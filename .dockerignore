@@ -1,0 +1,7 @@
+.tools
+.nuget
+artifacts
+**/bin
+**/obj
+.git
+**/.env

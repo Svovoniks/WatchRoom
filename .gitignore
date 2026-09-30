@@ -1,0 +1,9 @@
+.tools/
+.nuget/
+**/bin/
+**/obj/
+artifacts/
+*.user
+.vs/
+.env
+data/

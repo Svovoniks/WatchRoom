@@ -1,0 +1,7 @@
+{$WATCHROOM_DOMAIN} {
+    reverse_proxy watchroom:8080
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+    }
+}

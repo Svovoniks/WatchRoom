@@ -1,0 +1,59 @@
+services:
+  watchroom:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      WATCHROOM_STUN: stun:${TURN_HOST:?Set TURN_HOST}:3478
+      WATCHROOM_TURN: turn:${TURN_HOST}:3478?transport=udp;turn:${TURN_HOST}:3478?transport=tcp
+      WATCHROOM_TURN_SECRET: ${TURN_SECRET:?Generate TURN_SECRET}
+      WATCHROOM_FORCE_RELAY: ${FORCE_RELAY:-false}
+    ports:
+      - "127.0.0.1:5080:8080"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      WATCHROOM_DOMAIN: ${WATCHROOM_DOMAIN:?Set WATCHROOM_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - watchroom
+  turn:
+    image: coturn/coturn:4.18.0-r0
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET}
+      - --realm=${TURN_HOST}
+      - --external-ip=${PUBLIC_IP:?Set PUBLIC_IP}
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --user-quota=8
+      - --total-quota=100
+      - --no-multicast-peers
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      - --denied-peer-ip=::1
+      - --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+      - --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+      - --log-file=stdout
+volumes:
+  caddy_data:
+  caddy_config:
