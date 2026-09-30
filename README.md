@@ -1,5 +1,7 @@
 # Watchroom
 
+An additional macOS preview is available; see [Mac client setup and validation status](MAC-CLIENT.md).
+
 A Windows desktop preview for watching local movies together. C# / WPF, LibVLCSharp, SQLite and native libdatachannel. Only the host needs the video file.
 
 ## Run the app

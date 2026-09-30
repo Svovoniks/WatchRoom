@@ -36,3 +36,6 @@ Windows UI inspection verified folder setup rendering, library selection, movie 
 5. **Distribution:** installer clean-machine and upgrade tests, code signing, a signed update service, complete bundled-component license/source review, and official TMDB logo attribution before metadata-enabled public release.
 
 These gaps are not reported as completed. The artifact is a working preview for local use and controlled testing with a configured server, not a production release.
+# macOS preview
+
+An Avalonia client and architecture-specific `.app` ZIP packages have been added on the `sites-migration` branch. Both Mac architectures compile. The shared room/media checks and Windows-hosted interface playback were exercised; no actual Mac launch or cross-device validation was possible. Native VLC/libdatachannel setup and remaining Mac work are documented in [MAC-CLIENT.md](MAC-CLIENT.md).

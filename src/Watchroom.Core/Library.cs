@@ -73,7 +73,8 @@ public static partial class FileNames
     public static MediaItem Parse(string path, string kind = "Mixed")
     {
         path = System.IO.Path.GetFullPath(path);
-        var id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(path.ToUpperInvariant())))[..32];
+        var identityPath = OperatingSystem.IsWindows() ? path.ToUpperInvariant() : path;
+        var id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identityPath)))[..32];
         var name = Regex.Replace(System.IO.Path.GetFileNameWithoutExtension(path), @"\[[^\]]*\]", " ");
         name = Regex.Replace(name, @"[._]+", " ").Trim();
         var episode = Regex.Match(name, @"(?i)\bS(\d{1,2})\s*E(\d{1,3})\b|\b(\d{1,2})x(\d{1,3})\b");

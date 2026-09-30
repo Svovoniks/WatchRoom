@@ -2,13 +2,17 @@ using System.Text.Json;
 
 namespace Watchroom.Core;
 
-public record LibraryFolder(string Path, string Kind = "Mixed");
+public record LibraryFolder(string Path, string Kind = "Mixed")
+{
+    public override string ToString() => $"{Path} · {Kind}";
+}
 public record MediaItem(string Id, string Path, string Title, string Kind, int? Year = null,
     string? Series = null, int? Season = null, int? Episode = null, string? Poster = null,
     string? Overview = null, bool Available = true, bool Matched = false)
 {
     public string Caption => Episode is { } ep ? $"{Series} · S{Season:00} E{ep:00}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";
     public string DisplayTitle => Episode is not null ? Series ?? Title : Title;
+    public override string ToString() => Episode is not null ? Caption + " · " + Title : Title;
 }
 public record SharedMedia(string Id, string Title, long Length, string Extension, SharedMedia[]? Subtitles = null);
 public record Participant(string Id, string Name, bool IsHost, bool Approved, bool Ready = false);
