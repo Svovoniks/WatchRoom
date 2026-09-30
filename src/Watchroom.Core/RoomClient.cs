@@ -6,7 +6,7 @@ namespace Watchroom.Core;
 
 public sealed class RoomClient : IAsyncDisposable
 {
-    private readonly ClientWebSocket socket = new();
+    private IRoomConnection? connection;
     private readonly CancellationTokenSource lifetime = new();
     private readonly Channel<WireMessage> outgoing = Channel.CreateBounded<WireMessage>(128);
     private readonly ConcurrentDictionary<string, PeerTransport> peers = new();
@@ -38,10 +38,25 @@ public sealed class RoomClient : IAsyncDisposable
         var uri = new Uri(server.TrimEnd('/') + "/room");
         if (uri.Scheme != "https" && !(uri.Scheme == "http" && uri.IsLoopback)) throw new InvalidOperationException("Use an HTTPS server address. HTTP is allowed only on localhost for development.");
         var builder = new UriBuilder(uri) { Scheme = uri.Scheme == "https" ? "wss" : "ws" };
+        var first = new WireMessage(invitation is null ? "create" : "join", Text: name, Data: invitation);
+        using var probe = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(10) };
+        using var health = await probe.GetAsync(server.TrimEnd('/') + "/health", lifetime.Token);
+        if ((int)health.StatusCode is >= 300 and < 400 || health.Content.Headers.ContentType?.MediaType == "text/html")
+            throw new IOException("This Site requires browser sign-in. Ask its owner to enable access for Windows clients, or use the local server.");
+        var transport = health.IsSuccessStatusCode && health.Content.Headers.ContentType?.MediaType == "application/json"
+            ? await health.Content.ReadAsStringAsync(lifetime.Token) : "";
+        if (transport.Contains("http-poll", StringComparison.Ordinal))
+            connection = await SitesRoomConnection.OpenAsync(new Uri(server.TrimEnd('/') + "/"), first, lifetime.Token);
+        else
+        {
+        var socket = new ClientWebSocket();
         socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
-        await socket.ConnectAsync(builder.Uri, lifetime.Token);
+        try { await socket.ConnectAsync(builder.Uri, lifetime.Token); }
+        catch { socket.Dispose(); throw; }
+        connection = new WebSocketRoomConnection(socket);
+        await connection.SendAsync(first, lifetime.Token);
+        }
         sendTask = SendLoop(); readTask = ReadLoop();
-        Send(new(invitation is null ? "create" : "join", Text: name, Data: invitation));
         _ = PingLoop();
     }
     public void Send(WireMessage message)
@@ -50,8 +65,8 @@ public sealed class RoomClient : IAsyncDisposable
     }
     private async Task SendLoop()
     {
-        try { await foreach (var msg in outgoing.Reader.ReadAllAsync(lifetime.Token)) await SocketMessages.SendAsync(socket, msg, lifetime.Token); }
-        catch (Exception ex) when (ex is OperationCanceledException or WebSocketException) { lifetime.Cancel(); }
+        try { await foreach (var msg in outgoing.Reader.ReadAllAsync(lifetime.Token)) await connection!.SendAsync(msg, lifetime.Token); }
+        catch (Exception ex) when (ex is OperationCanceledException or WebSocketException or IOException or HttpRequestException) { if (!lifetime.IsCancellationRequested) Status?.Invoke("Disconnected: " + ex.Message); lifetime.Cancel(); }
     }
     private async Task PingLoop()
     {
@@ -63,7 +78,7 @@ public sealed class RoomClient : IAsyncDisposable
         {
             while (!lifetime.IsCancellationRequested)
             {
-                var message = await SocketMessages.ReadAsync(socket, lifetime.Token); if (message is null) break;
+                var message = await connection!.ReadAsync(lifetime.Token); if (message is null) break;
                 switch (message.Type)
                 {
                     case "welcome": case "admitted": Identity = Wire.Read<Welcome>(message.Data!); break;
@@ -105,10 +120,11 @@ public sealed class RoomClient : IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
-        lifetime.Cancel(); outgoing.Writer.TryComplete(); socket.Abort();
+        lifetime.Cancel(); outgoing.Writer.TryComplete(); connection?.Abort();
         if (readTask is not null) { try { await readTask; } catch { } }
         if (sendTask is not null) { try { await sendTask; } catch { } }
-        foreach (var peer in peers.Values) peer.Dispose(); peers.Clear(); socket.Dispose();
+        foreach (var peer in peers.Values) peer.Dispose(); peers.Clear();
+        if (connection is not null) await connection.DisposeAsync();
     }
 }
 

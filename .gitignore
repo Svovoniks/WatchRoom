@@ -7,3 +7,8 @@ artifacts/
 .vs/
 .env
 data/
+**/node_modules/
+**/.sites-runtime/
+**/.sites-checkout/
+sites/dist/
+sites/site.tar.gz

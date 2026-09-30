@@ -81,11 +81,13 @@ using (var videoMedia = new Media(vlc, videoUrl))
 cts.Cancel(); try { await pump; } catch (OperationCanceledException) { }
 
 var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0); listener.Start(); var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
-var serverUrl = $"http://localhost:{port}";
+var externalServer = Environment.GetEnvironmentVariable("WATCHROOM_TEST_SERVER");
+if (string.IsNullOrWhiteSpace(externalServer)) externalServer = null;
+var serverUrl = externalServer ?? $"http://localhost:{port}";
 var start = new ProcessStartInfo(Path.GetFullPath(".tools/dotnet/dotnet.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
 start.ArgumentList.Add(Path.GetFullPath("src/Watchroom.Server/bin/Release/net10.0/Watchroom.Server.dll")); start.ArgumentList.Add("--urls"); start.ArgumentList.Add(serverUrl);
-using var server = Process.Start(start)!;
-var stdout = server.StandardOutput.ReadToEndAsync(); var stderr = server.StandardError.ReadToEndAsync();
+using var server = externalServer is null ? Process.Start(start)! : null;
+var stdout = server?.StandardOutput.ReadToEndAsync(); var stderr = server?.StandardError.ReadToEndAsync();
 try
 {
     for (int i = 0; i < 80; i++) { try { if ((await http.GetAsync(serverUrl + "/health")).IsSuccessStatusCode) break; } catch (HttpRequestException) { } await Task.Delay(100); }
@@ -134,10 +136,19 @@ try
     Check(revoked, "removal revokes existing media channel");
     await using var wrongInvitation = new RoomClient();
     var errors = new ConcurrentQueue<WireMessage>(); wrongInvitation.Message += errors.Enqueue;
-    await wrongInvitation.ConnectAsync(serverUrl, "Unknown Guest", "NOT-A-ROOM");
-    await Wait(() => errors.Any(x => x.Type == "error"), "unknown invitations rejected");
+    if (externalServer is null)
+    {
+        await wrongInvitation.ConnectAsync(serverUrl, "Unknown Guest", "NOT-A-ROOM");
+        await Wait(() => errors.Any(x => x.Type == "error"), "unknown invitations rejected");
+    }
+    else
+    {
+        bool rejected = false;
+        try { await wrongInvitation.ConnectAsync(serverUrl, "Unknown Guest", "NOT-A-ROOM"); } catch (IOException) { rejected = true; }
+        Check(rejected, "unknown invitations rejected");
+    }
 }
-finally { if (!server.HasExited) server.Kill(true); await server.WaitForExitAsync(); }
+finally { if (server is not null) { if (!server.HasExited) server.Kill(true); await server.WaitForExitAsync(); } }
 Console.WriteLine($"{passed} checks passed.");
 
 async Task Wait(Func<bool> condition, string name)
