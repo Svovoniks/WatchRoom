@@ -57,7 +57,7 @@ public sealed class LibraryStore
                     cancellation.ThrowIfCancellationRequested();
                     if (!FileNames.Extensions.Contains(System.IO.Path.GetExtension(path))) continue;
                     var parsed = FileNames.Parse(path, folder.Kind); seen.Add(parsed.Id);
-                    var item = old.TryGetValue(parsed.Id, out var previous) ? previous with { Available = true, Poster = previous.Matched ? previous.Poster : parsed.Poster ?? previous.Poster } : parsed;
+                    var item = old.TryGetValue(parsed.Id, out var previous) ? previous with { Available = true, Kind = parsed.Kind, Series = parsed.Series ?? previous.Series, Season = parsed.Season ?? previous.Season, Episode = parsed.Episode ?? previous.Episode, SeriesPoster = parsed.SeriesPoster ?? previous.SeriesPoster, SeasonPoster = parsed.SeasonPoster ?? previous.SeasonPoster, Poster = previous.Matched && File.Exists(previous.Poster) ? previous.Poster : parsed.Poster ?? (File.Exists(previous.Poster) ? previous.Poster : null) } : parsed;
                     Save(item); progress?.Report($"Found {seen.Count} videos · {item.Title}");
                 }
             }
@@ -85,18 +85,31 @@ public static partial class FileNames
             number = int.Parse(episode.Groups[2].Success ? episode.Groups[2].Value : episode.Groups[4].Value);
             series = name[..episode.Index].Trim(' ', '-');
         }
-        else if (kind == "Anime")
+        else if (kind == "Anime" || kind == "Mixed" && Regex.IsMatch(System.IO.Path.GetFileName(path), @"^\[[^\]]+\]"))
         {
             var anime = Regex.Match(name, @"\s-\s(\d{1,3})(?:v\d)?\b");
-            if (anime.Success) { series = name[..anime.Index].Trim(); season = 1; number = int.Parse(anime.Groups[1].Value); }
+            if (anime.Success) { series = name[..anime.Index].Trim(); season = 1; number = int.Parse(anime.Groups[1].Value); if (kind == "Mixed") kind = "Anime"; }
         }
+        var dir = System.IO.Path.GetDirectoryName(path)!;
+        var seasonFolder = Regex.Match(System.IO.Path.GetFileName(dir), @"(?i)^Season\s*(\d+)\b|^Specials$");
+        if (seasonFolder.Success)
+        {
+            season = seasonFolder.Groups[1].Success ? int.Parse(seasonFolder.Groups[1].Value) : 0;
+            if (string.IsNullOrWhiteSpace(series)) series = System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(dir)!);
+        }
+        if (episode.Success && string.IsNullOrWhiteSpace(series)) series = System.IO.Path.GetFileName(dir);
+        if (series is not null) series = Regex.Replace(series, @"\s*\(?(?:19|20)\d{2}\)?\s*$", "").Trim();
         var year = Regex.Match(name, @"\b(19\d{2}|20\d{2})\b");
         var title = series ?? (year.Success ? name[..year.Index] : name);
         title = Regex.Split(title, @"(?i)\b(?:2160p|1080p|720p|480p|WEB-DL|WEBRip|BluRay|x264|x265|HEVC)\b")[0].Trim(' ', '-', '(');
         if (string.IsNullOrWhiteSpace(title)) title = System.IO.Path.GetFileNameWithoutExtension(path);
-        var dir = System.IO.Path.GetDirectoryName(path)!;
-        var poster = new[] { System.IO.Path.ChangeExtension(path, ".jpg"), System.IO.Path.Combine(dir, "poster.jpg"), System.IO.Path.Combine(dir, "folder.jpg") }.FirstOrDefault(File.Exists);
+        string? Artwork(string folder, params string[] stems) => stems.SelectMany(stem => new[] { ".jpg", ".jpeg", ".png" }.Select(ext => System.IO.Path.Combine(folder, stem + ext))).FirstOrDefault(File.Exists);
+        var localPoster = Artwork(dir, System.IO.Path.GetFileNameWithoutExtension(path), "poster", "folder", "cover");
+        var seriesDir = seasonFolder.Success ? System.IO.Path.GetDirectoryName(dir)! : dir;
+        var seriesPoster = series is null ? null : Artwork(seriesDir, "poster", "folder", "cover");
+        var seasonPoster = series is null ? null : Artwork(dir, "poster", "folder", "cover") ?? Artwork(seriesDir, $"season{season ?? 1:00}-poster", $"season{season ?? 1}-poster");
         return new(id, path, title, kind == "Mixed" ? (series is null ? "Movie" : "Show") : kind,
-            year.Success ? int.Parse(year.Value) : null, series, season, number, poster);
+            year.Success ? int.Parse(year.Value) : null, series, season, number, localPoster ?? seriesPoster,
+            SeriesPoster: seriesPoster, SeasonPoster: seasonPoster);
     }
 }

@@ -8,7 +8,7 @@ public record LibraryFolder(string Path, string Kind = "Mixed")
 }
 public record MediaItem(string Id, string Path, string Title, string Kind, int? Year = null,
     string? Series = null, int? Season = null, int? Episode = null, string? Poster = null,
-    string? Overview = null, bool Available = true, bool Matched = false)
+    string? Overview = null, bool Available = true, bool Matched = false, string? SeriesPoster = null, string? SeasonPoster = null, string? PosterSource = null)
 {
     public string Caption => Episode is { } ep ? $"{Series} · S{Season:00} E{ep:00}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";
     public string DisplayTitle => Episode is not null ? Series ?? Title : Title;

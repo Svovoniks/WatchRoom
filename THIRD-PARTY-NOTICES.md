@@ -1,5 +1,9 @@
 # Third-party components
 
+Anime title aliases use AniDB's public title index (https://anidb.net/api/anime-titles.xml.gz), cached locally with a maximum daily download attempt. AniDB metadata and images are not fetched through its registered HTTP API. AniDB does not endorse Watchroom.
+
+Automatic series artwork uses [TVmaze](https://www.tvmaze.com), whose API data is provided under [CC BY-SA](https://www.tvmaze.com/api#licensing). Movie artwork uses Wikipedia page images. Images retain their individual copyright and license terms; each downloaded poster's source page is shown in the title details. These services do not endorse Watchroom.
+
 Watchroom dynamically links the following components. Package versions and content hashes are recorded in each project's `packages.lock.json`.
 
 | Component | Version | Upstream |

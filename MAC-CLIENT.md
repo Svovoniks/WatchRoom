@@ -9,11 +9,30 @@ Use the Apple Silicon `Watchroom-Mac-arm64-0.2.0.zip` for M1/M2/M3/M4 and later 
 This preview requires native media dependencies on your Mac:
 
 1. Install VLC from https://www.videolan.org/vlc/ into `/Applications/VLC.app`, using the download matching your Mac architecture.
-2. Install libdatachannel for the same architecture. With Homebrew installed, run `brew install libdatachannel`. Standard Homebrew locations `/opt/homebrew/lib/libdatachannel.dylib` and `/usr/local/lib/libdatachannel.dylib` are recognized.
+2. Build libdatachannel for the same architecture using the commands below. It is not available as a standard Homebrew formula; Homebrew supplies the build tools and OpenSSL instead.
 3. Extract the ZIP and move `Watchroom.app` to Applications, then open it. The preview is unsigned and not notarized; follow macOS's normal user-approved process for opening locally trusted development software if prompted.
 4. Add your movie folders on the Folders tab and scan. Choose a title and Play locally, or Watch together. Friends can join without adding folders.
 
-VLC and libdatachannel are not bundled. The Intel NuGet dylib is present as a fallback, but its dependent native libraries are not validated on a clean Mac. Installing the matching Homebrew build is the recommended setup for both architectures. Rosetta builds must use Intel dependencies; a native Apple Silicon app must use arm64 dependencies.
+VLC and libdatachannel are not bundled. The Intel NuGet dylib is present as a fallback, but its dependent native libraries are not validated on a clean Mac. Rosetta builds must use Intel dependencies; a native Apple Silicon app must use arm64 dependencies.
+
+Build the native dependency from the [upstream source](https://github.com/paullouisageneau/libdatachannel/blob/master/BUILDING.md) in Terminal (requires Apple's Command Line Tools). Run this in a directory where `libdatachannel` does not already exist:
+
+```sh
+brew install cmake openssl@3
+git clone --recursive --depth 1 --branch v0.24.6 https://github.com/paullouisageneau/libdatachannel.git
+cmake -S libdatachannel -B libdatachannel/build \
+  -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
+  -DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON \
+  -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
+  -DCMAKE_INSTALL_PREFIX="$HOME/.local/watchroom-native"
+cmake --build libdatachannel/build --parallel 2
+cmake --install libdatachannel/build
+export WATCHROOM_DATACHANNEL_NATIVE="$HOME/.local/watchroom-native/lib/libdatachannel.dylib"
+/Applications/Watchroom.app/Contents/MacOS/Watchroom.Mac --diagnostics
+/Applications/Watchroom.app/Contents/MacOS/Watchroom.Mac
+```
+
+The exported path applies to apps launched from this Terminal. Repeat the export before future Terminal launches. These source-build commands follow upstream's CMake options but have not been executed on a Mac in this workspace.
 
 For a nonstandard installation, set `WATCHROOM_VLC_PATH` to VLC's `Contents/MacOS/lib` directory and/or `WATCHROOM_DATACHANNEL_NATIVE` to an absolute matching dylib path before launching the executable. The VLC plugin directory is discovered alongside its library directory.
 
@@ -42,7 +61,7 @@ python3 scripts/package-mac.py --arch arm64
 
 Use `osx-x64` and `--arch x64` for Intel. Windows can cross-publish with the same commands; `scripts/build-mac.ps1` is a wrapper. ZIP packaging preserves Unix executable permissions and checks the Mach-O architecture and bundle manifest. Signing and notarization require a Mac and Apple signing credentials.
 
-Data is stored under `~/Library/Application Support/Watchroom`, or `WATCHROOM_DATA` when set. Library folders and settings are saved locally; TMDB tokens stay in memory. Local poster images are supported without an API token. Manual metadata matching uses the same TMDB API as the Windows client.
+Data is stored under `~/Library/Application Support/Watchroom`, or `WATCHROOM_DATA` when set. Library folders and settings are saved locally; TMDB tokens stay in memory. Posters are fetched after scanning by default, using TVmaze for series and Wikipedia for movies without an API token. Browse series → seasons → episodes. Local PNG/JPEG artwork takes priority. Automatic artwork can be disabled in Settings; manual metadata matching uses TMDB.
 
 ## Verification and remaining work
 

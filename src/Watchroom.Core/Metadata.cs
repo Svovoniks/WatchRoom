@@ -30,12 +30,14 @@ public sealed class MetadataClient : IDisposable
         if (match.Poster is null || !match.Poster.StartsWith('/') || match.Poster.Contains("..")) return null;
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, $"{match.Type}-{match.Id}.jpg");
-        if (!File.Exists(path))
+        if (!File.Exists(path) || new FileInfo(path).Length == 0)
         {
             // Separate client: never send the API authorization token to the image CDN.
             using var images = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
             var bytes = await images.GetByteArrayAsync("https://image.tmdb.org/t/p/w342" + match.Poster, ct);
-            await File.WriteAllBytesAsync(path, bytes, ct);
+            var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try { await File.WriteAllBytesAsync(temporary, bytes, ct); File.Move(temporary, path, true); }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
         return path;
     }

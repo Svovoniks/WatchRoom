@@ -53,7 +53,9 @@ public sealed class MainWindow : Window
     private readonly TextBlock time = Text("00:00 / 00:00", 14);
     private readonly ComboBox audio = new() { Width = 170 };
     private readonly ComboBox subtitles = new() { Width = 170 };
-    private readonly Button play = new() { Content = "Play", MinWidth = 70 };
+    private readonly Button play = new() { Content = "▶", Width = 48, FontSize = 20 };
+    private readonly Grid roomPage = new() { ColumnDefinitions = new ColumnDefinitions("*,300") };
+    private Control? roomSidebar, appHeader, playbackHeading;
     private List<MediaItem> items = [];
     private MediaItem? selected;
     private LibVLC? vlc;
@@ -63,7 +65,14 @@ public sealed class MainWindow : Window
     private PlaybackState? target;
     private string? loadedMedia;
     private long revision = -1, tick, lastBufferNotice;
+    private string? browseSeries, browseKind;
+    private int? browseSeason;
+    private readonly TextBlock libraryLocation = Text("Library", 18);
+    private readonly CheckBox automaticArtwork = new() { Content = "Fetch artwork automatically after scanning", IsChecked = true };
+    private bool artworkBusy;
     private int generation;
+    private long? pendingSeek;
+    private long seekExpires, seekRevision;
     private bool ready, seeking, refreshingTracks, refreshingRoom, scanning, closing, allowClose;
 
     public MainWindow()
@@ -74,8 +83,9 @@ public sealed class MainWindow : Window
         folderList.ItemsSource = folders;
         server.Text = library.Setting("server") ?? "http://localhost:5080";
         name.Text = library.Setting("name") ?? Environment.UserName;
+        automaticArtwork.IsChecked = library.Setting("artwork") != "false";
         BuildUI(); RefreshLibrary(); WatchFolders();
-        search.TextChanged += (_, _) => FilterLibrary(); category.SelectionChanged += (_, _) => FilterLibrary();
+        search.TextChanged += (_, _) => FilterLibrary(); category.SelectionChanged += (_, _) => { browseSeries = browseKind = null; browseSeason = null; FilterLibrary(); };
         episodes.SelectionChanged += (_, _) => { if (episodes.SelectedItem is MediaItem item) { selected = item; summary.Text = item.Caption; } };
         timer.Tick += (_, _) => Tick(); timer.Start();
         scanDelay.Tick += async (_, _) => { scanDelay.Stop(); if (!scanning) await Guard(Scan); };
@@ -103,6 +113,7 @@ public sealed class MainWindow : Window
                     { selected = next; await Guard(room is null ? PlayLocal : Host); }
                 });
             });
+            if (folders.Count > 0 && automaticArtwork.IsChecked == true) await Guard(FetchArtwork);
         };
         Closing += async (_, e) =>
         {
@@ -118,7 +129,13 @@ public sealed class MainWindow : Window
             if (e.Source is TextBox) return;
             if (e.Key == Key.Space && tabs.SelectedIndex == 1) { TogglePlay(); e.Handled = true; }
             if (e.Key == Key.F && tabs.SelectedIndex == 1) { Fullscreen(); e.Handled = true; }
-            if (e.Key == Key.Escape && WindowState == WindowState.FullScreen) WindowState = WindowState.Normal;
+            if (e.Key == Key.Escape && WindowState == WindowState.FullScreen) { Fullscreen(); e.Handled = true; }
+            if (tabs.SelectedIndex != 1 || e.Source is Slider or ComboBox) return;
+            if (e.Key is Key.Left or Key.Right) { MovePlayback(e.Key == Key.Left ? -10000 : 10000); e.Handled = true; }
+            if (e.Key is Key.Up or Key.Down) { volume.Value = Math.Clamp(volume.Value + (e.Key == Key.Up ? 5 : -5), 0, 100); e.Handled = true; }
+            if (e.Key == Key.M) { Mute(); e.Handled = true; }
+            if (e.Key == Key.S) { StopPlayback(); e.Handled = true; }
+            if (e.Key == Key.N) { _ = Guard(PlayNext); e.Handled = true; }
         };
     }
     private static TextBlock Text(string text, double size = 16) => new() { Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap };
@@ -131,35 +148,43 @@ public sealed class MainWindow : Window
     private void BuildUI()
     {
         var root = new DockPanel();
-        var header = new Border { Padding = new Thickness(24, 18), Child = Text("WATCHROOM", 26) }; DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
+        var header = new Border { Padding = new Thickness(24, 18), Child = Text("WATCHROOM", 26) }; appHeader = header; DockPanel.SetDock(header, Dock.Top); root.Children.Add(header);
         var footer = new Border { Padding = new Thickness(18, 10), Child = status }; DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(tabs); Content = root;
         var libraryPage = new Grid { ColumnDefinitions = new ColumnDefinitions("*,280"), RowDefinitions = new RowDefinitions("Auto,*") };
-        var tools = Row(search, category); tools.Margin = new Thickness(0, 0, 0, 18); Grid.SetColumnSpan(tools, 2); libraryPage.Children.Add(tools);
+        var tools = Column(Row(search, category), Row(Button("← Back", () => { if (browseSeason is not null) browseSeason = null; else browseSeries = browseKind = null; FilterLibrary(); }), libraryLocation)); tools.Margin = new Thickness(0, 0, 0, 18); Grid.SetColumnSpan(tools, 2); libraryPage.Children.Add(tools);
         var gallery = new ScrollViewer { Content = posterGrid }; Grid.SetRow(gallery, 1); libraryPage.Children.Add(gallery);
         var details = Column(title, summary, episodes, Button("Play locally", PlayLocal), Button("Watch together", Host), Button("Add to queue", AddQueue), Button("Find artwork", MatchArtwork), Button("Use local poster", LocalPoster));
         details.Margin = new Thickness(18, 0, 0, 0); Grid.SetColumn(details, 1); Grid.SetRow(details, 1); libraryPage.Children.Add(details);
-        var roomPage = new Grid { ColumnDefinitions = new ColumnDefinitions("*,300") };
         var playback = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto,Auto") };
-        playback.Children.Add(Column(roomTitle, roomHint)); Grid.SetRow(video, 1); playback.Children.Add(video);
-        Grid.SetRow(timeline, 2); playback.Children.Add(timeline);
+        playbackHeading = Column(roomTitle, roomHint); playback.Children.Add(playbackHeading); Grid.SetRow(video, 1); playback.Children.Add(video);
+        var seekRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Margin = new Thickness(10, 8) };
+        time.VerticalAlignment = VerticalAlignment.Center; time.Margin = new Thickness(0, 0, 14, 0); seekRow.Children.Add(time); Grid.SetColumn(timeline, 1); seekRow.Children.Add(timeline);
+        Grid.SetRow(seekRow, 2); playback.Children.Add(seekRow);
         play.Click += (_, _) => TogglePlay(); volume.ValueChanged += (_, _) => { if (player is not null) player.Volume = (int)volume.Value; };
-        timeline.AddHandler(PointerPressedEvent, (_, _) => seeking = true, RoutingStrategies.Tunnel, true);
-        timeline.AddHandler(PointerReleasedEvent, (_, _) => Seek(), RoutingStrategies.Tunnel, true);
-        timeline.KeyUp += (_, e) => { if (e.Key is Key.Left or Key.Right or Key.Home or Key.End) { seeking = true; Seek(); } };
-        var controls = Flow(play, time, Text("Volume", 14), volume, Button("Full screen", Fullscreen)); Grid.SetRow(controls, 3); playback.Children.Add(controls);
-        var tracks = Flow(Text("Audio", 14), audio, Text("Subtitles", 14), subtitles, Button("Load subtitle", LoadSubtitle)); tracks.Margin = new Thickness(0, 10, 0, 0); Grid.SetRow(tracks, 4); playback.Children.Add(tracks);
+        timeline.AddHandler(PointerPressedEvent, (_, e) => { e.Handled = true; if (!CanSeek()) { status.Text = "The host controls playback, or the video is not ready to seek."; return; } seeking = true; e.Pointer.Capture(timeline); UpdateScrub(e.GetPosition(timeline).X); }, RoutingStrategies.Tunnel, true);
+        timeline.AddHandler(PointerMovedEvent, (_, e) => { if (seeking && e.Pointer.Captured == timeline) { UpdateScrub(e.GetPosition(timeline).X); e.Handled = true; } }, RoutingStrategies.Tunnel, true);
+        timeline.AddHandler(PointerReleasedEvent, (_, e) => { if (seeking) { UpdateScrub(e.GetPosition(timeline).X); Seek(); e.Pointer.Capture(null); e.Handled = true; } }, RoutingStrategies.Tunnel, true);
+        timeline.PointerCaptureLost += (_, _) => Seek();
+        timeline.AddHandler(KeyDownEvent, (_, e) => { if (e.Key is not (Key.Left or Key.Right or Key.Home or Key.End)) return; e.Handled = true; if (!CanSeek()) return; seeking = true; timeline.Value = e.Key switch { Key.Home => 0, Key.End => timeline.Maximum, Key.Left => Math.Max(0, timeline.Value - 5000), _ => Math.Min(timeline.Maximum, timeline.Value + 5000) }; }, RoutingStrategies.Tunnel, true);
+        timeline.KeyUp += (_, e) => { if (e.Key is Key.Left or Key.Right or Key.Home or Key.End) { Seek(); e.Handled = true; } };
+        ToolTip.SetTip(play, "Play / pause (Space)");
+        var controls = new DockPanel { Margin = new Thickness(10, 0, 10, 8) };
+        var sound = Row(Button("Mute", Mute), volume, Button("⛶", Fullscreen)); DockPanel.SetDock(sound, Dock.Right); controls.Children.Add(sound);
+        var transport = Row(play, Button("■", StopPlayback), Button("−10s", () => MovePlayback(-10000)), Button("+10s", () => MovePlayback(10000)), Button("▶|", PlayNext)); controls.Children.Add(transport);
+        Grid.SetRow(controls, 3); playback.Children.Add(controls);
+        var tracks = Flow(Text("Audio", 14), audio, Text("Subtitles", 14), subtitles, Button("Load subtitle", LoadSubtitle)); tracks.Margin = new Thickness(0, 10, 0, 0); var options = new Expander { Header = "Audio and subtitles", Content = tracks, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(10, 0, 10, 8) }; Grid.SetRow(options, 4); playback.Children.Add(options);
         audio.SelectionChanged += (_, _) => { if (!refreshingTracks && audio.SelectedItem is TrackOption t) player?.SetAudioTrack(t.Id); };
         subtitles.SelectionChanged += (_, _) => { if (!refreshingTracks && subtitles.SelectedItem is TrackOption t) player?.SetSpu(t.Id); };
         roomPage.Children.Add(playback);
         shared.IsCheckedChanged += (_, _) => { if (!refreshingRoom && room?.Identity?.Host == true) Send(new("controls", Number: shared.IsChecked == true ? 1 : 0)); };
         var sidebar = Column(Button("Copy invitation", CopyInvitation), Button("Leave room", Disconnect), shared, Text("People", 18), people, Text("Up next", 18), queueText, Button("Play next", PlayNext), Text("Chat", 18), new ScrollViewer { Content = chat, Height = 150 }, chatInput, Button("Send", SendChat));
         chatInput.KeyDown += (_, e) => { if (e.Key == Key.Enter) SendChat(); };
-        var side = new ScrollViewer { Content = sidebar, Margin = new Thickness(18, 0, 0, 0) }; Grid.SetColumn(side, 1); roomPage.Children.Add(side);
+        var side = new ScrollViewer { Content = sidebar, Margin = new Thickness(18, 0, 0, 0) }; roomSidebar = side; Grid.SetColumn(side, 1); roomPage.Children.Add(side);
         tabs.ItemsSource = new[] {
             new TabItem { Header = "Library", Content = Pane(libraryPage) },
             new TabItem { Header = "Watch room", Content = Pane(roomPage) },
             new TabItem { Header = "Folders", Content = Pane(Column(Text("Your movie folders",24),Text("Add the folders Watchroom should scan. You can skip this when joining a friend."), Row(folderKind, Button("Add folders", AddFolders)), folderList, Row(Button("Remove selected", RemoveFolder),Button("Scan library", Scan)))) },
-            new TabItem { Header = "Settings", Content = Pane(new ScrollViewer { Content = Column(Text("Room connection",24),Text("Display name",14),name,Text("Server address",14),server,Button("Save settings",SaveSettings),Text("Join a friend",22),invitation,Button("Join room",Join),Text("Poster artwork",22),token,Text("Use a TMDB read access token to match posters, or choose local artwork from the library. Token stays in this app session.",14),Text("This product uses the TMDB API but is not endorsed or certified by TMDB.",14),Text("Playback requirements",22),Text("On Mac, install VLC in /Applications. WebRTC requires a matching libdatachannel library; Homebrew can install it with brew install libdatachannel. The private Sites deployment requires access enabled for native clients.",14)) }) }
+            new TabItem { Header = "Settings", Content = Pane(new ScrollViewer { Content = Column(Text("Room connection",24),Text("Display name",14),name,Text("Server address",14),server,Button("Save settings",SaveSettings),Text("Join a friend",22),invitation,Button("Join room",Join),Text("Poster artwork",22),token,automaticArtwork,Button("Fetch missing posters now",FetchArtwork),Text("Without a token, show titles are searched on TVmaze and movie titles on Wikipedia. Some titles need a manual match. Video files stay local. TVmaze: https://www.tvmaze.com (CC BY-SA). Artwork source pages appear in title details.",14),Text("Use a TMDB read access token to match posters, or choose local artwork from the library. Token stays in this app session.",14),Text("This product uses the TMDB API but is not endorsed or certified by TMDB.",14),Text("Playback requirements",22),Text("On Mac, install VLC in /Applications. WebRTC requires a matching libdatachannel library; follow MAC-CLIENT.md to build it and set WATCHROOM_DATACHANNEL_NATIVE. Use the same reachable room server on both clients.",14)) }) }
         };
     }
     private async Task Guard(Func<Task> action)
@@ -174,19 +199,21 @@ public sealed class MainWindow : Window
         posterGrid.Children.Clear(); foreach (var bitmap in posters) bitmap.Dispose(); posters.Clear();
         var visible = items.Where(x => x.DisplayTitle.Contains(search.Text?.Trim() ?? "", StringComparison.OrdinalIgnoreCase));
         visible = category.SelectedIndex switch { 1 => visible.Where(x => x.Kind == "Movie"), 2 => visible.Where(x => x.Kind == "Show"), 3 => visible.Where(x => x.Kind == "Anime"), 4 => visible.Where(x => x.Poster is null), _ => visible };
-        foreach (var item in visible.GroupBy(x => x.Series is null ? x.Id : x.Kind + ":" + x.Series).Select(g => g.First()))
+        libraryLocation.Text = browseSeries is null ? "Library" : browseSeries + (browseSeason is null ? " · Seasons" : browseSeason == 0 ? " · Specials" : $" · Season {browseSeason}");
+        foreach (var card in LibraryCatalog.Browse(visible, browseSeries, browseKind, browseSeason))
         {
-            Control image = new Border { Background = new SolidColorBrush(Color.Parse("#263d52")), Height = 200, Child = new TextBlock { Text = item.DisplayTitle, FontSize = 20, Margin = new Thickness(16), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center } };
-            if (item.Poster is not null && File.Exists(item.Poster)) try { var bitmap = new Bitmap(item.Poster); posters.Add(bitmap); image = new Image { Source = bitmap, Height = 200, Stretch = Stretch.UniformToFill }; } catch (Exception ex) when (ex is IOException or ArgumentException) { }
-            var button = Button("", () => Select(item)); button.Padding = new Thickness(6); button.Margin = new Thickness(3); button.HorizontalAlignment = HorizontalAlignment.Stretch;
-            button.Content = Column(image, Text(item.DisplayTitle, 14), Text(item.Available ? item.Kind : "Unavailable", 12)); posterGrid.Children.Add(button);
+            var item = card.Media;
+            Control image = new Border { Background = new SolidColorBrush(Color.Parse("#263d52")), Height = 200, Child = new TextBlock { Text = card.DisplayTitle, FontSize = 20, Margin = new Thickness(16), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center } };
+            if (card.Poster is not null && File.Exists(card.Poster)) try { var bitmap = new Bitmap(card.Poster); posters.Add(bitmap); image = new Image { Source = bitmap, Height = 200, Stretch = Stretch.UniformToFill }; } catch (Exception ex) when (ex is IOException or ArgumentException) { }
+            var button = Button("", () => { if (card.Level is "series" or "season") { selected = null; title.Text = card.DisplayTitle; summary.Text = card.Caption; } if (card.Level == "series") { browseSeries = item.Series; browseKind = item.Kind; browseSeason = null; FilterLibrary(); } else if (card.Level == "season") { browseSeason = card.Season; FilterLibrary(); } else Select(item); }); button.Padding = new Thickness(6); button.Margin = new Thickness(3); button.HorizontalAlignment = HorizontalAlignment.Stretch;
+            button.Content = Column(image, Text(card.DisplayTitle, 14), Text(card.Caption, 12)); posterGrid.Children.Add(button);
         }
         if (posterGrid.Children.Count == 0) posterGrid.Children.Add(Text(items.Count == 0 ? "Add folders and scan to see your movies here." : "No matching titles."));
     }
     private void Select(MediaItem item)
     {
-        selected = item; title.Text = item.DisplayTitle; summary.Text = item.Overview ?? item.Caption;
-        episodes.IsVisible = item.Series is not null;
+        selected = item; title.Text = item.DisplayTitle; summary.Text = (item.Overview ?? item.Caption) + (item.PosterSource is null ? "" : "\nArtwork: " + item.PosterSource);
+        episodes.IsVisible = false;
         episodes.ItemsSource = item.Series is null ? null : items.Where(x => x.Series == item.Series && x.Kind == item.Kind).ToArray();
         episodes.SelectedItem = item;
     }
@@ -211,10 +238,16 @@ public sealed class MainWindow : Window
     private async Task Scan()
     {
         if (scanning) return; scanning = true;
-        try { await library.ScanAsync(folders.ToArray(), new Progress<string>(s => status.Text = s), lifetime.Token); RefreshLibrary(); tabs.SelectedIndex = 0; }
+        try { await library.ScanAsync(folders.ToArray(), new Progress<string>(s => status.Text = s), lifetime.Token); RefreshLibrary(); tabs.SelectedIndex = 0; if (automaticArtwork.IsChecked == true) await FetchArtwork(); }
         finally { scanning = false; }
     }
-    private void SaveSettings() { library.Setting("server", server.Text?.Trim() ?? ""); library.Setting("name", name.Text?.Trim() ?? ""); status.Text = "Settings saved"; }
+    private void SaveSettings() { library.Setting("artwork", automaticArtwork.IsChecked == true ? "true" : "false"); library.Setting("server", server.Text?.Trim() ?? ""); library.Setting("name", name.Text?.Trim() ?? ""); status.Text = "Settings saved"; }
+    private async Task FetchArtwork()
+    {
+        if (artworkBusy) return; artworkBusy = true;
+        try { var report = await AutomaticArtwork.FetchAsync(library, App.DataDirectory, token.Text, new Progress<string>(s => status.Text = s), lifetime.Token); RefreshLibrary(); status.Text = report; }
+        finally { artworkBusy = false; }
+    }
     private async Task MatchArtwork()
     {
         if (selected is null) return; if (string.IsNullOrWhiteSpace(token.Text)) { tabs.SelectedIndex = 3; status.Text = "Enter your TMDB read access token, or use a local poster."; return; }
@@ -334,9 +367,10 @@ public sealed class MainWindow : Window
     private void Tick()
     {
         if (player is null) return;
-        if (!seeking) { timeline.Maximum = Math.Max(1, player.Length); timeline.Value = Math.Max(0, player.Time); time.Text = FormatTime(player.Time) + " / " + FormatTime(player.Length); }
-        play.Content = player.IsPlaying ? "Pause" : "Play"; if (++tick % 8 == 0 && ready) RefreshTracks();
-        if (room is null || target is null || !ready || seeking) return;
+        if (pendingSeek is { } requested && (Wire.Now >= seekExpires || (room is null || target?.Revision > seekRevision) && Math.Abs(player.Time - requested) < 1500)) pendingSeek = null;
+        if (!seeking) { timeline.Maximum = Math.Max(1, player.Length); timeline.Value = pendingSeek ?? Math.Max(0, player.Time); time.Text = FormatTime(player.Time) + " / " + FormatTime(player.Length); }
+        play.Content = player.IsPlaying ? "Ⅱ" : "▶"; ToolTip.SetTip(play, player.IsPlaying ? "Pause (Space)" : "Play (Space)"); if (++tick % 8 == 0 && ready) RefreshTracks();
+        if (room is null || target is null || !ready || seeking || pendingSeek is not null && target.Revision <= seekRevision) return;
         var now = Wire.Now + room.ServerOffsetMs; if (now < target.AtUnixMs) { player.SetPause(true); return; }
         var desired = SyncMath.TargetPosition(target, now); var drift = desired - Math.Max(0, player.Time);
         if (revision != target.Revision || Math.Abs(drift) > 1200)
@@ -347,9 +381,28 @@ public sealed class MainWindow : Window
         else if (target.Playing) player.SetRate(SyncMath.Correction(drift));
     }
     private static string FormatTime(long ms) => TimeSpan.FromMilliseconds(Math.Max(0, ms)).ToString(ms >= 3600000 ? @"h\:mm\:ss" : @"mm\:ss");
-    private void TogglePlay() { if (player is null) return; if (room is not null) SendPlayback(!player.IsPlaying, player.Length > 0 && player.Time >= player.Length - 250 ? 0 : Math.Max(0, player.Time)); else if (player.IsPlaying) player.SetPause(true); else player.Play(); }
-    private void Seek() { if (player is not null && seeking) { if (room is null) player.Time = (long)timeline.Value; else SendPlayback(target?.Playing == true, (long)timeline.Value); } seeking = false; }
-    private void Fullscreen() => WindowState = WindowState == WindowState.FullScreen ? WindowState.Normal : WindowState.FullScreen;
+    private void TogglePlay() { if (player is null) return; if (room is not null) SendPlayback(!player.IsPlaying, player.Length > 0 && player.Time >= player.Length - 250 ? 0 : Math.Max(0, player.Time)); else if (player.IsPlaying) player.SetPause(true); else { if (player.State == VLCState.Ended) player.Stop(); player.Play(); } }
+    private bool CanSeek() => player is not null && player.Length > 0 && (room is null || room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
+    private void UpdateScrub(double x) { timeline.Value = Math.Clamp((x - 8) / Math.Max(1, timeline.Bounds.Width - 16), 0, 1) * timeline.Maximum; time.Text = FormatTime((long)timeline.Value) + " / " + FormatTime(player?.Length ?? 0); }
+    private void Seek()
+    {
+        if (!seeking) return; seeking = false;
+        if (!CanSeek()) return;
+        var position = (long)timeline.Value; pendingSeek = position; seekRevision = target?.Revision ?? -1; seekExpires = Wire.Now + 5000;
+        if (room is null) player!.Time = position; else SendPlayback(target?.Playing == true, position);
+    }
+    private void MovePlayback(long offset) { if (player is null || player.Length <= 0) return; var position = Math.Clamp(player.Time + offset, 0, player.Length); if (room is null) player.Time = position; else SendPlayback(target?.Playing == true, position); }
+    private void StopPlayback() { if (player is null) return; if (room is null) { player.Stop(); ready = false; } else SendPlayback(false, 0); }
+    private void Mute() { if (player is not null) player.Mute = !player.Mute; }
+    private void Fullscreen()
+    {
+        var full = WindowState != WindowState.FullScreen;
+        WindowState = full ? WindowState.FullScreen : WindowState.Normal;
+        if (roomSidebar is not null) roomSidebar.IsVisible = !full;
+        if (appHeader is not null) appHeader.IsVisible = !full;
+        if (playbackHeading is not null) playbackHeading.IsVisible = !full;
+        roomPage.ColumnDefinitions[1].Width = new GridLength(full ? 0 : 300);
+    }
     private void RefreshTracks()
     {
         if (player is null) return; refreshingTracks = true;
@@ -368,7 +421,7 @@ public sealed class MainWindow : Window
     private async Task PlayNext() { if (!queue.TryDequeue(out var next)) return; selected = next; if (room?.Identity?.Host == true) await Host(); else if (room is null) await PlayLocal(); PublishQueue(); }
     private async Task Disconnect()
     {
-        var previous = room; room = null; ++generation; target = null; loadedMedia = null; ready = false; player?.Stop();
+        pendingSeek = null; seeking = false; var previous = room; room = null; ++generation; target = null; loadedMedia = null; ready = false; player?.Stop();
         if (previous is not null) await previous.DisposeAsync();
         await loading.WaitAsync(); try { if (bridge is not null) await bridge.DisposeAsync(); bridge = null; } finally { loading.Release(); }
         people.Children.Clear(); shared.IsEnabled = false; roomHint.Text = "Disconnected";

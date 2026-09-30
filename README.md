@@ -9,8 +9,8 @@ A Windows desktop preview for watching local movies together. C# / WPF, LibVLCSh
 Open `artifacts/Watchroom/Watchroom.exe` after publishing, or build from source below. The self-contained publish includes the .NET runtime and libVLC; installing VLC separately is unnecessary.
 
 1. On first launch, add movie, show or anime folders and click **Scan library**. You can skip this when only joining friends.
-2. Browse the poster grid, select a title, and choose **Play locally** or **Watch together**. Series group into an episode selector.
-3. For automatic artwork, enter a TMDB **API read access token** in Settings and enable automatic matching. Ambiguous matches remain manual. You can also use `poster.jpg`, `folder.jpg`, a matching `.jpg`, or **Use local poster** without an API token.
+2. Browse the poster grid, open a series, then a season, then an episode. On Windows, selecting a movie or episode opens its own information page with artwork, metadata, and **Play locally** / **Watch together** actions. **Back to library** restores the same season, search, and filter.
+3. Posters are fetched automatically after scanning, using TVmaze for series and Wikipedia for movies without a token. Anime releases are recognized in Mixed libraries; unmatched anime can use AniDB's locally cached title index to find English aliases, then retry TVmaze. The index downloads at most daily; this is title matching, not AniDB's registered metadata API. An optional TMDB **API read access token** uses TMDB instead. Missing or ambiguous matches remain manual. Local PNG/JPEG artwork (`poster`, `folder`, `cover`, or a matching filename) takes priority. Put series artwork in the series folder and season artwork in its season folder.
 4. For a room, configure a deployed HTTPS server in Settings. Create the room, copy its invitation, and admit friends when they join.
 5. Host controls playback by default; **Allow shared controls** permits guests to play, pause and seek. Volume, audio and subtitle selections are personal for original media. Buffering pauses everyone and resumes when participants report ready.
 
@@ -45,7 +45,7 @@ These boundaries distinguish this working preview from the full release describe
 
 ## Data and privacy
 
-Library/settings: `%LOCALAPPDATA%/Watchroom`, or `WATCHROOM_DATA` when set. The TMDB token is held only for the current app session. Poster searches send titles to TMDB; movie files stay on the host. The loopback media bridge uses an unguessable per-session path and serves authorized media IDs. Room signaling uses HTTPS/WebSockets; media uses WebRTC encryption, with TURN relay fallback when configured.
+Library/settings: `%LOCALAPPDATA%/Watchroom`, or `WATCHROOM_DATA` when set. The TMDB token is held only for the current app session. Poster searches send titles to TVmaze/Wikipedia, or TMDB when configured; movie files stay on the host. Disable automatic artwork in Settings to stop these lookups. The loopback media bridge uses an unguessable per-session path and serves authorized media IDs. Room signaling uses HTTPS/WebSockets; media uses WebRTC encryption, with TURN relay fallback when configured.
 
 Room codes expire after six hours. Relay bandwidth and host upload increase with each viewer. A public server and a tested relay are necessary for dependable internet use.
 

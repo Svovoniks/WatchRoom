@@ -34,6 +34,6 @@ internal static class NativeMedia
         var candidates = new[] { custom, Path.Combine(AppContext.BaseDirectory, "libdatachannel.dylib"), "/opt/homebrew/lib/libdatachannel.dylib", "/usr/local/lib/libdatachannel.dylib", Path.Combine(AppContext.BaseDirectory, "datachannel.dylib") };
         foreach (var candidate in candidates)
             if (candidate is not null && File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out dataChannelHandle)) return dataChannelHandle;
-        throw new DllNotFoundException("WebRTC requires libdatachannel for this Mac. Install it with 'brew install libdatachannel', or set WATCHROOM_DATACHANNEL_NATIVE to a matching dylib.");
+        throw new DllNotFoundException("WebRTC requires libdatachannel for this Mac. Follow MAC-CLIENT.md to build it, then set WATCHROOM_DATACHANNEL_NATIVE to the matching libdatachannel.dylib path.");
     }
 }
