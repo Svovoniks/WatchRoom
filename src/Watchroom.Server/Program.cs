@@ -127,7 +127,7 @@ app.Map("/room", async context =>
                         var desired = Wire.Read<PlaybackState>(message.Data!);
                         if (room.Media is null || desired.MediaId != room.Media.Id || desired.PositionMs < 0 || desired.PositionMs > 7 * 86400000L) break;
                         room.ResumeWhenReady = desired.Playing && room.People.Values.Any(x => x.Approved && !x.Ready);
-                        room.Playback = desired with { Revision = ++room.Revision, Playing = desired.Playing && !room.ResumeWhenReady, AtUnixMs = Wire.Now + (desired.Playing ? 600 : 0) };
+                        room.Playback = desired with { Revision = ++room.Revision, Playing = desired.Playing && !room.ResumeWhenReady, AtUnixMs = Wire.Now + (desired.Playing && !room.ResumeWhenReady ? 200 : 0) };
                         room.Broadcast(new("playback", Data: Wire.Serialize(room.Playback))); break;
                     case "buffering":
                         member.Ready = false;
@@ -208,7 +208,7 @@ sealed class Room(string code, bool persistent = false)
     {
         if (!ResumeWhenReady || Playback is null || People.Values.Any(x => x.Approved && !x.Ready)) return;
         ResumeWhenReady = false;
-        Playback = Playback with { Revision = ++Revision, Playing = true, AtUnixMs = Wire.Now + 600 };
+        Playback = Playback with { Revision = ++Revision, Playing = true, AtUnixMs = Wire.Now + 200 };
         Broadcast(new("playback", Data: Wire.Serialize(Playback)));
     }
     public void Broadcast(WireMessage message) { foreach (var p in People.Values.Where(x => x.Approved)) p.Send(message); }

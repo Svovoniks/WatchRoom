@@ -16,6 +16,10 @@ public sealed class ServerClock
     }
     public long Now { get { lock (gate) return serverAnchor + Elapsed(anchor, time.GetTimestamp()); } }
     public long OffsetMs => Now - time.GetUtcNow().ToUnixTimeMilliseconds();
+    internal void Initialize(long hostUnixMs)
+    {
+        lock (gate) { anchor = time.GetTimestamp(); serverAnchor = hostUnixMs; samples.Clear(); pending.Clear(); }
+    }
     private long Elapsed(long from, long to) => (long)time.GetElapsedTime(from, to).TotalMilliseconds;
     public void Sent(long id)
     {

@@ -27,7 +27,7 @@ public record SavedRoom(string Id, string Name, string Server, string Code, stri
 public record SavedQueue(string Id, string Name, string[] MediaIds);
 public record SharedMedia(string Id, string Title, long Length, string Extension, SharedMedia[]? Subtitles = null);
 public record Participant(string Id, string Name, bool IsHost, bool Approved, bool Ready = false);
-public record PlaybackState(long Revision, string MediaId, bool Playing, long PositionMs, long AtUnixMs);
+public record PlaybackState(long Revision, string MediaId, bool Playing, long PositionMs, long AtUnixMs, string? CommandId = null);
 public record WireMessage(string Type, string? Target = null, string? Sender = null,
     string? Text = null, string? Data = null, long Number = 0);
 public record Welcome(string Room, string Peer, bool Host, string[] IceServers, bool ForceRelay, string? HostKey = null);
@@ -47,7 +47,13 @@ public static class SyncMath
         state.PositionMs + (state.Playing ? Math.Max(0, now - state.AtUnixMs) : 0));
     // Aim for a <= 500 ms p95 pair difference in the measured LAN/VM fixture.
     // The hard bound is per client; live pair/frame measurements remain required.
-    public const long HardSeekMs = 600;
-    public static float Correction(long driftMs) => Math.Abs(driftMs) < 80 ? 1f :
+    // Native time can be sparse or ahead of decoded frames (notably silent AVI).
+    // Keep the established policy by default until the tighter policy is validated
+    // across those inputs as well as ordinary H.264/AAC media.
+    public static bool UseTunedPolicy { get; } = Environment.GetEnvironmentVariable("WATCHROOM_SYNC_EXPERIMENTAL") == "1";
+    public static long HardSeekMs => UseTunedPolicy ? 600 : 1200;
+    public static float Correction(long driftMs) => UseTunedPolicy ? TunedCorrection(driftMs) : EstablishedCorrection(driftMs);
+    public static float EstablishedCorrection(long driftMs) => Math.Abs(driftMs) < 100 ? 1f : driftMs > 0 ? 1.03f : .97f;
+    public static float TunedCorrection(long driftMs) => Math.Abs(driftMs) < 80 ? 1f :
         1f + (float)Math.Clamp(driftMs / 4000d, -.05, .05);
 }

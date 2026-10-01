@@ -6,6 +6,14 @@ using Watchroom.Core;
 using LibVLCSharp.Shared;
 using System.Diagnostics;
 
+if (args.FirstOrDefault() == "--direct-controls")
+{
+    var checks = 0;
+    await DirectControlFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/direct-controls"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} direct control checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--ui-fixture")
 {
     var directory = Path.GetFullPath(args[1]); Directory.CreateDirectory(directory);
@@ -73,6 +81,7 @@ Directory.CreateDirectory(root);
 int passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
 await RecoveryFixture.Run(Check);
+HostRoomFixture.Run(Check);
 Check(MediaBridge.TryRange("bytes=-30", 100, out var s, out var e) && s == 70 && e == 99, "suffix byte ranges");
 Check(MediaBridge.TryRange("bytes=40-999", 100, out s, out e) && s == 40 && e == 99, "range end clamped");
 Check(!MediaBridge.TryRange("bytes=100-", 100, out _, out _) && !MediaBridge.TryRange("bytes=0-1,3-4", 100, out _, out _), "invalid ranges rejected");
@@ -281,6 +290,11 @@ host.ResolveMedia = id => id == file.Media.Id ? file : null;
 host.StartOffer();
 await Task.WhenAll(host.Ready, guest.Ready).WaitAsync(TimeSpan.FromSeconds(20));
 Check(true, "native WebRTC peers connect");
+await Task.WhenAll(host.ControlReady, guest.ControlReady).WaitAsync(TimeSpan.FromSeconds(10));
+var directStop = new TaskCompletionSource<WireMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+guest.ControlMessage += message => directStop.TrySetResult(message);
+host.SendControl(new("playback", Data: Wire.Serialize(new PlaybackState(1, file.Media.Id, false, 0, Wire.Now))));
+Check((await directStop.Task.WaitAsync(TimeSpan.FromSeconds(1))).Type == "playback", "separate native control channel delivers stop directly");
 var remote = new RemoteMediaSource(guest, file.Media);
 await using var remoteBridge = new MediaBridge(); var remoteUrl = await remoteBridge.StartAsync(remote);
 var received = await http.GetByteArrayAsync(remoteUrl);
@@ -300,6 +314,9 @@ using (var vlc = new LibVLC("--vout=dummy", "--aout=dummy", "--no-video-title-sh
 using (var player = new MediaPlayer(vlc))
 using (var videoMedia = new Media(vlc, videoUrl))
 {
+    // Exercise the same AVI demux path used by room playback, including seeking
+    // and replay through a remote peer rather than a direct local file.
+    videoMedia.AddOption(":demux=avformat");
     player.Play(videoMedia);
     await Wait(() => player.Time > 1000, "LibVLC remote playback");
     Check(player.Length >= 11000, "LibVLC reads AVI duration through peer bridge");
@@ -336,7 +353,10 @@ try
     await roomGuest.ConnectAsync(serverUrl, "Test Guest", roomHost.Identity!.Room);
     await Wait(() => roomGuest.Identity is not null && roomGuest.Snapshot is not null, "guest waiting for admission");
     Check(roomGuest.Snapshot!.Media is null, "pending guests cannot see shared media");
-    roomGuest.Send(new("playback", Data: Wire.Serialize(new PlaybackState(0, file.Media.Id, true, 1000, 0))));
+    var pendingRejected = false;
+    try { roomGuest.Send(new("playback", Data: Wire.Serialize(new PlaybackState(0, file.Media.Id, true, 1000, 0)))); }
+    catch (IOException) { pendingRejected = true; }
+    Check(pendingRejected, "unapproved guest cannot send direct room controls");
     await Task.Delay(150); Check(!hostMessages.Any(x => x.Type == "playback"), "pending guests cannot control playback");
     roomHost.Send(new("admit", Target: roomGuest.Identity!.Peer));
     await Wait(() => roomGuest.Snapshot?.Media is not null, "guest admitted");
@@ -349,14 +369,15 @@ try
     roomHost.Send(new("playback", Data: Wire.Serialize(new PlaybackState(0, file.Media.Id, true, 2000, 0))));
     await Wait(() => guestMessages.Any(x => x.Type == "playback"), "host playback broadcast");
     var playback = Wire.Read<PlaybackState>(guestMessages.Last(x => x.Type == "playback").Data!);
-    Check(playback.Revision > 0 && playback.AtUnixMs > 0 && playback.PositionMs == 2000, "server assigns playback revision and clock");
+    Check(playback.Revision > 0 && playback.AtUnixMs > 0 && playback.PositionMs == 2000, "host assigns playback revision and clock");
+    Check(playback.AtUnixMs <= Wire.Now + 200, "playback starts with a 200 ms lead instead of the old 600 ms delay");
     roomGuest.Send(new("buffering"));
     await Wait(() => guestMessages.Any(x => x.Type == "notice"), "buffering pauses room");
     Check(!Wire.Read<PlaybackState>(guestMessages.Last(x => x.Type == "playback").Data!).Playing, "shared buffering state paused");
     roomGuest.Send(new("ready"));
     await Wait(() => Wire.Read<PlaybackState>(guestMessages.Last(x => x.Type == "playback").Data!).Playing, "automatic resume after buffering");
     roomHost.Send(new("queue", Data: Wire.Serialize(new[] { "Next movie", "Episode two" })));
-    await Wait(() => roomGuest.Snapshot?.Queue?.Length == 2, "shared queue visible to admitted guests");
+    await Wait(() => roomHost.Snapshot?.Queue?.Length == 2 && roomGuest.Snapshot?.Queue?.Length == 2, "shared queue visible to host and admitted guests");
     roomGuest.Send(new("queue", Data: Wire.Serialize(new[] { "Unauthorized change" })));
     await Task.Delay(100); Check(roomHost.Snapshot!.Queue![0] == "Next movie", "guests cannot overwrite host queue");
     var subtitleText = "1\n00:00:00,000 --> 00:00:04,000\nWatchroom subtitle test\n";

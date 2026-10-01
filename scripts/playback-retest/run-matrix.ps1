@@ -1,12 +1,13 @@
-param([ValidateSet('public','local')][string]$Mode,[Parameter(Mandatory)][string]$PasswordFile,[int]$SteadySeconds=180,[string]$TestRoot='artifacts/sync-followup/desktop',[string]$GuestRoot='C:\Users\vmuser\Desktop\WatchroomSyncFollowup',[int]$StartPhase=0,[switch]$LaunchGuest,[int]$HostSequenceOffset=0,[string]$GuestExecutable)
+param([ValidateSet('public','local')][string]$Mode,[Parameter(Mandatory)][string]$PasswordFile,[int]$SteadySeconds=180,[string]$TestRoot='artifacts/sync-followup/desktop',[string]$GuestRoot='C:\Users\vmuser\Desktop\WatchroomSyncFollowup',[int]$StartPhase=0,[switch]$LaunchGuest,[int]$HostSequenceOffset=0,[string]$GuestExecutable,[switch]$ExperimentalSync)
 $ErrorActionPreference='Stop'
 $testRootFull=(Resolve-Path $TestRoot).Path
 $testVBox='C:\Program Files\Oracle\VirtualBox\VBoxManage.exe'
 $testGuest="$GuestRoot\$Mode-guest"
 $testExecutable=if($GuestExecutable){$GuestExecutable}else{"$GuestRoot\app\Watchroom.exe"}
+$testPolicy=if($ExperimentalSync){"1"}else{"0"}
 $testInvite=Get-Content -Raw -LiteralPath (Join-Path $testRootFull "$Mode-host/test-invite.txt")
 if($StartPhase -eq 0 -or $LaunchGuest){
-& $testVBox guestcontrol 'Windows 11' start --username vmuser --passwordfile $PasswordFile --exe $testExecutable --putenv "WATCHROOM_DATA=$testGuest" --putenv "WATCHROOM_DIAGNOSTICS=$testGuest" --putenv 'WATCHROOM_TEST_ROLE=guest' --putenv "WATCHROOM_TEST_INVITE=$testInvite"
+& $testVBox guestcontrol 'Windows 11' start --username vmuser --passwordfile $PasswordFile --exe $testExecutable --putenv "WATCHROOM_DATA=$testGuest" --putenv "WATCHROOM_DIAGNOSTICS=$testGuest" --putenv 'WATCHROOM_TEST_ROLE=guest' --putenv "WATCHROOM_TEST_INVITE=$testInvite" --putenv "WATCHROOM_SYNC_EXPERIMENTAL=$testPolicy"
 if($LASTEXITCODE -ne 0){throw 'Guest launch failed'}
 $testReadyDeadline=[DateTimeOffset]::UtcNow.AddMinutes(3)
 do {
@@ -59,8 +60,8 @@ for($testPhaseIndex=$StartPhase;$testPhaseIndex -lt $testPhases.Count;$testPhase
 # A unified log includes native-time, seeks, settling, cache, rates, reads and clocks.
 & $testVBox guestcontrol 'Windows 11' copyfrom --username vmuser --passwordfile $PasswordFile "$testGuest\diagnostics.jsonl" (Join-Path $testRootFull "$Mode-guest/diagnostics.jsonl")
 if($LASTEXITCODE -ne 0){throw 'Guest diagnostic collection failed'}
-New-Item -ItemType Directory -Force (Join-Path $testRootFull 'guest-collected') | Out-Null
-& $testVBox guestcontrol 'Windows 11' copyfrom --username vmuser --passwordfile $PasswordFile --recursive "$testGuest\" (Join-Path $testRootFull 'guest-collected')
+New-Item -ItemType Directory -Force (Join-Path $testRootFull "$Mode-guest-collected") | Out-Null
+& $testVBox guestcontrol 'Windows 11' copyfrom --username vmuser --passwordfile $PasswordFile --recursive "$testGuest\" (Join-Path $testRootFull "$Mode-guest-collected")
 if($LASTEXITCODE -ne 0){throw 'Guest frame collection failed'}
 Write-Output "$Mode host-to-VM matrix complete."
 

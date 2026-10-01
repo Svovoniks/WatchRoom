@@ -10,6 +10,7 @@ internal interface IRoomConnection : IAsyncDisposable
     Task SendAsync(WireMessage message, CancellationToken ct);
     Task<WireMessage?> ReadAsync(CancellationToken ct);
     void Abort();
+    void UseDiscoveryPolling() { }
 }
 
 internal sealed class WebSocketRoomConnection(ClientWebSocket socket) : IRoomConnection
@@ -27,10 +28,13 @@ internal sealed class SitesRoomConnection : IRoomConnection
     private readonly HttpClient http;
     private readonly Channel<WireMessage> incoming = Channel.CreateBounded<WireMessage>(128);
     private readonly CancellationTokenSource lifetime = new();
+    private readonly SemaphoreSlim pollWake = new(0, 1);
     private readonly Task polling;
     private long cursor;
     private bool disposed;
     private readonly bool idempotentRequests;
+    private int pollingIntervalMs = 100;
+    public void UseDiscoveryPolling() => Volatile.Write(ref pollingIntervalMs, 1000);
 
     internal SitesRoomConnection(HttpClient http, bool idempotentRequests = false)
     {
@@ -62,6 +66,8 @@ internal sealed class SitesRoomConnection : IRoomConnection
             request.Headers.Add("X-Watchroom-Request-Id", id);
             return await http.SendAsync(request, token);
         }, idempotentRequests || message.Type == "ping", linked.Token);
+        // Fetch the authoritative reply immediately after our command commits.
+        try { pollWake.Release(); } catch (SemaphoreFullException) { }
     }
     public async Task<WireMessage?> ReadAsync(CancellationToken ct)
     {
@@ -83,7 +89,7 @@ internal sealed class SitesRoomConnection : IRoomConnection
                     if (item.Sequence != cursor + 1) throw new IOException("Room events expired. Rejoin the room.");
                     await incoming.Writer.WriteAsync(item.Message, lifetime.Token); cursor = item.Sequence;
                 }
-                await Task.Delay(250, lifetime.Token);
+                await pollWake.WaitAsync(Volatile.Read(ref pollingIntervalMs), lifetime.Token);
             }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }

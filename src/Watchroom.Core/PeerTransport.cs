@@ -45,16 +45,23 @@ public sealed class PeerTransport : IDisposable
 {
     private readonly RtcPeerConnection peer;
     private IRtcDataChannel? channel;
+    private IRtcDataChannel? controls;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<byte[]>> pending = new();
     private readonly SemaphoreSlim window = new(8);
     private readonly Channel<RangeRequest> requests = Channel.CreateBounded<RangeRequest>(32);
     private readonly CancellationTokenSource lifetime = new();
     private readonly TaskCompletionSource opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource controlOpened = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int controlClosed;
     private int disposed;
     public Func<string, IMediaSource?>? ResolveMedia { get; set; }
     public event Action<string, string>? Signal;
     public event Action<string>? Status;
+    public event Action<WireMessage>? ControlMessage;
+    public event Action? ControlClosed;
     public Task Ready => opened.Task;
+    public Task ControlReady => controlOpened.Task;
+    public bool IsControlOpen => controls?.IsOpen == true && disposed == 0;
 
     public PeerTransport(string[] iceServers, bool relayOnly = false)
     {
@@ -76,12 +83,20 @@ public sealed class PeerTransport : IDisposable
             {
                 var error = new IOException("Peer connection interrupted");
                 opened.TrySetException(error);
+                controlOpened.TrySetException(error);
+                CloseControls();
                 foreach (var p in pending.Values) p.TrySetException(error);
             }
         };
         _ = ServeAsync();
     }
-    public void StartOffer() => Attach(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = "media" }));
+    public void StartOffer()
+    {
+        // Reliable, ordered commands have their own SCTP stream and never enter
+        // the media range request queue.
+        Attach(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = "watchroom-control-v2" }));
+        Attach(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = "media" }));
+    }
     public void ReceiveSignal(string type, string data)
     {
         if (type == "sdp") peer.SetRemoteDescription(Wire.Read<RtcDescription>(data));
@@ -89,6 +104,8 @@ public sealed class PeerTransport : IDisposable
     }
     private void Attach(IRtcDataChannel data)
     {
+        if (data.Label == "watchroom-control-v2") { AttachControls(data); return; }
+        if (data.Label != "media" || channel is not null) { data.Dispose(); return; }
         channel = data;
         data.OnOpen += _ => opened.TrySetResult();
         if (data.IsOpen) opened.TrySetResult();
@@ -116,6 +133,35 @@ public sealed class PeerTransport : IDisposable
             }
             catch (Exception ex) { Status?.Invoke("Invalid peer message: " + ex.GetType().Name); }
         };
+    }
+    private void AttachControls(IRtcDataChannel data)
+    {
+        if (controls is not null) { data.Dispose(); return; }
+        controls = data;
+        data.OnOpen += _ => controlOpened.TrySetResult();
+        if (data.IsOpen) controlOpened.TrySetResult();
+        data.OnClose += _ => CloseControls();
+        data.OnTextReceivedSafe += (_, text) =>
+        {
+            try
+            {
+                if (text.Text.Length > 65536) { CloseControls(); return; }
+                ControlMessage?.Invoke(Wire.Read<WireMessage>(text.Text));
+            }
+            catch (Exception ex) { Status?.Invoke("Invalid control message: " + ex.GetType().Name); CloseControls(); }
+        };
+    }
+    private void CloseControls()
+    {
+        controlOpened.TrySetException(new IOException("Room control channel closed"));
+        if (disposed == 0 && Interlocked.Exchange(ref controlClosed, 1) == 0) ControlClosed?.Invoke();
+    }
+    public void SendControl(WireMessage message)
+    {
+        if (!IsControlOpen) throw new IOException("Room controls are not connected. Rejoin the room.");
+        var text = Wire.Serialize(message);
+        if (System.Text.Encoding.UTF8.GetByteCount(text) > 65536) throw new InvalidDataException("Room control message is too large");
+        controls!.Send(text);
     }
     private void SendReply(RangeReply reply) => channel?.Send(Wire.Serialize(new WireMessage("bytes", Data: Wire.Serialize(reply))));
     private async Task ServeAsync()
@@ -158,9 +204,11 @@ public sealed class PeerTransport : IDisposable
         lifetime.Cancel(); requests.Writer.TryComplete();
         foreach (var p in pending.Values) p.TrySetException(new IOException("Peer disposed"));
         opened.TrySetCanceled();
+        controlOpened.TrySetCanceled();
         // A remotely closed native channel can reject disposal. Cleanup of one
         // departed peer must still release its connection and preserve the room.
         try { channel?.Dispose(); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning("Channel cleanup: {0}", ex.Message); }
+        try { controls?.Dispose(); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning("Control cleanup: {0}", ex.Message); }
         try { peer.Dispose(); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning("Peer cleanup: {0}", ex.Message); }
     }
 }

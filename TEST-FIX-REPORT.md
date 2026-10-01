@@ -1,3 +1,9 @@
+**Latest rerun:** current-source build clean; 129 local + 129 public smoke checks and 6 room-service tests pass. Same-machine original-AVI p95 is 200 ms by default and 301 ms experimentally; both control matrices pass 6/6 and have no pairs above 500 ms. VM guest service still unavailable. See TEST-REPORT.html and artifacts/sync-rerun for fresh evidence.
+
+**Latest investigation:** HTTP AVI demux read-ahead reproduced and fixed by selecting avformat for room AVI playback. Same-machine default and experimental matrices both have raw pair-position p95 300 ms and all six control assertions pass. 129 local + 129 public smoke checks and 6 worker tests pass; build has zero warnings/errors. VM retest remains blocked by the guest execution service. See [AVI-INVESTIGATION.md](AVI-INVESTIGATION.md) for complete evidence.
+
+> Follow-up status (1 October 2026): replay and smoke-test queue race fixed; final source passes 129 local and 129 public smoke checks plus six Node tests. Experimental H.264/AAC public-room p95 is 421 ms; silent AVI still fails at 2,186 ms. Tighter tuning is opt-in. Final default-policy VM retest is unverified while the VM completes a Windows update. See TEST-REPORT.html for current evidence; the older notes below are historical.
+
 # Fixes and retest — 1 October 2026
 
 The confirmed clock, runtime packaging, transient coordination, and buffering feedback defects have been addressed. Automated checks and control tests pass. **Reliable live synchronization is still not fully signed off:** the complete desktop matrix retains some drift, and the original host-to-VM retest needs the missing guest-control credential file.

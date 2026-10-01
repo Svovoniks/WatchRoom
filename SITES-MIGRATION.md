@@ -1,6 +1,6 @@
 # Watchroom on Sites
 
-The native Windows player now supports the Sites room service as well as the original ASP.NET WebSocket server. Files, local folder scanning, posters, LibVLC playback and the encrypted WebRTC media channel remain on Windows. Sites coordinates invitations, host approval, signaling, playback, buffering, queues and chat using D1-backed HTTP sessions.
+The native Windows player supports the Sites room service as well as the original ASP.NET WebSocket server. Sites coordinates invitations, host approval and WebRTC signaling using D1-backed HTTP sessions. Updated native clients send playback, readiness, buffering, queues and chat through a separate reliable WebRTC data channel. The host owns the room state and clock, validates guest requests and distributes authoritative updates to admitted guests. Files and LibVLC playback remain on each computer.
 
 The pre-migration preview is saved in root commit `d1ea5d4`. Migration work is on `sites-migration`. The Site has its own deployment repository; this branch references its source commit as the `sites` Git submodule. The local Site checkout is retained for recovery.
 
@@ -19,12 +19,14 @@ The web page provides room creation, joining, admission, removal, chat and servi
 ## Implementation
 
 - `POST /sessions`: create/join with a display name and invitation; returns a random 256-bit bearer token.
-- `GET /session?since=N`: ordered event polling; the Windows app polls every 250 ms.
+- `GET /session?since=N`: ordered discovery event polling; native clients poll every 100 ms during connection establishment and every second after the direct control handshake.
 - `POST /session`: existing Watchroom wire messages.
 - `DELETE /session`: leave; host leaving closes the room.
 - `/health`: protocol and transport discovery.
 
-D1 stores room state with a version for compare-and-swap updates. Concurrent requests retry against the latest state. Session secrets are hashed before storage. Events are acknowledged with monotonic cursors; each participant has a bounded 128-message queue. Rooms expire after six hours; stalled peers are removed after 60 seconds. No movie files or local folder paths are uploaded to Sites. Movie descriptors and chat remain in room state until expiry cleanup on a subsequent room creation.
+D1 stores discovery and admission state with a version for compare-and-swap updates. Concurrent requests retry against the latest state. Session secrets are hashed before storage. Events are acknowledged with monotonic cursors; each participant has a bounded 128-message queue. Rooms expire after six hours; stalled peers are removed after 60 seconds. No movie files or local folder paths are uploaded to Sites. Updated native clients keep movie descriptors, playback state and chat on the host and its admitted peers. Legacy control endpoints remain available for the service test page and older clients; new native rooms require updated participants.
+
+Once direct connections are established, playback continues if discovery becomes unavailable. New joins require the discovery service. Host disconnection ends the room and pauses guest playback; host migration is not implemented. See `DIRECT-CONTROLS.md` for validation of the direct control path.
 
 Sites runtime environment values can configure `WATCHROOM_STUN`, `WATCHROOM_TURN`, `WATCHROOM_TURN_SECRET`, and `WATCHROOM_FORCE_RELAY`. Use Sites' secret/environment settings; never commit a relay secret. Coturn remains external. The deployment has no relay credentials or STUN address configured, so public-network connectivity is not validated. Hosted access and real network-separated Windows testing remain required before treating this as an internet-ready release. Polling also consumes D1 reads/writes and should be measured before broader use.
 

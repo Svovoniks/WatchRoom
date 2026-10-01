@@ -6,6 +6,26 @@ static class RecoveryFixture
 {
     public static async Task Run(Action<bool, string> check)
     {
+        var pause = new PlaybackPause();
+        var stop = new PlaybackState(0, "movie", false, 0, 0, new string('a', 32));
+        pause.Request(stop, 10);
+        for (var revision = 10; revision < 18; revision++)
+            pause.Observe(new(revision, "movie", true, 5000, revision * 1000));
+        check(pause.Pending, "local stop stays paused through seven seconds of stale playing updates");
+        pause.Observe(new(18, "movie", false, 0, 18000, new string('b', 32)));
+        check(pause.Pending, "another command cannot acknowledge our pending stop");
+        pause.Observe(stop with { Revision = 19 });
+        check(!pause.Pending, "matching authoritative command acknowledges immediate local stop");
+        pause.Request(stop, 20); pause.Observe(new(20, "movie", false, 0, 20000));
+        check(pause.Pending, "old snapshot cannot acknowledge a new stop");
+        pause.Observe(new(21, "movie", false, 0, 21000));
+        check(!pause.Pending, "legacy room service acknowledges stop without command IDs");
+        pause.Request(stop, 21); pause.Request(stop with { Playing = true }, 21);
+        check(!pause.Pending, "explicit play supersedes pending local pause");
+        pause.Request(stop, 21); pause.Observe(new(22, "next-movie", false, 0, 22000));
+        check(!pause.Pending, "media change clears pending pause");
+        pause.Request(stop, 22); pause.Clear();
+        check(!pause.Pending, "leaving room clears pending local pause");
         var time = new ClockTime(); var clock = new ServerClock(time);
         clock.Sent(1); time.Advance(100); clock.Receive(1, 100050);
         time.Utc -= 10000; time.Advance(1000);
@@ -32,7 +52,8 @@ static class RecoveryFixture
         check(position.Estimate(90000, true, 1.03f, 1250) == 90257, "position estimate advances between native observations at playback rate");
         check(position.Estimate(90000, true, 1f, 3000) == 90500 && position.Estimate(90000, false, 1f, 1250) == 90000, "position estimate is bounded during stalls and never advances paused playback");
         check(position.Estimate(150000, true, 1f, 1250) == 150000, "new native position supersedes old interpolation anchor");
-        check(SyncMath.Correction(0) == 1 && SyncMath.Correction(10000) == 1.05f && SyncMath.Correction(-10000) == .95f, "rate correction is neutral when aligned and bounded in both directions");
+        check(SyncMath.TunedCorrection(0) == 1 && SyncMath.TunedCorrection(10000) == 1.05f && SyncMath.TunedCorrection(-10000) == .95f, "rate correction is neutral when aligned and bounded in both directions");
+        check(SyncMath.EstablishedCorrection(99) == 1f && SyncMath.EstablishedCorrection(100) == 1.03f && SyncMath.EstablishedCorrection(-100) == .97f, "established rate policy preserves its deadband and correction limits");
         var buffer = new PlaybackBuffering(); buffer.Cache(0, 1000); buffer.Cache(100, 1004);
         check(!buffer.Poll(true, 1600), "short seek buffering bursts do not pause the room");
         buffer.Cache(0, 2000);
