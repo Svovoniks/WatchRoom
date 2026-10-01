@@ -30,13 +30,15 @@ internal sealed class SitesRoomConnection : IRoomConnection
     private readonly Task polling;
     private long cursor;
     private bool disposed;
+    private readonly bool idempotentRequests;
 
-    private SitesRoomConnection(HttpClient http)
+    internal SitesRoomConnection(HttpClient http, bool idempotentRequests = false)
     {
         this.http = http;
+        this.idempotentRequests = idempotentRequests;
         polling = PollAsync();
     }
-    public static async Task<IRoomConnection> OpenAsync(Uri server, WireMessage first, CancellationToken ct)
+    public static async Task<IRoomConnection> OpenAsync(Uri server, WireMessage first, CancellationToken ct, bool idempotentRequests = false)
     {
         var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { BaseAddress = server, Timeout = TimeSpan.FromSeconds(15) };
         try
@@ -46,14 +48,20 @@ internal sealed class SitesRoomConnection : IRoomConnection
             var session = await response.Content.ReadFromJsonAsync<Session>(Wire.Json, ct) ?? throw new IOException("Missing room session");
             if (session.Token.Length != 64) throw new IOException("Invalid room session");
             http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", session.Token);
-            return new SitesRoomConnection(http);
+            return new SitesRoomConnection(http, idempotentRequests);
         }
         catch { http.Dispose(); throw; }
     }
     public async Task SendAsync(WireMessage message, CancellationToken ct)
     {
-        using var response = await http.PostAsJsonAsync("session", message, Wire.Json, ct);
-        await CheckAsync(response, ct);
+        var id = Guid.NewGuid().ToString("N");
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, lifetime.Token);
+        using var response = await RequestAsync(async token =>
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "session") { Content = JsonContent.Create(message, options: Wire.Json) };
+            request.Headers.Add("X-Watchroom-Request-Id", id);
+            return await http.SendAsync(request, token);
+        }, idempotentRequests || message.Type == "ping", linked.Token);
     }
     public async Task<WireMessage?> ReadAsync(CancellationToken ct)
     {
@@ -66,8 +74,7 @@ internal sealed class SitesRoomConnection : IRoomConnection
         {
             while (!lifetime.IsCancellationRequested)
             {
-                using var response = await http.GetAsync("session?since=" + cursor, lifetime.Token);
-                await CheckAsync(response, lifetime.Token);
+                using var response = await RequestAsync(token => http.GetAsync("session?since=" + cursor, token), true, lifetime.Token);
                 var batch = await response.Content.ReadFromJsonAsync<Events>(Wire.Json, lifetime.Token) ?? throw new IOException("Missing room events");
                 if (batch.Items.Length > 128) throw new IOException("Room event limit exceeded");
                 foreach (var item in batch.Items)
@@ -86,13 +93,40 @@ internal sealed class SitesRoomConnection : IRoomConnection
     private static async Task CheckAsync(HttpResponseMessage response, CancellationToken ct)
     {
         if (response.IsSuccessStatusCode && response.Content.Headers.ContentType?.MediaType == "application/json") return;
+        if ((int)response.StatusCode is 408 or 429 or >= 500) throw new TransientRoomException($"Room service temporarily unavailable ({(int)response.StatusCode}).");
         if ((int)response.StatusCode is >= 300 and < 400 || response.Content.Headers.ContentType?.MediaType == "text/html")
             throw new IOException("This Site requires browser sign-in. Ask its owner to enable access for Windows clients, or use the local server.");
         string? error = null;
         try { error = (await response.Content.ReadFromJsonAsync<Failure>(Wire.Json, ct))?.Error; } catch (System.Text.Json.JsonException) { }
         throw new IOException(error ?? $"Room request failed ({(int)response.StatusCode})");
     }
-    public void Abort() { lifetime.Cancel(); }
+    private static async Task<HttpResponseMessage> RequestAsync(Func<CancellationToken, Task<HttpResponseMessage>> send, bool retry, CancellationToken ct)
+    {
+        // Below the server's 60-second heartbeat lease, including request timeouts.
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(TimeSpan.FromSeconds(30));
+        var attempt = 0;
+        while (true)
+        {
+            HttpResponseMessage? response = null;
+            try
+            {
+                response = await send(budget.Token);
+                await CheckAsync(response, budget.Token);
+                return response;
+            }
+            catch (Exception ex) when (retry && !ct.IsCancellationRequested && ex is TransientRoomException or HttpRequestException or OperationCanceledException)
+            {
+                response?.Dispose();
+                if (budget.IsCancellationRequested) throw new IOException("Room service did not recover within 30 seconds. Rejoin to reconnect.", ex);
+                try { await Task.Delay(Math.Min(2000, 250 * (1 << Math.Min(attempt++, 3))), budget.Token); }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new IOException("Room service did not recover within 30 seconds. Rejoin to reconnect.", ex); }
+            }
+            catch { response?.Dispose(); throw; }
+        }
+    }
+    private sealed class TransientRoomException(string message) : IOException(message);
+    public void Abort() { if (!disposed) lifetime.Cancel(); }
     public async ValueTask DisposeAsync()
     {
         if (disposed) return; disposed = true;

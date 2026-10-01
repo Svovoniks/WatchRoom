@@ -43,21 +43,43 @@ public sealed class LibraryStore
         c.CommandText = "INSERT INTO media VALUES($id,$path,$json) ON CONFLICT(id) DO UPDATE SET json=$json";
         c.Parameters.AddWithValue("$id", item.Id); c.Parameters.AddWithValue("$path", item.Path); c.Parameters.AddWithValue("$json", Wire.Serialize(item)); c.ExecuteNonQuery();
     }
-    public async Task<List<MediaItem>> ScanAsync(IEnumerable<LibraryFolder> folders, IProgress<string>? progress = null, CancellationToken cancellation = default)
+    public static bool IsWithin(string path, string folder)
     {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var root = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(folder));
+        var full = System.IO.Path.GetFullPath(path);
+        return full.Equals(root, comparison) || full.StartsWith(System.IO.Path.EndsInDirectorySeparator(root) ? root : root + System.IO.Path.DirectorySeparatorChar, comparison);
+    }
+    public void Prune(IEnumerable<LibraryFolder> folders, IEnumerable<string>? exclusions = null)
+    {
+        var roots = folders.ToArray(); var excluded = exclusions?.ToArray() ?? [];
+        var removed = All().Where(x => !roots.Any(f => IsWithin(x.Path, f.Path)) || excluded.Any(f => IsWithin(x.Path, f))).ToArray();
+        using var db = Open(); using var transaction = db.BeginTransaction();
+        foreach (var item in removed)
+        {
+            using var command = db.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "DELETE FROM media WHERE id=$id"; command.Parameters.AddWithValue("$id", item.Id); command.ExecuteNonQuery();
+        }
+        transaction.Commit();
+    }
+    public async Task<List<MediaItem>> ScanAsync(IEnumerable<LibraryFolder> folders, IProgress<string>? progress = null, CancellationToken cancellation = default, IEnumerable<string>? exclusions = null)
+    {
+        var roots = folders.ToArray(); var excluded = exclusions?.ToArray() ?? [];
         return await Task.Run(() =>
         {
+            Prune(roots, excluded);
             var old = All().ToDictionary(x => x.Id); var seen = new HashSet<string>();
-            foreach (var folder in folders)
+            foreach (var folder in roots)
             {
                 if (!Directory.Exists(folder.Path)) continue;
                 var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.System };
                 foreach (var path in Directory.EnumerateFiles(folder.Path, "*", options))
                 {
                     cancellation.ThrowIfCancellationRequested();
+                    if (excluded.Any(f => IsWithin(path, f))) continue;
                     if (!FileNames.Extensions.Contains(System.IO.Path.GetExtension(path))) continue;
                     var parsed = FileNames.Parse(path, folder.Kind); seen.Add(parsed.Id);
-                    var item = old.TryGetValue(parsed.Id, out var previous) ? previous with { Available = true, Kind = parsed.Kind, Series = parsed.Series ?? previous.Series, Season = parsed.Season ?? previous.Season, Episode = parsed.Episode ?? previous.Episode, SeriesPoster = parsed.SeriesPoster ?? previous.SeriesPoster, SeasonPoster = parsed.SeasonPoster ?? previous.SeasonPoster, Poster = previous.Matched && File.Exists(previous.Poster) ? previous.Poster : parsed.Poster ?? (File.Exists(previous.Poster) ? previous.Poster : null) } : parsed;
+                    var item = old.TryGetValue(parsed.Id, out var previous) ? previous with { Available = true, Kind = previous.MetadataKind ?? parsed.Kind, Series = previous.MetadataType == "movie" ? null : previous.MetadataType == "tv" || previous.Matched ? previous.Series : parsed.Series ?? previous.Series, Season = previous.MetadataType == "movie" ? null : parsed.Season ?? previous.Season, Episode = previous.MetadataType == "movie" ? null : parsed.Episode ?? previous.Episode, SeriesPoster = parsed.SeriesPoster ?? previous.SeriesPoster, SeasonPoster = parsed.SeasonPoster ?? previous.SeasonPoster, Poster = previous.Matched && File.Exists(previous.Poster) ? previous.Poster : parsed.Poster ?? (File.Exists(previous.Poster) ? previous.Poster : null) } : parsed;
                     Save(item); progress?.Report($"Found {seen.Count} videos · {item.Title}");
                 }
             }

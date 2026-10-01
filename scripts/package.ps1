@@ -6,6 +6,7 @@ try {
     if (!$SkipPublish) { & ./build.ps1 -Publish }
     $output = Join-Path $root 'artifacts/Watchroom'
     if (!(Test-Path (Join-Path $output 'Watchroom.exe'))) { throw 'Publish the app first' }
+    & ./scripts/copy-native-runtime.ps1 -Destination $output
     Copy-Item 'README.md','THIRD-PARTY-NOTICES.md' $output
     $licenses = Join-Path $output 'licenses'
     New-Item -ItemType Directory -Force $licenses | Out-Null

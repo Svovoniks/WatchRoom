@@ -58,11 +58,12 @@ public sealed class PeerTransport : IDisposable
 
     public PeerTransport(string[] iceServers, bool relayOnly = false)
     {
-        peer = new RtcPeerConnection(new RtcPeerConfiguration
+        try { peer = new RtcPeerConnection(new RtcPeerConfiguration
         {
             IceServers = iceServers, MaxMessageSize = 65536,
             TransportPolicy = relayOnly ? rtcTransportPolicy.RTC_TRANSPORT_POLICY_RELAY : rtcTransportPolicy.RTC_TRANSPORT_POLICY_ALL
-        });
+        }); }
+        catch (DllNotFoundException ex) when (OperatingSystem.IsWindows()) { throw new IOException("The Windows media transport or its Visual C++ runtime is missing. Republish using build.ps1 -Publish or reinstall the complete Watchroom package.", ex); }
         peer.OnLocalDescriptionSafe += (_, d) => Signal?.Invoke("sdp", Wire.Serialize(d));
         peer.OnCandidateSafe += (_, c) => Signal?.Invoke("ice", Wire.Serialize(c));
         peer.OnDataChannel += (_, c) => Attach(c);
@@ -156,7 +157,11 @@ public sealed class PeerTransport : IDisposable
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         lifetime.Cancel(); requests.Writer.TryComplete();
         foreach (var p in pending.Values) p.TrySetException(new IOException("Peer disposed"));
-        opened.TrySetCanceled(); channel?.Dispose(); peer.Dispose();
+        opened.TrySetCanceled();
+        // A remotely closed native channel can reject disposal. Cleanup of one
+        // departed peer must still release its connection and preserve the room.
+        try { channel?.Dispose(); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning("Channel cleanup: {0}", ex.Message); }
+        try { peer.Dispose(); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning("Peer cleanup: {0}", ex.Message); }
     }
 }
 

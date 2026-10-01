@@ -19,6 +19,8 @@ var app = builder.Build();
 app.UseRateLimiter();
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
 var rooms = new ConcurrentDictionary<string, Room>();
+var persistentRooms = new PersistentRooms(builder.Configuration["WATCHROOM_DATA"] ?? Path.Combine(AppContext.BaseDirectory, "data"));
+foreach (var saved in persistentRooms.All()) rooms[saved.Code] = new Room(saved.Code, true);
 string[] IceServers(string peer)
 {
     var urls = new List<string>();
@@ -40,7 +42,7 @@ string[] IceServers(string peer)
     return urls.ToArray();
 }
 bool forceRelay = builder.Configuration["WATCHROOM_FORCE_RELAY"] == "true";
-app.MapGet("/health", () => Results.Ok(new { status = "ok", protocol = 1, relayConfigured = !string.IsNullOrEmpty(builder.Configuration["WATCHROOM_TURN"]) }));
+app.MapGet("/health", () => Results.Ok(new { status = "ok", protocol = 1, persistentRooms = true, relayConfigured = !string.IsNullOrEmpty(builder.Configuration["WATCHROOM_TURN"]) }));
 app.Map("/room", async context =>
 {
     if (!context.WebSockets.IsWebSocketRequest) { context.Response.StatusCode = 400; return; }
@@ -52,24 +54,33 @@ app.Map("/room", async context =>
     {
         using var handshake = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); handshake.CancelAfter(TimeSpan.FromSeconds(10));
         var first = await SocketMessages.ReadAsync(socket, handshake.Token);
-        if (first is null || first.Type is not ("create" or "join")) throw new InvalidDataException("Expected create or join");
+        if (first is null || first.Type is not ("create" or "join" or "resume")) throw new InvalidDataException("Expected create, join or resume");
         var name = (first.Text ?? "Guest").Trim();
         if (name.Length is < 1 or > 40 || name.Any(char.IsControl)) throw new InvalidDataException("Invalid display name");
-        var host = first.Type == "create";
-        if (host)
+        var host = first.Type is "create" or "resume";
+        string? hostKey = null;
+        if (first.Type == "create")
         {
             if (rooms.Count >= 1000) throw new InvalidDataException("Server room limit reached");
-            room = new Room(Convert.ToHexString(RandomNumberGenerator.GetBytes(12)));
+            room = new Room(Convert.ToHexString(RandomNumberGenerator.GetBytes(12)), first.Target == "persistent");
+            if (room.Persistent) hostKey = persistentRooms.Create(room.Code);
             rooms[room.Code] = room;
         }
         else if (!rooms.TryGetValue((first.Data ?? "").Trim().ToUpperInvariant(), out room) || room.Expires < Wire.Now) throw new InvalidDataException("Invitation is invalid or expired");
+        if (first.Type == "resume")
+        {
+            if (!room!.Persistent || !persistentRooms.Verify(room.Code, first.Target)) throw new InvalidDataException("Host key is invalid");
+            hostKey = first.Target;
+        }
         member = new Member(Guid.NewGuid().ToString("N"), name, host, socket, lifetime);
         var sender = member.SendLoop();
         lock (room.Gate)
         {
             if (room.Closed || room.People.Count >= 9) throw new InvalidDataException("Room is full or closed");
+            if (host && room.People.Values.Any(x => x.Host)) throw new InvalidDataException("The host is already connected to this room");
+            if (!host && !room.People.Values.Any(x => x.Host)) throw new InvalidDataException("The host is offline. Try again when they reopen the room.");
             room.People.Add(member.Id, member);
-            member.Send(new("welcome", Data: Wire.Serialize(new Welcome(room.Code, member.Id, host, host ? IceServers(member.Id) : [], forceRelay))));
+            member.Send(new("welcome", Data: Wire.Serialize(new Welcome(room.Code, member.Id, host, host ? IceServers(member.Id) : [], forceRelay, hostKey))));
             room.Snapshot();
         }
         var messages = 0; var window = Wire.Now;
@@ -110,7 +121,7 @@ app.Map("/room", async context =>
                         room.SharedControls = message.Number == 1; room.Snapshot(); break;
                     case "queue" when member.Host:
                         var queue = Wire.Read<string[]>(message.Data!);
-                        if (queue.Length > 50 || queue.Any(x => x is null || x.Length > 300)) throw new InvalidDataException("Invalid queue");
+                        if (queue.Length > 1000 || queue.Any(x => x is null || x.Length > 300)) throw new InvalidDataException("Invalid queue");
                         room.Queue = queue; room.Snapshot(); break;
                     case "playback" when member.Host || room.SharedControls:
                         var desired = Wire.Read<PlaybackState>(message.Data!);
@@ -141,7 +152,7 @@ app.Map("/room", async context =>
     }
     catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
     {
-        if (member is not null) member.Send(new("error", Text: ex.Message));
+        if (member is not null) { try { await member.SendAndWaitAsync(new("error", Text: ex.Message)); } catch (Exception) { } }
         else if (socket.State == WebSocketState.Open) await SocketMessages.SendAsync(socket, new("error", Text: ex.Message), CancellationToken.None);
     }
     catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or IOException) { }
@@ -151,13 +162,14 @@ app.Map("/room", async context =>
         {
             lock (room.Gate)
             {
-                room.People.Remove(member.Id);
-                if (member.Host)
+                var registered = room.People.Remove(member.Id);
+                if (registered && member.Host)
                 {
-                    room.Closed = true; rooms.TryRemove(room.Code, out _);
+                    if (!room.Persistent) { room.Closed = true; rooms.TryRemove(room.Code, out _); }
                     foreach (var other in room.People.Values) other.Lifetime.Cancel();
+                    room.People.Clear(); room.Media = null; room.Playback = null; room.Queue = []; room.SharedControls = false; room.ResumeWhenReady = false;
                 }
-                else { room.Broadcast(new("peer-left", Sender: member.Id)); room.TryResume(); room.Snapshot(); }
+                else if (registered) { room.Broadcast(new("peer-left", Sender: member.Id)); room.TryResume(); room.Snapshot(); }
             }
         }
         lifetime.Cancel(); socket.Abort();
@@ -171,18 +183,25 @@ sealed class Member(string id, string name, bool host, WebSocket socket, Cancell
     public bool Approved = host;
     public bool Ready;
     public CancellationTokenSource Lifetime => lifetime;
-    private readonly Channel<WireMessage> outgoing = Channel.CreateBounded<WireMessage>(128);
-    public void Send(WireMessage message) { if (!outgoing.Writer.TryWrite(message)) lifetime.Cancel(); }
+    private readonly Channel<(WireMessage Message, TaskCompletionSource? Sent)> outgoing = Channel.CreateBounded<(WireMessage, TaskCompletionSource?)>(128);
+    public void Send(WireMessage message) { if (!outgoing.Writer.TryWrite((message, null))) lifetime.Cancel(); }
+    public async Task SendAndWaitAsync(WireMessage message)
+    {
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!outgoing.Writer.TryWrite((message, sent))) throw new IOException("Room send queue full");
+        await sent.Task.WaitAsync(TimeSpan.FromSeconds(2), lifetime.Token);
+    }
     public async Task SendLoop()
     {
-        try { await foreach (var msg in outgoing.Reader.ReadAllAsync(lifetime.Token)) await SocketMessages.SendAsync(socket, msg, lifetime.Token); }
+        try { await foreach (var msg in outgoing.Reader.ReadAllAsync(lifetime.Token)) { await SocketMessages.SendAsync(socket, msg.Message, lifetime.Token); msg.Sent?.TrySetResult(); } }
         catch (Exception) { lifetime.Cancel(); }
     }
 }
-sealed class Room(string code)
+sealed class Room(string code, bool persistent = false)
 {
     public object Gate { get; } = new(); public string Code => code; public bool Closed;
-    public long Expires { get; } = Wire.Now + 6 * 3600000; public long Revision;
+    public bool Persistent { get; } = persistent;
+    public long Expires { get; } = persistent ? long.MaxValue : Wire.Now + 6 * 3600000; public long Revision;
     public Dictionary<string, Member> People { get; } = new();
     public SharedMedia? Media; public PlaybackState? Playback; public bool SharedControls; public bool ResumeWhenReady; public string[] Queue = [];
     public void TryResume()

@@ -18,8 +18,11 @@ Watchroom dynamically links the following components. Package versions and conte
 | Microsoft.Data.Sqlite | 10.0.12 | https://github.com/dotnet/efcore |
 | SQLitePCLRaw | 3.0.5 | https://github.com/ericsink/SQLitePCL.raw |
 | .NET / WPF | Runtime selected by .NET 10 SDK | https://github.com/dotnet |
+| Microsoft Visual C++ x64 runtime | 14.44.35211.0 (pinned signed redistributable) | https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files |
 
 Licenses supplied by downloaded packages are copied into `licenses/` by the packaging script. LibVLC plugins can have different licenses from the embedding API; review the exact Windows build and provide corresponding source/required notices before public redistribution. This local preview is not a completed redistribution-license audit.
+
+The Windows publisher extracts app-local x64 runtime DLLs from Microsoft's signed redistributable, verifies their signatures, and records provenance in `native-runtime.json`. These files remain subject to Microsoft's Visual Studio redistribution terms; distribution of the Microsoft runtime requires the applicable Visual Studio license.
 
 FFmpeg is currently an optional user-supplied executable and is not bundled. TMDB is an optional metadata service: this product uses the TMDB API but is not endorsed or certified by TMDB. TMDB imagery requires its attribution and branding requirements; the official TMDB logo must be included before publishing a metadata-enabled release.
 

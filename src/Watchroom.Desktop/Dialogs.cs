@@ -6,14 +6,27 @@ namespace Watchroom.Desktop;
 
 public static class Dialogs
 {
-    public static string? Prompt(Window owner, string title, string label, string initial = "")
+    public static string? Prompt(Window owner, string title, string label, string initial = "", Func<string, string?>? validate = null)
     {
         var win = new Window { Owner = owner, Title = title, Width = 530, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
         var panel = new StackPanel { Margin = new Thickness(24) };
         panel.Children.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap });
         var input = new TextBox { Text = initial, MinWidth = 400 }; panel.Children.Add(input);
-        var button = new Button { Content = "Continue", IsDefault = true, HorizontalAlignment = HorizontalAlignment.Right };
-        button.Click += (_, _) => win.DialogResult = true; panel.Children.Add(button); win.Content = panel;
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,0,0,12), FontWeight = FontWeights.SemiBold };
+        error.SetResourceReference(TextBlock.ForegroundProperty, "Accent");
+        System.Windows.Automation.AutomationProperties.SetLiveSetting(error, System.Windows.Automation.AutomationLiveSetting.Polite);
+        panel.Children.Add(error);
+        System.Windows.Automation.AutomationProperties.SetName(input, label);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        var button = new Button { Content = "Continue", IsDefault = true, IsEnabled = !string.IsNullOrWhiteSpace(initial) };
+        void Validate()
+        {
+            error.Text = string.IsNullOrWhiteSpace(input.Text) ? "" : validate?.Invoke(input.Text.Trim()) ?? "";
+            button.IsEnabled = !string.IsNullOrWhiteSpace(input.Text) && error.Text.Length == 0;
+        }
+        input.TextChanged += (_, _) => Validate(); Validate();
+        button.Click += (_, _) => win.DialogResult = true; actions.Children.Add(cancel); actions.Children.Add(button); panel.Children.Add(actions); win.Content = panel;
         win.Loaded += (_, _) => { input.Focus(); input.SelectAll(); };
         return win.ShowDialog() == true ? input.Text.Trim() : null;
     }

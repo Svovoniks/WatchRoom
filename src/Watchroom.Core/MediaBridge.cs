@@ -48,13 +48,29 @@ public sealed class MediaBridge : IAsyncDisposable
                 while (offset <= end && inflight.Count < 8)
                 {
                     int count = (int)Math.Min(32768, end - offset + 1);
-                    inflight.Enqueue(source.ReadAsync(offset, count, context.RequestAborted)); offset += count;
+                    inflight.Enqueue(ReadRange(offset, count, context.RequestAborted)); offset += count;
                 }
                 var bytes = await inflight.Dequeue();
                 await context.Response.Body.WriteAsync(bytes, context.RequestAborted);
             }
         }
         catch (Exception) { context.Abort(); }
+    }
+    private async Task<byte[]> ReadRange(long offset, int count, CancellationToken ct)
+    {
+        if (!PlaybackDiagnostics.Enabled) return await source!.ReadAsync(offset, count, ct);
+        var start = Environment.TickCount64;
+        try
+        {
+            var bytes = await source!.ReadAsync(offset, count, ct);
+            PlaybackDiagnostics.Record("range-read", new { offset, count, bytes = bytes.Length, elapsedMs = Environment.TickCount64 - start });
+            return bytes;
+        }
+        catch (Exception ex)
+        {
+            PlaybackDiagnostics.Record("range-error", new { offset, count, elapsedMs = Environment.TickCount64 - start, error = ex.GetType().Name });
+            throw;
+        }
     }
     public static bool TryRange(string? value, long length, out long start, out long end)
     {

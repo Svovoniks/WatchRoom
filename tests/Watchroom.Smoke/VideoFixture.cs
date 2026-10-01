@@ -3,9 +3,10 @@ using System.Text;
 internal static class VideoFixture
 {
     // A generated 12-second, uncompressed AVI. No downloaded media or user files.
-    public static void Write(string path)
+    public static void Write(string path, int seconds = 12)
     {
-        const int width = 64, height = 48, frames = 120, size = width * height * 3;
+        const int width = 64, height = 48, size = width * height * 3;
+        var frames = seconds * 10;
         using var stream = File.Create(path); using var w = new BinaryWriter(stream);
         void Four(string s) => w.Write(Encoding.ASCII.GetBytes(s));
         long Start(string id) { Four(id); w.Write(0); return stream.Position; }
