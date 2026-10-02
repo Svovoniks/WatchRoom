@@ -311,6 +311,30 @@ static class Program
         Check(rename.IsEnabled, "host can rename their saved room offline");
         typeof(MainWindow).GetMethod("RenameHostRoom", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [first, "New movie night"]);
         Check(rooms.Single(x => x.Id == first.Id).Name == "New movie night" && store.Setting("room:" + first.Server + ":" + first.Code + ":name") == "New movie night", "host rename persists for reconnection");
+        var roomField = typeof(MainWindow).GetField("room", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var previousRoom = roomField.GetValue(window);
+        var waitingClient = new RoomClient();
+        var waitingSnapshot = new RoomSnapshot([new("host", "Host", true, true), new("guest", "Guest", false, false)], null, null, false, [], Name: "Host's shared name");
+        typeof(RoomClient).GetProperty(nameof(RoomClient.ServerAddress))!.SetValue(waitingClient, guest.Server);
+        typeof(RoomClient).GetProperty(nameof(RoomClient.Identity))!.SetValue(waitingClient, new Welcome(guest.Code, "guest", false, [], false));
+        typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, waitingSnapshot);
+        roomField.SetValue(window, waitingClient);
+        try
+        {
+            list.SelectedItem = guest;
+            typeof(MainWindow).GetMethod("SyncCurrentRoomName", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [waitingSnapshot]);
+            Check(((System.Windows.Controls.TextBlock)window.FindName("SavedRoomHeading")).Text == waitingSnapshot.Name &&
+                rooms.Single(x => x.Id == guest.Id).Name == waitingSnapshot.Name && !rename.IsEnabled,
+                "waiting guest replaces its room-code label with the host name and cannot rename it");
+            Check(Wire.Read<SavedRoom[]>(store.Setting("rooms")!).Single(x => x.Id == guest.Id).Name == waitingSnapshot.Name,
+                "waiting guest's canonical room name is saved for the next app launch");
+        }
+        finally
+        {
+            roomField.SetValue(window, previousRoom);
+            waitingClient.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            list.SelectedItem = rooms.Single(x => x.Id == first.Id);
+        }
         Check(!first.ToString().Contains(first.HostKey!), "saved-room accessibility labels exclude the private host key");
     }
 

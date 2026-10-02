@@ -22,11 +22,11 @@ var rooms = new ConcurrentDictionary<string, Room>();
 var persistentRooms = new PersistentRooms(builder.Configuration["WATCHROOM_DATA"] ?? Path.Combine(AppContext.BaseDirectory, "data"));
 foreach (var saved in persistentRooms.All())
 {
-    var restored = new Room(saved.Code, true) { SharedControls = saved.SharedControls };
+    var restored = new Room(saved.Code, true) { SharedControls = saved.SharedControls, Name = saved.Name };
     restored.ApprovedGuests.UnionWith(saved.ApprovedGuests ?? []); rooms[saved.Code] = restored;
     foreach (var guest in saved.Guests ?? []) restored.GuestNames[guest.Id] = guest.Name;
 }
-void SaveRoom(Room room) { if (room.Persistent) persistentRooms.Update(room.Code, room.Guests(), room.SharedControls); }
+void SaveRoom(Room room) { if (room.Persistent) persistentRooms.Update(room.Code, room.Guests(), room.SharedControls, room.Name); }
 string[] IceServers(string peer)
 {
     var urls = new List<string>();
@@ -132,6 +132,11 @@ app.Map("/room", async context =>
                         break;
                     case "settings" when member.Host:
                     case "controls" when member.Host:
+                        if (message.Text is not null)
+                        {
+                            if (string.IsNullOrWhiteSpace(message.Text) || message.Text.Trim().Length > 100 || message.Text.Any(char.IsControl)) throw new InvalidDataException("Invalid room name");
+                            room.Name = message.Text.Trim();
+                        }
                         room.SharedControls = message.Number == 1; SaveRoom(room); room.Snapshot(); break;
                     case "queue" when member.Host:
                         var queue = Wire.Read<string[]>(message.Data!);
@@ -217,6 +222,7 @@ sealed class Room(string code, bool persistent = false)
 {
     public object Gate { get; } = new(); public string Code => code; public bool Closed;
     public bool Persistent { get; } = persistent;
+    public string? Name;
     public long Expires { get; } = persistent ? long.MaxValue : Wire.Now + 6 * 3600000; public long Revision;
     public Dictionary<string, Member> People { get; } = new();
     public HashSet<string> ApprovedGuests { get; } = [];
@@ -236,7 +242,7 @@ sealed class Room(string code, bool persistent = false)
         foreach (var p in People.Values)
         {
             var visible = People.Values.Where(x => p.Host || x.Approved || x.Id == p.Id).Select(x => new Participant(x.Id, x.Name, x.Host, x.Approved, x.Ready, p.Host ? x.GuestHash : null)).ToArray();
-            p.Send(new("snapshot", Data: Wire.Serialize(new RoomSnapshot(visible, p.Approved ? Media : null, p.Approved ? Playback : null, SharedControls, p.Approved ? Queue : [], p.Host ? Guests() : null))));
+            p.Send(new("snapshot", Data: Wire.Serialize(new RoomSnapshot(visible, p.Approved ? Media : null, p.Approved ? Playback : null, SharedControls, p.Approved ? Queue : [], p.Host ? Guests() : null, Name))));
         }
     }
 }

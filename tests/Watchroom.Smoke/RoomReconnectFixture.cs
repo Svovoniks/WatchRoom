@@ -29,9 +29,18 @@ static class RoomReconnectFixture
             using var http = new HttpClient();
             await Wait(async () => { try { return (await http.GetAsync(url + "/health")).IsSuccessStatusCode; } catch { return false; } });
             var host = new RoomClient(hostStore);
-            await host.ConnectAsync(url, "Host", persistent: true); var identity = host.Identity!;
+            await host.ConnectAsync(url, "Host", persistent: true, roomName: "Movie night"); var identity = host.Identity!;
             var guest = new RoomClient(new LibraryStore(guestDirectory));
             await guest.ConnectAsync(url, "Guest", identity.Room);
+            await Wait(() => Task.FromResult(guest.Snapshot?.Name == "Movie night"));
+            check(!guest.DirectControlsReady.IsCompleted && !guest.Snapshot!.People.Single(p => p.Id == guest.Identity!.Peer).Approved,
+                "waiting guest receives the host name before admission or direct connection");
+            guest.Send(new("settings", Text: "Guest override", Number: 1));
+            host.Send(new("room-name", Text: "Friday movie night"));
+            await Wait(() => Task.FromResult(guest.Snapshot?.Name == "Friday movie night"));
+            check(host.Snapshot?.Name == guest.Snapshot?.Name, "host rename reaches waiting clients and guest cannot rename it");
+            check(guest.Snapshot is { Media: null, Playback: null, SharedControls: false } && guest.Snapshot.Queue?.Length == 0,
+                "waiting-room name does not grant access to playback or controls");
             await Wait(() => Task.FromResult(host.Snapshot!.People.Any(p => p.Id == guest.Identity!.Peer)));
             host.Send(new("admit", Target: guest.Identity!.Peer));
             await guest.DirectControlsReady.WaitAsync(TimeSpan.FromSeconds(20));
@@ -41,6 +50,12 @@ static class RoomReconnectFixture
             await guest.DisposeAsync(); await host.DisposeAsync(); await Task.Delay(400);
             await using var reopened = new RoomClient(new LibraryStore(Path.Combine(directory, "host")));
             await reopened.ConnectAsync(url, "Host", identity.Room, identity.HostKey);
+            await using (var waiting = new RoomClient())
+            {
+                await waiting.ConnectAsync(url, "New guest", identity.Room);
+                await Wait(() => Task.FromResult(waiting.Snapshot?.Name == "Friday movie night"));
+                check(!waiting.DirectControlsReady.IsCompleted, "saved host name reaches a new waiting guest after host reconnects");
+            }
             check(reopened.Snapshot?.SharedControls == true, "host restart restores enabled shared controls");
             await using (var returned = new RoomClient(new LibraryStore(guestDirectory)))
             {

@@ -253,7 +253,7 @@ public sealed class RoomClient : IAsyncDisposable
                     roomControlsRestored = storedControls is not null;
                     if (storedControls == "true")
                         coordinator.Apply(Identity.Peer, new("controls", Number: 1), clock.Now, out _);
-                    if (roomControlsRestored) QueueDiscovery(new("settings", Number: coordinator.SharedControls ? 1 : 0));
+                    if (roomControlsRestored) QueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
                     Snapshot = coordinator.Snapshot; directConnected.TrySetResult();
                 }
                 connected.TrySetResult(Identity); Message?.Invoke(message); break;
@@ -266,6 +266,7 @@ public sealed class RoomClient : IAsyncDisposable
                         coordinator!.Apply(Identity.Peer, new("controls", Number: discovery.SharedControls ? 1 : 0), clock.Now, out _);
                         settings?.Setting(RoomSetting(Identity.Room, "sharedControls"), discovery.SharedControls ? "true" : "false");
                         roomControlsRestored = true;
+                        QueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
                     }
                     coordinator!.AdmittedGuests = discovery.AdmittedGuests ?? [];
                     coordinator!.Discover(discovery.People, clock.Now); PublishHostState();
@@ -276,7 +277,7 @@ public sealed class RoomClient : IAsyncDisposable
                     // Once bootstrapped, only the host's direct channel can update
                     // the room. Sites snapshots contain stale readiness/playback.
                     if (!directConnected.Task.IsCompletedSuccessfully)
-                    { Snapshot = new(discovery.People, null, null, false, []); Message?.Invoke(new("snapshot", Data: Wire.Serialize(Snapshot))); }
+                    { Snapshot = new(discovery.People, null, null, false, [], Name: HostRoomCoordinator.ValidName(discovery.Name) ? discovery.Name : Snapshot?.Name); Message?.Invoke(new("snapshot", Data: Wire.Serialize(Snapshot))); }
                 }
                 break;
             case "connect":
@@ -356,10 +357,13 @@ public sealed class RoomClient : IAsyncDisposable
         {
             roomControlsRestored = true;
             settings?.Setting(RoomSetting(Identity.Room, "sharedControls"), coordinator.SharedControls ? "true" : "false");
-            if (DiscoveryOnline) QueueDiscovery(new("settings", Number: coordinator.SharedControls ? 1 : 0));
+            if (DiscoveryOnline) QueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
         }
         if (sender == Identity!.Peer && message.Type == "room-name")
+        {
             settings?.Setting(RoomSetting(Identity.Room, "name"), coordinator.Name!);
+            if (DiscoveryOnline) QueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
+        }
         PublishHostState();
         if (announcement is not null) { Message?.Invoke(announcement); Broadcast(announcement); }
         if (PlaybackDiagnostics.Enabled && message.Type == "playback") PlaybackDiagnostics.Record("control-sent", new { message.Data, transport = "peer" });
