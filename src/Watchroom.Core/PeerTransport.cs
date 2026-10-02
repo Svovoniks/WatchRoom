@@ -13,13 +13,19 @@ public interface IMediaSource
     Task<byte[]> ReadAsync(long offset, int count, CancellationToken ct);
 }
 
-public sealed class FileMediaSource : IMediaSource
+public interface ILocalMediaSource : IMediaSource
+{
+    string LocalPath { get; }
+}
+
+public sealed class FileMediaSource : ILocalMediaSource
 {
     private readonly string path;
+    public string LocalPath => path;
     public SharedMedia Media { get; }
     public FileMediaSource(string path, string? title = null, string? id = null)
     {
-        this.path = path;
+        this.path = Path.GetFullPath(path);
         Media = new(id ?? Guid.NewGuid().ToString("N"), title ?? Path.GetFileNameWithoutExtension(path), new FileInfo(path).Length, Path.GetExtension(path));
     }
     public async Task<byte[]> ReadAsync(long offset, int count, CancellationToken ct)

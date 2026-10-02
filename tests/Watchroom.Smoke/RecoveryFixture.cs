@@ -54,6 +54,26 @@ static class RecoveryFixture
         check(position.Estimate(150000, true, 1f, 1250) == 150000, "new native position supersedes old interpolation anchor");
         check(SyncMath.TunedCorrection(0) == 1 && SyncMath.TunedCorrection(10000) == 1.05f && SyncMath.TunedCorrection(-10000) == .95f, "rate correction is neutral when aligned and bounded in both directions");
         check(SyncMath.EstablishedCorrection(99) == 1f && SyncMath.EstablishedCorrection(100) == 1.03f && SyncMath.EstablishedCorrection(-100) == .97f, "established rate policy preserves its deadband and correction limits");
+        var rateControl = new PlaybackRateControl();
+        var stable = true;
+        // Aligned video with VLC's 500 ms native time updates: the old raw-time
+        // correction would alternate 1 and 1.03 at each UI tick.
+        for (long now = 0; now <= 10000; now += 250)
+        {
+            var native = now / 500 * 500;
+            if (now % 500 == 0) position.Observe(native, now);
+            stable &= rateControl.Update(now - position.Estimate(native, true, 1, now), now) == 1;
+        }
+        check(stable, "sparse native clock updates do not change aligned playback speed");
+        rateControl.Reset();
+        check(rateControl.Update(400, 0) == 1 && rateControl.Update(400, 500) == 1 && rateControl.Update(50, 750) == 1,
+            "brief clock jitter cannot trigger rate correction");
+        check(rateControl.Update(400, 1000) == 1 && rateControl.Update(400, 1750) == 1.03f && rateControl.Update(150, 2000) == 1.03f,
+            "persistent lag accelerates playback and hysteresis avoids rate chatter");
+        check(rateControl.Update(-250, 2250) == 1 && rateControl.Update(-250, 3000) == .97f && rateControl.Update(-50, 3250) == 1,
+            "overshoot returns to normal speed before sustained reverse correction");
+        rateControl.Update(400, 4000); rateControl.Reset();
+        check(rateControl.Update(400, 4750) == 1, "new playback commands clear previous drift history");
         var buffer = new PlaybackBuffering(); buffer.Cache(0, 1000); buffer.Cache(100, 1004);
         check(!buffer.Poll(true, 1600), "short seek buffering bursts do not pause the room");
         buffer.Cache(0, 2000);

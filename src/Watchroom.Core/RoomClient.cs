@@ -453,8 +453,9 @@ public sealed class RoomClient : IAsyncDisposable
     }
 }
 
-internal sealed class MediaWithSubtitles(IMediaSource source, SharedMedia[] subtitles) : IMediaSource
+internal sealed class MediaWithSubtitles(FileMediaSource source, SharedMedia[] subtitles) : ILocalMediaSource
 {
+    public string LocalPath => source.LocalPath;
     public SharedMedia Media { get; } = source.Media with { Subtitles = subtitles };
     public Task<byte[]> ReadAsync(long offset, int count, CancellationToken ct) => source.ReadAsync(offset, count, ct);
 }

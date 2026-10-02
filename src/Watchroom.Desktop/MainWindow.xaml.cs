@@ -74,6 +74,7 @@ public partial class MainWindow : Window
     private readonly PlaybackSettling settling = new();
     private readonly PlaybackPause playbackPause = new();
     private readonly PlaybackPosition playbackPosition = new();
+    private readonly PlaybackRateControl playbackRate = new();
     private PlaybackBuffering buffering = new();
     private int loadGeneration;
     private long? pendingSeek;
@@ -872,8 +873,18 @@ public partial class MainWindow : Window
             if (bridge is not null) await bridge.DisposeAsync(); bridge = null;
             var source = await client.GetSourceAsync(media, lifetime.Token);
             if (client != room || generation != loadGeneration) return;
-            bridge = new(); var uri = await bridge.StartAsync(source);
-            using var vlcMedia = new Media(vlc!, uri); vlcMedia.AddOption(":network-caching=200");
+            Uri? streamUri = null;
+            if (source is not ILocalMediaSource)
+            {
+                bridge = new(); streamUri = await bridge.StartAsync(source);
+            }
+            // The host owns the file already. Feeding it back through HTTP adds
+            // network buffering and slow-seek behavior to otherwise local playback.
+            using var vlcMedia = source is ILocalMediaSource local
+                ? new Media(vlc!, local.LocalPath, FromType.FromPath)
+                : new Media(vlc!, streamUri!);
+            if (streamUri is not null) vlcMedia.AddOption(":network-caching=200");
+            if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("media-input", new { local = source is ILocalMediaSource, media.Extension });
             // VLC's AVI demuxer reads slow-seekable HTTP inputs in 1.5-second
             // steps, exposing read-ahead time to the synchronization controller.
             // The avformat demuxer provides a regularly advancing timeline.
@@ -943,7 +954,7 @@ public partial class MainWindow : Window
         {
             var serverMs = room?.ServerNowMs ?? Wire.Now;
             PlaybackDiagnostics.Record("sample", new { serverMs, position = player.Time,
-                estimated = playbackPosition.Estimate(player.Time, player.IsPlaying, player.Rate, Environment.TickCount64), rate = player.Rate, policy = SyncMath.UseTunedPolicy ? "experimental" : "established",
+                estimated = playbackPosition.Estimate(player.Time, player.IsPlaying, player.Rate, Environment.TickCount64), rate = player.Rate, policy = SyncMath.UseTunedPolicy ? "experimental" : "stable",
                 state = player.State.ToString(), playing = player.IsPlaying, ready, revision = target?.Revision, targetPlaying = target?.Playing,
                 desired = target is null ? (long?)null : SyncMath.TargetPosition(target, serverMs), connected = room?.IsConnected ?? false });
         }
@@ -958,7 +969,7 @@ public partial class MainWindow : Window
         long now = room.ServerNowMs;
         if (now < target.AtUnixMs) { player.SetPause(true); return; }
         long desired = SyncMath.TargetPosition(target, now);
-        long drift = desired - (SyncMath.UseTunedPolicy ? playbackPosition.Estimate(player.Time, player.IsPlaying, player.Rate, Environment.TickCount64) : Math.Max(0, player.Time));
+        long drift = desired - playbackPosition.Estimate(player.Time, player.IsPlaying, player.Rate, Environment.TickCount64);
         if (settling.Waiting(target.Revision, Math.Max(0, player.Time), Environment.TickCount64)) return;
         if (appliedRevision != target.Revision || Math.Abs(drift) > SyncMath.HardSeekMs)
         {
@@ -978,10 +989,11 @@ public partial class MainWindow : Window
                 if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("seek", new { serverMs = now, revision = target.Revision, position = player.Time, desired, drift });
                 settling.Seek(target.Revision, desired, Environment.TickCount64); player.Time = desired;
             }
+            playbackRate.Reset();
             player.SetPause(!target.Playing); ApplyPlaybackRate(1); appliedRevision = target.Revision;
             if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("applied", new { revision = appliedRevision, serverMs = now, desired, drift });
         }
-        else if (target.Playing) ApplyPlaybackRate(SyncMath.Correction(drift));
+        else if (target.Playing) ApplyPlaybackRate(SyncMath.UseTunedPolicy ? SyncMath.Correction(drift) : playbackRate.Update(drift, Environment.TickCount64));
     }
     private void ApplyPlaybackRate(float rate)
     {

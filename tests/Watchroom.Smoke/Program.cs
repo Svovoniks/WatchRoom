@@ -372,6 +372,8 @@ using (var unusedHttp = new HttpClient(new ArtworkFixture()))
 }
 Check(Wire.Read<MediaItem>(Wire.Serialize(enriched)).EpisodeTitle == "Pilot", "episode metadata survives library serialization");
 var file = new FileMediaSource(path);
+Check(file.LocalPath == Path.GetFullPath(path) && !Wire.Serialize(file.Media).Contains(file.LocalPath, StringComparison.OrdinalIgnoreCase),
+    "host retains a local playback path without exposing it in shared media");
 await using var localBridge = new MediaBridge();
 var localUrl = await localBridge.StartAsync(file);
 using var http = new HttpClient();
@@ -462,6 +464,7 @@ try
     roomHost.Send(new("admit", Target: roomGuest.Identity!.Peer));
     await Wait(() => roomGuest.Snapshot?.Media is not null, "guest admitted");
     var roomSource = await roomGuest.GetSourceAsync(file.Media, CancellationToken.None);
+    Check(roomSource is not ILocalMediaSource, "guest playback cannot take the host's local file shortcut");
     Check((await roomSource.ReadAsync(900, 100, CancellationToken.None)).SequenceEqual(bytes[900..1000]), "signaled room serves host media");
     roomGuest.Send(new("playback", Data: Wire.Serialize(new PlaybackState(0, file.Media.Id, true, 1000, 0))));
     await Task.Delay(150); Check(!hostMessages.Any(x => x.Type == "playback"), "admitted guest respects host-only controls");
@@ -484,6 +487,12 @@ try
     var subtitleText = "1\n00:00:00,000 --> 00:00:04,000\nWatchroom subtitle test\n";
     await File.WriteAllTextAsync(Path.ChangeExtension(videoPath, ".srt"), subtitleText);
     roomHost.SetHostedFile(videoPath, "Video with subtitle");
+    var hostedSource = await roomHost.GetSourceAsync(roomHost.HostedMedia!.Media, CancellationToken.None);
+    var hostedBytes = await hostedSource.ReadAsync(0, 128, CancellationToken.None);
+    var videoBytes = await File.ReadAllBytesAsync(videoPath);
+    Check(hostedSource is ILocalMediaSource localVideo && localVideo.LocalPath == Path.GetFullPath(videoPath)
+        && hostedBytes.SequenceEqual(videoBytes[..128]),
+        "host video with subtitles supports direct playback and authorized peer reads");
     roomHost.Send(new("media", Data: Wire.Serialize(roomHost.HostedMedia!.Media)));
     await Wait(() => roomGuest.Snapshot?.Media?.Subtitles?.Length == 1, "external subtitle advertised without local path");
     var subtitleSource = await roomGuest.GetSourceAsync(roomGuest.Snapshot!.Media!.Subtitles![0], CancellationToken.None);

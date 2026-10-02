@@ -26,6 +26,16 @@ public partial class MainWindow
     {
         if(Environment.GetEnvironmentVariable("WATCHROOM_TEST_ROLE") is null) return;
         try {
+            if (player is not null && PlaybackDiagnostics.Enabled)
+            {
+                using var currentMedia = player.Media;
+                if (currentMedia is not null)
+                {
+                    var stats = currentMedia.Statistics;
+                    PlaybackDiagnostics.Record("video-stats", new { stats.DisplayedPictures, stats.LostPictures, stats.DecodedVideo, stats.InputBitrate,
+                        position = player.Time, rate = player.Rate, playing = player.IsPlaying });
+                }
+            }
             if(room?.Identity?.Host==true && room.Snapshot is { } snapshot)
                 foreach(var person in snapshot.People.Where(p=>!p.IsHost&&!p.Approved)) room.Send(new("admit",Target:person.Id));
             var captures = Path.Combine(App.DataDirectory, "test-captures.txt");

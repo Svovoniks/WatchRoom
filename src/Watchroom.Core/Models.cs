@@ -57,12 +57,12 @@ public static class SyncMath
         state.PositionMs + (state.Playing ? Math.Max(0, now - state.AtUnixMs) : 0));
     // Aim for a <= 500 ms p95 pair difference in the measured LAN/VM fixture.
     // The hard bound is per client; live pair/frame measurements remain required.
-    // Native time can be sparse or ahead of decoded frames (notably silent AVI).
-    // Keep the established policy by default until the tighter policy is validated
-    // across those inputs as well as ordinary H.264/AAC media.
+    // The default desktop controller uses bounded position interpolation and
+    // PlaybackRateControl; keep experimental tighter seeks explicitly opt-in.
     public static bool UseTunedPolicy { get; } = Environment.GetEnvironmentVariable("WATCHROOM_SYNC_EXPERIMENTAL") == "1";
     public static long HardSeekMs => UseTunedPolicy ? 600 : 1200;
     public static float Correction(long driftMs) => UseTunedPolicy ? TunedCorrection(driftMs) : EstablishedCorrection(driftMs);
+    // Legacy instantaneous rate policy, retained for benchmark comparisons.
     public static float EstablishedCorrection(long driftMs) => Math.Abs(driftMs) < 100 ? 1f : driftMs > 0 ? 1.03f : .97f;
     public static float TunedCorrection(long driftMs) => Math.Abs(driftMs) < 80 ? 1f :
         1f + (float)Math.Clamp(driftMs / 4000d, -.05, .05);
