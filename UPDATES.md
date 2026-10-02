@@ -7,6 +7,11 @@ branch is `master`. The updater uses its public `/releases/latest` endpoint.
 Shipping is authorized when the user asks to ship an update; complete the steps
 below rather than stopping at a source commit or workflow artifact.
 
+Shipping means publishing and verifying the GitHub release. Do not open, control,
+or update the user's desktop app as part of shipping. Install a release locally
+only when the user explicitly requests a local installation. Computer use is not
+part of this release checklist.
+
 1. Inspect `git status`, fetch `origin`, and inspect the latest GitHub release.
    Preserve unrelated changes. Stage the intended source, tests, build files, and
    general documentation explicitly. Keep personal HTML investigations, library
@@ -30,12 +35,9 @@ below rather than stopping at a source commit or workflow artifact.
    the exact expected filename, a nonzero size, and a `sha256:` digest. Download
    the installer and verify its SHA-256 against the API digest and SHA256SUMS.txt.
    This step matters: a private or incomplete release cannot update users' apps.
-7. On the previous installed version, **Settings → Check for updates** must offer
-   the new version and show its update card. If updating the local app was
-   requested or useful for validation, run the verified installer and confirm
-   the app reopens at the new version with its library/settings intact. Use shell
-   installation if UI automation confirmation rules would require another prompt.
-8. Report the version, release URL, Actions result, and any validation limitations.
+7. Check that the public GitHub release page is available and links to the
+   installer and checksums. Report the version, release URL, Actions result, and
+   any validation limitations. Leave the user's installed app unchanged.
 
 PowerShell checks (use `dotnet` instead of the workspace SDK path on other machines):
 

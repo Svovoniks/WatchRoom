@@ -6,6 +6,9 @@ When the user asks to ship, publish, or release an app update, follow
 [UPDATES.md](UPDATES.md), including its release checklist and verification steps.
 A source push or successful workflow artifact alone does not ship an update.
 Finish by verifying the published release and the unauthenticated updater feed.
+Shipping does not authorize opening, controlling, or updating the user's desktop
+app. Verify the public GitHub release page and assets; do not use computer use for
+release verification. Install locally only if the user explicitly requests it.
 
 The public release repository is `Svovoniks/WatchRoom`; its release branch is
 `master`. Windows x64 installers are built by `.github/workflows/build.yml`.
