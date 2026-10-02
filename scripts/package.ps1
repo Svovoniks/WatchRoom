@@ -14,14 +14,14 @@ try {
     $seen = @{}
     foreach ($framework in $lock.dependencies.PSObject.Properties) {
         foreach ($package in $framework.Value.PSObject.Properties) {
-            $version = $package.Value.resolved
-            if (!$version) { continue }
-            $key = $package.Name.ToLowerInvariant() + '/' + $version
+            $packageVersion = $package.Value.resolved
+            if (!$packageVersion) { continue }
+            $key = $package.Name.ToLowerInvariant() + '/' + $packageVersion
             if ($seen.ContainsKey($key)) { continue }
             $seen[$key] = $true
             $source = Join-Path $root ('.nuget/packages/' + $key)
             if (!(Test-Path $source)) { continue }
-            $dest = Join-Path $licenses ($package.Name + '-' + $version)
+            $dest = Join-Path $licenses ($package.Name + '-' + $packageVersion)
             New-Item -ItemType Directory -Force $dest | Out-Null
             Get-ChildItem -LiteralPath $source -File | Where-Object { $_.Name -match 'license|copying|notice|\.nuspec$' } | Copy-Item -Destination $dest
         }

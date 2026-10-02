@@ -63,7 +63,7 @@ public partial class MainWindow
             var installer = await new GitHubUpdates(updateHttp, UpdateRepository).DownloadAsync(availableUpdate, Path.Combine(App.DataDirectory, "updates"), progress, lifetime.Token);
             if (closing) return;
             var start = new ProcessStartInfo(installer) { UseShellExecute = false };
-            foreach (var argument in new[] { "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/WATCHROOMUPDATE=1", "/DIR=" + AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar) }) start.ArgumentList.Add(argument);
+            foreach (var argument in new[] { "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/WATCHROOMUPDATE=1", "/LOG=" + Path.Combine(App.DataDirectory, "updates", "install.log"), "/DIR=" + AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar) }) start.ArgumentList.Add(argument);
             if (Process.Start(start) is null) throw new IOException("Could not start the installer.");
             Close();
         }
