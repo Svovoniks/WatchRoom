@@ -775,6 +775,7 @@ public partial class MainWindow : Window
             case "admitted": RoomSubtitle.Text = "Admitted · Connecting to host…"; break;
             case "snapshot":
                 var snapshot = Wire.Read<RoomSnapshot>(message.Data!);
+                SyncCurrentRoomName(snapshot);
                 if (room.Identity?.Host == false)
                 {
                     QueueStatus.Text = $"{snapshot.Queue?.Length ?? 0} videos in the host's queue";
@@ -893,7 +894,7 @@ public partial class MainWindow : Window
                 vlcMedia.AddSlave(MediaSlaveType.Subtitle, 2, new Uri(subtitlePath).AbsoluteUri);
             }
             if (client != room || generation != loadGeneration) return;
-            RoomHeading.Text = media.Title; RoomSubtitle.Text = "Private room · " + (client.Identity?.Host == true ? "You are hosting" : "Streaming from host");
+            RoomHeading.Text = client.Snapshot?.Name ?? media.Title; RoomSubtitle.Text = media.Title + " · " + (client.Identity?.Host == true ? "You are hosting" : "Streaming from host");
             await PrepareVideoSurface(openPlayer: RoomPage.Visibility == Visibility.Visible);
             if (client != room || generation != loadGeneration) return;
             player!.Play(vlcMedia);

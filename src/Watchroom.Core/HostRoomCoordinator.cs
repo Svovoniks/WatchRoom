@@ -12,7 +12,9 @@ internal sealed class HostRoomCoordinator(string host)
     private long revision;
     private bool resumeWhenReady;
     public AdmittedGuest[] AdmittedGuests { get; set; } = [];
-    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests);
+    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name);
+    public string? Name { get; private set; }
+    internal static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 100 && !name.Any(char.IsControl);
     public SharedMedia? Media { get; private set; }
     public PlaybackState? Playback { get; private set; }
     public bool SharedControls { get; private set; }
@@ -43,6 +45,9 @@ internal sealed class HostRoomCoordinator(string host)
         }
         switch (message.Type)
         {
+            case "room-name" when sender == host:
+                if (!ValidName(message.Text)) return false;
+                Name = message.Text!.Trim(); return true;
             case "media" when sender == host:
                 var media = Wire.Read<SharedMedia>(message.Data!);
                 if (!ValidMedia(media)) throw new InvalidDataException("Invalid shared media");

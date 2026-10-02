@@ -11,6 +11,10 @@ static class HostRoomFixture
         check(room.Apply("host", new("media", Data: Wire.Serialize(media)), 1000, out _), "host owns media state without discovery service");
         check(!room.Apply("pending", new("ready"), 1000, out _), "unapproved member cannot change direct room state");
         check(!room.Apply("guest", new("controls", Number: 1, Sender: "host"), 1000, out _), "peer cannot spoof host to enable shared controls");
+        check(room.Apply("host", new("room-name", Text: "  Movie night  "), 1000, out _) && room.Snapshot.Name == "Movie night", "host publishes the canonical room name in shared state");
+        check(!room.Apply("guest", new("room-name", Text: "Guest name", Sender: "host"), 1000, out _) && room.Snapshot.Name == "Movie night", "guest cannot spoof the host to rename the room");
+        check(!room.Apply("host", new("room-name", Text: new string('x', 101)), 1000, out _) && !room.Apply("host", new("room-name", Text: "bad\nname"), 1000, out _), "room name rejects excessive length and control characters");
+        check(Wire.Read<RoomSnapshot>(Wire.Serialize(room.Snapshot)).Name == "Movie night", "room name survives wire serialization");
         room.Apply("host", new("ready"), 1000, out _);
         var command = new PlaybackState(9999, media.Id, true, 3000, 900000, new string('a', 32));
         check(!room.Apply("guest", new("playback", Data: Wire.Serialize(command)), 1000, out _), "host-only playback denies direct guest commands");

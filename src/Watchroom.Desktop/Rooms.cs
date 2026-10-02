@@ -23,7 +23,7 @@ public partial class MainWindow
         if (SavedRoomsList is null) return;
         ReturnToRoomButton.IsEnabled = ready || room is not null;
         ConnectSavedRoomButton.IsEnabled = !roomBusy && SavedRoomsList.SelectedItem is SavedRoom;
-        RenameSavedRoomButton.IsEnabled = ForgetSavedRoomButton.IsEnabled = CopySavedInviteButton.IsEnabled = SavedRoomsList.SelectedItem is SavedRoom;
+        ForgetSavedRoomButton.IsEnabled = CopySavedInviteButton.IsEnabled = SavedRoomsList.SelectedItem is SavedRoom;
         RefreshRoomSettings();
     }
     private string SavedRoomSetting(SavedRoom saved, string field) => "room:" + saved.Server + ":" + saved.Code.ToUpperInvariant() + ":" + field;
@@ -33,6 +33,8 @@ public partial class MainWindow
         var saved = SavedRoomsList.SelectedItem as SavedRoom;
         var connected = saved is not null && room?.IsConnected == true && room.ServerAddress == saved.Server && room.Identity?.Room == saved.Code;
         var host = saved is not null && (connected ? room!.Identity!.Host : saved.HostKey is not null);
+        RenameSavedRoomButton.IsEnabled = host;
+        RenameSavedRoomButton.ToolTip = host ? "Change the room name for everyone" : "Only the host can change the room name";
         SavedRoomHeading.Text = saved?.Name ?? "Choose a room";
         SavedRoomStatus.Text = saved is null ? "Create a room or save an invitation to get started." : connected ? (host ? "Connected · You are the host" : "Connected · Guest") : (host ? "Your room · Offline" : "Saved invitation · Offline");
         ConnectSavedRoomButton.Content = connected ? "Open player" : "Connect";
@@ -74,24 +76,40 @@ public partial class MainWindow
         var existing = savedRooms.FirstOrDefault(x => x.Server == room.ServerAddress && x.Code == identity.Room);
         if (existing is null)
         {
-            existing = new(Guid.NewGuid().ToString("N"), pendingRoomName ?? "Room " + identity.Room[..6], room.ServerAddress, identity.Room, identity.HostKey);
+            existing = new(Guid.NewGuid().ToString("N"), room.Snapshot?.Name ?? pendingRoomName ?? "Room " + identity.Room[..6], room.ServerAddress, identity.Room, identity.HostKey);
             savedRooms.Add(existing);
         }
-        else if (identity.HostKey is not null) savedRooms[savedRooms.IndexOf(existing)] = existing with { HostKey = identity.HostKey };
+        else savedRooms[savedRooms.IndexOf(existing)] = existing with { HostKey = identity.HostKey ?? existing.HostKey, Name = room.Snapshot?.Name ?? existing.Name };
         SaveRooms(); SavedRoomsList.SelectedItem = savedRooms.First(x => x.Id == existing.Id);
     }
+    private void SyncCurrentRoomName(RoomSnapshot snapshot)
+    {
+        if (room?.Identity is not { } identity || string.IsNullOrWhiteSpace(snapshot.Name)) return;
+        RoomHeading.Text = snapshot.Name;
+        var saved = savedRooms.FirstOrDefault(x => x.Server == room.ServerAddress && x.Code == identity.Room);
+        if (saved is not null && saved.Name != snapshot.Name)
+        {
+            var selected = (SavedRoomsList.SelectedItem as SavedRoom)?.Id == saved.Id;
+            var updated = saved with { Name = snapshot.Name };
+            savedRooms[savedRooms.IndexOf(saved)] = updated; SaveRooms();
+            if (selected) SavedRoomsList.SelectedItem = updated;
+        }
+        RefreshSavedRooms();
+    }
+    private static string? ValidateRoomName(string name) => name.Length > 100 || name.Any(char.IsControl)
+        ? "Use at most 100 characters without control characters." : null;
     private async void CreatePersistentRoom(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (roomBusy) return;
-        var name = Dialogs.Prompt(this, "Create room", "Room name"); if (name is null) return;
+        var name = Dialogs.Prompt(this, "Create room", "Room name", validate: ValidateRoomName); if (name is null) return;
         pendingRoomName = name; roomBusy = true; RefreshSavedRooms();
         try
         {
             await Disconnect(); var client = NewRoom();
-            try { await client.ConnectAsync(ServerBox.Text, DisplayNameBox.Text, persistent: true); }
+            try { await client.ConnectAsync(ServerBox.Text, DisplayNameBox.Text, persistent: true, roomName: name); }
             catch { await Disconnect(); throw; }
             RememberCurrentRoom(); RoomHeading.Text = name; RoomSubtitle.Text = "Share an invitation, then choose a video from the library.";
-            roomPanelVisible = true; ShowPage("Room");
+            roomPanelVisible = true; ShowPage("Rooms");
         }
         finally { pendingRoomName = null; roomBusy = false; RefreshSavedRooms(); }
     });
@@ -103,8 +121,7 @@ public partial class MainWindow
         var address = RoomAddress.Parse(invitation, ServerBox.Text);
         var existing = savedRooms.FirstOrDefault(x => x.Server == address.Server && x.Code == address.Code);
         if (existing is not null) { SavedRoomsList.SelectedItem = existing; SetStatus("This room is already saved."); return; }
-        var name = Dialogs.Prompt(this, "Add room by invitation", "Room name", "Room " + address.Code[..6]); if (name is null) return;
-        var saved = new SavedRoom(Guid.NewGuid().ToString("N"), name, address.Server, address.Code);
+        var saved = new SavedRoom(Guid.NewGuid().ToString("N"), "Room " + address.Code[..6], address.Server, address.Code);
         savedRooms.Add(saved); SaveRooms(); SavedRoomsList.SelectedItem = saved;
     }
     private async void ConnectSavedRoom(object sender, RoutedEventArgs e) => await Guard(async () =>
@@ -115,18 +132,29 @@ public partial class MainWindow
         try
         {
             await Disconnect(); var client = NewRoom();
-            try { await client.ConnectAsync(saved.Server, DisplayNameBox.Text, saved.Code, saved.HostKey); }
+            try { await client.ConnectAsync(saved.Server, DisplayNameBox.Text, saved.Code, saved.HostKey, roomName: saved.HostKey is null ? null : saved.Name); }
             catch { await Disconnect(); throw; }
-            RoomHeading.Text = saved.Name;
+            RoomHeading.Text = client.Snapshot?.Name ?? saved.Name;
             RoomSubtitle.Text = saved.HostKey is null ? "Waiting for host approval" : "Choose a video from the library.";
             RememberCurrentRoom(); roomPanelVisible = true; ShowPage("Rooms");
         }
         finally { roomBusy = false; RefreshSavedRooms(); }
     });
-    private void RenameSavedRoom(object sender, RoutedEventArgs e)
+    private async void RenameSavedRoom(object sender, RoutedEventArgs e) => await Guard(() =>
     {
-        if (SavedRoomsList.SelectedItem is not SavedRoom saved) return;
-        var name = Dialogs.Prompt(this, "Rename room", "Room name", saved.Name); if (name is null) return;
+        if (SavedRoomsList.SelectedItem is not SavedRoom saved || !RenameSavedRoomButton.IsEnabled) return Task.CompletedTask;
+        var name = Dialogs.Prompt(this, "Rename room", "Room name", saved.Name, ValidateRoomName); if (name is null) return Task.CompletedTask;
+        RenameHostRoom(saved, name);
+        return Task.CompletedTask;
+    });
+    private void RenameHostRoom(SavedRoom saved, string name)
+    {
+        var connected = room?.IsConnected == true && room.ServerAddress == saved.Server && room.Identity?.Room == saved.Code;
+        if (!(connected ? room!.Identity!.Host : saved.HostKey is not null)) return;
+        if (string.IsNullOrWhiteSpace(name) || ValidateRoomName(name.Trim()) is not null) return;
+        name = name.Trim();
+        if (connected) room!.Send(new("room-name", Text: name));
+        library.Setting(SavedRoomSetting(saved, "name"), name);
         var updated = saved with { Name = name }; savedRooms[savedRooms.IndexOf(saved)] = updated;
         SaveRooms(); SavedRoomsList.SelectedItem = updated;
     }

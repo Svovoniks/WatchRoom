@@ -303,6 +303,14 @@ static class Program
         Check(controls.IsChecked == true, "returning to a saved room restores its control setting");
         list.SelectedItem = guest;
         Check(!controls.IsEnabled, "guests cannot edit room settings");
+        var rename = (System.Windows.Controls.Button)window.FindName("RenameSavedRoomButton");
+        Check(!rename.IsEnabled, "guest room name is read only");
+        typeof(MainWindow).GetMethod("RenameHostRoom", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [guest, "Guest override"]);
+        Check(rooms.Single(x => x.Id == guest.Id).Name == guest.Name, "guest cannot rename a room through its handler");
+        list.SelectedItem = first;
+        Check(rename.IsEnabled, "host can rename their saved room offline");
+        typeof(MainWindow).GetMethod("RenameHostRoom", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [first, "New movie night"]);
+        Check(rooms.Single(x => x.Id == first.Id).Name == "New movie night" && store.Setting("room:" + first.Server + ":" + first.Code + ":name") == "New movie night", "host rename persists for reconnection");
         Check(!first.ToString().Contains(first.HostKey!), "saved-room accessibility labels exclude the private host key");
     }
 

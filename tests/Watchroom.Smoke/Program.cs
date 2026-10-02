@@ -494,15 +494,21 @@ try
     var roomSettings = new LibraryStore(Path.Combine(root, "room-settings"));
     var guestSettingsPath = Path.Combine(root, "guest-room-settings");
     var persistentHost = new RoomClient(roomSettings);
-    await persistentHost.ConnectAsync(serverUrl, "Persistent Host", persistent: true);
+    await persistentHost.ConnectAsync(serverUrl, "Persistent Host", persistent: true, roomName: "Friday movie night");
     var savedIdentity = persistentHost.Identity!;
     Check(savedIdentity.HostKey?.Length == 64, "persistent host receives a private reopening key");
     var admittedGuest = new RoomClient(new LibraryStore(guestSettingsPath));
     await admittedGuest.ConnectAsync(serverUrl, "Remembered Guest", savedIdentity.Room);
     persistentHost.Send(new("admit", Target: admittedGuest.Identity!.Peer));
     await Wait(() => admittedGuest.DirectControlsReady.IsCompletedSuccessfully, "persistent guest admitted");
+    await Wait(() => admittedGuest.Snapshot?.Name == "Friday movie night", "guest receives the host's room name");
+    Check(persistentHost.Snapshot?.Name == admittedGuest.Snapshot?.Name, "host and guest share the same room name");
+    persistentHost.Send(new("room-name", Text: "Anime night"));
+    await Wait(() => admittedGuest.Snapshot?.Name == "Anime night", "host rename reaches the connected guest");
+    admittedGuest.Send(new("room-name", Text: "Guest override", Sender: savedIdentity.Peer));
     persistentHost.Send(new("controls", Number: 1));
     await Wait(() => admittedGuest.Snapshot?.SharedControls == true, "persistent controls enabled");
+    Check(persistentHost.Snapshot?.Name == "Anime night" && admittedGuest.Snapshot?.Name == "Anime night", "guest rename is rejected even with shared playback controls");
     Check(admittedGuest.Identity.GuestKey?.Length == 64, "guest receives private reconnect credential");
     await admittedGuest.DisposeAsync();
     await using (var duplicateHost = new RoomClient())
@@ -524,10 +530,12 @@ try
         await reopened.ConnectAsync(serverUrl, "Persistent Host", savedIdentity.Room, savedIdentity.HostKey);
         Check(reopened.Identity!.Host && reopened.Identity.Room == savedIdentity.Room, "persistent room reconnects as host with same invitation");
         Check(reopened.Snapshot?.SharedControls == true, "shared controls restored when host reconnects");
+        Check(reopened.Snapshot?.Name == "Anime night", "host room name survives reconnect");
         await using (var rememberedGuest = new RoomClient(new LibraryStore(guestSettingsPath)))
         {
             await rememberedGuest.ConnectAsync(serverUrl, "Renamed Guest", savedIdentity.Room);
             await rememberedGuest.DirectControlsReady.WaitAsync(TimeSpan.FromSeconds(15));
+            Check(rememberedGuest.Snapshot?.Name == "Anime night", "returning guest receives the canonical name");
             Check(rememberedGuest.Snapshot?.SharedControls == true, "admitted guest reconnects without approval and receives saved controls");
             await Wait(() => reopened.Snapshot?.AdmittedGuests?.Length == 1, "remembered roster visible to host");
             Check(rememberedGuest.Snapshot?.AdmittedGuests is null, "remembered guest credentials and roster are host-only");

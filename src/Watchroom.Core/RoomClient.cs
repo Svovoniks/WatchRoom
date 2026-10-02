@@ -21,6 +21,7 @@ public sealed class RoomClient : IAsyncDisposable
     private HostRoomCoordinator? coordinator;
     private string? hostPeer;
     private string displayName = "";
+    private string? initialRoomName;
     private long stateSequence, receivedSequence;
     private bool admitted;
     private bool roomControlsRestored;
@@ -56,13 +57,16 @@ public sealed class RoomClient : IAsyncDisposable
     public long ServerOffsetMs => clock.OffsetMs;
     public event Action<WireMessage>? Message;
     public event Action<string>? Status;
-    public async Task ConnectAsync(string server, string name, string? invitation = null, string? hostKey = null, bool persistent = false)
+    public async Task ConnectAsync(string server, string name, string? invitation = null, string? hostKey = null, bool persistent = false, string? roomName = null)
     {
         server = RoomAddress.ValidateServer(server);
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 40 || name.Any(char.IsControl))
             throw new ArgumentException("Enter a display name between 1 and 40 characters in Settings.");
         ServerAddress = server;
         displayName = name.Trim();
+        if (roomName is not null && !HostRoomCoordinator.ValidName(roomName))
+            throw new ArgumentException("Enter a room name between 1 and 100 characters without control characters.");
+        initialRoomName = roomName?.Trim();
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         deadline.CancelAfter(TimeSpan.FromSeconds(20));
         var uri = new Uri(server.TrimEnd('/') + "/room");
@@ -114,7 +118,7 @@ public sealed class RoomClient : IAsyncDisposable
     {
         if (!IsConnected) throw new IOException("Room connection is closed. Rejoin the room to reconnect.");
         if (message.Type == "remove" && !DiscoveryOnline) throw new IOException("Reconnect to the room service before revoking saved guest access.");
-        if (message.Type is "media" or "controls" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
+        if (message.Type is "media" or "controls" or "room-name" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
         {
             if (Identity?.Host != true && !directConnected.Task.IsCompletedSuccessfully)
                 throw new IOException("Waiting for the host's direct control connection. All participants need the updated app.");
@@ -241,6 +245,10 @@ public sealed class RoomClient : IAsyncDisposable
                 {
                     hostPeer = Identity.Peer; coordinator = new(Identity.Peer);
                     coordinator.Discover([new(Identity.Peer, displayName, true, true)], clock.Now);
+                    var storedName = initialRoomName ?? settings?.Setting(RoomSetting(Identity.Room, "name"));
+                    if (!HostRoomCoordinator.ValidName(storedName)) storedName = "Room " + Identity.Room[..6];
+                    coordinator.Apply(Identity.Peer, new("room-name", Text: storedName), clock.Now, out _);
+                    settings?.Setting(RoomSetting(Identity.Room, "name"), coordinator.Name!);
                     var storedControls = settings?.Setting(RoomSetting(Identity.Room, "sharedControls"));
                     roomControlsRestored = storedControls is not null;
                     if (storedControls == "true")
@@ -350,6 +358,8 @@ public sealed class RoomClient : IAsyncDisposable
             settings?.Setting(RoomSetting(Identity.Room, "sharedControls"), coordinator.SharedControls ? "true" : "false");
             if (DiscoveryOnline) QueueDiscovery(new("settings", Number: coordinator.SharedControls ? 1 : 0));
         }
+        if (sender == Identity!.Peer && message.Type == "room-name")
+            settings?.Setting(RoomSetting(Identity.Room, "name"), coordinator.Name!);
         PublishHostState();
         if (announcement is not null) { Message?.Invoke(announcement); Broadcast(announcement); }
         if (PlaybackDiagnostics.Enabled && message.Type == "playback") PlaybackDiagnostics.Record("control-sent", new { message.Data, transport = "peer" });
