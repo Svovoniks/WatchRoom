@@ -11,7 +11,8 @@ internal sealed class HostRoomCoordinator(string host)
     private readonly Dictionary<string, (long At, int Count)> limits = [];
     private long revision;
     private bool resumeWhenReady;
-    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue);
+    public AdmittedGuest[] AdmittedGuests { get; set; } = [];
+    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests);
     public SharedMedia? Media { get; private set; }
     public PlaybackState? Playback { get; private set; }
     public bool SharedControls { get; private set; }

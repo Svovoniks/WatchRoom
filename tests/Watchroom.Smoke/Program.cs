@@ -6,6 +6,97 @@ using Watchroom.Core;
 using LibVLCSharp.Shared;
 using System.Diagnostics;
 
+if (args.FirstOrDefault() == "--metadata-cache")
+{
+    var checks = 0;
+    await MetadataCacheFixture.Run(Path.Combine("artifacts/metadata-cache-check", Guid.NewGuid().ToString("N")), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} metadata cache checks passed."); return;
+}
+
+if (args.FirstOrDefault() == "--room-reconnect")
+{
+    var checks = 0;
+    await RoomReconnectFixture.Run(Path.Combine("artifacts/room-reconnect-check", Guid.NewGuid().ToString("N")), args.Contains("--sites"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} room reconnect checks passed."); return;
+}
+
+if (args.FirstOrDefault() == "--library-snapshot")
+{
+    var store = new LibraryStore(Path.GetFullPath(args[1]));
+    await File.WriteAllTextAsync(Path.GetFullPath(args[2]), Wire.Serialize(store.All()));
+    Console.WriteLine($"Library snapshot: {store.All().Count} files, {LibraryCatalog.Browse(store.All()).Count} cards."); return;
+}
+
+if (args.FirstOrDefault() == "--metadata-recovery")
+{
+    var checks = 0;
+    await MetadataRecoveryFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/metadata-recovery-check"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} metadata recovery checks passed."); return;
+}
+
+if (args.FirstOrDefault() == "--episode-artwork")
+{
+    var checks = 0;
+    await EpisodeArtworkFixture.Run(Path.GetFullPath(args[1]), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} episode artwork checks passed."); return;
+}
+
+if (args.FirstOrDefault() == "--refresh-metadata")
+{
+    var data = Path.GetFullPath(args[1]); var report = Path.GetFullPath(args[2]); Directory.CreateDirectory(report);
+    var store = new LibraryStore(data); var before = store.All();
+    await File.WriteAllTextAsync(Path.Combine(report, "before-refresh.json"), Wire.Serialize(before));
+    var selected = before.Where(x => x.Available && !x.IsExtra && !x.IsVirtual).GroupBy(LibraryIdentity.ShowKey)
+        .Where(g => args.Length > 3 ? System.Text.RegularExpressions.Regex.IsMatch(g.First().DisplayTitle, args[3], System.Text.RegularExpressions.RegexOptions.IgnoreCase) :
+            !g.Any(x => ArtworkCache.IsUsable(x.SeriesPoster) || ArtworkCache.IsUsable(x.Poster)) || !g.Any(x => !string.IsNullOrWhiteSpace(x.Overview)))
+        .SelectMany(g => g).ToArray();
+    var temporary = Path.Combine(report, "refresh-" + Guid.NewGuid().ToString("N")); var subset = new LibraryStore(temporary);
+    MetadataOptions.Load(store).Save(subset); foreach (var entry in selected) subset.Save(entry);
+    Console.WriteLine($"Refreshing {selected.Length} files in {selected.GroupBy(LibraryIdentity.ShowKey).Count()} title groups.");
+    var progress = new Progress<string>(Console.WriteLine);
+    var summary = await AutomaticArtwork.FetchAsync(subset, data, null, progress, default);
+    File.Copy(Path.Combine(data,"metadata-fetch-report.json"),Path.Combine(report,"metadata-fetch-report.json"),true);
+    foreach (var entry in subset.All()) store.Save(entry);
+    await File.WriteAllTextAsync(Path.Combine(report, "after-refresh.json"), Wire.Serialize(store.All()));
+    Console.WriteLine(summary); return;
+}
+
+if (args.FirstOrDefault() == "--grouping-audit")
+{
+    var checks = 0;
+    await GroupingAuditFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/grouping-audit-check"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} grouping audit checks passed."); return;
+}
+
+if (args.FirstOrDefault() == "--metadata-pipeline")
+{
+    var checks = 0;
+    await MetadataPipelineFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/metadata-pipeline"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} metadata pipeline checks passed."); return;
+}
+
+if (args.FirstOrDefault() == "--library-ingestion")
+{
+    var checks = 0;
+    await LibraryIngestionFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/library-ingestion-check"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} library ingestion checks passed."); return;
+}
+
+if (args.FirstOrDefault() == "--library-search")
+{
+    var checks = 0;
+    await LibrarySearchFixture.Run((condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} library search checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--direct-controls")
 {
     var checks = 0;
@@ -81,6 +172,12 @@ Directory.CreateDirectory(root);
 int passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
 await RecoveryFixture.Run(Check);
+await LibrarySearchFixture.Run(Check);
+await MetadataPipelineFixture.Run(Path.Combine(root, "metadata-pipeline"), Check);
+await MetadataRecoveryFixture.Run(Path.Combine(root, "metadata-recovery"), Check);
+await MetadataCacheFixture.Run(Path.Combine(root, "metadata-cache"), Check);
+await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
+await GroupingAuditFixture.Run(Path.Combine(root, "grouping-audit"), Check);
 HostRoomFixture.Run(Check);
 Check(MediaBridge.TryRange("bytes=-30", 100, out var s, out var e) && s == 70 && e == 99, "suffix byte ranges");
 Check(MediaBridge.TryRange("bytes=40-999", 100, out s, out e) && s == 40 && e == 99, "range end clamped");
@@ -144,6 +241,9 @@ var persistentRegistryPath = Path.Combine(root, "persistent-registry");
 var registry = new PersistentRooms(persistentRegistryPath); var reusableCode = Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
 var ownerKey = registry.Create(reusableCode);
 Check(new PersistentRooms(persistentRegistryPath).Verify(reusableCode, ownerKey), "persistent room owner survives registry restart");
+registry.Update(reusableCode, [new("admitted-guest-hash", "Guest")], true);
+var restoredRoom = new PersistentRooms(persistentRegistryPath).All().Single();
+Check(restoredRoom.SharedControls && restoredRoom.Guests?.Single().Name == "Guest", "room settings and admitted roster survive server registry restart");
 Check(!registry.Verify(reusableCode, new string('0', 64)) && !Wire.Serialize(registry.All()).Contains(ownerKey), "server stores only hashed host keys and rejects wrong owners");
 var queueDefinition = new SavedQueue("test", "Weekend", ["third", "second", "third"]);
 library.Setting("queues", Wire.Serialize(new[] { queueDefinition }));
@@ -184,7 +284,7 @@ using (var artworkHttp = new HttpClient(new ArtworkFixture()))
 }
 var classificationDirectory = Path.Combine(root, "classified-library"); Directory.CreateDirectory(classificationDirectory);
 var classifiedAnimePath = Path.Combine(classificationDirectory, "Example Show S01E01.mkv");
-var classifiedMoviePath = Path.Combine(classificationDirectory, "Example Movie S01E01.mkv");
+var classifiedMoviePath = Path.Combine(classificationDirectory, "Example Movie (2020).mkv");
 await File.WriteAllBytesAsync(classifiedAnimePath, [0]); await File.WriteAllBytesAsync(classifiedMoviePath, [0]);
 var classificationStore = new LibraryStore(Path.Combine(root, "classification-db"));
 await classificationStore.ScanAsync([new(classificationDirectory, "Show")]);
@@ -338,7 +438,7 @@ if (string.IsNullOrWhiteSpace(externalServer)) externalServer = null;
 var serverUrl = externalServer ?? $"http://localhost:{port}";
 var start = new ProcessStartInfo(Path.GetFullPath(".tools/dotnet/dotnet.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
 start.Environment["WATCHROOM_DATA"] = Path.Combine(root, "server-data");
-start.ArgumentList.Add(Path.GetFullPath("src/Watchroom.Server/bin/Release/net10.0/Watchroom.Server.dll")); start.ArgumentList.Add("--urls"); start.ArgumentList.Add(serverUrl);
+start.ArgumentList.Add(Path.GetFullPath(Environment.GetEnvironmentVariable("WATCHROOM_TEST_SERVER_DLL") ?? "src/Watchroom.Server/bin/Release/net10.0/Watchroom.Server.dll")); start.ArgumentList.Add("--urls"); start.ArgumentList.Add(serverUrl);
 using var server = externalServer is null ? Process.Start(start)! : null;
 var stdout = server?.StandardOutput.ReadToEndAsync(); var stderr = server?.StandardError.ReadToEndAsync();
 try
@@ -391,10 +491,20 @@ try
     await Wait(() => roomHost.Snapshot!.People.All(x => x.Id != roomGuest.Identity.Peer), "guest removed");
     bool revoked = false; try { await roomSource.ReadAsync(100, 100, CancellationToken.None); } catch { revoked = true; }
     Check(revoked, "removal revokes existing media channel");
-    var persistentHost = new RoomClient();
+    var roomSettings = new LibraryStore(Path.Combine(root, "room-settings"));
+    var guestSettingsPath = Path.Combine(root, "guest-room-settings");
+    var persistentHost = new RoomClient(roomSettings);
     await persistentHost.ConnectAsync(serverUrl, "Persistent Host", persistent: true);
     var savedIdentity = persistentHost.Identity!;
     Check(savedIdentity.HostKey?.Length == 64, "persistent host receives a private reopening key");
+    var admittedGuest = new RoomClient(new LibraryStore(guestSettingsPath));
+    await admittedGuest.ConnectAsync(serverUrl, "Remembered Guest", savedIdentity.Room);
+    persistentHost.Send(new("admit", Target: admittedGuest.Identity!.Peer));
+    await Wait(() => admittedGuest.DirectControlsReady.IsCompletedSuccessfully, "persistent guest admitted");
+    persistentHost.Send(new("controls", Number: 1));
+    await Wait(() => admittedGuest.Snapshot?.SharedControls == true, "persistent controls enabled");
+    Check(admittedGuest.Identity.GuestKey?.Length == 64, "guest receives private reconnect credential");
+    await admittedGuest.DisposeAsync();
     await using (var duplicateHost = new RoomClient())
     {
         bool ownerRejected = false;
@@ -409,13 +519,44 @@ try
         try { await wrongOwner.ConnectAsync(serverUrl, "Wrong Owner", savedIdentity.Room, new string('0', 64)); } catch (IOException) { ownerRejected = true; }
         Check(ownerRejected, "persistent room rejects an incorrect host key");
     }
-    await using (var reopened = new RoomClient())
+    await using (var reopened = new RoomClient(roomSettings))
     {
         await reopened.ConnectAsync(serverUrl, "Persistent Host", savedIdentity.Room, savedIdentity.HostKey);
         Check(reopened.Identity!.Host && reopened.Identity.Room == savedIdentity.Room, "persistent room reconnects as host with same invitation");
+        Check(reopened.Snapshot?.SharedControls == true, "shared controls restored when host reconnects");
+        await using (var rememberedGuest = new RoomClient(new LibraryStore(guestSettingsPath)))
+        {
+            await rememberedGuest.ConnectAsync(serverUrl, "Renamed Guest", savedIdentity.Room);
+            await rememberedGuest.DirectControlsReady.WaitAsync(TimeSpan.FromSeconds(15));
+            Check(rememberedGuest.Snapshot?.SharedControls == true, "admitted guest reconnects without approval and receives saved controls");
+            await Wait(() => reopened.Snapshot?.AdmittedGuests?.Length == 1, "remembered roster visible to host");
+            Check(rememberedGuest.Snapshot?.AdmittedGuests is null, "remembered guest credentials and roster are host-only");
+        }
+        await using (var impostor = new RoomClient())
+        {
+            await impostor.ConnectAsync(serverUrl, "Remembered Guest", savedIdentity.Room);
+            await Wait(() => impostor.Snapshot is not null, "impostor waiting");
+            Check(!impostor.Snapshot!.People.Single(p => p.Id == impostor.Identity!.Peer).Approved, "same display name cannot inherit admission");
+        }
+        reopened.Send(new("remove", Target: reopened.Snapshot!.AdmittedGuests![0].Id));
+        await Wait(() => reopened.Snapshot?.AdmittedGuests?.Length == 0, "offline admission revoked");
+        await using (var removedGuest = new RoomClient(new LibraryStore(guestSettingsPath)))
+        {
+            await removedGuest.ConnectAsync(serverUrl, "Renamed Guest", savedIdentity.Room);
+            await Wait(() => removedGuest.Snapshot is not null, "removed guest waiting");
+            Check(!removedGuest.Snapshot!.People.Single(p => p.Id == removedGuest.Identity!.Peer).Approved, "removed guest needs fresh host approval on rejoin");
+        }
+        reopened.Send(new("controls", Number: 0));
+        await Wait(() => reopened.Snapshot?.SharedControls == false, "controls disabled and saved");
         await using var returningGuest = new RoomClient();
         await returningGuest.ConnectAsync(serverUrl, "Returning Guest", savedIdentity.Room);
         Check(returningGuest.Identity?.HostKey is null, "persistent guest can rejoin without receiving the owner key");
+    }
+    await Task.Delay(350);
+    await using (var hostAgain = new RoomClient(roomSettings))
+    {
+        await hostAgain.ConnectAsync(serverUrl, "Persistent Host", savedIdentity.Room, savedIdentity.HostKey);
+        Check(hostAgain.Snapshot?.SharedControls == false, "disabled shared controls remain disabled on next reconnect");
     }
     await using var wrongInvitation = new RoomClient();
     var errors = new ConcurrentQueue<WireMessage>(); wrongInvitation.Message += errors.Enqueue;

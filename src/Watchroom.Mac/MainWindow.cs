@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -39,6 +39,16 @@ public sealed class MainWindow : Window
     private readonly TextBox server = new() { Watermark = "HTTPS room server" };
     private readonly TextBox name = new() { Watermark = "Your display name" };
     private readonly TextBox token = new() { PasswordChar = '●', Watermark = "TMDB API read access token (this session only)" };
+    private readonly TextBox metadataProviders = new() { Watermark = "Providers: tmdb, tvmaze, wikipedia" };
+    private readonly TextBox metadataLanguage = new() { Watermark = "Language, e.g. en-US" };
+    private readonly TextBox metadataCountry = new() { Watermark = "Country, e.g. US" };
+    private readonly TextBox refreshDays = new() { Watermark = "Refresh after days (0 disables)" };
+    private readonly CheckBox importMissing = new() { Content = "Show missing episodes" };
+    private readonly CheckBox importUpcoming = new() { Content = "Show upcoming episodes" };
+    private readonly CheckBox saveNfo = new() { Content = "Save NFO metadata beside videos" };
+    private readonly CheckBox displaySpecials = new() { Content = "Show specials within aired seasons" };
+    private readonly CheckBox groupShows = new() { Content = "Combine show folders with matching provider IDs" };
+    private readonly ComboBox metadataRefreshMode = new() { ItemsSource = new[] { "Fill missing metadata", "Refresh text", "Refresh text and replace downloaded artwork" }, SelectedIndex = 0 };
     private readonly TextBox invitation = new() { Watermark = "Invitation link or room code" };
     private readonly TextBox chatInput = new() { Watermark = "Message your room", MaxLength = 1000 };
     private readonly StackPanel people = new() { Spacing = 6 };
@@ -88,6 +98,10 @@ public sealed class MainWindow : Window
         server.Text = library.Setting("server") ?? "http://localhost:5080";
         name.Text = library.Setting("name") ?? Environment.UserName;
         automaticArtwork.IsChecked = library.Setting("artwork") != "false";
+        var options = MetadataOptions.Load(library); metadataProviders.Text = string.Join(", ", options.ProviderOrder);
+        metadataLanguage.Text = options.Language; metadataCountry.Text = options.Country; refreshDays.Text = options.RefreshDays.ToString();
+        importMissing.IsChecked = options.ImportMissing; importUpcoming.IsChecked = options.ImportUpcoming; saveNfo.IsChecked = options.SaveNfo;
+        displaySpecials.IsChecked = options.DisplaySpecialsWithinSeasons; groupShows.IsChecked = options.GroupShowsByProvider;
         BuildUI(); RefreshLibrary(); WatchFolders();
         search.TextChanged += (_, _) => FilterLibrary(); category.SelectionChanged += (_, _) => { browseSeries = browseKind = null; browseSeason = null; FilterLibrary(); };
         episodes.SelectionChanged += (_, _) => { if (episodes.SelectedItem is MediaItem item) { selected = item; summary.Text = item.DetailOverview ?? item.Caption; } };
@@ -193,7 +207,7 @@ public sealed class MainWindow : Window
             new TabItem { Header = "Library", Content = Pane(libraryPage) },
             new TabItem { Header = "Watch room", Content = Pane(roomPage) },
             new TabItem { Header = "Folders", Content = Pane(Column(Text("Your movie folders",24),Text("Add the folders Watchroom should scan. You can skip this when joining a friend."), Row(folderKind, Button("Add folders", AddFolders)), folderList, Row(Button("Remove selected", RemoveFolder),Button("Scan library", Scan)))) },
-            new TabItem { Header = "Settings", Content = Pane(new ScrollViewer { Content = Column(Text("Room connection",24),Text("Display name",14),name,Text("Server address",14),server,Button("Save settings",SaveSettings),Text("Join a friend",22),invitation,Button("Join room",Join),Text("Poster artwork",22),token,automaticArtwork,Button("Fetch missing posters now",FetchArtwork),Text("Without a token, show titles are searched on TVmaze and movie titles on Wikipedia. Some titles need a manual match. Video files stay local. TVmaze: https://www.tvmaze.com (CC BY-SA). Artwork source pages appear in title details.",14),Text("Use a TMDB read access token to match posters, or choose local artwork from the library. Token stays in this app session.",14),Text("This product uses the TMDB API but is not endorsed or certified by TMDB.",14),Text("Playback requirements",22),Text("On Mac, install VLC in /Applications. WebRTC requires a matching libdatachannel library; follow MAC-CLIENT.md to build it and set WATCHROOM_DATACHANNEL_NATIVE. Use the same reachable room server on both clients.",14)) }) }
+            new TabItem { Header = "Settings", Content = Pane(new ScrollViewer { Content = Column(Text("Room connection",24),Text("Display name",14),name,Text("Server address",14),server,Button("Save settings",SaveSettings),Text("Join a friend",22),invitation,Button("Join room",Join),Text("Artwork and metadata",22),token,automaticArtwork,Text("Providers in priority order",14),metadataProviders,Text("Language / country / refresh days",14),metadataLanguage,metadataCountry,refreshDays,importMissing,importUpcoming,displaySpecials,groupShows,saveNfo,metadataRefreshMode,Button("Fetch metadata",RefreshMetadata),Text("Without a token, show titles are searched on TVmaze and movie titles on Wikipedia. Some titles need a manual match. Video files stay local. TVmaze: https://www.tvmaze.com (CC BY-SA). Artwork source pages appear in title details.",14),Text("Use a TMDB read access token to match posters, or choose local artwork from the library. Token stays in this app session.",14),Text("This product uses the TMDB API but is not endorsed or certified by TMDB.",14),Text("Playback requirements",22),Text("On Mac, install VLC in /Applications. WebRTC requires a matching libdatachannel library; follow MAC-CLIENT.md to build it and set WATCHROOM_DATACHANNEL_NATIVE. Use the same reachable room server on both clients.",14)) }) }
         };
     }
     private async Task Guard(Func<Task> action)
@@ -208,13 +222,14 @@ public sealed class MainWindow : Window
         posterGrid.Children.Clear(); foreach (var bitmap in posters) bitmap.Dispose(); posters.Clear();
         var visible = items.Where(x => x.DisplayTitle.Contains(search.Text?.Trim() ?? "", StringComparison.OrdinalIgnoreCase));
         visible = category.SelectedIndex switch { 1 => visible.Where(x => x.Kind == "Movie"), 2 => visible.Where(x => x.Kind == "Show"), 3 => visible.Where(x => x.Kind == "Anime"), 4 => visible.Where(x => x.Poster is null), _ => visible };
-        libraryLocation.Text = browseSeries is null ? "Library" : browseSeries + (browseSeason is null ? " · Seasons" : browseSeason == 0 ? " · Specials" : $" · Season {browseSeason}");
-        foreach (var card in LibraryCatalog.Browse(visible, browseSeries, browseKind, browseSeason))
+        var showTitle = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind))?.Series ?? browseSeries;
+        libraryLocation.Text = browseSeries is null ? "Library" : showTitle + (browseSeason is null ? " · Seasons" : browseSeason < 0 ? " · Season unknown" : browseSeason == 0 ? " · Specials" : $" · Season {browseSeason}");
+        foreach (var card in LibraryCatalog.Browse(visible, browseSeries, browseKind, browseSeason, displaySpecials: MetadataOptions.Load(library).DisplaySpecialsWithinSeasons))
         {
             var item = card.Media;
             Control image = new Border { Background = new SolidColorBrush(Color.Parse("#263d52")), Height = 200, Child = new TextBlock { Text = card.DisplayTitle, FontSize = 20, Margin = new Thickness(16), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center } };
             if (card.Poster is not null && File.Exists(card.Poster)) try { var bitmap = new Bitmap(card.Poster); posters.Add(bitmap); image = new Image { Source = bitmap, Height = 200, Stretch = Stretch.UniformToFill }; } catch (Exception ex) when (ex is IOException or ArgumentException) { }
-            var button = Button("", () => { if (card.Level is "series" or "season") { selected = null; title.Text = card.DisplayTitle; summary.Text = card.Level == "season" ? item.SeasonOverview ?? item.Overview ?? card.Caption : item.Overview ?? card.Caption; } if (card.Level == "series") { browseSeries = item.Series; browseKind = item.Kind; browseSeason = null; FilterLibrary(); } else if (card.Level == "season") { browseSeason = card.Season; FilterLibrary(); } else Select(item); }); button.Padding = new Thickness(6); button.Margin = new Thickness(3); button.HorizontalAlignment = HorizontalAlignment.Stretch;
+            var button = Button("", () => { if (card.Level is "series" or "season") { selected = null; title.Text = card.DisplayTitle; summary.Text = card.Level == "season" ? item.SeasonOverview ?? item.Overview ?? card.Caption : item.Overview ?? card.Caption; } if (card.Level == "series") { browseSeries = LibraryIdentity.ShowKey(item); browseKind = item.Kind; browseSeason = null; FilterLibrary(); } else if (card.Level == "season") { browseSeason = card.Season; FilterLibrary(); } else Select(item); }); button.Padding = new Thickness(6); button.Margin = new Thickness(3); button.HorizontalAlignment = HorizontalAlignment.Stretch;
             button.Content = Column(image, Text(card.DisplayTitle, 14), Text(card.Caption, 12)); posterGrid.Children.Add(button);
         }
         if (posterGrid.Children.Count == 0) posterGrid.Children.Add(Text(items.Count == 0 ? "Add folders and scan to see your movies here." : "No matching titles."));
@@ -223,7 +238,7 @@ public sealed class MainWindow : Window
     {
         selected = item; title.Text = item.EpisodeDisplayTitle; summary.Text = (item.DetailOverview ?? item.Caption) + (item.PosterSource is null ? "" : "\nArtwork: " + item.PosterSource);
         episodes.IsVisible = false;
-        episodes.ItemsSource = item.Series is null ? null : items.Where(x => x.Series == item.Series && x.Kind == item.Kind).ToArray();
+        episodes.ItemsSource = item.Series is null ? null : items.Where(x => LibraryIdentity.SameShow(x, item)).ToArray();
         episodes.SelectedItem = item;
     }
     private async Task AddFolders()
@@ -250,17 +265,29 @@ public sealed class MainWindow : Window
         try { await library.ScanAsync(folders.ToArray(), new Progress<string>(s => status.Text = s), lifetime.Token); RefreshLibrary(); tabs.SelectedIndex = 0; if (automaticArtwork.IsChecked == true) await FetchArtwork(); }
         finally { scanning = false; }
     }
-    private void SaveSettings() { library.Setting("artwork", automaticArtwork.IsChecked == true ? "true" : "false"); library.Setting("server", server.Text?.Trim() ?? ""); library.Setting("name", name.Text?.Trim() ?? ""); status.Text = "Settings saved"; }
+    private void SaveSettings()
+    {
+        var providers = (metadataProviders.Text ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Select(x => x.ToLowerInvariant()).Distinct().ToArray();
+        if (providers.Any(x => x is not ("tmdb" or "tvmaze" or "wikipedia")) || !int.TryParse(refreshDays.Text, out var days) || days < 0 || days > 365 ||
+            !System.Text.RegularExpressions.Regex.IsMatch(metadataLanguage.Text ?? "", @"^[a-z]{2}(?:-[A-Z]{2})?$") || !System.Text.RegularExpressions.Regex.IsMatch(metadataCountry.Text ?? "", @"^[A-Z]{2}$"))
+        { status.Text = "Use providers tmdb, tvmaze, wikipedia; days 0–365; language en-US; country US."; return; }
+        new MetadataOptions(providers, metadataLanguage.Text!, metadataCountry.Text!, days, importMissing.IsChecked == true, importUpcoming.IsChecked == true,
+            saveNfo.IsChecked == true, displaySpecials.IsChecked == true, groupShows.IsChecked == true).Save(library);
+        library.Setting("artwork", automaticArtwork.IsChecked == true ? "true" : "false"); library.Setting("server", server.Text?.Trim() ?? ""); library.Setting("name", name.Text?.Trim() ?? ""); status.Text = "Settings saved";
+    }
+    private async Task RefreshMetadata() => await FetchArtwork((MetadataRefresh)metadataRefreshMode.SelectedIndex);
     private async Task FetchArtwork()
+        => await FetchArtwork(MetadataRefresh.FillMissing);
+    private async Task FetchArtwork(MetadataRefresh refresh)
     {
         if (artworkBusy) return; artworkBusy = true;
-        try { var report = await AutomaticArtwork.FetchAsync(library, App.DataDirectory, token.Text, new Progress<string>(s => status.Text = s), lifetime.Token); RefreshLibrary(); status.Text = report; }
+        try { var report = await AutomaticArtwork.FetchAsync(library, App.DataDirectory, token.Text, new Progress<string>(s => status.Text = s), lifetime.Token, refresh: refresh); RefreshLibrary(); status.Text = report; }
         finally { artworkBusy = false; }
     }
     private async Task MatchArtwork()
     {
         if (selected is null) return; if (string.IsNullOrWhiteSpace(token.Text)) { tabs.SelectedIndex = 3; status.Text = "Enter your TMDB read access token, or use a local poster."; return; }
-        using var metadata = new MetadataClient(token.Text); var item = selected;
+        using var metadata = new MetadataClient(token.Text, options: MetadataOptions.Load(library)); var item = selected;
         var matches = (await metadata.SearchAsync(item.Series ?? item.Title, true, lifetime.Token)).Concat(await metadata.SearchAsync(item.Series ?? item.Title, false, lifetime.Token)).ToList();
         if (matches.Count == 0) { status.Text = "No metadata matches. Try a local poster."; return; }
         var picker = new Window { Title = "Choose the matching title", Width = 520, Height = 420 };
@@ -269,14 +296,15 @@ public sealed class MainWindow : Window
         picker.Content = Pane(Column(list, use)); await picker.ShowDialog(this); if (match is null) return;
         match = await metadata.DetailsAsync(match, lifetime.Token);
         var poster = await metadata.CachePosterAsync(match, Path.Combine(App.DataDirectory, "posters"), lifetime.Token);
-        foreach (var episode in items.Where(x => x.Id == item.Id || item.Series is not null && x.Series == item.Series && x.Kind == item.Kind)) library.Save(MetadataClassification.Apply(episode, match.Kind ?? (match.Type == "tv" ? "Show" : "Movie"), match.Type, match.Title) with { Poster = poster, Overview = match.Overview, Matched = true, MetadataProvider = "tmdb", MetadataId = match.Id });
+        foreach (var episode in items.Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item))) library.Save(AutomaticArtwork.MergeDetails(LibraryIdentity.WithProvider(MetadataClassification.Apply(episode with { ProviderIds = null, MetadataProvider = null, MetadataId = null }, match.Kind ?? (match.Type == "tv" ? "Show" : "Movie"), match.Type, match.Title), "tmdb", match.Id), match) with { Poster = poster, SeriesPoster = match.Type == "tv" ? poster : null, Overview = match.Overview, Matched = true, MetadataFetchedAt = 0,
+            SeasonTitle = null, SeasonOverview = null, EpisodeTitle = null, EpisodeOverview = null, EpisodePoster = null, SeasonPoster = null });
         RefreshLibrary();
     }
     private async Task LocalPoster()
     {
         if (selected is null) return; var chosen = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = "Choose poster", FileTypeFilter = new[] { new FilePickerFileType("Images") { Patterns = new[] { "*.jpg", "*.jpeg", "*.png", "*.webp" } } } });
         var path = chosen.FirstOrDefault()?.TryGetLocalPath(); if (path is null) return;
-        foreach (var item in items.Where(x => x.Id == selected.Id || selected.Series is not null && x.Series == selected.Series && x.Kind == selected.Kind)) library.Save(item with { Poster = path, Matched = true }); RefreshLibrary();
+        foreach (var item in items.Where(x => x.Id == selected.Id || LibraryIdentity.SameShow(x, selected))) library.Save(item with { Poster = path, SeriesPoster = item.Series is null ? null : path, PosterSource = "Local artwork", Matched = true, LockedFields = (item.LockedFields ?? []).Append("Poster").Distinct().ToArray() }); RefreshLibrary();
     }
     private void NeedPlayer() { if (player is null) throw new InvalidOperationException("Playback is unavailable. Check the VLC installation, then restart Watchroom."); }
     private async Task PlayLocal()
@@ -311,7 +339,7 @@ public sealed class MainWindow : Window
     }
     private RoomClient NewRoom()
     {
-        var client = new RoomClient(); room = client;
+        var client = new RoomClient(library); room = client;
         client.Message += message => Dispatcher.UIThread.Post(async () => { if (client == room) await Guard(() => OnMessage(message)); });
         client.Status += text => Dispatcher.UIThread.Post(() => { if (room != client) return; status.Text = text; if (text.StartsWith("Disconnected", StringComparison.Ordinal)) { player?.SetPause(true); target = null; } }); return client;
     }

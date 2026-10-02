@@ -4,6 +4,9 @@ namespace Watchroom.Core;
 
 public static class MetadataClassification
 {
+    public static bool? Animation(JsonElement details) => details.TryGetProperty("genres", out var genres)
+        ? genres.EnumerateArray().Any(g => g.TryGetProperty("id", out var id) && id.GetInt32() == 16)
+        : details.TryGetProperty("genre_ids", out var ids) ? ids.EnumerateArray().Any(g => g.GetInt32() == 16) : null;
     private static string? Text(JsonElement value, string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
     public static string Tvmaze(JsonElement show)
     {
@@ -37,6 +40,12 @@ public static class MetadataClassification
         Kind = kind, MetadataKind = kind, MetadataType = type,
         Series = type == "tv" ? seriesTitle ?? item.Series ?? item.Title : null,
         Season = type == "tv" ? item.Season : null, Episode = type == "tv" ? item.Episode : null,
+        EpisodeEnd = type == "tv" ? item.EpisodeEnd : null, AbsoluteEpisode = type == "tv" ? item.AbsoluteEpisode : null,
+        AbsoluteEpisodeEnd = type == "tv" ? item.AbsoluteEpisodeEnd : null,
+        ShowId = type == "tv" ? item.ShowId : null, SeasonId = type == "tv" ? item.SeasonId : null,
+        SeriesPath = type == "tv" ? item.SeriesPath : null, NumberingSource = type == "tv" ? item.NumberingSource : null,
+        SourcePart = type == "tv" ? item.SourcePart : null, SourcePartEpisode = type == "tv" ? item.SourcePartEpisode : null,
+        SourcePartEpisodeEnd = type == "tv" ? item.SourcePartEpisodeEnd : null,
         SeasonTitle = type == "tv" ? item.SeasonTitle : null, SeasonOverview = type == "tv" ? item.SeasonOverview : null,
         EpisodeTitle = type == "tv" ? item.EpisodeTitle : null, EpisodeOverview = type == "tv" ? item.EpisodeOverview : null,
         SeasonPoster = type == "tv" ? item.SeasonPoster : null, SeriesPoster = type == "tv" ? item.SeriesPoster : null,

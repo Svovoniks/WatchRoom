@@ -1,4 +1,4 @@
-param([switch]$SkipPublish)
+param([switch]$SkipPublish, [string]$Version = '0.2.0')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
@@ -33,7 +33,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Installer compiler restore failed' }
     $compiler = Get-ChildItem '.nuget/packages/tools.innosetup/7.1.0' -Recurse -Filter ISCC.exe | Select-Object -First 1
     if (!$compiler) { throw 'Inno Setup compiler not found' }
-    & $compiler.FullName /Qp packaging/Watchroom.iss
+    if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Version must be major.minor.patch' }
+    & $compiler.FullName /Qp "/DAppVersion=$Version" packaging/Watchroom.iss
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
-    Get-FileHash 'artifacts/Watchroom-Setup-0.1.0-win-x64.exe' -Algorithm SHA256 | Format-List
+    Get-FileHash "artifacts/Watchroom-Setup-$Version-win-x64.exe" -Algorithm SHA256 | Format-List
 } finally { Pop-Location }

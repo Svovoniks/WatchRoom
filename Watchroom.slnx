@@ -1,1 +1,6 @@
-<Solution><Project Path="src/Watchroom.Core/Watchroom.Core.csproj"/><Project Path="src/Watchroom.Server/Watchroom.Server.csproj"/><Project Path="src/Watchroom.Desktop/Watchroom.Desktop.csproj"/><Project Path="src/Watchroom.Mac/Watchroom.Mac.csproj"/><Project Path="tests/Watchroom.Smoke/Watchroom.Smoke.csproj"/></Solution>
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/tests/">
+    <Project Path="tests/Watchroom.DesktopChecks/Watchroom.DesktopChecks.csproj" />
+    <Project Path="tests/Watchroom.UpdateChecks/Watchroom.UpdateChecks.csproj" />
+  </Folder><Project Path="src/Watchroom.Core/Watchroom.Core.csproj" /><Project Path="src/Watchroom.Server/Watchroom.Server.csproj" /><Project Path="src/Watchroom.Desktop/Watchroom.Desktop.csproj" /><Project Path="src/Watchroom.Mac/Watchroom.Mac.csproj" /><Project Path="tests/Watchroom.Smoke/Watchroom.Smoke.csproj" /></Solution>

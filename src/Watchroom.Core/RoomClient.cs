@@ -6,6 +6,9 @@ namespace Watchroom.Core;
 
 public sealed class RoomClient : IAsyncDisposable
 {
+    private readonly LibraryStore? settings;
+    public RoomClient(LibraryStore? settings = null) => this.settings = settings;
+    private string RoomSetting(string code, string field) => "room:" + ServerAddress + ":" + code.ToUpperInvariant() + ":" + field;
     private IRoomConnection? connection;
     private readonly CancellationTokenSource lifetime = new();
     private readonly CancellationTokenSource discoveryLifetime = new();
@@ -20,6 +23,7 @@ public sealed class RoomClient : IAsyncDisposable
     private string displayName = "";
     private long stateSequence, receivedSequence;
     private bool admitted;
+    private bool roomControlsRestored;
     private int discoveryFailed;
     private Task? readTask, sendTask, controlTask, pingTask;
     private int disposed;
@@ -64,7 +68,8 @@ public sealed class RoomClient : IAsyncDisposable
         var uri = new Uri(server.TrimEnd('/') + "/room");
         if (uri.Scheme != "https" && !(uri.Scheme == "http" && uri.IsLoopback)) throw new InvalidOperationException("Use an HTTPS server address. HTTP is allowed only on localhost for development.");
         var builder = new UriBuilder(uri) { Scheme = uri.Scheme == "https" ? "wss" : "ws" };
-        var first = new WireMessage(hostKey is not null ? "resume" : invitation is null ? "create" : "join", Target: hostKey ?? (persistent ? "persistent" : null), Text: name, Data: invitation);
+        var guestKey = invitation is not null && hostKey is null ? settings?.Setting(RoomSetting(invitation, "guestKey")) : null;
+        var first = new WireMessage(hostKey is not null ? "resume" : invitation is null ? "create" : "join", Target: hostKey ?? (persistent ? "persistent" : null), Sender: guestKey, Text: name, Data: invitation);
         using var probe = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(10) };
         using var health = await probe.GetAsync(server.TrimEnd('/') + "/health", deadline.Token);
         if ((int)health.StatusCode is >= 300 and < 400 || health.Content.Headers.ContentType?.MediaType == "text/html")
@@ -108,6 +113,7 @@ public sealed class RoomClient : IAsyncDisposable
     public void Send(WireMessage message)
     {
         if (!IsConnected) throw new IOException("Room connection is closed. Rejoin the room to reconnect.");
+        if (message.Type == "remove" && !DiscoveryOnline) throw new IOException("Reconnect to the room service before revoking saved guest access.");
         if (message.Type is "media" or "controls" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
         {
             if (Identity?.Host != true && !directConnected.Task.IsCompletedSuccessfully)
@@ -226,11 +232,20 @@ public sealed class RoomClient : IAsyncDisposable
         switch (message.Type)
         {
             case "welcome": case "admitted":
-                Identity = Wire.Read<Welcome>(message.Data!); admitted = Identity.Host || message.Type == "admitted";
+                var welcome = Wire.Read<Welcome>(message.Data!);
+                if (!welcome.Host && welcome.GuestKey is null && Identity?.Room == welcome.Room)
+                    welcome = welcome with { GuestKey = Identity.GuestKey };
+                Identity = welcome; admitted = Identity.Host || message.Type == "admitted";
+                if (Identity.GuestKey is { Length: 64 } key) settings?.Setting(RoomSetting(Identity.Room, "guestKey"), key);
                 if (Identity.Host && coordinator is null)
                 {
                     hostPeer = Identity.Peer; coordinator = new(Identity.Peer);
                     coordinator.Discover([new(Identity.Peer, displayName, true, true)], clock.Now);
+                    var storedControls = settings?.Setting(RoomSetting(Identity.Room, "sharedControls"));
+                    roomControlsRestored = storedControls is not null;
+                    if (storedControls == "true")
+                        coordinator.Apply(Identity.Peer, new("controls", Number: 1), clock.Now, out _);
+                    if (roomControlsRestored) QueueDiscovery(new("settings", Number: coordinator.SharedControls ? 1 : 0));
                     Snapshot = coordinator.Snapshot; directConnected.TrySetResult();
                 }
                 connected.TrySetResult(Identity); Message?.Invoke(message); break;
@@ -238,6 +253,13 @@ public sealed class RoomClient : IAsyncDisposable
                 var discovery = Wire.Read<RoomSnapshot>(message.Data!);
                 if (Identity?.Host == true)
                 {
+                    if (!roomControlsRestored)
+                    {
+                        coordinator!.Apply(Identity.Peer, new("controls", Number: discovery.SharedControls ? 1 : 0), clock.Now, out _);
+                        settings?.Setting(RoomSetting(Identity.Room, "sharedControls"), discovery.SharedControls ? "true" : "false");
+                        roomControlsRestored = true;
+                    }
+                    coordinator!.AdmittedGuests = discovery.AdmittedGuests ?? [];
                     coordinator!.Discover(discovery.People, clock.Now); PublishHostState();
                 }
                 else
@@ -322,6 +344,12 @@ public sealed class RoomClient : IAsyncDisposable
             if (sender == Identity!.Peer) Message?.Invoke(error); else SendPeer(sender, error);
             return;
         }
+        if (sender == Identity!.Peer && message.Type == "controls")
+        {
+            roomControlsRestored = true;
+            settings?.Setting(RoomSetting(Identity.Room, "sharedControls"), coordinator.SharedControls ? "true" : "false");
+            if (DiscoveryOnline) QueueDiscovery(new("settings", Number: coordinator.SharedControls ? 1 : 0));
+        }
         PublishHostState();
         if (announcement is not null) { Message?.Invoke(announcement); Broadcast(announcement); }
         if (PlaybackDiagnostics.Enabled && message.Type == "playback") PlaybackDiagnostics.Record("control-sent", new { message.Data, transport = "peer" });
@@ -337,7 +365,7 @@ public sealed class RoomClient : IAsyncDisposable
     {
         var snapshot = coordinator!.Snapshot;
         ApplySnapshot(snapshot);
-        var publicSnapshot = snapshot with { People = snapshot.People.Where(p => p.Approved).ToArray() };
+        var publicSnapshot = snapshot with { People = snapshot.People.Where(p => p.Approved).Select(p => p with { GuestId = null }).ToArray(), AdmittedGuests = null };
         Broadcast(new("host-state", Data: Wire.Serialize(new HostRoomState(++stateSequence, clock.Now, publicSnapshot))));
     }
     private void Broadcast(WireMessage message)

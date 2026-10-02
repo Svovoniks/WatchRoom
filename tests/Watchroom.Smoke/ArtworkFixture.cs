@@ -17,7 +17,8 @@ internal sealed class ArtworkFixture(bool failImages = false, bool omitImages = 
             ? """[{"show":{"id":1,"name":"Example Show","type":"Scripted","language":"English","summary":"<p>A <b>show</b> &amp; its story.</p>","premiered":"2020-01-01","url":"https://www.tvmaze.com/shows/1/example-show","image":{"medium":"https://static.tvmaze.com/poster.png"}}}]"""
             : """{"query":{"pages":[{"title":"Example Movie (2020 film)","extract":"A movie and its story.","categories":[{"title":"Category:2020 films"}],"thumbnail":{"source":"https://upload.wikimedia.org/poster.png"}}]}}""";
         if (anime && uri.Host == "api.tvmaze.com") json = json.Replace("\"type\":\"Scripted\",\"language\":\"English\"", "\"type\":\"Animation\",\"language\":\"Japanese\"");
-        if (animatedMovie && uri.Host == "en.wikipedia.org") json = json.Replace("Category:2020 films", "Category:Japanese animated films");
+        if (animatedMovie && uri.Host == "en.wikipedia.org") json = json.Replace("Category:2020 films", "Category:Japanese animated films")
+            .Replace("A movie and its story.", "Example Movie is a 2020 Japanese animated film.");
         if (ambiguous && uri.Host == "en.wikipedia.org") json = json.Replace("Example Movie (2020 film)", "Example Show (2020 film)");
         if (uri.Host == "api.tvmaze.com" && System.Text.RegularExpressions.Regex.IsMatch(uri.AbsolutePath, @"^/shows/\d+$"))
         {

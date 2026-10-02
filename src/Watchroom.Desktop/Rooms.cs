@@ -14,7 +14,9 @@ public partial class MainWindow
     {
         try { foreach (var saved in Wire.Read<SavedRoom[]>(library.Setting("rooms") ?? "[]")) savedRooms.Add(saved); }
         catch (System.Text.Json.JsonException) { }
-        SavedRoomsList.ItemsSource = savedRooms; RefreshSavedRooms();
+        SavedRoomsList.ItemsSource = savedRooms;
+        if (savedRooms.Count > 0) SavedRoomsList.SelectedIndex = 0;
+        RefreshSavedRooms();
     }
     private void RefreshSavedRooms()
     {
@@ -22,6 +24,47 @@ public partial class MainWindow
         ReturnToRoomButton.IsEnabled = ready || room is not null;
         ConnectSavedRoomButton.IsEnabled = !roomBusy && SavedRoomsList.SelectedItem is SavedRoom;
         RenameSavedRoomButton.IsEnabled = ForgetSavedRoomButton.IsEnabled = CopySavedInviteButton.IsEnabled = SavedRoomsList.SelectedItem is SavedRoom;
+        RefreshRoomSettings();
+    }
+    private string SavedRoomSetting(SavedRoom saved, string field) => "room:" + saved.Server + ":" + saved.Code.ToUpperInvariant() + ":" + field;
+    private void RefreshRoomSettings()
+    {
+        if (SavedRoomSharedControls is null) return;
+        var saved = SavedRoomsList.SelectedItem as SavedRoom;
+        var connected = saved is not null && room?.IsConnected == true && room.ServerAddress == saved.Server && room.Identity?.Room == saved.Code;
+        var host = saved is not null && (connected ? room!.Identity!.Host : saved.HostKey is not null);
+        SavedRoomHeading.Text = saved?.Name ?? "Choose a room";
+        SavedRoomStatus.Text = saved is null ? "Create a room or save an invitation to get started." : connected ? (host ? "Connected · You are the host" : "Connected · Guest") : (host ? "Your room · Offline" : "Saved invitation · Offline");
+        ConnectSavedRoomButton.Content = connected ? "Open player" : "Connect";
+        SavedRoomSharedControls.IsEnabled = host;
+        SavedRoomSharedControls.IsChecked = connected ? room!.Snapshot?.SharedControls == true : saved is not null && library.Setting(SavedRoomSetting(saved, "sharedControls")) == "true";
+        SavedRoomControlHint.Text = host ? "Saved automatically for this room. Guests can play, pause and seek when enabled." : "Only the room host can change this setting.";
+        AdmittedGuest[] remembered = [];
+        if (saved is not null && host)
+        {
+            if (connected) { remembered = room!.Snapshot?.AdmittedGuests ?? []; library.Setting(SavedRoomSetting(saved, "guests"), Wire.Serialize(remembered)); }
+            else try { remembered = Wire.Read<AdmittedGuest[]>(library.Setting(SavedRoomSetting(saved, "guests")) ?? "[]"); } catch (System.Text.Json.JsonException) { }
+        }
+        var active = connected && host ? room!.Snapshot?.People.Where(p => !p.IsHost).ToArray() ?? [] : [];
+        var rows = active.Select(p => new RoomGuestRow(p.Id, p.Name, p.Approved ? "Admitted · Connected" : "Waiting for approval", !p.Approved, connected && host, pendingAdmissions.ContainsKey(p.Id))).ToList();
+        rows.AddRange(remembered.Where(p => !active.Any(a => a.GuestId == p.Id)).Select(p => new RoomGuestRow(p.Id, p.Name, "Admitted · Remembered", false, connected && host, false)));
+        SavedRoomGuests.ItemsSource = rows;
+        SavedRoomGuestHint.Text = !host ? "Connect as the host to manage guests." : connected ? "Admission is remembered on each guest's device. Remove revokes their saved access." : "Remembered guests are listed below. Connect to admit or remove guests.";
+    }
+    private sealed record RoomGuestRow(string Id, string Name, string Status, bool Waiting, bool CanRemove, bool Pending)
+    {
+        public Visibility AdmitVisibility => Waiting ? Visibility.Visible : Visibility.Collapsed;
+        public bool CanAdmit => CanRemove && !Pending;
+        public string AdmitLabel => Pending ? "Admitting…" : "Admit";
+    }
+    private void SavedRoomControlsChanged(object sender, RoutedEventArgs e)
+    {
+        if (SavedRoomsList.SelectedItem is not SavedRoom saved || !SavedRoomSharedControls.IsEnabled) return;
+        var enabled = SavedRoomSharedControls.IsChecked == true;
+        library.Setting(SavedRoomSetting(saved, "sharedControls"), enabled ? "true" : "false");
+        if (room?.IsConnected == true && room.Identity?.Host == true && room.ServerAddress == saved.Server && room.Identity.Room == saved.Code)
+            room.Send(new("controls", Number: enabled ? 1 : 0));
+        SetStatus("Room playback controls saved.");
     }
     private void SaveRooms() => library.Setting("rooms", Wire.Serialize(savedRooms));
     private void SavedRoomSelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSavedRooms();
@@ -54,13 +97,13 @@ public partial class MainWindow
     });
     private void SaveRoomInvitation(object sender, RoutedEventArgs e)
     {
-        var invitation = Dialogs.Prompt(this, "Save room", "Invitation link or room code", validate: value =>
+        var invitation = Dialogs.Prompt(this, "Add room by invitation", "Invitation link or room code", validate: value =>
         { try { RoomAddress.Parse(value, ServerBox.Text); return null; } catch (ArgumentException ex) { return ex.Message; } });
         if (invitation is null) return;
         var address = RoomAddress.Parse(invitation, ServerBox.Text);
         var existing = savedRooms.FirstOrDefault(x => x.Server == address.Server && x.Code == address.Code);
         if (existing is not null) { SavedRoomsList.SelectedItem = existing; SetStatus("This room is already saved."); return; }
-        var name = Dialogs.Prompt(this, "Save room", "Room name", "Room " + address.Code[..6]); if (name is null) return;
+        var name = Dialogs.Prompt(this, "Add room by invitation", "Room name", "Room " + address.Code[..6]); if (name is null) return;
         var saved = new SavedRoom(Guid.NewGuid().ToString("N"), name, address.Server, address.Code);
         savedRooms.Add(saved); SaveRooms(); SavedRoomsList.SelectedItem = saved;
     }
@@ -76,7 +119,7 @@ public partial class MainWindow
             catch { await Disconnect(); throw; }
             RoomHeading.Text = saved.Name;
             RoomSubtitle.Text = saved.HostKey is null ? "Waiting for host approval" : "Choose a video from the library.";
-            RememberCurrentRoom(); roomPanelVisible = true; ShowPage("Room");
+            RememberCurrentRoom(); roomPanelVisible = true; ShowPage("Rooms");
         }
         finally { roomBusy = false; RefreshSavedRooms(); }
     });

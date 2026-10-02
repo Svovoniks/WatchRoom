@@ -9,7 +9,7 @@ namespace Watchroom.Core;
 public static class AnimeTitles
 {
     private static readonly SemaphoreSlim Gate = new(1);
-    private static string Key(string text) => Regex.Replace(text, @"[^\p{L}\p{N}]", "").ToLowerInvariant();
+    private static string Key(string text) => MetadataTitles.Normalize(text);
     public static string[] FindAliases(Stream xml, string title)
     {
         using var reader = XmlReader.Create(xml, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, MaxCharactersInDocument = 100_000_000 });
@@ -30,6 +30,8 @@ public static class AnimeTitles
             if (!File.Exists(attempted) || DateTime.UtcNow - File.GetLastWriteTimeUtc(attempted) > TimeSpan.FromDays(1))
             {
                 await File.WriteAllTextAsync(attempted, "", ct);
+                try
+                {
                 using var response = await http.GetAsync("https://anidb.net/api/anime-titles.xml.gz", HttpCompletionOption.ResponseHeadersRead, ct);
                 response.EnsureSuccessStatusCode();
                 await using var input = await response.Content.ReadAsStreamAsync(ct);
@@ -38,6 +40,9 @@ public static class AnimeTitles
                 data.Position = 0; using (var validation = new GZipStream(data, CompressionMode.Decompress, true)) FindAliases(validation, title);
                 var temp = path + ".tmp";
                 try { await File.WriteAllBytesAsync(temp, data.ToArray(), ct); File.Move(temp, path, true); } finally { if (File.Exists(temp)) File.Delete(temp); }
+                }
+                catch (Exception ex) when (File.Exists(path) && !ct.IsCancellationRequested && ex is HttpRequestException or IOException or TaskCanceledException or InvalidDataException or XmlException)
+                { /* A stale, validated title dump is better than losing all local aliases. */ }
             }
             if (!File.Exists(path)) return [];
             using var file = File.OpenRead(path); using var gzip = new GZipStream(file, CompressionMode.Decompress);

@@ -1,0 +1,65 @@
+name: Build and release
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Resolve version
+        shell: pwsh
+        run: |
+          $version = '0.2.0'
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $version = $env:GITHUB_REF_NAME.TrimStart('v') }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Release tags must be vMAJOR.MINOR.PATCH' }
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Restore and build
+        shell: pwsh
+        run: |
+          dotnet restore Watchroom.slnx --locked-mode
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet build Watchroom.slnx -c Release --no-restore -p:Version=$env:APP_VERSION
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Update safety checks
+        run: dotnet run --project tests/Watchroom.UpdateChecks -c Release
+      - name: Metadata regression checks
+        run: dotnet run --project tests/Watchroom.Smoke -c Release -- --metadata-cache
+      - name: Desktop regression checks
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release
+      - name: Publish Windows app
+        shell: pwsh
+        run: |
+          dotnet publish src/Watchroom.Desktop -c Release -r win-x64 --self-contained true -o artifacts/Watchroom -p:Version=$env:APP_VERSION -p:VlcWindowsX86Enabled=false -p:VlcWindowsArm64Enabled=false
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./scripts/package.ps1 -SkipPublish -Version $env:APP_VERSION
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Watchroom-windows-${{ env.APP_VERSION }}
+          path: artifacts/Watchroom-Setup-*-win-x64.exe
+          retention-days: 14
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = "artifacts/Watchroom-Setup-$env:APP_VERSION-win-x64.exe"
+          $checksum = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$checksum  $(Split-Path $installer -Leaf)" | Set-Content artifacts/SHA256SUMS.txt
+          gh release create $env:GITHUB_REF_NAME $installer artifacts/SHA256SUMS.txt --verify-tag --title "Watchroom $env:APP_VERSION" --generate-notes
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

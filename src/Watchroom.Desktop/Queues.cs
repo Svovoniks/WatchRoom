@@ -1,6 +1,8 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using Watchroom.Core;
 
 namespace Watchroom.Desktop;
@@ -36,7 +38,20 @@ public partial class MainWindow
         updatingQueues = false;
         RefreshSavedItems();
     }
-    private void RefreshSavedItems() => SavedQueueItems.ItemsSource = QueuePicker.SelectedItem is SavedQueue saved ? ResolveQueue(saved).ToArray() : Array.Empty<MediaItem>();
+    private sealed record QueueEntry(int Index, MediaItem? Media)
+    {
+        public string Number => (Index + 1).ToString("00");
+        public string Title => Media is null ? "Video no longer in library" : Media.Episode is null ? Media.Title : Media.EpisodeDisplayTitle;
+        public string Caption => Media is null ? "Remove this entry or add the video again." : Media.Caption + (Media.Available ? "" : " · Unavailable");
+    }
+    private void RefreshSavedItems()
+    {
+        var saved = QueuePicker.SelectedItem as SavedQueue;
+        SavedQueueItems.ItemsSource = saved?.MediaIds.Select((id, index) => new QueueEntry(index, items.FirstOrDefault(x => x.Id == id))).ToArray() ?? [];
+        QueueDetailTitle.Text = saved?.Name ?? "Choose a queue";
+        QueueDetailCaption.Text = saved is null ? "Create a queue to get started." : $"{saved.MediaIds.Length} videos · Order saved automatically";
+        QueueEmpty.Visibility = saved?.MediaIds.Length > 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
     private void SavedQueueChanged(object sender, SelectionChangedEventArgs e) { if (!updatingQueues && SavedQueueItems is not null) RefreshSavedItems(); }
     private void SelectPlaybackQueue(SavedQueue saved)
     {
@@ -81,17 +96,29 @@ public partial class MainWindow
         if (!ResolveQueue(saved).Any(x => File.Exists(x.Path))) { SetStatus("This queue has no available videos."); return; }
         SelectPlaybackQueue(saved); NextQueued(sender, e);
     }
-    private void UpdateSavedQueue(SavedQueue saved, string[] ids)
+    private void ApplyQueueOrder(SavedQueue saved, int[] order)
     {
-        var updated = saved with { MediaIds = ids };
+        if (!CanEditQueue() || !savedQueues.Contains(saved) || order.Distinct().Count() != order.Length || order.Any(i => i < 0 || i >= saved.MediaIds.Length)) return;
+        var resolvedIndices = Enumerable.Range(0, saved.MediaIds.Length).Where(i => items.Any(x => x.Id == saved.MediaIds[i])).ToArray();
+        var cursor = queuePosition >= 0 && queuePosition < resolvedIndices.Length ? resolvedIndices[queuePosition] : -1;
+        var updated = saved with { MediaIds = order.Select(i => saved.MediaIds[i]).ToArray() };
         savedQueues[savedQueues.IndexOf(saved)] = updated;
-        if (activeQueueId == saved.Id) SelectPlaybackQueue(updated);
+        if (activeQueueId == saved.Id)
+        {
+            queue.Clear(); queue.AddRange(ResolveQueue(updated));
+            var resolvedOrder = order.Where(i => items.Any(x => x.Id == saved.MediaIds[i])).ToArray();
+            queuePosition = cursor < 0 ? -1 : Array.IndexOf(resolvedOrder, cursor);
+            if (cursor >= 0 && queuePosition < 0) queuePosition = resolvedOrder.Count(i => i < cursor) - 1;
+            PublishQueue();
+        }
         SaveQueues(); RefreshQueuePickers(saved.Id);
     }
     private void RemoveSavedItem(object sender, RoutedEventArgs e)
     {
-        if (!CanEditQueue() || QueuePicker.SelectedItem is not SavedQueue saved || SavedQueueItems.SelectedIndex < 0) return;
-        UpdateSavedQueue(saved, saved.MediaIds.Where((_, index) => index != SavedQueueItems.SelectedIndex).ToArray());
+        if (QueuePicker.SelectedItem is not SavedQueue saved) return;
+        var entry = (sender as FrameworkElement)?.Tag as QueueEntry ?? SavedQueueItems.SelectedItem as QueueEntry;
+        if (entry is null) return;
+        ApplyQueueOrder(saved, Enumerable.Range(0, saved.MediaIds.Length).Where(i => i != entry.Index).ToArray());
     }
     private void EditQueueOrder(object sender, RoutedEventArgs e)
     {
@@ -99,8 +126,76 @@ public partial class MainWindow
         var index = SavedQueueItems.SelectedIndex;
         var destination = index + ((string)((Button)sender).Tag == "Earlier" ? -1 : 1);
         if (index < 0 || destination < 0 || destination >= saved.MediaIds.Length) return;
-        var ids = saved.MediaIds.ToArray(); (ids[index], ids[destination]) = (ids[destination], ids[index]);
-        UpdateSavedQueue(saved, ids); SavedQueueItems.SelectedIndex = destination;
+        MoveSavedEntry(saved, index, destination);
+    }
+    private void MoveSavedEntry(SavedQueue saved, int source, int destination)
+    {
+        if (source < 0 || destination < 0 || source >= saved.MediaIds.Length || destination >= saved.MediaIds.Length || source == destination) return;
+        var order = Enumerable.Range(0, saved.MediaIds.Length).ToList(); order.RemoveAt(source); order.Insert(destination, source);
+        ApplyQueueOrder(saved, order.ToArray()); SavedQueueItems.SelectedIndex = destination;
+    }
+    private sealed record QueueDrag(SavedQueue Queue, int Index);
+    private Point queueDragStart;
+    private QueueEntry? queueDragEntry;
+    private void QueueDragDown(object sender, MouseButtonEventArgs e)
+    {
+        queueDragEntry = (sender as FrameworkElement)?.DataContext as QueueEntry;
+        queueDragStart = e.GetPosition(SavedQueueItems);
+    }
+    private void QueueDragMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed) { queueDragEntry = null; return; }
+        if (queueDragEntry is not { } entry || QueuePicker.SelectedItem is not SavedQueue saved) return;
+        var point = e.GetPosition(SavedQueueItems);
+        if (Math.Abs(point.X - queueDragStart.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(point.Y - queueDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        queueDragEntry = null;
+        if (CanEditQueue())
+        {
+            try { DragDrop.DoDragDrop((DependencyObject)sender, new DataObject(typeof(QueueDrag), new QueueDrag(saved, entry.Index)), DragDropEffects.Move); }
+            finally { QueueDropMarker.Visibility = Visibility.Collapsed; }
+        }
+    }
+    private (int Index, double Y) QueueDropLocation(DragEventArgs e)
+    {
+        var pointer = e.GetPosition(SavedQueueItems).Y;
+        var result = (Index: SavedQueueItems.Items.Count, Y: 0d);
+        for (var i = 0; i < SavedQueueItems.Items.Count; i++)
+        {
+            if (SavedQueueItems.ItemContainerGenerator.ContainerFromIndex(i) is not ListBoxItem card) continue;
+            var top = card.TranslatePoint(new Point(), SavedQueueItems).Y;
+            if (pointer < top + card.ActualHeight / 2) return (i, top);
+            result = (i + 1, top + card.ActualHeight);
+        }
+        return result;
+    }
+    private void QueueDragOver(object sender, DragEventArgs e)
+    {
+        var drag = e.Data.GetData(typeof(QueueDrag)) as QueueDrag;
+        e.Effects = drag is not null && ReferenceEquals(QueuePicker.SelectedItem, drag.Queue) && room?.Identity?.Host != false ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+        QueueDropMarker.Visibility = e.Effects == DragDropEffects.Move ? Visibility.Visible : Visibility.Collapsed;
+        var markerY = QueueDropLocation(e).Y;
+        QueueDropMarker.Margin = new Thickness(8, Math.Clamp(markerY, 0, Math.Max(0, SavedQueueItems.ActualHeight - 4)), 28, 0);
+        var point = e.GetPosition(SavedQueueItems);
+        if (FindQueueScroll(SavedQueueItems) is { } scroll)
+        {
+            if (point.Y < 32) scroll.LineUp(); else if (point.Y > SavedQueueItems.ActualHeight - 32) scroll.LineDown();
+        }
+    }
+    private void QueueDragLeave(object sender, DragEventArgs e) => QueueDropMarker.Visibility = Visibility.Collapsed;
+    private static ScrollViewer? FindQueueScroll(DependencyObject parent)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        { var child = VisualTreeHelper.GetChild(parent, i); if (child is ScrollViewer scroll) return scroll; if (FindQueueScroll(child) is { } found) return found; }
+        return null;
+    }
+    private void QueueDrop(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        QueueDropMarker.Visibility = Visibility.Collapsed;
+        if (e.Data.GetData(typeof(QueueDrag)) is not QueueDrag drag || !ReferenceEquals(QueuePicker.SelectedItem, drag.Queue)) return;
+        var insertion = QueueDropLocation(e).Index;
+        MoveSavedEntry(drag.Queue, drag.Index, insertion > drag.Index ? insertion - 1 : insertion);
     }
     private void AddQueueVideos(object sender, RoutedEventArgs e)
     {
@@ -145,7 +240,7 @@ public partial class MainWindow
     private void CardContextMenu(object sender, ContextMenuEventArgs e)
     {
         if (sender is not Button button || button.Tag is not LibraryCard card) return;
-        var videos = LibraryCatalog.CardItems(items, card).ToArray();
+        var videos = LibraryCatalog.CardItems(items, card, displaySpecialsWithinSeasons).ToArray();
         var menu = new ContextMenu { PlacementTarget = button };
         var open = new MenuItem { Header = card.Level is "series" or "season" ? "Open" : "Details" }; open.Click += (_, _) => SelectMovie(button, new RoutedEventArgs()); menu.Items.Add(open);
         var play = new MenuItem { Header = card.Level is "series" or "season" ? "Play all" : "Play", IsEnabled = room?.Identity?.Host != false && videos.Any(x => x.Available && File.Exists(x.Path)) };
@@ -156,8 +251,42 @@ public partial class MainWindow
             PublishQueue(); NextQueued(button, new RoutedEventArgs());
         };
         menu.Items.Add(play); menu.Items.Add(QueueMenu(videos));
+        var members = items.Where(x => x.Id == card.Media.Id || card.Level is "series" or "season" && LibraryIdentity.SameShow(x, card.Media)).ToArray();
+        var locked = new MenuItem { Header = "Lock metadata", IsCheckable = true, IsChecked = members.All(x => x.MetadataLocked) };
+        locked.Click += (_, _) => { foreach (var item in members) library.Save(item with { MetadataLocked = locked.IsChecked }); RefreshLibrary(); };
+        menu.Items.Add(locked);
+        if (card.Media.Series is not null)
+        {
+            var ordering = new MenuItem { Header = "Episode numbering" };
+            foreach (var order in new[] { "aired", "absolute", "dvd" })
+            {
+                var choice = new MenuItem { Header = order == "dvd" ? "DVD order (TMDB)" : order == "absolute" ? "Absolute numbering" : "Aired order", IsCheckable = true, IsChecked = card.Media.NumberingOrder == order };
+                choice.Click += async (_, _) => await Guard(async () =>
+                {
+                    foreach (var item in items.Where(x => LibraryIdentity.SameShow(x, card.Media)).ToArray()) library.Save(item with { NumberingOrder = order, MetadataFetchedAt = 0 });
+                    await FetchArtwork(lifetime.Token, true); RefreshLibrary();
+                });
+                ordering.Items.Add(choice);
+            }
+            menu.Items.Add(ordering);
+        }
         if (card.Level is "movie" or "episode")
         {
+            if (card.Level == "episode")
+            {
+                var versions = items.Where(x => LibraryIdentity.SameShow(x, card.Media) && x.Season == card.Media.Season && x.Episode == card.Media.Episode && x.EpisodeEnd == card.Media.EpisodeEnd && !x.IsVirtual).ToArray();
+                if (versions.Length > 1)
+                {
+                    var versionMenu = new MenuItem { Header = "Choose version" };
+                    foreach (var version in versions) { var choice = new MenuItem { Header = Path.GetFileName(version.Path) }; choice.Click += (_, _) => Select(version); versionMenu.Items.Add(choice); }
+                    menu.Items.Add(versionMenu);
+                }
+            }
+            if (!card.Media.IsVirtual)
+            {
+                var export = new MenuItem { Header = "Export NFO metadata" }; export.Click += async (_, _) => await Guard(() =>
+                { LocalMetadata.Export(card.Media); SetStatus("NFO metadata saved beside the video."); return Task.CompletedTask; }); menu.Items.Add(export);
+            }
             var copy = new MenuItem { Header = "Copy file path" }; copy.Click += (_, _) => { try { Clipboard.SetText(card.Media.Path); } catch (System.Runtime.InteropServices.ExternalException) { SetStatus("Clipboard is busy."); } }; menu.Items.Add(copy);
         }
         button.ContextMenu = menu; menu.IsOpen = true; e.Handled = true;

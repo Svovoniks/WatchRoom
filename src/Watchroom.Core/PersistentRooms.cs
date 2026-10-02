@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Watchroom.Core;
 
-public record PersistentRoom(string Code, string HostKeyHash);
+public record PersistentRoom(string Code, string HostKeyHash, string[]? ApprovedGuests = null, bool SharedControls = false, AdmittedGuest[]? Guests = null);
 public sealed class PersistentRooms
 {
     private readonly LibraryStore store;
@@ -15,6 +15,16 @@ public sealed class PersistentRooms
         rooms = Wire.Read<List<PersistentRoom>>(store.Setting("persistentRooms") ?? "[]");
     }
     public PersistentRoom[] All() { lock (gate) return rooms.ToArray(); }
+    public void Update(string code, AdmittedGuest[] guests, bool sharedControls)
+    {
+        lock (gate)
+        {
+            var index = rooms.FindIndex(x => x.Code == code);
+            if (index < 0) return;
+            rooms[index] = rooms[index] with { ApprovedGuests = guests.Select(x => x.Id).ToArray(), Guests = guests, SharedControls = sharedControls };
+            store.Setting("persistentRooms", Wire.Serialize(rooms));
+        }
+    }
     public string Create(string code)
     {
         lock (gate)

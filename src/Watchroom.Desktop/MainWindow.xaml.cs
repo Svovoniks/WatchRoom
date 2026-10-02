@@ -1,5 +1,6 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
@@ -25,8 +26,22 @@ public partial class MainWindow : Window
         public override string ToString() => Name;
     }
     private readonly LibraryStore library;
+    private readonly ConcurrentDictionary<string, MediaItem> libraryUpdates = new();
+    private readonly ObservableCollection<LibraryCardView> libraryCards = [];
+    private readonly EpisodeArtwork episodeArtwork = new();
+    private readonly HashSet<string> episodeArtworkRequests = [];
+    private bool libraryViewDirty;
+    private string? detailPosterPath;
+    private int detailPosterGeneration;
+    private string? pendingScanStatus;
+    private sealed class ScanProgressSink(MainWindow window) : IProgress<string>
+    {
+        public void Report(string value) => Interlocked.Exchange(ref window.pendingScanStatus, value);
+    }
+    private readonly DispatcherTimer libraryUpdateTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private readonly ObservableCollection<LibraryFolder> folders = [];
     private readonly ObservableCollection<string> chat = [];
+    private readonly Dictionary<string, Guid> pendingAdmissions = [];
     private readonly List<FileSystemWatcher> watchers = [];
     private readonly List<MediaItem> queue = [];
     private int queuePosition = -1;
@@ -39,6 +54,8 @@ public partial class MainWindow : Window
     private int videoClickGeneration;
     private readonly DispatcherTimer scanDelay = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly SemaphoreSlim loading = new(1);
+    private readonly SemaphoreSlim librarySearchGate = new(1);
+    private CancellationTokenSource? librarySearchCancellation;
     private readonly CancellationTokenSource lifetime = new();
     private List<MediaItem> items = [];
     private MediaItem? selected;
@@ -65,11 +82,15 @@ public partial class MainWindow : Window
     private Rect previousBounds;
     private ResizeMode previousResizeMode;
     private bool roomPanelVisible;
+    private double roomPanelWidth = 340;
     private long lastPlayerInteraction;
     private Point lastPlayerMouse;
     private string? browseSeries, browseKind;
     private int? browseSeason;
+    private int libraryCategory;
+    private IReadOnlyList<LibraryBreadcrumb> breadcrumbItems = [];
     private bool artworkBusy;
+    private bool displaySpecialsWithinSeasons;
 
     public MainWindow()
     {
@@ -85,6 +106,7 @@ public partial class MainWindow : Window
         Height = Math.Min(Height, SystemParameters.WorkArea.Height);
         Width = Math.Min(Width, SystemParameters.WorkArea.Width);
         library = new LibraryStore(App.DataDirectory);
+        InitializeUpdates();
         light = library.Setting("theme") == "light";
         ApplyTheme();
         ShowPage("Library");
@@ -93,7 +115,21 @@ public partial class MainWindow : Window
         DisplayNameBox.Text = library.Setting("name") ?? Environment.UserName;
         ServerBox.Text = library.Setting("server") ?? "https://watchroom-rooms.svovoniks.chatgpt.site";
         FfmpegBox.Text = library.Setting("ffmpeg") ?? "";
+        try
+        {
+            MetadataToken.Password = MetadataCredential.Load(App.DataDirectory);
+            MetadataKeyStatus.Text = MetadataToken.Password.Length > 0 ? "Saved key loaded." : "";
+        }
+        catch (Win32Exception) { SetStatus("Could not read the saved TMDB token. Enter it again in Settings."); }
         AutoArtwork.IsChecked = library.Setting("artwork") != "false";
+        var metadataOptions = MetadataOptions.Load(library);
+        MetadataProviders.Text = string.Join(", ", metadataOptions.ProviderOrder);
+        MetadataLanguage.Text = metadataOptions.Language; MetadataCountry.Text = metadataOptions.Country;
+        MetadataRefreshDays.Text = metadataOptions.RefreshDays.ToString();
+        ImportMissing.IsChecked = metadataOptions.ImportMissing; ImportUpcoming.IsChecked = metadataOptions.ImportUpcoming;
+        SaveNfo.IsChecked = metadataOptions.SaveNfo; DisplaySpecials.IsChecked = metadataOptions.DisplaySpecialsWithinSeasons;
+        GroupShows.IsChecked = metadataOptions.GroupShowsByProvider;
+        displaySpecialsWithinSeasons = metadataOptions.DisplaySpecialsWithinSeasons;
         foreach (var path in Wire.Read<string[]>(library.Setting("exclusions") ?? "[]")) exclusions.Add(path);
         ExcludedFolderList.ItemsSource = exclusions;
         try { savedQueues.AddRange(Wire.Read<List<SavedQueue>>(library.Setting("queues") ?? "[]")); }
@@ -107,6 +143,9 @@ public partial class MainWindow : Window
         activeQueueId = savedQueues.FirstOrDefault(x => x.Id == library.Setting("activeQueue"))?.Id ?? savedQueues[0].Id;
         var savedQueue = library.Setting("queue") ?? Wire.Serialize(savedQueues.First(x => x.Id == activeQueueId).MediaIds);
         RefreshLibrary(); WatchFolders();
+        library.MediaSaved += QueueLibraryUpdate;
+        libraryUpdateTimer.Tick += (_, _) => ApplyLibraryUpdates();
+        libraryUpdateTimer.Start();
         try { foreach (var id in Wire.Read<string[]>(savedQueue).Take(10000)) if (items.FirstOrDefault(x => x.Id == id) is { } queued) queue.Add(queued); }
         catch (System.Text.Json.JsonException) { }
         if (int.TryParse(library.Setting("queuePosition"), out var cursor)) queuePosition = Math.Clamp(cursor, -1, queue.Count - 1);
@@ -141,7 +180,7 @@ public partial class MainWindow : Window
                 {
                     if (closing) return;
                     PlayButton.Content = "▶";
-                    if (room is null && playingItem is not null) library.Setting("position:" + playingItem.Id, "0");
+                    if (room is null && playingItem is not null) { library.Setting("position:" + playingItem.Id, "0"); library.Setting("watched:" + playingItem.Id, "true"); foreach (var card in libraryCards.Where(x => x.Card.Media.Id == playingItem.Id)) UpdateCardPlayback(card); }
                     if (room?.Identity?.Host == true) SendPlayback(false, Math.Max(0, player.Length));
                     if (queue.Count > 0 && (room is null || room.Identity?.Host == true)) NextQueued(this, new RoutedEventArgs());
                 });
@@ -182,20 +221,79 @@ public partial class MainWindow : Window
         RoomPage.Visibility = name == "Room" ? Visibility.Visible : Visibility.Collapsed;
         ApplyPlayerLayout();
         UpdateSessionControls();
-        if (name == "Library") SearchBox.Focus();
+        if (name == "Library") FilterLibrary();
         if (name == "Rooms") RefreshSavedRooms();
+        UpdateLibraryCategorySelection(name is "Library" or "Details");
         foreach (var button in new[] { LibraryNav, QueuesNav, RoomNav, FoldersNav, SettingsNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button,
                 (string)button.Tag == (name == "Details" ? "Library" : name == "Room" ? "Rooms" : name) ? "Selected" : "");
     }
     private void Navigate(object sender, RoutedEventArgs e) => ShowPage((string)((Button)sender).Tag);
+    private static int CategoryFor(MediaItem item) => item.Kind == "Anime" ? 3 : item.Series is not null ? 2 : 1;
+    private static string CategoryName(int category) => category switch { 1 => "Movies", 2 => "Shows", 3 => "Anime", _ => "All" };
+    private static string SeasonName(int season) => season < 0 ? "Season unknown" : season == 0 ? "Specials" : $"Season {season}";
+    private void UpdateLibraryCategorySelection(bool active)
+    {
+        foreach (var button in new[] { AllLibraryNav, AnimeLibraryNav, ShowsLibraryNav, MoviesLibraryNav })
+            System.Windows.Automation.AutomationProperties.SetItemStatus(button, active && int.Parse((string)button.Tag) == libraryCategory ? "Selected" : "");
+    }
+    private void LibraryMenuClick(object sender, RoutedEventArgs e)
+    {
+        var visible = LibraryCategories.Visibility == Visibility.Visible;
+        LibraryCategories.Visibility = LibraryPage.Visibility == Visibility.Visible && visible ? Visibility.Collapsed : Visibility.Visible;
+        LibraryChevron.Text = LibraryCategories.Visibility == Visibility.Visible ? "▾" : "▸";
+        ShowPage("Library"); UpdateBreadcrumbs();
+    }
+    private void LibraryCategoryClick(object sender, RoutedEventArgs e) => NavigateLibrary(int.Parse((string)((Button)sender).Tag));
+    private void NavigateLibrary(int category, string? series = null, string? kind = null, int? season = null)
+    {
+        libraryCategory = category; browseSeries = series; browseKind = kind; browseSeason = season;
+        ShowPage("Library"); SearchBox.Clear(); LibraryStatusFilter.SelectedIndex = 0;
+        FilterLibrary();
+    }
+    private void UpdateBreadcrumbs()
+    {
+        if (LibraryBreadcrumbs is null || DetailBreadcrumbs is null) return;
+        var detail = Details.Visibility == Visibility.Visible ? selected : null;
+        var show = detail?.Series is not null ? detail : browseSeries is null ? null : items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind));
+        var category = detail is not null ? CategoryFor(detail) : libraryCategory;
+        var crumbs = new List<LibraryBreadcrumb> { new("All", "category", Separator: "") };
+        if (category != 0) crumbs.Add(new(CategoryName(category), "category", category));
+        if (show?.Series is not null)
+        {
+            var showId = LibraryIdentity.ShowKey(show);
+            crumbs.Add(new(show.Series, "show", category, showId, show.Kind));
+            var season = detail is not null ? detail.Season ?? -1 : browseSeason;
+            if (season is { } number) crumbs.Add(new(SeasonName(number), "season", category, showId, show.Kind, number));
+        }
+        if (detail is not null) crumbs.Add(new(detail.Series is null ? detail.DisplayTitle : detail.EpisodeDisplayTitle, "media", category, MediaId: detail.Id));
+        crumbs[^1] = crumbs[^1] with { IsCurrent = true };
+        // Metadata refreshes should not recreate an unchanged navigation bar.
+        if (breadcrumbItems.SequenceEqual(crumbs)) return;
+        breadcrumbItems = crumbs; LibraryBreadcrumbs.ItemsSource = crumbs; DetailBreadcrumbs.ItemsSource = crumbs;
+    }
+    private void BreadcrumbClick(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is not FrameworkElement element) return;
+        var crumb = element.DataContext as LibraryBreadcrumb;
+        if (crumb is null) return;
+        if (crumb.Level == "media") { if (items.FirstOrDefault(x => x.Id == crumb.MediaId) is { } item) Select(item); }
+        else NavigateLibrary(crumb.Category, crumb.Series, crumb.Kind, crumb.Season);
+        e.Handled = true;
+    }
     private void RefreshLibrary()
     {
         library.Prune(folders, exclusions);
+        libraryUpdates.Clear();
         items = library.All();
-        if (browseSeries is not null && !items.Any(x => x.Series == browseSeries && x.Kind == browseKind))
+        RefreshLibraryFromItems(items);
+    }
+    private void RefreshLibraryFromItems(List<MediaItem> refreshedItems)
+    {
+        items = refreshedItems;
+        if (browseSeries is not null && !items.Any(x => LibraryIdentity.InShow(x, browseSeries, browseKind)))
         {
-            var changed = items.FirstOrDefault(x => x.Series == browseSeries);
+            var changed = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries));
             if (changed is null) { browseSeries = browseKind = null; browseSeason = null; }
             else browseKind = changed.Kind;
         }
@@ -211,40 +309,141 @@ public partial class MainWindow : Window
         if (Details.Visibility == Visibility.Visible && selected is not null && items.FirstOrDefault(x => x.Id == selected.Id) is { } updated) Select(updated);
         SetStatus($"{items.Count(x => x.Available)} videos available · {folders.Count} {(folders.Count == 1 ? "folder" : "folders")}");
     }
-    private void FilterLibrary()
+    private void QueueLibraryUpdate(MediaItem item) => libraryUpdates[item.Id] = item;
+    private void ApplyLibraryUpdates()
     {
-        if (PosterGrid is null || Category is null || NoResults is null) return;
-        SearchHint.Text = browseSeries is null ? "Search library…" : browseSeason is null ? "Search seasons…" : "Search episodes…";
-        SearchBox.ToolTip = browseSeries is null ? "Search your library (Ctrl+F)" : "Search within " + browseSeries + (browseSeason is null ? "" : $" · Season {browseSeason}");
+        if (closing) return;
+        if (Interlocked.Exchange(ref pendingScanStatus, null) is { } progress && scanning)
+        { ScanStatus.Text = progress; SetStatus(progress); }
+        if (libraryUpdates.IsEmpty)
+        {
+            if (libraryViewDirty && librarySearchCancellation is null) FilterLibrary(backgroundUpdate: true);
+            return;
+        }
+        var updated = items.ToDictionary(item => item.Id);
+        var changed = false;
+        foreach (var id in libraryUpdates.Keys)
+            if (libraryUpdates.TryRemove(id, out var item) && (!updated.TryGetValue(id, out var previous) || previous != item))
+            { updated[id] = item; changed = true; }
+        if (!changed) return;
+        var browsedId = items.FirstOrDefault(item => LibraryIdentity.InShow(item, browseSeries, browseKind))?.Id;
+        items = updated.Values.ToList();
+        if (browseSeries is not null && !items.Any(item => LibraryIdentity.InShow(item, browseSeries, browseKind)))
+        {
+            var current = browsedId is null ? null : updated.GetValueOrDefault(browsedId);
+            if (current?.Series is not null) { browseSeries = LibraryIdentity.ShowKey(current); browseKind = current.Kind; }
+            else { browseSeries = browseKind = null; browseSeason = null; }
+        }
+        libraryViewDirty = true;
+        if (librarySearchCancellation is null) FilterLibrary(backgroundUpdate: true);
+        if (selected is not null && items.FirstOrDefault(item => item.Id == selected.Id) is { } refreshed && refreshed != selected)
+        {
+            selected = refreshed;
+            if (Details.Visibility == Visibility.Visible) Select(refreshed);
+        }
+    }
+    private async void FilterLibrary(bool debounce = false, bool backgroundUpdate = false)
+    {
+        if (PosterGrid is null || LibraryStatusFilter is null || NoResults is null || library is null || closing) return;
+        librarySearchCancellation?.Cancel();
+        using var request = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        librarySearchCancellation = request;
+        libraryViewDirty = false;
+        var cancellation = request.Token;
+        // Capture one immutable library and navigation state before leaving the UI thread.
+        var status = LibraryStatusFilter.SelectedIndex;
+        var source = status == 2 ? items.Where(x => !x.Available).ToList() : items;
+        var series = browseSeries; var kind = browseKind; var season = browseSeason;
+        var showTitle = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind))?.Series ?? browseSeries;
+        SearchHint.Text = browseSeries is null ? "Search your library" : browseSeason is null ? "Search seasons" : "Search episodes";
+        SearchBox.ToolTip = browseSeries is null ? "Search your library (Ctrl+F)" : "Search within " + showTitle + (browseSeason is null ? "" : $" · Season {browseSeason}");
         System.Windows.Automation.AutomationProperties.SetName(SearchBox, SearchHint.Text);
-        var filter = Category.SelectedIndex;
+        var filter = libraryCategory;
         var query = SearchBox.Text.Trim();
-        IEnumerable<MediaItem> visible = items;
-        visible = filter switch { 1 => visible.Where(x => x.Kind == "Movie"), 2 => visible.Where(x => x.Kind == "Show"), 3 => visible.Where(x => x.Kind == "Anime"), 4 => visible.Where(x => !File.Exists(x.Poster) && !File.Exists(x.SeriesPoster) && !File.Exists(x.SeasonPoster)), 5 => visible.Where(x => !x.Available), _ => visible };
-        var cards = LibraryCatalog.Search(visible, query, browseSeries, browseKind, browseSeason);
-        PosterGrid.ItemsSource = cards;
-        ResultCount.Text = $"{cards.Count} {(cards.Count == 1 ? "item" : "items")}";
+        if (!backgroundUpdate)
+        {
+            ResultCount.Text = "Searching…";
+
+            NoResults.Visibility = Visibility.Collapsed;
+        }
         ClearSearchButton.Visibility = query.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-        NoResults.Visibility = items.Count > 0 && cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        LibraryBack.Visibility = browseSeries is null ? Visibility.Collapsed : Visibility.Visible;
-        LibraryLocation.Text = browseSeries is null ? (query.Length > 0 ? "Search results" : ((ComboBoxItem)Category.SelectedItem).Content.ToString()) : browseSeries + (browseSeason is null ? " · Seasons" : browseSeason == 0 ? " · Specials" : $" · Season {browseSeason}");
-        var seasonItem = browseSeason is null ? null : items.FirstOrDefault(x => x.Series == browseSeries && x.Kind == browseKind && (x.Season ?? 1) == browseSeason);
+        UpdateBreadcrumbs();
+        UpdateLibraryCategorySelection(LibraryPage.Visibility == Visibility.Visible || Details.Visibility == Visibility.Visible);
+        var seasonItem = browseSeason is null ? null : items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind) && (x.Season ?? -1) == browseSeason);
         SeasonInformation.Visibility = seasonItem is null ? Visibility.Collapsed : Visibility.Visible;
         SeasonSummary.Text = seasonItem is null ? "" : (string.IsNullOrWhiteSpace(seasonItem.SeasonTitle) ? "" : seasonItem.SeasonTitle + "\n\n") + (seasonItem.SeasonOverview ?? seasonItem.Overview ?? "No season overview available.") + (seasonItem.SeasonSource is null ? "" : "\n\nMetadata: " + seasonItem.SeasonSource);
         EmptyLibrary.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        try
+        {
+            if (debounce) await Task.Delay(200, cancellation);
+            // A slow artwork drive must not spawn overlapping searches on every keystroke.
+            await librarySearchGate.WaitAsync(cancellation);
+            List<LibraryCard> cards;
+            try { cards = await LibraryCatalog.SearchAsync(source, query, filter, series, kind, season, cancellation, displaySpecialsWithinSeasons); }
+            finally { librarySearchGate.Release(); }
+            if (status == 1) cards = cards.Where(card => card.Poster is null).ToList();
+            if (cancellation.IsCancellationRequested || librarySearchCancellation != request) return;
+            if (PosterGrid.ItemsSource != libraryCards) PosterGrid.ItemsSource = libraryCards;
+            var views = libraryCards.ToDictionary(view => view.Key);
+            var desiredKeys = cards.Select(LibraryCardView.Identity).ToHashSet();
+            var slice = Stopwatch.StartNew();
+            async Task YieldForInput()
+            {
+                if (slice.ElapsedMilliseconds < 6) return;
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                cancellation.ThrowIfCancellationRequested(); slice.Restart();
+            }
+            for (var index = libraryCards.Count - 1; index >= 0; index--)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (!desiredKeys.Contains(libraryCards[index].Key)) libraryCards.RemoveAt(index);
+                await YieldForInput();
+            }
+            for (var index = 0; index < cards.Count; index++)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (!views.TryGetValue(LibraryCardView.Identity(cards[index]), out var view)) view = new(cards[index]);
+                else view.Update(cards[index]);
+                UpdateCardPlayback(view);
+                if (index >= libraryCards.Count || libraryCards[index] != view)
+                {
+                    var existingIndex = libraryCards.IndexOf(view);
+                    if (existingIndex >= 0) libraryCards.Move(existingIndex, index);
+                    else libraryCards.Insert(index, view);
+                }
+                await YieldForInput();
+            }
+            ResultCount.Text = $"{cards.Count} {(cards.Count == 1 ? "item" : "items")}";
+            NoResults.Visibility = items.Count > 0 && cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (librarySearchCancellation == request && !closing)
+            {
+                ResultCount.Text = "Search failed"; SetStatus("Library search failed: " + ex.Message);
+            }
+        }
+        finally
+        {
+            if (librarySearchCancellation == request)
+            {
+                librarySearchCancellation = null;
+
+            }
+        }
     }
     private void SearchChanged(object sender, TextChangedEventArgs e)
     {
-        FilterLibrary();
+        FilterLibrary(debounce: true);
     }
     private void ClearSearch(object sender, RoutedEventArgs e) { SearchBox.Clear(); SearchBox.Focus(); }
+    private void SearchFrameClick(object sender, MouseButtonEventArgs e) => SearchBox.Focus();
     private void ResetFilters(object sender, RoutedEventArgs e)
     {
-        browseSeries = browseKind = null; browseSeason = null;
-        SearchBox.Clear(); Category.SelectedIndex = 0; FilterLibrary(); SearchBox.Focus();
+        NavigateLibrary(0);
     }
-    private void FilterChanged(object sender, SelectionChangedEventArgs e) { browseSeries = browseKind = null; browseSeason = null; FilterLibrary(); }
-    private void LibraryBackClick(object sender, RoutedEventArgs e) { if (browseSeason is not null) browseSeason = null; else browseSeries = browseKind = null; Details.Visibility = Visibility.Collapsed; SearchBox.Clear(); FilterLibrary(); }
+    private void FilterChanged(object sender, SelectionChangedEventArgs e) => FilterLibrary();
     private void CardArtworkFailed(object sender, ExceptionRoutedEventArgs e)
     {
         // An unavailable or invalid image should use the same fallback as missing artwork.
@@ -254,13 +453,16 @@ public partial class MainWindow : Window
     private void SelectMovie(object sender, RoutedEventArgs e)
     {
         var card = (LibraryCard)((Button)sender).Tag;
-        if (card.Level == "series") { browseSeries = card.Media.Series; browseKind = card.Media.Kind; browseSeason = null; Details.Visibility = Visibility.Collapsed; SearchBox.Clear(); FilterLibrary(); }
-        else if (card.Level == "season") { browseSeason = card.Season; Details.Visibility = Visibility.Collapsed; SearchBox.Clear(); FilterLibrary(); }
+        if (card.Level == "series") NavigateLibrary(CategoryFor(card.Media), LibraryIdentity.ShowKey(card.Media), card.Media.Kind);
+        else if (card.Level == "season") NavigateLibrary(libraryCategory, browseSeries, browseKind, card.Season);
         else { Select(card.Media); Details.ScrollToTop(); }
     }
     private void Select(MediaItem item)
     {
-        selected = item; ShowPage("Details"); DetailTitle.Text = item.EpisodeDisplayTitle;
+        selected = item; libraryCategory = CategoryFor(item);
+        browseSeries = item.Series is null ? null : LibraryIdentity.ShowKey(item); browseKind = item.Series is null ? null : item.Kind;
+        browseSeason = item.Series is null ? null : item.Season ?? -1;
+        ShowPage("Details"); UpdateBreadcrumbs(); DetailTitle.Text = item.EpisodeDisplayTitle;
         DetailPlay.IsEnabled = DetailHost.IsEnabled = DetailQueue.IsEnabled = item.Available && File.Exists(item.Path);
         var resume = long.TryParse(library.Setting("position:" + item.Id), out var position) && position >= 10000 ? position : 0;
         DetailPlay.Content = resume > 0 ? "Resume at " + FormatTime(resume) : "Play locally";
@@ -268,19 +470,25 @@ public partial class MainWindow : Window
         RestartButton.IsEnabled = DetailPlay.IsEnabled;
         DetailContext.Text = item.Series is null ? "MOVIE" : item.Series;
         DetailMeta.Text = item.Caption + " · " + Path.GetExtension(item.Path).TrimStart('.').ToUpperInvariant() + (string.IsNullOrWhiteSpace(item.AirDate) ? "" : " · " + item.AirDate) + (item.RuntimeMinutes is > 0 ? $" · {item.RuntimeMinutes} min" : "");
-        var poster = LibraryCatalog.EpisodeArtwork(item);
-        DetailPoster.Source = null;
-        if (poster is not null)
-        {
-            try { var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.UriSource = new Uri(Path.GetFullPath(poster)); image.EndInit(); image.Freeze(); DetailPoster.Source = image; }
-            catch (Exception ex) when (ex is IOException or NotSupportedException or FileFormatException) { SetStatus("Artwork could not be opened. Choose a different local poster."); }
-        }
+        _ = UpdateDetailPosterAsync(item);
         DetailFile.Text = item.Path;
         var overviewSource = !string.IsNullOrWhiteSpace(item.EpisodeOverview) ? item.EpisodeSource : !string.IsNullOrWhiteSpace(item.SeasonOverview) ? item.SeasonSource : item.PosterSource;
-        DetailSummary.Text = (item.Available ? "" : "File unavailable — reconnect its drive. ") + (item.DetailOverview ?? "No overview available yet.") + (overviewSource is null ? "" : "\n\nMetadata: " + overviewSource);
+        DetailSummary.Text = (item.IsVirtual ? "This episode is not in your library. " : item.Available ? "" : "File unavailable — reconnect its drive. ") + (item.DetailOverview ?? "No overview available yet.") +
+            (item.Genres?.Length > 0 ? "\n\nGenres: " + string.Join(", ", item.Genres) : "") + (item.Cast?.Length > 0 ? "\nCast: " + string.Join(", ", item.Cast) : "") +
+            (item.Rating is > 0 ? $"\nRating: {item.Rating:0.0}/10" : "") + (item.NumberingConflict is null ? "" : "\n\n" + item.NumberingConflict) + (overviewSource is null ? "" : "\n\nMetadata: " + overviewSource);
         Episodes.Visibility = Visibility.Collapsed;
     }
-    private void DetailBack(object sender, RoutedEventArgs e) => ShowPage("Library");
+    private async Task UpdateDetailPosterAsync(MediaItem item)
+    {
+        var generation = ++detailPosterGeneration;
+        var path = await Task.Run(() => LibraryCatalog.EpisodeArtwork(item));
+        if (closing || generation != detailPosterGeneration) return;
+        if (path == detailPosterPath && (path is null || DetailPoster.Source is not null)) return;
+        detailPosterPath = path; DetailPoster.Source = null;
+        var view = new LibraryCardView(new(item.DisplayTitle, item.Caption, path, item, "episode"));
+        await view.LoadPosterAsync();
+        if (!closing && generation == detailPosterGeneration) DetailPoster.Source = view.Poster;
+    }
     private void EpisodeChanged(object sender, SelectionChangedEventArgs e) { if (Episodes.SelectedItem is MediaItem item) { selected = item; DetailSummary.Text = item.Caption + (item.Available ? "" : " · File unavailable"); } }
     private void AddFolder(object sender, RoutedEventArgs e)
     {
@@ -339,12 +547,14 @@ public partial class MainWindow : Window
         CancelScanButton.Visibility = Visibility.Visible;
         try
         {
-            var progress = new Progress<string>(text => { ScanStatus.Text = text; SetStatus(text); });
-            await library.ScanAsync(folders.ToArray(), progress, scanCancellation.Token, exclusions.ToArray()); RefreshLibrary();
+            var progress = new ScanProgressSink(this);
+            var scannedItems = await library.ScanAsync(folders.ToArray(), progress, scanCancellation.Token, exclusions.ToArray());
+            Interlocked.Exchange(ref pendingScanStatus, null);
+            libraryUpdates.Clear(); RefreshLibraryFromItems(scannedItems);
             ScanStatus.Text = $"Scan complete · {items.Count} videos indexed.";
             if (AutoArtwork.IsChecked == true && !scanCancellation.IsCancellationRequested) await FetchArtwork(scanCancellation.Token);
         }
-        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested) { RefreshLibrary(); ScanStatus.Text = "Scan cancelled. Videos already indexed remain in your library."; SetStatus(ScanStatus.Text); }
+        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested) { var partial = await Task.Run(library.All); libraryUpdates.Clear(); RefreshLibraryFromItems(partial); ScanStatus.Text = "Scan cancelled. Videos already indexed remain in your library."; SetStatus(ScanStatus.Text); }
         finally
         {
             scanning = false;
@@ -360,28 +570,56 @@ public partial class MainWindow : Window
         }
     }
     private void CancelScan(object sender, RoutedEventArgs e) => scanCancellation?.Cancel();
-    private async void FetchArtworkClick(object sender, RoutedEventArgs e) => await Guard(() => FetchArtwork(lifetime.Token, true));
+    private async void FetchArtworkClick(object sender, RoutedEventArgs e)
+    {
+        if (SaveMetadataToken()) await Guard(() => FetchArtwork(lifetime.Token, refresh: (MetadataRefresh)MetadataRefreshMode.SelectedIndex));
+    }
+    private bool SaveMetadataToken()
+    {
+        try { MetadataCredential.Save(App.DataDirectory, MetadataToken.Password); return true; }
+        catch (Exception ex) when (ex is Win32Exception or ArgumentException)
+        { SetStatus("Could not save the TMDB credential. " + ex.Message); return false; }
+    }
+    private void SaveMetadataKey(object sender, RoutedEventArgs e)
+    {
+        MetadataKeyStatus.Text = SaveMetadataToken()
+            ? string.IsNullOrWhiteSpace(MetadataToken.Password) ? "Saved key removed." : "Key saved securely."
+            : "Could not save the key. See the status message below.";
+    }
+    private void MetadataKeyChanged(object sender, RoutedEventArgs e) => MetadataKeyStatus.Text = "Unsaved changes.";
     private Task FetchArtwork() => FetchArtwork(lifetime.Token);
-    private async Task FetchArtwork(CancellationToken cancellation, bool force = false)
+    private async Task FetchArtwork(CancellationToken cancellation, bool force = false, MetadataRefresh? refresh = null)
     {
         if (artworkBusy) return; artworkBusy = true;
-        try { var report = await AutomaticArtwork.FetchAsync(library, App.DataDirectory, MetadataToken.Password, new Progress<string>(SetStatus), cancellation, force: force); RefreshLibrary(); if (selected is not null && Details.Visibility == Visibility.Visible && items.FirstOrDefault(x => x.Id == selected.Id) is { } refreshed) Select(refreshed); SetStatus(report); }
-        finally { artworkBusy = false; }
+        var token = MetadataToken.Password;
+        var progress = new Progress<string>(SetStatus);
+        try { var report = await Task.Run(() => AutomaticArtwork.FetchAsync(library, App.DataDirectory, token, progress, cancellation, force: force, refresh: refresh), cancellation); RefreshLibrary(); SetStatus(report); }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        finally { ApplyLibraryUpdates(); artworkBusy = false; }
     }
     private void SaveSettings(object sender, RoutedEventArgs e)
     {
         try { RoomAddress.ValidateServer(ServerBox.Text); }
         catch (ArgumentException ex) { SetStatus(ex.Message); ServerBox.Focus(); return; }
         if (string.IsNullOrWhiteSpace(DisplayNameBox.Text)) { SetStatus("Enter your display name before saving."); DisplayNameBox.Focus(); return; }
+        var providers = MetadataProviders.Text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Select(x => x.ToLowerInvariant()).Distinct().ToArray();
+        if (providers.Any(x => x is not ("tmdb" or "tvmaze" or "wikipedia")) || !int.TryParse(MetadataRefreshDays.Text, out var days) || days < 0 || days > 365 ||
+            !System.Text.RegularExpressions.Regex.IsMatch(MetadataLanguage.Text.Trim(), @"^[a-z]{2}(?:-[A-Z]{2})?$") || !System.Text.RegularExpressions.Regex.IsMatch(MetadataCountry.Text.Trim(), @"^[A-Z]{2}$"))
+        { SetStatus("Use providers tmdb, tvmaze, wikipedia; refresh days 0–365; language such as en-US; and a country such as US."); return; }
+        if (!SaveMetadataToken()) return;
+        new MetadataOptions(providers, MetadataLanguage.Text.Trim(), MetadataCountry.Text.Trim(), days, ImportMissing.IsChecked == true,
+            ImportUpcoming.IsChecked == true, SaveNfo.IsChecked == true, DisplaySpecials.IsChecked == true, GroupShows.IsChecked == true).Save(library);
+        displaySpecialsWithinSeasons = DisplaySpecials.IsChecked == true;
         library.Setting("name", DisplayNameBox.Text.Trim()); library.Setting("server", ServerBox.Text.Trim().TrimEnd('/'));
-        library.Setting("artwork", AutoArtwork.IsChecked == true ? "true" : "false"); library.Setting("ffmpeg", FfmpegBox.Text.Trim()); SetStatus("Settings saved. TMDB token is kept for this session only.");
+        library.Setting("artwork", AutoArtwork.IsChecked == true ? "true" : "false"); library.Setting("ffmpeg", FfmpegBox.Text.Trim()); SetStatus("Settings saved. TMDB token saved in Windows Credential Manager.");
     }
     private async void MatchClick(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (selected is null) return;
         if (MetadataToken.Password.Length == 0) { ShowPage("Settings"); SetStatus("Enter your TMDB API read access token, then return to Find artwork."); return; }
+        if (!SaveMetadataToken()) return;
         var item = selected; var query = Dialogs.Prompt(this, "Find artwork", "Search by movie or series title", item.DisplayTitle); if (query is null) return;
-        using var metadata = new MetadataClient(MetadataToken.Password);
+        using var metadata = new MetadataClient(MetadataToken.Password, options: MetadataOptions.Load(library));
         var results = (await metadata.SearchAsync(query, true, lifetime.Token)).Concat(await metadata.SearchAsync(query, false, lifetime.Token)).ToList();
         if (results.Count == 0) { SetStatus("No matches. Try a different title or use a local poster."); return; }
         var match = Dialogs.Choose(this, results); if (match is null) return;
@@ -391,15 +629,15 @@ public partial class MainWindow : Window
     {
         match = await metadata.DetailsAsync(match, lifetime.Token);
         var poster = await metadata.CachePosterAsync(match, Path.Combine(App.DataDirectory, "posters"), lifetime.Token);
-        foreach (var entry in items.Where(x => x.Id == item.Id || (item.Series is not null && x.Series == item.Series && x.Kind == item.Kind)).ToArray())
-            library.Save(entry with { Title = match.Title, Series = match.Type == "tv" ? match.Title : null, Kind = match.Kind ?? (match.Type == "tv" ? "Show" : "Movie"),
+        foreach (var entry in items.Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item)).ToArray())
+            library.Save(AutomaticArtwork.MergeDetails(LibraryIdentity.WithProvider(entry with { ProviderIds = null, MetadataProvider = null, MetadataId = null }, "tmdb", match.Id), match) with { Title = match.Title, Series = match.Type == "tv" ? match.Title : null, Kind = match.Kind ?? (match.Type == "tv" ? "Show" : "Movie"),
                 MetadataKind = match.Kind ?? (match.Type == "tv" ? "Show" : "Movie"), MetadataType = match.Type,
                 Season = match.Type == "tv" ? entry.Season : null, Episode = match.Type == "tv" ? entry.Episode : null,
                 Poster = poster ?? entry.Poster, Overview = match.Overview, Year = int.TryParse(match.Year, out var year) ? year : entry.Year, Matched = true, PosterSource = $"https://www.themoviedb.org/{match.Type}/{match.Id}",
                 MetadataProvider = "tmdb", MetadataId = match.Id, MetadataFetchedAt = 0,
                 SeasonTitle = null, SeasonOverview = null, EpisodeTitle = null, EpisodeOverview = null, EpisodePoster = null, AirDate = null, RuntimeMinutes = null,
                 SeasonPoster = entry.SeasonSource is not null && entry.SeasonPoster is not null && LibraryStore.IsWithin(entry.SeasonPoster, Path.Combine(App.DataDirectory, "posters")) ? null : entry.SeasonPoster, SeasonSource = null, EpisodeSource = null });
-        if (item.Series is not null && browseSeries == item.Series) { browseSeries = match.Type == "tv" ? match.Title : null; browseKind = match.Kind; if (browseSeries is null) browseSeason = null; }
+        if (item.Series is not null && LibraryIdentity.InShow(item, browseSeries, browseKind)) { browseSeries = match.Type == "tv" ? LibraryIdentity.ShowKey(item) : null; browseKind = match.Kind; if (browseSeries is null) browseSeason = null; }
         if (match.Type == "tv")
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
@@ -413,9 +651,9 @@ public partial class MainWindow : Window
         var title = Dialogs.Prompt(this, "Correct title", item.Series is null ? "Movie title" : "Series title (applies to every episode)", item.DisplayTitle,
             text => text.Length > 300 ? "Use a title with at most 300 characters." : null);
         if (title is null) return;
-        foreach (var entry in items.Where(x => x.Id == item.Id || item.Series is not null && x.Series == item.Series && x.Kind == item.Kind))
-            library.Save(entry with { Title = title, Series = entry.Series is null ? null : title, Matched = true });
-        if (item.Series is not null && browseSeries == item.Series) browseSeries = title;
+        foreach (var entry in items.Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item)))
+            library.Save(entry with { Title = title, Series = entry.Series is null ? null : title, Matched = true, LockedFields = (entry.LockedFields ?? []).Append("Title").Distinct().ToArray() });
+        if (item.Series is not null && LibraryIdentity.InShow(item, browseSeries, browseKind)) browseSeries = LibraryIdentity.ShowKey(item);
         RefreshLibrary(); Select(items.First(x => x.Id == item.Id)); SetStatus("Title corrected. Rescanning will preserve your changes.");
     }
     private void LocalPoster(object sender, RoutedEventArgs e)
@@ -425,7 +663,7 @@ public partial class MainWindow : Window
         if (picker.ShowDialog(this) != true) return;
         var dir = Path.Combine(App.DataDirectory, "posters"); Directory.CreateDirectory(dir);
         var dest = Path.Combine(dir, selected.Id + "-" + Guid.NewGuid().ToString("N") + Path.GetExtension(picker.FileName)); File.Copy(picker.FileName, dest, true);
-        foreach (var entry in items.Where(x => x.Id == selected.Id || (selected.Series is not null && x.Series == selected.Series && x.Kind == selected.Kind))) library.Save(entry with { Poster = dest, Matched = true, PosterSource = "Local artwork" });
+        foreach (var entry in items.Where(x => x.Id == selected.Id || LibraryIdentity.SameShow(x, selected))) library.Save(entry with { Poster = dest, SeriesPoster = entry.Series is null ? null : dest, Matched = true, PosterSource = "Local artwork", LockedFields = (entry.LockedFields ?? []).Append("Poster").Distinct().ToArray() });
         RefreshLibrary();
     }
     private async void PlayLocal(object sender, RoutedEventArgs e) => await Guard(async () => { if (selected is not null) { queuePosition = -1; await PlayLocalItem(selected); PublishQueue(); } });
@@ -444,13 +682,21 @@ public partial class MainWindow : Window
     {
         if (selected is null) return;
         library.Setting("position:" + selected.Id, "0");
+        library.Setting("watched:" + selected.Id, "false");
         if (playingItem?.Id == selected.Id) playingItem = null;
         PlayLocal(sender, e);
+    }
+    private void UpdateCardPlayback(LibraryCardView view)
+    {
+        if (view.IsEpisode) view.SetPlayback(long.TryParse(library.Setting("position:" + view.Card.Media.Id), out var position) ? position : 0, library.Setting("watched:" + view.Card.Media.Id) == "true");
     }
     private void SavePlaybackPosition()
     {
         if (room is null && playingItem is not null && player is not null && player.Time >= 0)
+        {
             library.Setting("position:" + playingItem.Id, player.Length > 0 && player.Time >= player.Length - 2000 ? "0" : Math.Max(0, player.Time).ToString());
+            foreach (var card in libraryCards.Where(x => x.Card.Media.Id == playingItem.Id)) UpdateCardPlayback(card);
+        }
     }
     private async void HostClick(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
@@ -493,7 +739,7 @@ public partial class MainWindow : Window
     });
     private RoomClient NewRoom()
     {
-        var client = new RoomClient(); room = client;
+        var client = new RoomClient(library); room = client;
         client.Message += msg => Dispatcher.BeginInvoke(async () => { if (room == client) await Guard(() => OnRoomMessage(msg)); });
         client.Status += text => Dispatcher.BeginInvoke(() =>
         {
@@ -525,7 +771,16 @@ public partial class MainWindow : Window
                     QueueStatus.Text = $"{snapshot.Queue?.Length ?? 0} videos in the host's queue";
                     QueueList.ItemsSource = (snapshot.Queue ?? []).Select(title => new { QueueTitle = title }).ToArray();
                 }
-                PeopleList.ItemsSource = snapshot.People.Select(p => new { p.Id, p.Name, Status = !p.Approved ? "Waiting for approval" : (p.IsHost ? "Host · " : "") + (p.Ready ? "Ready" : "Buffering"), Actions = room.Identity?.Host == true && !p.IsHost ? Visibility.Visible : Visibility.Collapsed }).ToList();
+                foreach (var id in pendingAdmissions.Keys.ToArray())
+                {
+                    var participant = snapshot.People.FirstOrDefault(p => p.Id == id);
+                    if (participant is null || participant.Approved)
+                    {
+                        pendingAdmissions.Remove(id);
+                        ShowRoomFeedback(participant is null ? "The guest left the room." : $"{participant.Name} admitted.");
+                    }
+                }
+                RefreshPeople(snapshot);
                 SharedControls.IsEnabled = room.Identity?.Host == true; SharedControls.IsChecked = snapshot.SharedControls;
                 if (room.Identity?.Host != true && !snapshot.SharedControls) playbackPause.Clear();
                 if (snapshot.Playback is not null) AcceptState(snapshot.Playback);
@@ -535,7 +790,7 @@ public partial class MainWindow : Window
             case "playback": AcceptState(Wire.Read<PlaybackState>(message.Data!)); break;
             case "chat": case "notice":
                 chat.Add(message.Text ?? ""); if (chat.Count > 150) chat.RemoveAt(0); ChatList.ScrollIntoView(chat.Last()); break;
-            case "error": SetStatus(message.Text ?? "Room error"); break;
+            case "error": ShowRoomFeedback(message.Text ?? "Room error"); SetStatus(message.Text ?? "Room error"); break;
         }
     }
     private void AcceptState(PlaybackState state)
@@ -549,6 +804,35 @@ public partial class MainWindow : Window
             if (room is { } client && state.AtUnixMs > client.ServerNowMs)
                 _ = ApplyScheduledPlayback(client, state);
         }
+    }
+    private async void CardArtworkLoaded(object sender, RoutedEventArgs e)
+    {
+        if (((Image)sender).DataContext is LibraryCardView view) { await view.LoadPosterAsync(); await ImproveEpisodeArtwork(view); }
+    }
+    private async void CardArtworkUpdated(object sender, System.Windows.Data.DataTransferEventArgs e)
+    {
+        if (((Image)sender).DataContext is LibraryCardView view) await view.LoadPosterAsync();
+    }
+    private async Task ImproveEpisodeArtwork(LibraryCardView view)
+    {
+        var item = view.Card.Media;
+        var token = MetadataToken.Password; var ffmpeg = FfmpegBox.Text.Trim();
+        var options = MetadataOptions.Load(library);
+        if (AutoArtwork.IsChecked != true) options = options with { Providers = [] };
+        if (!view.IsEpisode || !episodeArtworkRequests.Add(item.Id + ":" + item.EpisodeSource + ":" + LibraryIdentity.Hash(token) + ":" + string.Join(',', options.ProviderOrder))) return;
+        try
+        {
+            var improved = await Task.Run(() => episodeArtwork.ImproveAsync(item, App.DataDirectory, token, ffmpeg, lifetime.Token, options));
+            if (closing || improved == item) return;
+            var current = await Task.Run(() => library.All().FirstOrDefault(x => x.Id == item.Id));
+            if (current is null || current.EpisodeSource != item.EpisodeSource || current.Path != item.Path ||
+                current.EpisodePoster != item.EpisodePoster || current.Season != item.Season || current.Episode != item.Episode ||
+                current.ShowId != item.ShowId || current.MetadataId != item.MetadataId || current.MetadataProvider != item.MetadataProvider ||
+                current.NumberingOrder != item.NumberingOrder || LibraryIdentity.Locked(current, "EpisodePoster")) return;
+            library.Save(current with { EpisodePoster = improved.EpisodePoster, EpisodePosterQualityPath = improved.EpisodePosterQualityPath,
+                GeneratedEpisodePoster = improved.GeneratedEpisodePoster });
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or HttpRequestException or UnauthorizedAccessException) { }
     }
     private async Task ApplyScheduledPlayback(RoomClient client, PlaybackState state)
     {
@@ -601,17 +885,18 @@ public partial class MainWindow : Window
             }
             if (client != room || generation != loadGeneration) return;
             RoomHeading.Text = media.Title; RoomSubtitle.Text = "Private room · " + (client.Identity?.Host == true ? "You are hosting" : "Streaming from host");
-            await PrepareVideoSurface();
+            await PrepareVideoSurface(openPlayer: RoomPage.Visibility == Visibility.Visible);
             if (client != room || generation != loadGeneration) return;
             player!.Play(vlcMedia);
         }
         catch { if (generation == loadGeneration) loadedMedia = null; throw; }
         finally { loading.Release(); }
     }
-    private async Task PrepareVideoSurface()
+    private async Task PrepareVideoSurface(bool openPlayer = true)
     {
         PlayerEmpty.Visibility = Visibility.Collapsed;
         roomPanelVisible = room is not null;
+        if (!openPlayer) return;
         ShowPage("Room");
         await Dispatcher.InvokeAsync(() => Video.UpdateLayout(), DispatcherPriority.Render);
         PlayerOverlay.Focus();
@@ -793,8 +1078,59 @@ public partial class MainWindow : Window
         try { Clipboard.SetText(room.ServerAddress + "#" + room.Identity.Room); SetStatus("Invitation copied. Guests need the Windows app and host approval."); }
         catch (ExternalException) { SetStatus("Clipboard is busy. Try Copy invite again."); }
     }
-    private void Admit(object sender, RoutedEventArgs e) => room?.Send(new("admit", Target: (string)((Button)sender).Tag));
-    private void RemovePeer(object sender, RoutedEventArgs e) => room?.Send(new("remove", Target: (string)((Button)sender).Tag));
+    private void ShowRoomFeedback(string text)
+    {
+        RoomFeedback.Text = text; RoomFeedback.Visibility = Visibility.Visible;
+    }
+    private void RefreshPeople(RoomSnapshot? snapshot = null)
+    {
+        snapshot ??= room?.Snapshot;
+        if (snapshot is null) return;
+        PeopleList.ItemsSource = snapshot.People.Select(p => new
+        {
+            p.Id, p.Name,
+            Status = !p.Approved ? (pendingAdmissions.ContainsKey(p.Id) ? "Waiting for admission confirmation…" : "Waiting for approval")
+                : (p.IsHost ? "Host · " : "Admitted · ") + (p.Ready ? "Ready" : "Buffering"),
+            Actions = room?.Identity?.Host == true && !p.IsHost ? Visibility.Visible : Visibility.Collapsed,
+            AdmitVisibility = p.Approved ? Visibility.Collapsed : Visibility.Visible,
+            AdmitLabel = pendingAdmissions.ContainsKey(p.Id) ? "Admitting…" : "Admit",
+            CanAdmit = !pendingAdmissions.ContainsKey(p.Id)
+        }).ToList();
+        RefreshRoomSettings();
+    }
+    private async void Admit(object sender, RoutedEventArgs e)
+    {
+        var client = room;
+        if (client?.Identity?.Host != true || ((Button)sender).Tag is not string id || pendingAdmissions.ContainsKey(id)) return;
+        if (client.Snapshot?.People.Count(p => p.Approved) >= 5)
+        {
+            ShowRoomFeedback("The room is full (5 participants). Remove someone before admitting another guest."); return;
+        }
+        var request = Guid.NewGuid();
+        pendingAdmissions[id] = request;
+        ShowRoomFeedback("Admitting guest…"); RefreshPeople();
+        try
+        {
+            client.Send(new("admit", Target: id));
+            await Task.Delay(TimeSpan.FromSeconds(10), lifetime.Token);
+            if (room == client && pendingAdmissions.GetValueOrDefault(id) == request)
+            {
+                pendingAdmissions.Remove(id); RefreshPeople();
+                ShowRoomFeedback("Admission has not been confirmed. Check the connection and try again.");
+            }
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (room != client || pendingAdmissions.GetValueOrDefault(id) != request) return;
+            pendingAdmissions.Remove(id); RefreshPeople(); ShowRoomFeedback(ex.Message);
+        }
+    }
+    private void RemovePeer(object sender, RoutedEventArgs e)
+    {
+        try { room?.Send(new("remove", Target: (string)((Button)sender).Tag)); }
+        catch (IOException ex) { ShowRoomFeedback(ex.Message); SetStatus(ex.Message); }
+    }
     private void ControlsChanged(object sender, RoutedEventArgs e)
     {
         if (room?.Identity?.Host == true) room.Send(new("controls", Number: SharedControls.IsChecked == true ? 1 : 0));
@@ -845,7 +1181,8 @@ public partial class MainWindow : Window
         playingItem = null;
         await loading.WaitAsync();
         try { if (bridge is not null) await bridge.DisposeAsync(); bridge = null; } finally { loading.Release(); }
-        PeopleList.ItemsSource = null; chat.Clear(); SetThreadExecutionState(0x80000000); ConnectionStatus.Text = "Local playback";
+        PeopleList.ItemsSource = null; pendingAdmissions.Clear(); RoomFeedback.Text = ""; RoomFeedback.Visibility = Visibility.Collapsed;
+        RoomTabs.SelectedIndex = 0; chat.Clear(); SetThreadExecutionState(0x80000000); ConnectionStatus.Text = "Local playback";
         UpdateSessionControls();
     }
     private async void PrepareCopy(object sender, RoutedEventArgs e) => await Guard(async () =>
@@ -901,6 +1238,8 @@ public partial class MainWindow : Window
     {
         if (InviteButton is null || QueueList is null) return;
         var connectedRoom = room?.IsConnected == true;
+        SharedControls.Visibility = connectedRoom && room!.Identity?.Host == true ? Visibility.Visible : Visibility.Collapsed;
+        SharedControls.IsEnabled = connectedRoom && room!.Identity?.Host == true;
         NowPlayingStrip.Visibility = ready || room is not null ? Visibility.Visible : Visibility.Collapsed;
         NowPlayingLabel.Text = "Now watching · " + RoomHeading.Text;
         var canControl = room is null || connectedRoom && (room!.Identity?.Host == true || room.Snapshot?.SharedControls == true);
@@ -932,8 +1271,17 @@ public partial class MainWindow : Window
         StatusRow.Height = new GridLength(inPlayer ? 0 : 34);
         RoomHeader.Visibility = fullscreen ? Visibility.Collapsed : Visibility.Visible;
         RoomSide.Visibility = roomPanelVisible && !fullscreen ? Visibility.Visible : Visibility.Collapsed;
-        RoomSideWidth.Width = new GridLength(roomPanelVisible && !fullscreen ? 280 : 0);
+        var showRoomPanel = roomPanelVisible && !fullscreen;
+        RoomSplitter.Visibility = showRoomPanel ? Visibility.Visible : Visibility.Collapsed;
+        RoomSplitterWidth.Width = new GridLength(showRoomPanel ? 6 : 0);
+        RoomSideWidth.MinWidth = showRoomPanel ? 280 : 0;
+        RoomSideWidth.Width = new GridLength(showRoomPanel ? roomPanelWidth : 0);
         RoomToggle.ToolTip = roomPanelVisible ? "Hide participants and chat" : "Show participants and chat";
+    }
+    private void RoomPanelSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (roomPanelVisible && !fullscreen && RoomSideWidth.ActualWidth >= 280)
+            roomPanelWidth = Math.Clamp(RoomSideWidth.ActualWidth, 280, 600);
     }
     private void SetFullscreen(bool value)
     {
@@ -1048,10 +1396,40 @@ public partial class MainWindow : Window
         var colors = light ? new[] { "#F4F5FA", "#FFFFFF", "#EAECF4", "#202433", "#586175", "#D6DAE7", "#6950C9", "#FFFFFF" } : new[] { "#101218", "#191C26", "#232736", "#F2F1F8", "#A5ABBE", "#303547", "#BEABFF", "#241A40" };
         var keys = new[] { "Canvas", "Surface", "Elevated", "Ink", "Muted", "Line", "Accent", "AccentInk" };
         for (int i = 0; i < keys.Length; i++) Application.Current.Resources[keys[i]] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(colors[i]));
+        ApplyTitleBarTheme();
     }
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        ApplyTitleBarTheme();
+        Activated += (_, _) => ApplyTitleBarTheme();
+        Deactivated += (_, _) => ApplyTitleBarTheme();
+    }
+    private void ApplyTitleBarTheme()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero) return;
+        // Native chrome keeps Windows drag, resize, snap, and caption buttons.
+        // Unsupported attributes on older Windows versions leave the system defaults.
+        uint dark = !light && !SystemParameters.HighContrast ? 1u : 0u;
+        DwmSetWindowAttribute(handle, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, ref dark, sizeof(uint));
+        uint ColorRef(string resource)
+        {
+            if (SystemParameters.HighContrast) return uint.MaxValue; // DWMWA_COLOR_DEFAULT
+            var color = ((SolidColorBrush)Application.Current.Resources[resource]).Color;
+            return (uint)(color.R | color.G << 8 | color.B << 16);
+        }
+        var caption = ColorRef("Canvas"); var text = ColorRef(IsActive ? "Ink" : "Muted"); var border = ColorRef("Line");
+        DwmSetWindowAttribute(handle, 35 /* DWMWA_CAPTION_COLOR */, ref caption, sizeof(uint));
+        DwmSetWindowAttribute(handle, 36 /* DWMWA_TEXT_COLOR */, ref text, sizeof(uint));
+        DwmSetWindowAttribute(handle, 34 /* DWMWA_BORDER_COLOR */, ref border, sizeof(uint));
+    }
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref uint value, int size);
     private async void WindowClosing(object? sender, CancelEventArgs e)
     {
         if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop(); videoClickDelay.Stop();
+        libraryUpdateTimer.Stop(); updateTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
         library.Setting("volume", ((int)Volume.Value).ToString());
         await Task.Yield(); // Let WPF finish the first Closing event before calling Close again.
         foreach (var watcher in watchers) watcher.Dispose();

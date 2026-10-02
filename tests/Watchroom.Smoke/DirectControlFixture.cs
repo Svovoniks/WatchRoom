@@ -32,6 +32,8 @@ static class DirectControlFixture
             check(a.Snapshot?.Media is null, "Sites discovery does not disclose media before admission");
             host.Send(new("admit", Target: a.Identity!.Peer));
             await a.DirectControlsReady.WaitAsync(TimeSpan.FromSeconds(25));
+            await Wait(() => host.Snapshot!.People.Any(p => p.Id == a.Identity.Peer && p.Approved));
+            check(true, "host participant snapshot confirms approval after admitting a waiting guest");
             await b.ConnectAsync(url, "Guest B", host.Identity.Room);
             await Wait(() => host.Snapshot!.People.Any(p => p.Id == b.Identity!.Peer));
             host.Send(new("admit", Target: b.Identity!.Peer));
@@ -76,7 +78,7 @@ static class DirectControlFixture
                 "guests synchronize to host clock despite discovery clock being ten minutes ahead");
             using var http = new HttpClient();
             var stats = await http.GetFromJsonAsync<Stats>(url + "/test/stats", Wire.Json);
-            check(stats!.Commands.All(type => type is "ping" or "signal" or "admit" or "remove"), "no playback, readiness, queue, or chat commands reach Sites");
+            check(stats!.Commands.All(type => type is "ping" or "signal" or "admit" or "remove" or "settings"), "no playback, readiness, queue, or chat commands reach Sites");
             server.Kill(true); await server.WaitForExitAsync();
             await Control(b, false, 0, host, a, b);
             check(true, "direct stop still reaches all peers immediately after discovery goes offline");
