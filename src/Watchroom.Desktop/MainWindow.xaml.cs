@@ -95,6 +95,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        InitializeBackNavigation();
         videoClickDelay.Interval = TimeSpan.FromMilliseconds(GetDoubleClickTime());
         videoClickDelay.Tick += (_, _) =>
         {
@@ -203,6 +204,8 @@ public partial class MainWindow : Window
     }
     private void ShowPage(string name)
     {
+        if (name != currentPage) RememberLocation();
+        currentPage = name;
         if (name != "Room") videoClickDelay.Stop();
         if (fullscreen && name != "Room") SetFullscreen(false);
         // VideoView hosts its content in a separate native overlay window. Collapsing
@@ -247,8 +250,11 @@ public partial class MainWindow : Window
     private void LibraryCategoryClick(object sender, RoutedEventArgs e) => NavigateLibrary(int.Parse((string)((Button)sender).Tag));
     private void NavigateLibrary(int category, string? series = null, string? kind = null, int? season = null)
     {
+        if (currentPage != "Library" || libraryCategory != category || browseSeries != series || browseKind != kind || browseSeason != season || SearchBox.Text.Length > 0 || LibraryStatusFilter.SelectedIndex != 0) RememberLocation();
+        var restoring = restoringNavigation; restoringNavigation = true;
         libraryCategory = category; browseSeries = series; browseKind = kind; browseSeason = season;
         ShowPage("Library"); SearchBox.Clear(); LibraryStatusFilter.SelectedIndex = 0;
+        restoringNavigation = restoring;
         FilterLibrary();
     }
     private void UpdateBreadcrumbs()
@@ -459,10 +465,13 @@ public partial class MainWindow : Window
     }
     private void Select(MediaItem item)
     {
+        if (currentPage != "Details" || selected?.Id != item.Id) RememberLocation();
+        var restoring = restoringNavigation; restoringNavigation = true;
         selected = item; libraryCategory = CategoryFor(item);
         browseSeries = item.Series is null ? null : LibraryIdentity.ShowKey(item); browseKind = item.Series is null ? null : item.Kind;
         browseSeason = item.Series is null ? null : item.Season ?? -1;
         ShowPage("Details"); UpdateBreadcrumbs(); DetailTitle.Text = item.EpisodeDisplayTitle;
+        restoringNavigation = restoring;
         DetailPlay.IsEnabled = DetailHost.IsEnabled = DetailQueue.IsEnabled = item.Available && File.Exists(item.Path);
         var resume = long.TryParse(library.Setting("position:" + item.Id), out var position) && position >= 10000 ? position : 0;
         DetailPlay.Content = resume > 0 ? "Resume at " + FormatTime(resume) : "Play locally";
@@ -1366,6 +1375,8 @@ public partial class MainWindow : Window
     private void KeyPressed(object sender, KeyEventArgs e)
     {
         if (e.Handled) return;
+        if (e.Key is Key.BrowserBack or Key.BrowserForward || Keyboard.Modifiers == ModifierKeys.Alt && e.SystemKey is Key.Left or Key.Right)
+        { BrowseHistory(e.Key == Key.BrowserBack || e.SystemKey == Key.Left); e.Handled = true; return; }
         if (e.Key == Key.Escape && fullscreen) { SetFullscreen(false); e.Handled = true; return; }
         if (fullscreen && e.Key == Key.Tab) ShowPlayerControls();
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen)
@@ -1401,6 +1412,7 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
+        HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(NavigationWindowMessage);
         ApplyTitleBarTheme();
         Activated += (_, _) => ApplyTitleBarTheme();
         Deactivated += (_, _) => ApplyTitleBarTheme();

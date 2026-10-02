@@ -24,8 +24,8 @@ jobs:
       - name: Resolve version
         shell: pwsh
         run: |
-          $version = '0.2.0'
-          if ($env:GITHUB_REF_TYPE -eq 'tag') { $version = $env:GITHUB_REF_NAME.TrimStart('v') }
+          $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") { throw 'Tag must match Version in Directory.Build.props' }
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Release tags must be vMAJOR.MINOR.PATCH' }
           "APP_VERSION=$version" >> $env:GITHUB_ENV
       - name: Restore and build
@@ -61,5 +61,7 @@ jobs:
           $installer = "artifacts/Watchroom-Setup-$env:APP_VERSION-win-x64.exe"
           $checksum = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
           "$checksum  $(Split-Path $installer -Leaf)" | Set-Content artifacts/SHA256SUMS.txt
-          gh release create $env:GITHUB_REF_NAME $installer artifacts/SHA256SUMS.txt --verify-tag --title "Watchroom $env:APP_VERSION" --generate-notes
+          gh release create $env:GITHUB_REF_NAME $installer artifacts/SHA256SUMS.txt --verify-tag --draft --title "Watchroom $env:APP_VERSION" --generate-notes
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          gh release edit $env:GITHUB_REF_NAME --draft=false --latest
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

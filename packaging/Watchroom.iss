@@ -1,5 +1,5 @@
 #ifndef AppVersion
-#define AppVersion "0.2.0"
+#error "Build with scripts/package.ps1 so the installer uses the app version"
 #endif
 [Setup]
 AppId={{90B3BA58-BBC8-4993-A0EA-25C68D8B1DA6}

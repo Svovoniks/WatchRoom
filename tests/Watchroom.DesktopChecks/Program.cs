@@ -116,6 +116,7 @@ static class Program
                 await CheckLibraryNavigation(window, activeStore, cards, directory, posterPath, Check);
                 CheckRoomSettings(window, activeStore, Check);
                 CheckQueueEditing(window, activeStore, Check);
+                await CheckBackNavigation(window, Check);
                 Console.WriteLine($"Input heartbeat: maximum {gaps.Max():F1} ms; p95 {gaps.Order().ElementAt((int)(gaps.Count * .95)):F1} ms");
                 Console.WriteLine($"{checks} desktop responsiveness checks passed.");
             }
@@ -214,6 +215,41 @@ static class Program
         check(scroll.VerticalScrollBarVisibility == System.Windows.Controls.ScrollBarVisibility.Visible, "poster grid reserves scrollbar space across filters");
         check(status.ActualHeight == 44 && scan.ActualHeight == 44 && frame.ActualHeight == 44, "search, status filter, and rescan align to a single toolbar height");
         status.Focus(); window.UpdateLayout();
+    }
+
+    private static async Task CheckBackNavigation(MainWindow window, Action<bool, string> check)
+    {
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+        object? Call(string name, params object[] values) => typeof(MainWindow).GetMethod(name, flags)!.Invoke(window, values);
+        object? Field(string name) => typeof(MainWindow).GetField(name, flags)!.GetValue(window);
+        var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
+        var filter = (System.Windows.Controls.ComboBox)window.FindName("LibraryStatusFilter");
+        Call("NavigateLibrary", 2, null!, null!, null!); search.Text = "Navigation"; filter.SelectedIndex = 2;
+        Call("ShowPage", "Settings");
+        Call("BrowseHistory", true); await Task.Delay(150);
+        check(Field("currentPage") as string == "Library" && search.Text == "Navigation" && filter.SelectedIndex == 2, "back restores category, search, and availability filter");
+        Call("BrowseHistory", false);
+        check(Field("currentPage") as string == "Settings", "forward restores the page left by Back");
+        Call("BrowseHistory", true); Call("ShowPage", "Queues");
+        check(!(bool)Call("BrowseHistory", false)!, "a new navigation clears forward history");
+        var mouse = new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount, System.Windows.Input.MouseButton.XButton1) { RoutedEvent = System.Windows.Input.Mouse.PreviewMouseUpEvent };
+        Call("NavigationMouseUp", window, mouse);
+        check(mouse.Handled && Field("currentPage") as string == "Library", "mouse back button uses the same browsing history");
+        var media = ((IEnumerable<MediaItem>)Field("items")!).First(x => x.Series is not null);
+        Call("NavigateLibrary", 2, LibraryIdentity.ShowKey(media), media.Kind, 1);
+        Call("Select", media); Call("BrowseHistory", true);
+        check(Field("currentPage") as string == "Library" && (int?)Field("browseSeason") == 1, "Back from an episode returns to its previous season view");
+        check((bool)Call("GestureControl", search)!, "swipe navigation ignores text entry controls");
+        Call("ShowPage", "Settings");
+        var hook = typeof(MainWindow).GetMethod("NavigationWindowMessage", flags)!;
+        void Horizontal(int delta)
+        {
+            hook.Invoke(window, new object[] { IntPtr.Zero, 0x020e, new IntPtr((long)(ushort)(short)delta << 16), IntPtr.Zero, false });
+        }
+        Horizontal(-120); Horizontal(-120);
+        check(Field("currentPage") as string == "Settings", "small horizontal movements do not accidentally navigate");
+        Horizontal(-120); Horizontal(-360);
+        check(Field("currentPage") as string == "Library", "horizontal swipe goes Back once and ignores its inertia");
     }
 
     private static void CheckQueueEditing(MainWindow window, LibraryStore store, Action<bool, string> check)
