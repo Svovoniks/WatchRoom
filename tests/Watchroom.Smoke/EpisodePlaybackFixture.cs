@@ -4,6 +4,9 @@ static class EpisodePlaybackFixture
 {
     public static void Run(Action<bool, string> check)
     {
+        check(!EpisodePlayback.NearEnd(0, 0) && !EpisodePlayback.NearEnd(-1, 60000), "unknown duration and unavailable position never show the end action");
+        check(!EpisodePlayback.NearEnd(509999, 600000) && EpisodePlayback.NearEnd(540000, 600000), "end action waits for the final ten percent of a short episode");
+        check(!EpisodePlayback.NearEnd(3509999, 3600000) && EpisodePlayback.NearEnd(3510000, 3600000), "long episodes show the end action only in the final ninety seconds");
         var first = new MediaItem("first", "first.mkv", "Example", "Show", Series: "Example", Season: 1, Episode: 1, ShowId: "original");
         var second = first with { Id = "second", Path = "second.mkv", Episode = 2 };
         var nextSeason = first with { Id = "next-season", Path = "next.mkv", Season = 2 };

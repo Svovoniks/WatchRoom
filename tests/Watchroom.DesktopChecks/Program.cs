@@ -21,6 +21,10 @@ static class Program
         store.Setting("folders", Wire.Serialize(new[] { new LibraryFolder(directory) }));
         var entries = Enumerable.Range(0, 750).Select(index => new MediaItem("item-" + index, Path.Combine(directory, "movie-" + index + ".mp4"), $"Movie {index:0000}", "Movie")).ToArray();
         foreach (var entry in entries) store.Save(entry);
+        var startupQueue = new SavedQueue("startup-queue", "Startup queue", [entries[0].Id, entries[^1].Id]);
+        store.Setting("queues", Wire.Serialize(new[] { startupQueue })); store.Setting("activeQueue", startupQueue.Id);
+        store.Setting("queue", Wire.Serialize(startupQueue.MediaIds)); store.Setting("queuePosition", "1");
+        store.Setting("watched:" + entries[3].Id, "true");
         var app = new Application();
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
         var resourceXml = System.Xml.Linq.XDocument.Load("src/Watchroom.Desktop/App.xaml");
@@ -40,6 +44,9 @@ static class Program
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             GuestLibraryLayoutChecks.Run(); app.Shutdown(); return;
         }
+        var startupGaps = new List<double>(); var startupClock = Stopwatch.StartNew(); var startupPrior = startupClock.Elapsed.TotalMilliseconds;
+        var startupHeartbeat = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(10) };
+        startupHeartbeat.Tick += (_, _) => { var now = startupClock.Elapsed.TotalMilliseconds; startupGaps.Add(now - startupPrior); startupPrior = now; };
         var window = new MainWindow { Left = -20000, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
         var checks = 0;
         void Check(bool condition, string message) { if (!condition) throw new Exception("FAIL: " + message); checks++; Console.WriteLine("PASS: " + message); }
@@ -58,12 +65,36 @@ static class Program
         {
             try
             {
+                startupPrior = startupClock.Elapsed.TotalMilliseconds; startupHeartbeat.Start();
                 typeof(MainWindow).GetMethod("ShowPage", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, ["Library"]);
                 await Task.Delay(2500);
                 await CheckScrolling(Check);
                 var field = typeof(MainWindow).GetField("libraryCards", BindingFlags.NonPublic | BindingFlags.Instance)!;
                 var cards = (ObservableCollection<LibraryCardView>)field.GetValue(window)!;
                 Check(cards.Count == entries.Length, "large library is displayed");
+                Check(cards.Single(card => card.Card.Media.Id == entries[3].Id).IsWatched, "background startup restores persisted watched flags");
+                var restoredQueue = (List<MediaItem>)typeof(MainWindow).GetField("queue", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+                Check(restoredQueue.Select(item => item.Id).SequenceEqual(startupQueue.MediaIds) && store.Setting("queuePosition") == "1",
+                    "background startup restores queue order and cursor before persisting them");
+                startupHeartbeat.Stop();
+                Console.WriteLine($"Startup max input gap: {startupGaps.DefaultIfEmpty().Max():F1} ms");
+                Check(startupGaps.Count > 20 && startupGaps.Max() < 350, "startup library loading keeps processing input");
+                var grid = (System.Windows.Controls.ItemsControl)window.FindName("PosterGrid");
+                int Realized() => Enumerable.Range(0, cards.Count).Count(index => grid.ItemContainerGenerator.ContainerFromIndex(index) is not null);
+                Check(Realized() < 50, "large library realizes only visible rows");
+                var libraryScroll = (System.Windows.Controls.ScrollViewer)window.FindName("LibraryScroll");
+                libraryScroll.ScrollToBottom(); await Task.Delay(150);
+                Console.WriteLine($"Library viewport {libraryScroll.ViewportHeight:F0}, extent {libraryScroll.ExtentHeight:F0}, offset {libraryScroll.VerticalOffset:F0}, realized {Realized()}");
+                Check(grid.ItemContainerGenerator.ContainerFromIndex(cards.Count - 1) is not null && Realized() < 50,
+                    "scrolling reaches the final card without realizing the entire library");
+                libraryScroll.ScrollToTop(); await Task.Delay(150);
+                Check(grid.ItemContainerGenerator.ContainerFromIndex(0) is not null && Realized() < 50,
+                    "scrolling back recreates the first cards and releases offscreen rows");
+                var originalWidth = window.Width; window.Width = 900; await Task.Delay(150);
+                libraryScroll.ScrollToBottom(); await Task.Delay(150);
+                Check(grid.ItemContainerGenerator.ContainerFromIndex(cards.Count - 1) is not null && Realized() < 50,
+                    "resizing recalculates library rows and keeps the final card reachable");
+                window.Width = originalWidth; libraryScroll.ScrollToTop(); await Task.Delay(150);
                 var previous = cards.ToArray();
                 await CheckSearchLayout(window, Check);
                 var tracker = new LibraryCardView(new("Example", "Movie", null, entries[0], "movie"));
@@ -123,7 +154,6 @@ static class Program
                 Check(cards.Count == previous.Length && cards.Zip(previous).All(pair => ReferenceEquals(pair.First, pair.Second)),
                     "scan updates preserve all existing card instances");
                 Check(cards.All(card => card.Card.Media.Overview == "Updated during scan"), "incremental metadata reaches every card");
-                var grid = (System.Windows.Controls.ItemsControl)window.FindName("PosterGrid");
                 Check(grid.IsEnabled, "background refresh leaves the library interactive");
                 typeof(MainWindow).GetMethod("FilterLibrary", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [false, false]);
                 Check(grid.IsEnabled, "full refresh never dims or disables the poster grid");
@@ -297,6 +327,41 @@ static class Program
         check(persisted.MediaIds.SequenceEqual([media[0].Id, media[1].Id]), "queue reordering and per-card deletion persist immediately");
         Call("ShowPage", "Queues"); window.UpdateLayout();
         check(list.ActualHeight > 100 && list.AllowDrop, "redesigned queue keeps a usable drag-and-drop list");
+        var picker = (System.Windows.Controls.ComboBox)window.FindName("PlayerQueuePicker");
+        var noQueue = picker.Items.Cast<SavedQueue>().Single(item => item.Name == "No queue");
+        picker.SelectedItem = noQueue;
+        check(((List<MediaItem>)Field("queue")).Count == 0 && (int)Field("queuePosition") == -1,
+            "No queue disables active queue playback and clears its cursor");
+        check(saved.Single(item => item.Id == fixture.Id).MediaIds.SequenceEqual([media[0].Id, media[1].Id]),
+            "No queue preserves saved queue contents");
+        check(store.Setting("activeQueue") == "" && Wire.Read<string[]>(store.Setting("queue")!).Length == 0,
+            "No queue persists independently of saved queues");
+        var card = new LibraryCardView(new(media[0].Title, "", null, media[0], "movie"));
+        var cards = (ObservableCollection<LibraryCardView>)Field("libraryCards"); cards.Add(card);
+        var watchedButton = new System.Windows.Controls.Button { DataContext = card };
+        var watchedClick = new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent);
+        Call("ToggleCardWatched", watchedButton, watchedClick);
+        check(card.IsWatched && store.Setting("watched:" + media[0].Id) == "true" && watchedClick.Handled,
+            "card action marks watched immediately without opening the video's details");
+        Call("ToggleCardWatched", watchedButton, new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        check(!card.IsWatched && store.Setting("watched:" + media[0].Id) == "false",
+            "card action clears watched state immediately");
+        cards.Remove(card);
+        var episode = ((IEnumerable<MediaItem>)Field("items")).First(item => item.Series is not null && item.Season == 1);
+        var seasonCard = new LibraryCardView(new("Season 1", "", null, episode, "season", 1)); cards.Add(seasonCard);
+        watchedButton.DataContext = seasonCard; Call("ToggleCardWatched", watchedButton, new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        var showEpisodes = ((IEnumerable<MediaItem>)Field("items")).Where(item => LibraryIdentity.SameShow(item, episode)).ToArray();
+        check(seasonCard.IsWatched && showEpisodes.Where(item => item.Season == 1).All(item => store.Setting("watched:" + item.Id) == "true") &&
+            showEpisodes.Where(item => item.Season != 1).All(item => store.Setting("watched:" + item.Id) != "true"),
+            "season checkmark toggles only that season's episodes");
+        var showCard = new LibraryCardView(new(episode.Series!, "", null, episode, "series")); cards.Add(showCard);
+        watchedButton.DataContext = showCard; Call("ToggleCardWatched", watchedButton, new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        check(showCard.IsWatched && showEpisodes.All(item => store.Setting("watched:" + item.Id) == "true"),
+            "show checkmark marks every season watched");
+        Call("ToggleCardWatched", watchedButton, new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        check(!showCard.IsWatched && !seasonCard.IsWatched && showEpisodes.All(item => store.Setting("watched:" + item.Id) == "false"),
+            "show checkmark clears all watched episode and season states");
+        cards.Remove(seasonCard); cards.Remove(showCard);
     }
 
     private static void CheckRoomSettings(MainWindow window, LibraryStore store, Action<bool, string> Check)

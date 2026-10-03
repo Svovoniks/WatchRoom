@@ -9,6 +9,7 @@ namespace Watchroom.Desktop;
 
 public partial class MainWindow
 {
+    private static readonly SavedQueue noPlaybackQueue = new("", "No queue", []);
     private bool CanEditQueue()
     {
         if (room?.Identity?.Host == false) { SetStatus("The host controls the queue."); return false; }
@@ -33,8 +34,9 @@ public partial class MainWindow
         updatingQueues = true;
         QueuePicker.ItemsSource = savedQueues.ToArray();
         QueuePicker.SelectedItem = savedQueues.FirstOrDefault(x => x.Id == selectedId) ?? savedQueues.FirstOrDefault();
-        PlayerQueuePicker.ItemsSource = savedQueues.ToArray();
-        PlayerQueuePicker.SelectedItem = savedQueues.FirstOrDefault(x => x.Id == activeQueueId);
+        var temporary = activeQueueId is null && queue.Count > 0 ? new SavedQueue("temporary", "Current queue", queue.Select(item => item.Id).ToArray()) : null;
+        PlayerQueuePicker.ItemsSource = new[] { noPlaybackQueue }.Concat(temporary is null ? [] : new[] { temporary }).Concat(savedQueues).ToArray();
+        PlayerQueuePicker.SelectedItem = savedQueues.FirstOrDefault(x => x.Id == activeQueueId) ?? temporary ?? noPlaybackQueue;
         updatingQueues = false;
         RefreshSavedItems();
     }
@@ -62,8 +64,16 @@ public partial class MainWindow
     private void PlayerQueueChanged(object sender, SelectionChangedEventArgs e)
     {
         if (updatingQueues || PlayerQueuePicker.SelectedItem is not SavedQueue saved) return;
+        if (saved.Id == "temporary") return;
         if (!CanEditQueue()) { RefreshQueuePickers(); return; }
-        SelectPlaybackQueue(saved);
+        if (saved == noPlaybackQueue) SelectNoQueue(); else SelectPlaybackQueue(saved);
+    }
+    private void SelectNoQueue()
+    {
+        SaveActiveQueueEdits();
+        activeQueueId = null; queue.Clear(); queuePosition = -1;
+        if (roomLibrary?.Queue.Entries.Length > 0) roomLibrary.Request(HostPeerId(), "clear");
+        SaveQueues(); RefreshQueuePickers(); PublishQueue(); RefreshEpisodeEndAction();
     }
     private void CreateQueue(object sender, RoutedEventArgs e)
     {
@@ -85,14 +95,14 @@ public partial class MainWindow
         if (QueuePicker.SelectedItem is not SavedQueue saved || !CanEditQueue()) return;
         savedQueues.Remove(saved);
         if (savedQueues.Count == 0) savedQueues.Add(new(Guid.NewGuid().ToString("N"), "Default queue", []));
-        if (activeQueueId == saved.Id) SelectPlaybackQueue(savedQueues[0]);
+        if (activeQueueId == saved.Id) SelectNoQueue();
         SaveQueues(); RefreshQueuePickers();
     }
     private void PlaySavedQueue(object sender, RoutedEventArgs e) => StartQueue(QueuePicker.SelectedItem as SavedQueue, sender, e);
     private void PlayPlayerQueue(object sender, RoutedEventArgs e) => StartQueue(PlayerQueuePicker.SelectedItem as SavedQueue, sender, e);
     private void StartQueue(SavedQueue? saved, object sender, RoutedEventArgs e)
     {
-        if (saved is null || !CanEditQueue()) return;
+        if (saved is null || saved == noPlaybackQueue || !CanEditQueue()) return;
         if (!ResolveQueue(saved).Any(x => File.Exists(x.Path))) { SetStatus("This queue has no available videos."); return; }
         SelectPlaybackQueue(saved); NextQueued(sender, e);
     }
@@ -248,7 +258,7 @@ public partial class MainWindow
         {
             if (!CanEditQueue()) return;
             queue.Clear(); queuePosition = -1; activeQueueId = null; foreach (var video in videos.Where(x => x.Available && File.Exists(x.Path))) queue.Add(video);
-            PublishQueue(); NextQueued(button, new RoutedEventArgs());
+            PublishQueue(); RefreshQueuePickers(); NextQueued(button, new RoutedEventArgs());
         };
         menu.Items.Add(play); menu.Items.Add(QueueMenu(videos));
         var members = items.Where(x => x.Id == card.Media.Id || card.Level is "series" or "season" && LibraryIdentity.SameShow(x, card.Media)).ToArray();

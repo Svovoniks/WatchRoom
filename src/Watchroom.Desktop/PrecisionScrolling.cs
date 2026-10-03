@@ -55,7 +55,9 @@ public static class PrecisionScrolling
         var state = target.GetValue(StateProperty) as ScrollState;
         if (state is null) { state = new(); target.SetValue(StateProperty, state); }
         // Pixel viewers use 16 DIP per configured line. Logical lists retain item-based scrolling.
-        var distance = lines < 0 ? target.ViewportHeight : lines * (target.CanContentScroll ? 1d : 16d);
+        var items = target.Content as ItemsControl ?? target.TemplatedParent as ItemsControl;
+        var logical = target.CanContentScroll && !(items is not null && VirtualizingPanel.GetScrollUnit(items) == ScrollUnit.Pixel);
+        var distance = lines < 0 ? target.ViewportHeight : lines * (logical ? 1d : 16d);
         state.Delta -= args.Delta / 120d * distance;
         if (state.Scheduled) return;
         state.Scheduled = true;
@@ -63,7 +65,7 @@ public static class PrecisionScrolling
         {
             state.Scheduled = false;
             if (!GetEnabled(target)) return;
-            var movement = target.CanContentScroll ? Math.Truncate(state.Delta) : state.Delta;
+            var movement = logical ? Math.Truncate(state.Delta) : state.Delta;
             state.Delta -= movement;
             var offset = Math.Clamp(target.VerticalOffset + movement, 0, target.ScrollableHeight);
             if (offset == 0 || offset == target.ScrollableHeight) state.Delta = 0;

@@ -1,9 +1,22 @@
 using System.ComponentModel;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.IO;
 using System.Windows.Media.Imaging;
 using Watchroom.Core;
 
 namespace Watchroom.Desktop;
+
+public sealed class LibraryCardCollection : ObservableCollection<LibraryCardView>
+{
+    public void AddBatch(IEnumerable<LibraryCardView> cards)
+    {
+        foreach (var card in cards) Items.Add(card);
+        OnPropertyChanged(new(nameof(Count)));
+        OnPropertyChanged(new("Item[]"));
+        OnCollectionChanged(new(NotifyCollectionChangedAction.Reset));
+    }
+}
 
 public sealed class LibraryCardView : INotifyPropertyChanged
 {

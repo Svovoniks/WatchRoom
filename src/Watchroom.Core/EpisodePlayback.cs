@@ -2,6 +2,9 @@ namespace Watchroom.Core;
 
 public static class EpisodePlayback
 {
+    public static bool NearEnd(long positionMs, long durationMs) => durationMs > 0 && positionMs >= 0 &&
+        durationMs - positionMs <= Math.Min(90000, durationMs / 10);
+
     public static MediaItem? Next(IEnumerable<MediaItem> library, MediaItem current, bool hasQueue,
         Func<MediaItem, bool> canPlay)
     {

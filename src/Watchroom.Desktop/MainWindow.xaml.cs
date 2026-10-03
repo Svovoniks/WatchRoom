@@ -27,10 +27,11 @@ public partial class MainWindow : Window
     }
     private readonly LibraryStore library;
     private readonly ConcurrentDictionary<string, MediaItem> libraryUpdates = new();
-    private readonly ObservableCollection<LibraryCardView> libraryCards = [];
+    private readonly LibraryCardCollection libraryCards = [];
     private readonly EpisodeArtwork episodeArtwork = new();
     private readonly HashSet<string> episodeArtworkRequests = [];
     private bool libraryViewDirty;
+    private bool libraryLoaded;
     private string? detailPosterPath;
     private int detailPosterGeneration;
     private string? pendingScanStatus;
@@ -94,10 +95,15 @@ public partial class MainWindow : Window
     private IReadOnlyList<LibraryBreadcrumb> breadcrumbItems = [];
     private bool artworkBusy;
     private bool displaySpecialsWithinSeasons;
+    private ScrollViewer LibraryScroll
+    {
+        get { PosterGrid.ApplyTemplate(); return (ScrollViewer)PosterGrid.Template.FindName("LibraryScroll", PosterGrid); }
+    }
 
     public MainWindow()
     {
         InitializeComponent();
+        RegisterName("LibraryScroll", LibraryScroll);
         RoomPage.SizeChanged += (_, _) => PlayerOptionsScroll.MaxHeight = Math.Clamp(RoomPage.ActualHeight / 3, 120, 260);
         InitializeBackNavigation();
         videoClickDelay.Interval = TimeSpan.FromMilliseconds(GetDoubleClickTime());
@@ -145,17 +151,16 @@ public partial class MainWindow : Window
             try { legacyIds = Wire.Read<string[]>(library.Setting("queue") ?? "[]"); } catch (System.Text.Json.JsonException) { }
             savedQueues.Add(new(Guid.NewGuid().ToString("N"), "Default queue", legacyIds));
         }
-        activeQueueId = savedQueues.FirstOrDefault(x => x.Id == library.Setting("activeQueue"))?.Id ?? savedQueues[0].Id;
-        var savedQueue = library.Setting("queue") ?? Wire.Serialize(savedQueues.First(x => x.Id == activeQueueId).MediaIds);
-        RefreshLibrary(); WatchFolders();
+        var savedActiveQueue = library.Setting("activeQueue");
+        activeQueueId = savedActiveQueue == "" ? null : savedQueues.FirstOrDefault(x => x.Id == savedActiveQueue)?.Id ?? savedQueues[0].Id;
+        var savedQueue = library.Setting("queue") ?? (activeQueueId is null ? "[]" : Wire.Serialize(savedQueues.First(x => x.Id == activeQueueId).MediaIds));
+        // Read the catalog after the window has appeared, without blocking input.
         library.MediaSaved += QueueLibraryUpdate;
         libraryUpdateTimer.Tick += (_, _) => ApplyLibraryUpdates();
         libraryUpdateTimer.Start();
         InitializeSharedLibrary();
-        try { foreach (var id in Wire.Read<string[]>(savedQueue).Take(10000)) if (items.FirstOrDefault(x => x.Id == id) is { } queued) queue.Add(queued); }
-        catch (System.Text.Json.JsonException) { }
-        if (int.TryParse(library.Setting("queuePosition"), out var cursor)) queuePosition = Math.Clamp(cursor, -1, queue.Count - 1);
-        LoadSavedRooms(); RefreshQueuePickers(); PublishQueue();
+        var savedCursor = library.Setting("queuePosition");
+        LoadSavedRooms(); RefreshQueuePickers();
         if (int.TryParse(library.Setting("volume"), out var savedVolume)) Volume.Value = Math.Clamp(savedVolume, 0, 100);
         timer.Tick += (_, _) => PlaybackTick(); timer.Start();
         scanDelay.Tick += async (_, _) => { scanDelay.Stop(); if (!scanning) await Guard(Scan); };
@@ -163,9 +168,33 @@ public partial class MainWindow : Window
         {
             await Guard(async () =>
             {
-                await Task.Run(() => LibVLCSharp.Shared.Core.Initialize());
-                vlc = new LibVLC("--no-video-title-show", "--no-snapshot-preview", "--no-osd", "--quiet");
-                player = new(vlc) { Volume = (int)Volume.Value, EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false };
+                SetStatus("Loading library…"); ResultCount.Text = "Loading library…";
+                EmptyLibrary.Visibility = Visibility.Collapsed;
+                var roots = folders.ToArray(); var excluded = exclusions.ToArray();
+                var loaded = await Task.Run(() => { library.Prune(roots, excluded); return library.All(); });
+                if (closing) return;
+                // Restore the saved queue before refresh persists any queue edits.
+                items = loaded;
+                var byId = loaded.ToDictionary(item => item.Id);
+                try { foreach (var id in Wire.Read<string[]>(savedQueue).Take(10000)) if (byId.TryGetValue(id, out var queued)) queue.Add(queued); }
+                catch (System.Text.Json.JsonException) { }
+                if (int.TryParse(savedCursor, out var cursor)) queuePosition = Math.Clamp(cursor, -1, queue.Count - 1);
+                libraryLoaded = true;
+                RefreshLibraryFromItems(loaded); WatchFolders();
+            });
+            if (closing) return;
+            await Guard(async () =>
+            {
+                var volume = (int)Volume.Value;
+                var native = await Task.Run(() =>
+                {
+                    LibVLCSharp.Shared.Core.Initialize();
+                    var engine = new LibVLC("--no-video-title-show", "--no-snapshot-preview", "--no-osd", "--quiet");
+                    try { return (Engine: engine, Player: new LibVLCSharp.Shared.MediaPlayer(engine) { Volume = volume, EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false }); }
+                    catch { engine.Dispose(); throw; }
+                });
+                if (closing) { native.Player.Dispose(); native.Engine.Dispose(); return; }
+                vlc = native.Engine; player = native.Player;
                 Video.MediaPlayer = player;
                 player.TimeChanged += (_, e) =>
                 {
@@ -316,10 +345,11 @@ public partial class MainWindow : Window
             else browseKind = changed.Kind;
         }
         FilterLibrary();
-        for (int i = 0; i < savedQueues.Count; i++) savedQueues[i] = savedQueues[i] with { MediaIds = savedQueues[i].MediaIds.Where(id => items.Any(x => x.Id == id)).ToArray() };
+        var byId = items.ToDictionary(item => item.Id);
+        for (int i = 0; i < savedQueues.Count; i++) savedQueues[i] = savedQueues[i] with { MediaIds = savedQueues[i].MediaIds.Where(byId.ContainsKey).ToArray() };
         if (savedQueues.Count > 0) { SaveQueues(); RefreshQueuePickers(); }
         var priorCursorId = queuePosition >= 0 && queuePosition < queue.Count ? queue[queuePosition].Id : null;
-        var refreshedQueue = queue.Select(x => items.FirstOrDefault(updated => updated.Id == x.Id)).OfType<MediaItem>().ToArray();
+        var refreshedQueue = queue.Select(x => byId.GetValueOrDefault(x.Id)).OfType<MediaItem>().ToArray();
         queue.Clear(); foreach (var queued in refreshedQueue) queue.Add(queued);
         queuePosition = priorCursorId is null ? -1 : queue.FindIndex(x => x.Id == priorCursorId);
         PublishQueue();
@@ -363,7 +393,7 @@ public partial class MainWindow : Window
     }
     private async void FilterLibrary(bool debounce = false, bool backgroundUpdate = false)
     {
-        if (PosterGrid is null || LibraryStatusFilter is null || NoResults is null || library is null || closing) return;
+        if (PosterGrid is null || LibraryStatusFilter is null || NoResults is null || library is null || closing || !libraryLoaded) return;
         librarySearchCancellation?.Cancel();
         using var request = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         librarySearchCancellation = request;
@@ -401,14 +431,31 @@ public partial class MainWindow : Window
             try { cards = await LibraryCatalog.SearchAsync(source, query, filter, series, kind, season, cancellation, displaySpecialsWithinSeasons); }
             finally { librarySearchGate.Release(); }
             if (status == 1) cards = cards.Where(card => card.Poster is null).ToList();
+            var views = libraryCards.ToDictionary(view => view.Key);
+            // Read playback flags once and calculate aggregate show progress off-thread.
+            var playback = await Task.Run(() =>
+            {
+                var settings = library.PlaybackSettings();
+                var shows = source.Where(item => item.Series is not null).GroupBy(LibraryIdentity.ShowKey)
+                    .ToDictionary(group => group.Key, group => group.ToArray());
+                return cards.Select(card =>
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    var members = card.Media.Series is null ? Array.Empty<MediaItem>() : shows.GetValueOrDefault(LibraryIdentity.ShowKey(card.Media)) ?? [];
+                    var position = card.Level == "episode" && long.TryParse(settings.GetValueOrDefault("position:" + card.Media.Id), out var saved) ? saved : 0;
+                    return (View: views.GetValueOrDefault(LibraryCardView.Identity(card)) ?? new LibraryCardView(card),
+                        Position: position, Watched: LibraryWatchProgress.IsWatched(members, card, id => settings.GetValueOrDefault("watched:" + id) == "true"));
+                }).ToArray();
+            }, cancellation);
             if (cancellation.IsCancellationRequested || librarySearchCancellation != request) return;
             if (PosterGrid.ItemsSource != libraryCards) PosterGrid.ItemsSource = libraryCards;
-            var views = libraryCards.ToDictionary(view => view.Key);
             var desiredKeys = cards.Select(LibraryCardView.Identity).ToHashSet();
             var slice = Stopwatch.StartNew();
             async Task YieldForInput()
             {
-                if (slice.ElapsedMilliseconds < 6) return;
+                // Batch card changes within one frame so the extra card actions
+                // do not force a full WrapPanel layout after every few inserts.
+                if (slice.ElapsedMilliseconds < 12) return;
                 await Dispatcher.Yield(DispatcherPriority.Background);
                 cancellation.ThrowIfCancellationRequested(); slice.Restart();
             }
@@ -418,13 +465,17 @@ public partial class MainWindow : Window
                 if (!desiredKeys.Contains(libraryCards[index].Key)) libraryCards.RemoveAt(index);
                 await YieldForInput();
             }
+            // When the grid is empty, publish one batch instead of repeatedly
+            // laying out all preceding cards as a large library is inserted.
+            var initialBatch = libraryCards.Count == 0 && cards.Count > 100 ? new List<LibraryCardView>() : null;
             for (var index = 0; index < cards.Count; index++)
             {
                 cancellation.ThrowIfCancellationRequested();
-                if (!views.TryGetValue(LibraryCardView.Identity(cards[index]), out var view)) view = new(cards[index]);
-                else view.Update(cards[index]);
-                UpdateCardPlayback(view);
-                if (index >= libraryCards.Count || libraryCards[index] != view)
+                var view = playback[index].View;
+                if (views.ContainsKey(view.Key)) view.Update(cards[index]);
+                view.SetPlayback(playback[index].Position, playback[index].Watched);
+                if (initialBatch is not null) initialBatch.Add(view);
+                else if (index >= libraryCards.Count || libraryCards[index] != view)
                 {
                     var existingIndex = libraryCards.IndexOf(view);
                     if (existingIndex >= 0) libraryCards.Move(existingIndex, index);
@@ -432,6 +483,8 @@ public partial class MainWindow : Window
                 }
                 await YieldForInput();
             }
+            cancellation.ThrowIfCancellationRequested();
+            if (initialBatch is not null) libraryCards.AddBatch(initialBatch);
             ResultCount.Text = $"{cards.Count} {(cards.Count == 1 ? "item" : "items")}";
             NoResults.Visibility = items.Count > 0 && cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -615,7 +668,14 @@ public partial class MainWindow : Window
         if (artworkBusy) return; artworkBusy = true;
         var token = MetadataToken.Password;
         var progress = new Progress<string>(SetStatus);
-        try { var report = await Task.Run(() => AutomaticArtwork.FetchAsync(library, App.DataDirectory, token, progress, cancellation, force: force, refresh: refresh), cancellation); RefreshLibrary(); SetStatus(report); }
+        try
+        {
+            var report = await Task.Run(() => AutomaticArtwork.FetchAsync(library, App.DataDirectory, token, progress, cancellation, force: force, refresh: refresh), cancellation);
+            var roots = folders.ToArray(); var excluded = exclusions.ToArray();
+            var refreshed = await Task.Run(() => { library.Prune(roots, excluded); return library.All(); }, cancellation);
+            if (closing) return;
+            libraryUpdates.Clear(); RefreshLibraryFromItems(refreshed); SetStatus(report);
+        }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         finally { ApplyLibraryUpdates(); artworkBusy = false; }
     }
@@ -693,8 +753,8 @@ public partial class MainWindow : Window
     {
         if (player is null) return;
         if (!File.Exists(item.Path)) throw new FileNotFoundException("Movie file is unavailable. Reconnect its drive and rescan.");
-        await Disconnect(); target = null; loadedMedia = null; playingItem = item;
-        localResume = long.TryParse(library.Setting("position:" + item.Id), out var saved) ? saved : 0;
+        await Disconnect(preserveFullscreen: fullscreen && room is null); target = null; loadedMedia = null; playingItem = item;
+        localResume = !WasWatched(item.Id) && long.TryParse(library.Setting("position:" + item.Id), out var saved) ? saved : 0;
         using var media = new Media(vlc!, item.Path, FromType.FromPath);
         ready = false; RoomHeading.Text = PlaybackTitle(item); RoomSubtitle.Text = "Local playback";
         ConnectionStatus.Text = "Local playback";
@@ -717,7 +777,7 @@ public partial class MainWindow : Window
     {
         if (room is null && playingItem is not null && player is not null && player.Time >= 0)
         {
-            library.Setting("position:" + playingItem.Id, player.Length > 0 && player.Time >= player.Length - 2000 ? "0" : Math.Max(0, player.Time).ToString());
+            library.Setting("position:" + playingItem.Id, WasWatched(playingItem.Id) || player.Length > 0 && player.Time >= player.Length - 2000 ? "0" : Math.Max(0, player.Time).ToString());
             foreach (var card in libraryCards.Where(x => x.Card.Media.Id == playingItem.Id)) UpdateCardPlayback(card);
         }
     }
@@ -1142,6 +1202,29 @@ public partial class MainWindow : Window
     private void StopPlayback(object sender, RoutedEventArgs e) { if (player is null) return; if (room is null) { player.Stop(); ready = false; } else SendPlayback(false, 0, seek: true); }
     private void MutePlayback(object sender, RoutedEventArgs e) { if (player is not null) player.Mute = !player.Mute; }
     private void VolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e) { if (player is not null) { player.Volume = (int)e.NewValue; if (e.NewValue > 0) player.Mute = false; } }
+    private void VolumeWheel(object sender, MouseWheelEventArgs e)
+    {
+        e.Handled = true;
+        Volume.Value = Math.Clamp(Volume.Value + e.Delta * 5d / 120, Volume.Minimum, Volume.Maximum);
+        VolumeText.Text = $"{(int)Volume.Value}%";
+        ShowPlayerControls();
+    }
+    private void VideoWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.OriginalSource == PlayerOverlay) VolumeWheel(sender, e);
+    }
+    private void TimelineWheel(object sender, MouseWheelEventArgs e)
+    {
+        e.Handled = true;
+        if (!CanSeek() || seeking) return;
+        var position = pendingSeek is { } pending && Wire.Now < seekExpires ? pending :
+            room is null ? Math.Max(0, player!.Time) : playbackIntent.Position(target, player!.Time, room.ServerNowMs);
+        Timeline.Maximum = player!.Length;
+        Timeline.Value = Math.Clamp(position + e.Delta * 5000d / 120, 0, player.Length);
+        seeking = true; CommitSeek();
+        PlaybackTime.Text = FormatTime((long)Timeline.Value) + " / " + FormatTime(player.Length);
+        ShowPlayerControls();
+    }
     private void RefreshTracks()
     {
         if (player is null) return; tracksUpdating = true;
@@ -1278,12 +1361,12 @@ public partial class MainWindow : Window
         PublishQueue();
     }
     private async void LeaveRoom(object sender, RoutedEventArgs e) => await Guard(async () => { var wasRoom = room is not null; await Disconnect(); player?.Stop(); RoomHeading.Text = "Your watch room"; RoomSubtitle.Text = "Room closed"; ShowPage(wasRoom ? "Rooms" : "Library"); });
-    private async Task Disconnect()
+    private async Task Disconnect(bool preserveFullscreen = false)
     {
         libraryWindow?.Shutdown(); libraryWindow = null; roomLibrary = null; sharedItems.Clear(); sharedIds.Clear(); sharedKinds = [];
         videoClickDelay.Stop();
         SavePlaybackPosition(); localResume = 0;
-        if (fullscreen) SetFullscreen(false);
+        if (fullscreen && !preserveFullscreen) SetFullscreen(false);
         PlayerEmpty.Visibility = Visibility.Visible;
         pendingSeek = null; seeking = false; playbackPause.Clear(); playbackIntent.Clear(); appliedGeneration = readyGeneration = -1; ++loadGeneration; var old = room; room = null; target = null; loadedMedia = null; ready = false;
         player?.Stop(); if (old is not null) await old.DisposeAsync();
@@ -1360,6 +1443,8 @@ public partial class MainWindow : Window
         ChatInput.IsEnabled = SendChatButton.IsEnabled = connectedRoom && (room!.Identity?.Host == true || room.Snapshot?.People.Any(p => p.Id == room.Identity?.Peer && p.Approved) == true);
         PlayButton.IsEnabled = StopButton.IsEnabled = canControl && (ready || playingItem is not null && player?.State is VLCState.Stopped or VLCState.Ended);
         Timeline.IsEnabled = BackwardButton.IsEnabled = ForwardButton.IsEnabled = canControl && player?.Length > 0;
+        NextButton.Visibility = PreviousButton.Visibility = HasPlaybackQueue ? Visibility.Visible : Visibility.Collapsed;
+        RefreshEpisodeEndAction();
         NextButton.IsEnabled = roomLibrary?.Queue.Entries.Length > 0
             ? connectedRoom && (room!.Identity?.Host == true || roomLibrary.OwnAccess.Start)
             : QueuePlayback.FindNext(queue, queuePosition, 1, x => File.Exists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);

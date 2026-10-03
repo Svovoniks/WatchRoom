@@ -215,6 +215,14 @@ public sealed class LibraryStore
         c.CommandText = "SELECT value FROM settings WHERE key=$k"; c.Parameters.AddWithValue("$k", key);
         return c.ExecuteScalar() as string;
     }
+    public Dictionary<string, string> PlaybackSettings()
+    {
+        using var db = Open(); using var command = db.CreateCommand();
+        command.CommandText = "SELECT key, value FROM settings WHERE key LIKE 'watched:%' OR key LIKE 'position:%'";
+        using var rows = command.ExecuteReader(); var result = new Dictionary<string, string>();
+        while (rows.Read()) result[rows.GetString(0)] = rows.GetString(1);
+        return result;
+    }
     public void Setting(string key, string value)
     {
         using var db = Open(); using var c = db.CreateCommand();
