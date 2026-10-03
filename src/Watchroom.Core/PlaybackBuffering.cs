@@ -7,9 +7,10 @@ public sealed class PlaybackBuffering
     private long? started;
     private long lastNotice = long.MinValue / 2;
     private bool reported;
+    public bool IsActive => started is not null;
     public bool Cache(float percent, long monotonicMs)
     {
-        if (percent < 10) started ??= monotonicMs;
+        if (percent < 100) started ??= monotonicMs;
         if (percent < 100) return false;
         started = null; var ready = reported; reported = false; return ready;
     }

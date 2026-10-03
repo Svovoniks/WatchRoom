@@ -79,6 +79,9 @@ static class RecoveryFixture
         buffer.Cache(0, 2000);
         check(!buffer.Poll(true, 2499) && buffer.Poll(true, 2500) && !buffer.Poll(true, 3000), "sustained starvation pauses the room once");
         check(buffer.Cache(100, 3100) && !buffer.Cache(100, 3101), "recovered buffering reports ready once");
+        buffer.Cache(60, 9000);
+        check(buffer.IsActive && buffer.Poll(true, 9500), "partial cache starvation is detected even without a zero-percent event");
+        check(buffer.Cache(100, 9600) && !buffer.IsActive, "full cache releases the synchronization hold and reports recovery");
 
         var cursors = new List<string>(); var gets = 0;
         using var handler = new Handler((request, ct) =>

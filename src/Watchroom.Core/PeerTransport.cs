@@ -60,8 +60,10 @@ public sealed class PeerTransport : IDisposable
         if (catalogChannel is null) Attach(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = "room-catalog-v1" }));
     }
     private readonly ConcurrentDictionary<string, TaskCompletionSource<byte[]>> pending = new();
-    private readonly SemaphoreSlim window = new(8);
-    private readonly Channel<RangeRequest> requests = Channel.CreateBounded<RangeRequest>(32);
+    private readonly SemaphoreSlim window = new(MediaStreaming.Window);
+    // Canceled HTTP seeks can leave earlier ranges queued at the host. Leave
+    // bounded room for those while the guest starts its next read window.
+    private readonly Channel<RangeRequest> requests = Channel.CreateBounded<RangeRequest>(MediaStreaming.Window * 4);
     private readonly CancellationTokenSource lifetime = new();
     private readonly TaskCompletionSource opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource controlOpened = new(TaskCreationOptions.RunContinuationsAsynchronously);

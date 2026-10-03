@@ -45,9 +45,9 @@ public sealed class MediaBridge : IAsyncDisposable
             var inflight = new Queue<Task<byte[]>>(); var offset = start;
             while (offset <= end || inflight.Count > 0)
             {
-                while (offset <= end && inflight.Count < 8)
+                while (offset <= end && inflight.Count < MediaStreaming.Window)
                 {
-                    int count = (int)Math.Min(32768, end - offset + 1);
+                    int count = (int)Math.Min(MediaStreaming.ChunkBytes, end - offset + 1);
                     inflight.Enqueue(ReadRange(offset, count, context.RequestAborted)); offset += count;
                 }
                 var bytes = await inflight.Dequeue();

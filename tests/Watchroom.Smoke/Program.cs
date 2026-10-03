@@ -167,6 +167,17 @@ if (args.FirstOrDefault() == "--seed-ui")
     Console.WriteLine("Isolated UI fixture prepared."); return;
 }
 
+if (args.FirstOrDefault() == "--streaming-audio")
+{
+    var checks = 0;
+    await StreamingAudioFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/streaming-audio"), (condition, name) =>
+    {
+        if (!condition) throw new Exception("FAIL: " + name);
+        Console.WriteLine("PASS: " + name); checks++;
+    }, int.TryParse(args.ElementAtOrDefault(2), out var cacheMs) ? cacheMs : MediaStreaming.NetworkCacheMs);
+    Console.WriteLine($"{checks} streaming audio checks passed.");
+    return;
+}
 var root = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/smoke");
 Directory.CreateDirectory(root);
 int passed = 0;
@@ -181,6 +192,7 @@ await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
 await GroupingAuditFixture.Run(Path.Combine(root, "grouping-audit"), Check);
 HostRoomFixture.Run(Check);
 SharedLibraryFixture.Run(Check);
+await StreamingAudioFixture.Run(Path.Combine(root, "streaming-audio"), Check);
 Check(MediaBridge.TryRange("bytes=-30", 100, out var s, out var e) && s == 70 && e == 99, "suffix byte ranges");
 Check(MediaBridge.TryRange("bytes=40-999", 100, out s, out e) && s == 40 && e == 99, "range end clamped");
 Check(!MediaBridge.TryRange("bytes=100-", 100, out _, out _) && !MediaBridge.TryRange("bytes=0-1,3-4", 100, out _, out _), "invalid ranges rejected");

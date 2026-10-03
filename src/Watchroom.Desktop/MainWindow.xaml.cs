@@ -913,7 +913,7 @@ public partial class MainWindow : Window
             using var vlcMedia = source is ILocalMediaSource local
                 ? new Media(vlc!, local.LocalPath, FromType.FromPath)
                 : new Media(vlc!, streamUri!);
-            if (streamUri is not null) vlcMedia.AddOption(":network-caching=200");
+            if (streamUri is not null) vlcMedia.AddOption($":network-caching={MediaStreaming.NetworkCacheMs}");
             if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("media-input", new { local = source is ILocalMediaSource, media.Extension });
             // VLC's AVI demuxer reads slow-seekable HTTP inputs in 1.5-second
             // steps, exposing read-ahead time to the synchronization controller.
@@ -997,6 +997,9 @@ public partial class MainWindow : Window
         // Pause before clock checks, settling, or a potentially slow remote seek.
         if (playbackPause.Pending || !target.Playing) player.SetPause(true);
         if (playbackPause.Pending || seeking || pendingSeek is not null && target.Revision <= seekRevision) return;
+        // Seeking or accelerating a starved input discards its recovering buffer
+        // and can turn a brief network delay into repeated audio/video dropouts.
+        if (buffering.IsActive || player.State == VLCState.Buffering) return;
         long now = room.ServerNowMs;
         if (now < target.AtUnixMs) { player.SetPause(true); return; }
         long desired = SyncMath.TargetPosition(target, now);
