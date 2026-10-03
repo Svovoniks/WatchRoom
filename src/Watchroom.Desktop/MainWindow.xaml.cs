@@ -725,25 +725,36 @@ public partial class MainWindow : Window
     {
         if (selected is null || roomBusy) return;
         if (!File.Exists(selected.Path)) throw new FileNotFoundException("Movie file is unavailable.");
-        if (room?.IsConnected == true && room.Identity?.Host == true)
+        var item = selected;
+        if (room?.IsConnected == true) RememberCurrentRoom();
+        var current = savedRooms.FirstOrDefault(saved => room?.IsConnected == true && room.Identity?.Host == true &&
+            saved.Server == room.ServerAddress && saved.Code == room.Identity.Room);
+        var choice = Dialogs.ChooseWatchRoom(this, savedRooms.Where(saved => saved.HostKey is not null), current, ValidateRoomName);
+        if (choice is null) return;
+        if (choice.Room is { } chosen && room?.IsConnected == true && room.Identity?.Host == true &&
+            chosen.Server == room.ServerAddress && chosen.Code == room.Identity.Room)
         {
-            playingItem = selected; room.SetHostedFile(selected.Path, PlaybackTitle(selected));
+            playingItem = item; room.SetHostedFile(item.Path, PlaybackTitle(item));
             room.Send(new("media", Data: Wire.Serialize(room.HostedMedia!.Media))); ShowPage("Room"); return;
         }
-        RoomAddress.ValidateServer(ServerBox.Text);
-        var item = selected; roomBusy = true; DetailHost.IsEnabled = false;
+        var server = choice.Room?.Server ?? ServerBox.Text.Trim();
+        RoomAddress.ValidateServer(server);
+        pendingRoomName = choice.NewRoomName;
+        roomBusy = true; DetailHost.IsEnabled = false; RefreshSavedRooms();
         try {
         await Disconnect(); playingItem = item; var client = NewRoom();
         client.SetHostedFile(item.Path, PlaybackTitle(item));
         SetStatus("Connecting to the room service…");
-        try { await client.ConnectAsync(ServerBox.Text.Trim(), DisplayNameBox.Text, persistent: true); }
+        try { await client.ConnectAsync(server, DisplayNameBox.Text, choice.Room?.Code, choice.Room?.HostKey,
+            persistent: true, roomName: choice.NewRoomName ?? choice.Room?.Name); }
         catch (Exception ex) when (ex is System.Net.Http.HttpRequestException or IOException or OperationCanceledException)
         {
             await Disconnect();
-            throw new IOException($"Cannot reach the room service at {ServerBox.Text.Trim()}. Check the server address in Settings. Localhost requires a server running on this computer.", ex);
+            throw new IOException($"Cannot reach the room service at {server}. Check the server address in Settings. Localhost requires a server running on this computer.", ex);
         }
+        catch { await Disconnect(); throw; }
         RememberCurrentRoom(); ShowPage("Room"); SetStatus("Private room connected. Waiting for guests.");
-        } finally { roomBusy = false; DetailHost.IsEnabled = selected?.Available == true && File.Exists(selected.Path); UpdateSessionControls(); }
+        } finally { pendingRoomName = null; roomBusy = false; DetailHost.IsEnabled = selected?.Available == true && File.Exists(selected.Path); RefreshSavedRooms(); UpdateSessionControls(); }
     });
     private async void JoinClick(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
