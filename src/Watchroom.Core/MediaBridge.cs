@@ -11,6 +11,7 @@ public sealed class MediaBridge : IAsyncDisposable
     private WebApplication? app;
     private readonly string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
     private IMediaSource? source;
+    private long diagnosticReads;
     public Uri? Url { get; private set; }
     public async Task<Uri> StartAsync(IMediaSource media)
     {
@@ -63,7 +64,9 @@ public sealed class MediaBridge : IAsyncDisposable
         try
         {
             var bytes = await source!.ReadAsync(offset, count, ct);
-            PlaybackDiagnostics.Record("range-read", new { offset, count, bytes = bytes.Length, elapsedMs = Environment.TickCount64 - start });
+            var elapsedMs = Environment.TickCount64 - start;
+            if (elapsedMs >= 250 || Interlocked.Increment(ref diagnosticReads) % 64 == 1)
+                PlaybackDiagnostics.Record("range-read", new { offset, count, bytes = bytes.Length, elapsedMs });
             return bytes;
         }
         catch (Exception ex)

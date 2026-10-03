@@ -7,6 +7,7 @@ namespace Watchroom.Core;
 public sealed class RoomClient : IAsyncDisposable
 {
     private readonly LibraryStore? settings;
+    private readonly string diagnosticId = Guid.NewGuid().ToString("N")[..8];
     public RoomClient(LibraryStore? settings = null) => this.settings = settings;
     private string RoomSetting(string code, string field) => "room:" + ServerAddress + ":" + code.ToUpperInvariant() + ":" + field;
     private IRoomConnection? connection;
@@ -106,6 +107,12 @@ public sealed class RoomClient : IAsyncDisposable
             throw new IOException("This Site requires browser sign-in. Ask its owner to enable access for Windows clients, or use the local server.");
         var transport = health.IsSuccessStatusCode && health.Content.Headers.ContentType?.MediaType == "application/json"
             ? await health.Content.ReadAsStringAsync(lifetime.Token) : "";
+        using (var capabilities = System.Text.Json.JsonDocument.Parse(string.IsNullOrWhiteSpace(transport) ? "{}" : transport))
+        {
+            bool Flag(string name) => capabilities.RootElement.TryGetProperty(name, out var value) && value.ValueKind == System.Text.Json.JsonValueKind.True;
+            PlaybackDiagnostics.Record("room-connect", new { room = diagnosticId, role = first.Type == "join" ? "guest" : "host",
+                httpStatus = (int)health.StatusCode, relayConfigured = Flag("relayConfigured"), stunConfigured = Flag("stunConfigured") });
+        }
         if (persistent || hostKey is not null)
         {
             using var capabilities = System.Text.Json.JsonDocument.Parse(string.IsNullOrWhiteSpace(transport) ? "{}" : transport);
@@ -212,6 +219,7 @@ public sealed class RoomClient : IAsyncDisposable
     }
     private void FailRoom(string reason)
     {
+        PlaybackDiagnostics.Record("room-failed", new { room = diagnosticId, reason = DiagnosticReason(reason) });
         connected.TrySetException(new IOException(reason)); directConnected.TrySetException(new IOException(reason));
         lifetime.Cancel(); discoveryLifetime.Cancel(); connection?.Abort();
         Status?.Invoke("Disconnected — " + reason);
@@ -245,7 +253,11 @@ public sealed class RoomClient : IAsyncDisposable
                         case "peer": HandlePeer(item.Peer!, item.Message!); break;
                         case "closed": DepartPeer(item.Peer!); break;
                         case "timeout":
-                            if (!negotiated.ContainsKey(item.Peer!)) DepartPeer(item.Peer!, "Direct room controls did not connect. Update all participants and rejoin.");
+                            if (!negotiated.ContainsKey(item.Peer!))
+                            {
+                                PlaybackDiagnostics.Record("peer-handshake-timeout", new { room = diagnosticId, transport = item.Transport?.DiagnosticId });
+                                DepartPeer(item.Peer!, "Direct room controls did not connect. Update all participants and rejoin.");
+                            }
                             break;
                         case "clock":
                             if (hostPeer is not null && negotiated.ContainsKey(hostPeer))
@@ -255,6 +267,7 @@ public sealed class RoomClient : IAsyncDisposable
                 }
                 catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException or IOException or ArgumentException)
                 {
+                    PlaybackDiagnostics.Record("room-command-error", new { room = diagnosticId, phase = item.Kind, command = item.Message?.Type, error = ex.GetType().Name });
                     if (item.Kind == "peer" && Identity?.Host == true)
                         SendPeer(item.Peer!, new("error", Text: "Invalid or unauthorized room command"));
                     else if (item.Kind == "local") Message?.Invoke(new("error", Text: ex.Message));
@@ -274,6 +287,7 @@ public sealed class RoomClient : IAsyncDisposable
                 if (!welcome.Host && welcome.GuestKey is null && Identity?.Room == welcome.Room)
                     welcome = welcome with { GuestKey = Identity.GuestKey };
                 Identity = welcome; admitted = Identity.Host || message.Type == "admitted";
+                PlaybackDiagnostics.Record("room-identity", new { room = diagnosticId, role = welcome.Host ? "host" : "guest", admitted, iceServers = welcome.IceServers.Length, welcome.ForceRelay });
                 if (Identity.GuestKey is { Length: 64 } key) settings?.Setting(RoomSetting(Identity.Room, "guestKey"), key);
                 if (Identity.Host && coordinator is null)
                 {
@@ -328,7 +342,7 @@ public sealed class RoomClient : IAsyncDisposable
                 if (message.Text == "library-capability") { if (message.Data == "1" && Identity?.Host == true) peer.EnableLibraryChannel(); }
                 else peer.ReceiveSignal(message.Text!, message.Data!);
                 break;
-            case "peer-left": if (message.Sender is not null) DepartPeer(message.Sender); break;
+            case "peer-left": if (message.Sender is not null) DepartPeer(message.Sender, "Room service reported peer departure"); break;
             case "error":
                 if (Identity is null) FailRoom(message.Text ?? "Could not join this room");
                 else Message?.Invoke(message);
@@ -352,6 +366,7 @@ public sealed class RoomClient : IAsyncDisposable
         if (Identity?.Host == true && !coordinator!.Approved(sender) || Identity?.Host == false && sender != hostPeer) return;
         if (message.Type == "control-hello")
         {
+            PlaybackDiagnostics.Record("peer-handshake", new { room = diagnosticId, protocol = message.Number, host = Identity?.Host == true });
             if (message.Number != 2) { DepartPeer(sender, "Update all participants to use direct room controls."); return; }
             negotiated.TryAdd(sender, 0);
             connection?.UseDiscoveryPolling();
@@ -471,10 +486,16 @@ public sealed class RoomClient : IAsyncDisposable
     {
         if (!peers.TryGetValue(id, out var peer) || !peer.IsControlOpen) { DepartPeer(id); return; }
         try { peer.SendControl(message); }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException) { DepartPeer(id); }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+            PlaybackDiagnostics.Record("control-send-failed", new { room = diagnosticId, transport = peer.DiagnosticId, command = message.Type, error = ex.GetType().Name });
+            DepartPeer(id, "Direct control send failed");
+        }
     }
     private void DepartPeer(string id, string? reason = null)
     {
+        PlaybackDiagnostics.Record("peer-departed", new { room = diagnosticId, transport = peers.GetValueOrDefault(id)?.DiagnosticId,
+            role = Identity?.Host == true ? "host" : "guest", reason = DiagnosticReason(reason ?? "Direct control channel closed or unavailable"), negotiated = negotiated.ContainsKey(id) });
         negotiated.TryRemove(id, out _);
         if (peers.TryRemove(id, out var peer)) peer.Dispose();
         if (Identity?.Host == true)
@@ -485,6 +506,7 @@ public sealed class RoomClient : IAsyncDisposable
     {
         if (Identity is null) throw new InvalidOperationException("Missing room identity");
         var peer = new PeerTransport(Identity.IceServers, Identity.ForceRelay);
+        PlaybackDiagnostics.Record("peer-created", new { room = diagnosticId, transport = peer.DiagnosticId, offer });
         peer.ResolveMedia = media => Identity?.Host == true && negotiated.ContainsKey(id) && Snapshot?.People.Any(p => p.Id == id && p.Approved) == true
             ? HostedMedia?.Media.Id == media ? HostedMedia : assets.GetValueOrDefault(media) : null;
         peer.Signal += (type, data) => { try { QueueDiscovery(new("signal", Target: id, Text: type, Data: data)); } catch (IOException) { } };
@@ -519,16 +541,24 @@ public sealed class RoomClient : IAsyncDisposable
             Post(new("timeout", id, Transport: peer));
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
-        catch (Exception) { Post(new("timeout", id, Transport: peer)); }
+        catch (Exception ex) { PlaybackDiagnostics.Record("peer-connect-timeout", new { room = diagnosticId, transport = peer.DiagnosticId, error = ex.GetType().Name }); Post(new("timeout", id, Transport: peer)); }
     }
     public async Task<IMediaSource> GetSourceAsync(SharedMedia media, CancellationToken ct)
     {
+        PlaybackDiagnostics.Record("media-source-request", new { room = diagnosticId, role = Identity?.Host == true ? "host" : "guest", media.Extension, bytes = media.Length,
+            directReady = directConnected.Task.IsCompletedSuccessfully });
         if (Identity?.Host == true) return HostedMedia?.Media.Id == media.Id ? HostedMedia : assets.GetValueOrDefault(media.Id) ?? throw new InvalidOperationException("No shared media selected");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, lifetime.Token); deadline.CancelAfter(TimeSpan.FromSeconds(35));
         await directConnected.Task.WaitAsync(deadline.Token);
         var peer = hostPeer is not null && peers.TryGetValue(hostPeer, out var host) ? host : throw new IOException("Host media connection is unavailable");
         await peer.Ready.WaitAsync(deadline.Token);
+        PlaybackDiagnostics.Record("media-source-ready", new { room = diagnosticId, transport = peer.DiagnosticId });
         return new RemoteMediaSource(peer, media);
+    }
+    private static string DiagnosticReason(string reason)
+    {
+        var safe = System.Text.RegularExpressions.Regex.Replace(reason, @"https?://\S+|[a-fA-F0-9]{24,}", "[redacted]");
+        return safe[..Math.Min(safe.Length, 300)];
     }
     public async ValueTask DisposeAsync()
     {

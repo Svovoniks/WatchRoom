@@ -172,8 +172,8 @@ public partial class MainWindow : Window
                     Dispatcher.BeginInvoke(() => { if (!closing) settling.Observe(e.Time, mono); });
                 };
                 RefreshTracks();
-                player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing) return; ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); try { room?.Send(new("ready")); } catch { } if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
-                player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => SetStatus("Playback failed. Check that the file is available and the connection is active."));
+                player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); try { room?.Send(new("ready")); } catch { } if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
+                player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus("Playback failed. Check that the file is available and the connection is active."); });
                 player.Buffering += (_, e) => Dispatcher.BeginInvoke(() =>
                 {
                     if (closing) return;
@@ -203,7 +203,7 @@ public partial class MainWindow : Window
     {
         try { await action(); }
         catch (OperationCanceledException) { SetStatus("Operation cancelled or timed out."); }
-        catch (Exception ex) { SetStatus(ex.Message); MessageBox.Show(this, ex.Message, "Watchroom", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        catch (Exception ex) { PlaybackDiagnostics.Record("action-failed", new { error = ex.GetType().Name, stack = ex.StackTrace }); SetStatus(ex.Message); MessageBox.Show(this, ex.Message, "Watchroom", MessageBoxButton.OK, MessageBoxImage.Warning); }
     }
     private void ShowPage(string name)
     {
@@ -892,6 +892,7 @@ public partial class MainWindow : Window
     }
     private async Task LoadRoomMedia(SharedMedia media)
     {
+        PlaybackDiagnostics.Record("media-load-start", new { media.Extension, bytes = media.Length });
         var client = room; if (client is null) return;
         var generation = ++loadGeneration; loadedMedia = media.Id;
         await loading.WaitAsync(lifetime.Token);
@@ -938,9 +939,10 @@ public partial class MainWindow : Window
             RoomHeading.Text = client.Snapshot?.Name ?? media.Title; RoomSubtitle.Text = media.Title + " · " + (client.Identity?.Host == true ? "You are hosting" : "Streaming from host");
             await PrepareVideoSurface(openPlayer: RoomPage.Visibility == Visibility.Visible);
             if (client != room || generation != loadGeneration) return;
-            player!.Play(vlcMedia);
+            var started = player!.Play(vlcMedia);
+            PlaybackDiagnostics.Record("media-play-request", new { started });
         }
-        catch { if (generation == loadGeneration) loadedMedia = null; throw; }
+        catch (Exception ex) { PlaybackDiagnostics.Record("media-load-failed", new { error = ex.GetType().Name, media.Extension }); if (generation == loadGeneration) loadedMedia = null; throw; }
         finally { loading.Release(); }
     }
     private async Task PrepareVideoSurface(bool openPlayer = true)

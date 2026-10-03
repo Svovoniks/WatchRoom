@@ -49,6 +49,7 @@ internal record RangeReply(string Id, byte[]? Bytes, string? Error = null);
 
 public sealed class PeerTransport : IDisposable
 {
+    public string DiagnosticId { get; } = Guid.NewGuid().ToString("N")[..8];
     private readonly RtcPeerConnection peer;
     private IRtcDataChannel? channel;
     private IRtcDataChannel? controls;
@@ -80,19 +81,24 @@ public sealed class PeerTransport : IDisposable
 
     public PeerTransport(string[] iceServers, bool relayOnly = false)
     {
+        PlaybackDiagnostics.Record("transport-created", new { transport = DiagnosticId, iceServers = iceServers.Length, relayOnly });
         try { peer = new RtcPeerConnection(new RtcPeerConfiguration
         {
             IceServers = iceServers, MaxMessageSize = 65536,
             TransportPolicy = relayOnly ? rtcTransportPolicy.RTC_TRANSPORT_POLICY_RELAY : rtcTransportPolicy.RTC_TRANSPORT_POLICY_ALL
         }); }
         catch (DllNotFoundException ex) when (OperatingSystem.IsWindows()) { throw new IOException("The Windows media transport or its Visual C++ runtime is missing. Republish using build.ps1 -Publish or reinstall the complete Watchroom package.", ex); }
-        peer.OnLocalDescriptionSafe += (_, d) => Signal?.Invoke("sdp", Wire.Serialize(d));
-        peer.OnCandidateSafe += (_, c) => Signal?.Invoke("ice", Wire.Serialize(c));
+        peer.OnLocalDescriptionSafe += (_, d) => { PlaybackDiagnostics.Record("signal-local", new { transport = DiagnosticId, type = "sdp" }); Signal?.Invoke("sdp", Wire.Serialize(d)); };
+        peer.OnCandidateSafe += (_, c) => { PlaybackDiagnostics.Record("signal-local", new { transport = DiagnosticId, type = "ice" }); Signal?.Invoke("ice", Wire.Serialize(c)); };
         peer.OnDataChannel += (_, c) => Attach(c);
         peer.OnConnectionStateChange += (_, s) =>
         {
+            PlaybackDiagnostics.Record("transport-state", new { transport = DiagnosticId, state = s.ToString(), pendingRanges = pending.Count });
             if (s == rtcState.RTC_CONNECTED && peer.TryGetSelectedCandidatePair(out var pair))
+            {
+                PlaybackDiagnostics.Record("transport-route", new { transport = DiagnosticId, relay = pair.LocalCandidate?.Contains("typ relay") == true || pair.RemoteCandidate?.Contains("typ relay") == true });
                 Status?.Invoke(pair.LocalCandidate?.Contains("typ relay") == true || pair.RemoteCandidate?.Contains("typ relay") == true ? "Connected through relay" : "Connected directly");
+            }
             else Status?.Invoke(s.ToString().Replace("RTC_", ""));
             if (s is rtcState.RTC_FAILED or rtcState.RTC_CLOSED or rtcState.RTC_DISCONNECTED)
             {
@@ -114,11 +120,15 @@ public sealed class PeerTransport : IDisposable
     }
     public void ReceiveSignal(string type, string data)
     {
+        PlaybackDiagnostics.Record("signal-received", new { transport = DiagnosticId, type });
         if (type == "sdp") peer.SetRemoteDescription(Wire.Read<RtcDescription>(data));
         else if (type == "ice") peer.AddRemoteCandidate(Wire.Read<RtcCandidate>(data));
     }
     private void Attach(IRtcDataChannel data)
     {
+        PlaybackDiagnostics.Record("channel-created", new { transport = DiagnosticId, label = data.Label });
+        data.OnOpen += _ => PlaybackDiagnostics.Record("channel-open", new { transport = DiagnosticId, label = data.Label });
+        data.OnClose += _ => PlaybackDiagnostics.Record("channel-closed", new { transport = DiagnosticId, label = data.Label });
         if (data.Label == "room-catalog-v1")
         {
             if (catalogChannel is not null) { data.Dispose(); return; }
@@ -173,10 +183,10 @@ public sealed class PeerTransport : IDisposable
         {
             try
             {
-                if (text.Text.Length > 65536) { CloseControls(); return; }
+                if (text.Text.Length > 65536) { PlaybackDiagnostics.Record("control-rejected", new { transport = DiagnosticId, reason = "oversized" }); CloseControls(); return; }
                 ControlMessage?.Invoke(Wire.Read<WireMessage>(text.Text));
             }
-            catch (Exception ex) { Status?.Invoke("Invalid control message: " + ex.GetType().Name); CloseControls(); }
+            catch (Exception ex) { PlaybackDiagnostics.Record("control-rejected", new { transport = DiagnosticId, error = ex.GetType().Name }); Status?.Invoke("Invalid control message: " + ex.GetType().Name); CloseControls(); }
         };
     }
     private void CloseControls()
@@ -210,7 +220,11 @@ public sealed class PeerTransport : IDisposable
                     var bytes = await source.ReadAsync(request.Offset, request.Count, lifetime.Token);
                     SendReply(new(request.Id, bytes));
                 }
-                catch (Exception) when (!lifetime.IsCancellationRequested) { try { SendReply(new(request.Id, null, "Media unavailable or not authorized")); } catch { } }
+                catch (Exception ex) when (!lifetime.IsCancellationRequested)
+                {
+                    PlaybackDiagnostics.Record("host-range-failed", new { transport = DiagnosticId, offset = request.Offset, count = request.Count, error = ex.GetType().Name });
+                    try { SendReply(new(request.Id, null, "Media unavailable or not authorized")); } catch { }
+                }
             }
         }
         catch (OperationCanceledException) { }
@@ -228,6 +242,11 @@ public sealed class PeerTransport : IDisposable
             var bytes = await completion.Task.WaitAsync(TimeSpan.FromSeconds(25), ct);
             if (bytes.Length != count) throw new IOException("Incomplete peer range");
             return bytes;
+        }
+        catch (Exception ex)
+        {
+            PlaybackDiagnostics.Record("peer-range-failed", new { transport = DiagnosticId, offset, count, error = ex.GetType().Name });
+            throw;
         }
         finally { pending.TryRemove(id, out _); window.Release(); }
     }

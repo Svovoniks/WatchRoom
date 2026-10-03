@@ -85,6 +85,20 @@ ship a higher version and leave the failed draft unpublished. Never overwrite
 bytes for an already published version. For a defective published version,
 release a higher patch version with the fix; the updater refuses downgrades.
 
+## Diagnosing room and playback failures
+
+Windows builds save connection and playback diagnostics automatically to
+`%LOCALAPPDATA%\Watchroom\logs`. Settings offers **Open logs folder**. After
+reproducing a failed watch session, close both apps and share the logs from both
+devices, together with the approximate time of the failure.
+
+`diagnostics.jsonl` contains timestamped structured events for app version,
+room-service capabilities, peer connection states, control-channel negotiation,
+guest departures, media loading, buffering, sync corrections, and transfer errors.
+It excludes invitation codes, credentials, raw signaling, and movie contents.
+The logger keeps four files of up to 5 MiB each and writes asynchronously.
+`WATCHROOM_DIAGNOSTICS` still overrides the output directory for test runs.
+
 ## Build and updater behavior
 
 GitHub Actions builds the Windows x64 app and installer on pushes, pull requests,

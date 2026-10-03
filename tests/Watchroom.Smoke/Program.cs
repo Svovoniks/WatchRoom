@@ -180,9 +180,11 @@ if (args.FirstOrDefault() == "--streaming-audio")
 }
 var root = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/smoke");
 Directory.CreateDirectory(root);
+PlaybackDiagnostics.Initialize(Path.Combine(root, "session-logs"));
 int passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
 RoomLibraryChecks.Run(Check);
+await DiagnosticLogFixture.Run(Path.Combine(root, "diagnostic-log"), Check);
 await RecoveryFixture.Run(Check);
 await LibrarySearchFixture.Run(Check);
 await MetadataPipelineFixture.Run(Path.Combine(root, "metadata-pipeline"), Check);
@@ -599,6 +601,14 @@ try
         Check(rejected, "unknown invitations rejected");
 }
 finally { if (server is not null) { if (!server.HasExited) server.Kill(true); await server.WaitForExitAsync(); } }
+await PlaybackDiagnostics.FlushAsync();
+using var diagnosticStream = new FileStream(Path.Combine(PlaybackDiagnostics.DirectoryPath!, "diagnostics.jsonl"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+using var diagnosticReader = new StreamReader(diagnosticStream);
+var diagnosticText = await diagnosticReader.ReadToEndAsync();
+Check(new[] { "room-connect", "transport-state", "peer-handshake", "peer-departed" }.All(kind => diagnosticText.Contains("\"kind\":\"" + kind + "\"")),
+    "real room connections record setup, native transport, handshake and departure events");
+Check(new[] { "hostKey", "guestKey", "password", "sdp", "localPath" }.All(key => !diagnosticText.Contains("\"" + key + "\":", StringComparison.OrdinalIgnoreCase)),
+    "connection diagnostics omit credential, raw signaling and local media path fields");
 Console.WriteLine($"{passed} checks passed.");
 
 async Task Wait(Func<bool> condition, string name)
