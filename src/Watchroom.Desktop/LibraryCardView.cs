@@ -27,6 +27,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         (Card.Media.Episode is { } episode ? $"E{episode:00}" + (Card.Media.EpisodeEnd > episode ? $"–{Card.Media.EpisodeEnd:00}" : "") : "Episode unknown") +
         (Card.Media.RuntimeMinutes is > 0 ? $" · {Card.Media.RuntimeMinutes} min" : "") + (Card.Media.IsVirtual ? " · Missing" : Card.Media.Available ? "" : " · Unavailable");
     public double Progress { get; private set; }
+    public bool IsWatched { get; private set; }
     public string PlaybackLabel { get; private set; } = "";
     public BitmapSource? Poster { get; private set; }
     public string Key => Identity(Card);
@@ -52,6 +53,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     }
     public void SetPlayback(long positionMs, bool watched)
     {
+        if (IsWatched != watched) { IsWatched = watched; Changed(nameof(IsWatched)); }
         var progress = watched ? 100 : Card.Media.RuntimeMinutes is > 0 ? Math.Clamp(positionMs / (Card.Media.RuntimeMinutes.Value * 600d), 0, 100) : 0;
         var label = watched ? "Watched" : positionMs >= 10000 ? $"Resume · {(int)(positionMs / 60000)}:{positionMs / 1000 % 60:00}" : "";
         if (Progress != progress) { Progress = progress; Changed(nameof(Progress)); }

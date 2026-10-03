@@ -6,6 +6,14 @@ using Watchroom.Core;
 using LibVLCSharp.Shared;
 using System.Diagnostics;
 
+if (args.FirstOrDefault() == "--episode-playback")
+{
+    var checks = 0;
+    EpisodePlaybackFixture.Run((condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} episode continuation and watched-state checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--metadata-cache")
 {
     var checks = 0;
@@ -191,6 +199,7 @@ Directory.CreateDirectory(root);
 PlaybackDiagnostics.Initialize(Path.Combine(root, "session-logs"));
 int passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
+EpisodePlaybackFixture.Run(Check);
 RoomLibraryChecks.Run(Check);
 await DiagnosticLogFixture.Run(Path.Combine(root, "diagnostic-log"), Check);
 await RecoveryFixture.Run(Check);

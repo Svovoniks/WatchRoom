@@ -103,6 +103,12 @@ static class Program
                 Check(episodeView.Progress == 50 && episodeView.PlaybackLabel == "Resume · 10:00", "episode playback progress uses runtime and saved resume point");
                 episodeView.SetPlayback(0, true);
                 Check(episodeView.Progress == 100 && episodeView.PlaybackLabel == "Watched", "completed episode retains watched progress");
+                Check(episodeView.IsWatched, "completed episodes expose the watched checkmark state");
+                episodeView.SetPlayback(0, false);
+                Check(!episodeView.IsWatched, "restarting an episode clears its watched checkmark state");
+                var movieView = new LibraryCardView(new("Movie", "", null, entries[0], "movie"));
+                movieView.SetPlayback(0, true);
+                Check(movieView.IsWatched, "watched checkmark state is available for movies as well as episodes");
                 var episodeButton = new System.Windows.Controls.Button { Style = (Style)app.Resources["PosterCard"], DataContext = episodeView };
                 episodeButton.Measure(new Size(600, 600)); await Dispatcher.Yield(DispatcherPriority.DataBind);
                 Check(episodeButton.Width == 300 && episodeButton.Height == 278, "episode cards use landscape layout without changing movie cards");

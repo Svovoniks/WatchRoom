@@ -182,14 +182,11 @@ public partial class MainWindow : Window
                     if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("buffer", new { cache = e.Cache, position = player?.Time, revision = target?.Revision });
                     if (buffering.Cache(e.Cache, Environment.TickCount64)) { readyGeneration = -1; ReportReady(); }
                 });
-                player.EndReached += (_, _) => Dispatcher.BeginInvoke(() =>
+                player.EndReached += (_, _) =>
                 {
-                    if (closing) return;
-                    PlayButton.Content = "▶";
-                    if (room is null && playingItem is not null) { library.Setting("position:" + playingItem.Id, "0"); library.Setting("watched:" + playingItem.Id, "true"); foreach (var card in libraryCards.Where(x => x.Card.Media.Id == playingItem.Id)) UpdateCardPlayback(card); }
-                    if (room?.Identity?.Host == true) SendPlayback(false, Math.Max(0, player.Length));
-                    if ((queue.Count > 0 || roomLibrary?.Queue.Entries.Length > 0) && (room is null || room.Identity?.Host == true)) NextQueued(this, new RoutedEventArgs());
-                });
+                    var endedItem = playingItem; var endedRoom = room; var generation = loadGeneration;
+                    Dispatcher.BeginInvoke(async () => await Guard(() => PlaybackEnded(endedItem, endedRoom, generation)));
+                };
             });
             if (folders.Count == 0) ShowPage("Folders");
             else if (AutoArtwork.IsChecked == true) await FetchArtwork();
@@ -707,13 +704,14 @@ public partial class MainWindow : Window
     {
         if (selected is null) return;
         library.Setting("position:" + selected.Id, "0");
-        library.Setting("watched:" + selected.Id, "false");
+        SetWatched(selected, false);
         if (playingItem?.Id == selected.Id) playingItem = null;
         PlayLocal(sender, e);
     }
     private void UpdateCardPlayback(LibraryCardView view)
     {
-        if (view.IsEpisode) view.SetPlayback(long.TryParse(library.Setting("position:" + view.Card.Media.Id), out var position) ? position : 0, library.Setting("watched:" + view.Card.Media.Id) == "true");
+        var position = view.IsEpisode && long.TryParse(library.Setting("position:" + view.Card.Media.Id), out var saved) ? saved : 0;
+        view.SetPlayback(position, LibraryWatchProgress.IsWatched(items, view.Card, WasWatched));
     }
     private void SavePlaybackPosition()
     {
