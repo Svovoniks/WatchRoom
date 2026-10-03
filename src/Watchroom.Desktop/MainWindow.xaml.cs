@@ -789,7 +789,7 @@ public partial class MainWindow : Window
         if (room is null) return;
         switch (message.Type)
         {
-            case "library-page": case "library-error": ReceiveHostLibrary(message); break;
+            case "catalog-page": case "catalog-error": ReceiveHostLibrary(message); break;
             case "welcome":
                 EnsureRoomLibrary();
                 RememberCurrentRoom();

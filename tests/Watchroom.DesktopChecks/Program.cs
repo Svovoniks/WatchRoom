@@ -368,12 +368,18 @@ static class Program
                 new("1", "The Grand Budapest Hotel", "Movie · 2014", "movie", null, "A concierge and his lobby boy become unlikely friends during a journey across a changing Europe."),
                 new("2", "Cowboy Bebop", "1 season · 26 episodes", "series", null, "A crew of bounty hunters travels through the solar system."),
                 new("3", "Severance", "2 seasons · 19 episodes", "series", null, "Office workers discover the consequences of separating their memories.")], 3, 0, "All titles");
-            var receive = typeof(MainWindow).GetMethod("ReceiveHostLibrary", BindingFlags.NonPublic | BindingFlags.Instance)!;
-            receive.Invoke(window, [new WireMessage("catalog-page", Number: requestNumber, Data: Wire.Serialize(catalog))]);
+            var dispatch = typeof(MainWindow).GetMethod("OnRoomMessage", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            void Receive(WireMessage message) => ((Task)dispatch.Invoke(window, [message])!).GetAwaiter().GetResult();
+            Receive(new WireMessage("catalog-page", Number: requestNumber, Data: Wire.Serialize(catalog)));
             var entries = (System.Windows.Controls.ItemsControl)window.FindName("GuestLibraryEntries");
             Check(entries.Items.Count == 3, "active guest renders host catalog cards in the Library tab");
-            receive.Invoke(window, [new WireMessage("catalog-page", Number: requestNumber - 1, Data: Wire.Serialize(catalog with { Entries = [] }))]);
+            Receive(new WireMessage("catalog-page", Number: requestNumber - 1, Data: Wire.Serialize(catalog with { Entries = [] })));
             Check(entries.Items.Count == 3, "stale library responses cannot replace current results");
+            typeof(MainWindow).GetField("guestBrowsePending", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, true);
+            Receive(new WireMessage("catalog-error", Number: requestNumber, Text: "The host has no available titles."));
+            Check(((System.Windows.Controls.TextBlock)window.FindName("GuestLibraryStatus")).Text == "The host has no available titles." &&
+                !(bool)typeof(MainWindow).GetField("guestBrowsePending", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!, "catalog error dispatch ends loading and displays the host response");
+            Receive(new WireMessage("catalog-page", Number: requestNumber, Data: Wire.Serialize(catalog)));
             window.UpdateLayout();
             var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
             bitmap.Render(window);
