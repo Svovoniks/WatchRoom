@@ -38,5 +38,43 @@ static class HostRoomFixture
         check(room.Playback?.Playing == true, "departed buffering guest cannot block remaining participants");
         room.Discover(members, 2700);
         check(!room.Snapshot.People.Any(p => p.Id == "guest"), "stale discovery cannot restore a revoked peer");
+        var scoped = new HostRoomCoordinator("host"); scoped.Discover(members, 1000);
+        scoped.Apply("host", new("media", Data: Wire.Serialize(media)), 1000, out _);
+        var firstGeneration = scoped.Playback!.Generation;
+        WireMessage Ready(long generation) => new("ready", Data: Wire.Serialize(new PlaybackReadiness(media.Id, generation)));
+        scoped.Apply("host", Ready(firstGeneration), 1000, out _); scoped.Apply("guest", Ready(firstGeneration), 1000, out _);
+        scoped.Apply("host", new("playback", Data: Wire.Serialize(command)), 1000, out _);
+        scoped.Apply("guest", new("buffering", Data: Wire.Serialize(new PlaybackReadiness(media.Id, firstGeneration))), 1500, out _);
+        check(scoped.Playback is { Playing: false, WantsPlayback: true }, "room retains Play intent while a guest buffers");
+        scoped.Apply("host", new("playback", Data: Wire.Serialize(command with { Seek = true, PositionMs = 80000 })), 1600, out _);
+        var seekGeneration = scoped.Playback!.Generation;
+        check(seekGeneration > firstGeneration && scoped.Snapshot.People.All(p => !p.Ready), "seek invalidates previous readiness for every participant");
+        scoped.Apply("guest", Ready(firstGeneration), 1700, out _);
+        check(!scoped.Snapshot.People.Single(p => p.Id == "guest").Ready && !scoped.Playback.Playing, "obsolete ready cannot resume a newer seek");
+        scoped.Apply("host", Ready(seekGeneration), 1800, out _); scoped.Apply("guest", Ready(seekGeneration), 1800, out _);
+        check(scoped.Playback is { Playing: true, PositionMs: 80000 }, "current seek resumes after both participants become ready");
+        scoped.Apply("guest", new("buffering", Data: Wire.Serialize(new PlaybackReadiness(media.Id, firstGeneration))), 1900, out _);
+        check(scoped.Playback.Playing, "late buffering cannot pause a newer seek");
+        scoped.Apply("host", new("playback", Data: Wire.Serialize(stop)), 2000, out _);
+        scoped.Apply("guest", Ready(seekGeneration), 2100, out _);
+        check(scoped.Playback is { Playing: false, WantsPlayback: false }, "explicit Pause cancels resume intent despite delayed readiness");
+        scoped.Apply("host", new("playback", Data: Wire.Serialize(command with { Seek = true, PositionMs = 10000 })), 2200, out _);
+        scoped.Apply("host", new("playback", Data: Wire.Serialize(command with { Seek = true, PositionMs = 20000 })), 2300, out _);
+        var latestGeneration = scoped.Playback!.Generation;
+        scoped.Apply("host", Ready(latestGeneration - 1), 2400, out _); scoped.Apply("guest", Ready(latestGeneration - 1), 2400, out _);
+        check(!scoped.Playback.Playing && scoped.Playback.PositionMs == 20000, "rapid seeks retain only the latest readiness generation");
+        scoped.Apply("host", Ready(latestGeneration), 2500, out _); scoped.Apply("guest", Ready(latestGeneration), 2500, out _);
+        check(scoped.Playback.Playing, "latest rapid seek completes without waiting for obsolete seeks");
+        scoped.Apply("guest", new("buffering"), 2600, out _);
+        check(scoped.Playback.Playing, "scoped peers cannot fall back to ambiguous unscoped buffering events");
+        var mixed = new HostRoomCoordinator("host"); mixed.Discover(members, 1000);
+        mixed.Apply("host", new("media", Data: Wire.Serialize(media)), 1000, out _);
+        mixed.Apply("host", Ready(mixed.Playback!.Generation), 1000, out _);
+        mixed.Apply("guest", new("ready"), 1000, out _);
+        mixed.Apply("host", new("playback", Data: Wire.Serialize(command with { Seek = true })), 1100, out _);
+        check(mixed.Snapshot.People.Single(p => p.Id == "guest").Ready && !mixed.Playback!.Playing,
+            "legacy guest retains buffering readiness instead of waiting for an unsupported seek acknowledgement");
+        mixed.Apply("host", Ready(mixed.Playback!.Generation), 1200, out _);
+        check(mixed.Playback.Playing, "updated host can resume a seek with a legacy guest");
     }
 }

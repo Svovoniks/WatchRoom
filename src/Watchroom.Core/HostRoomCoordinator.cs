@@ -8,8 +8,9 @@ internal sealed class HostRoomCoordinator(string host)
 {
     private readonly Dictionary<string, Participant> people = [];
     private readonly HashSet<string> departed = [];
+    private readonly HashSet<string> scopedReadiness = [];
     private readonly Dictionary<string, (long At, int Count)> limits = [];
-    private long revision;
+    private long revision, generation;
     private bool resumeWhenReady;
     public AdmittedGuest[] AdmittedGuests { get; set; } = [];
     public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name, LibraryBrowsing, LibraryActivity);
@@ -34,7 +35,7 @@ internal sealed class HostRoomCoordinator(string host)
     public void Discover(Participant[] members, long now)
     {
         var ids = members.Select(p => p.Id).ToHashSet();
-        foreach (var id in people.Keys.Where(id => !ids.Contains(id)).ToArray()) people.Remove(id);
+        foreach (var id in people.Keys.Where(id => !ids.Contains(id)).ToArray()) { people.Remove(id); scopedReadiness.Remove(id); }
         foreach (var p in members)
             if (!departed.Contains(p.Id)) people[p.Id] = p with { Ready = people.GetValueOrDefault(p.Id)?.Ready ?? false };
         if (LibraryActivity is { } activity && !Approved(activity.Peer)) LibraryActivity = null;
@@ -42,7 +43,7 @@ internal sealed class HostRoomCoordinator(string host)
     }
     public void Depart(string id, long now)
     {
-        departed.Add(id); people.Remove(id); limits.Remove(id);
+        departed.Add(id); people.Remove(id); limits.Remove(id); scopedReadiness.Remove(id);
         if (LibraryActivity?.Peer == id) LibraryActivity = null;
         TryResume(now);
     }
@@ -79,9 +80,9 @@ internal sealed class HostRoomCoordinator(string host)
             case "media" when sender == host:
                 var media = Wire.Read<SharedMedia>(message.Data!);
                 if (!ValidMedia(media)) throw new InvalidDataException("Invalid shared media");
-                Media = media; resumeWhenReady = false;
+                Media = media; resumeWhenReady = false; generation++;
                 foreach (var p in people.Values.ToArray()) people[p.Id] = p with { Ready = false };
-                Playback = new(++revision, media.Id, false, 0, now);
+                Playback = new(++revision, media.Id, false, 0, now, RequestedPlaying: false, Generation: generation);
                 return true;
             case "controls" when sender == host: SharedControls = message.Number == 1; return true;
             case "queue" when sender == host:
@@ -92,12 +93,21 @@ internal sealed class HostRoomCoordinator(string host)
             case "playback" when sender == host || SharedControls:
                 var desired = Wire.Read<PlaybackState>(message.Data!);
                 if (Media is null || desired.MediaId != Media.Id || desired.PositionMs is < 0 or > 604800000 || desired.CommandId?.Length > 64) return false;
+                if (desired.Seek)
+                {
+                    generation++;
+                    // Legacy peers cannot acknowledge a seek while paused. They
+                    // retain their existing buffering-based readiness behavior.
+                    foreach (var p in people.Values.Where(p => scopedReadiness.Contains(p.Id)).ToArray()) people[p.Id] = p with { Ready = false };
+                }
                 resumeWhenReady = desired.Playing && people.Values.Any(p => p.Approved && !p.Ready);
-                Playback = desired with { Revision = ++revision, Playing = desired.Playing && !resumeWhenReady, AtUnixMs = now + (desired.Playing && !resumeWhenReady ? 200 : 0) };
+                Playback = desired with { RequestedPlaying = desired.Playing, Generation = generation, Revision = ++revision, Playing = desired.Playing && !resumeWhenReady, AtUnixMs = now + (desired.Playing && !resumeWhenReady ? 200 : 0) };
                 return true;
             case "ready":
+                if (!CurrentReadiness(sender, message)) return true;
                 people[sender] = people[sender] with { Ready = true }; TryResume(now); return true;
             case "buffering":
+                if (!CurrentReadiness(sender, message)) return true;
                 people[sender] = people[sender] with { Ready = false };
                 if (Playback is { Playing: true } current)
                 {
@@ -112,6 +122,16 @@ internal sealed class HostRoomCoordinator(string host)
                 announcement = new("chat", Sender: sender, Text: people[sender].Name + ": " + text); return true;
             default: return false;
         }
+    }
+    private bool CurrentReadiness(string sender, WireMessage message)
+    {
+        // Older peers omit scope. Scoped peers cannot revive an obsolete seek.
+        if (message.Data is null) return !scopedReadiness.Contains(sender);
+        var scope = Wire.Read<PlaybackReadiness>(message.Data);
+        var current = scope.MediaId == Media?.Id && scope.Generation == generation;
+        if (current) scopedReadiness.Add(sender);
+        if (!current) PlaybackDiagnostics.Record("readiness-stale", new { message.Type, scope.Generation, currentGeneration = generation });
+        return current;
     }
     private void TryResume(long now)
     {

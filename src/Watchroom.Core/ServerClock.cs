@@ -16,6 +16,7 @@ public sealed class ServerClock
     }
     public long Now { get { lock (gate) return serverAnchor + Elapsed(anchor, time.GetTimestamp()); } }
     public long OffsetMs => Now - time.GetUtcNow().ToUnixTimeMilliseconds();
+    public long RecentRttMs { get { lock (gate) return samples.Where(s => Elapsed(s.At, time.GetTimestamp()) <= 10000).Select(s => s.Rtt).DefaultIfEmpty(0).Max(); } }
     internal void Initialize(long hostUnixMs)
     {
         lock (gate) { anchor = time.GetTimestamp(); serverAnchor = hostUnixMs; samples.Clear(); pending.Clear(); }

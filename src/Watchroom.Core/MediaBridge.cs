@@ -15,7 +15,7 @@ public sealed class MediaBridge : IAsyncDisposable
     public Uri? Url { get; private set; }
     public async Task<Uri> StartAsync(IMediaSource media)
     {
-        source = media;
+        source = new CachedMediaSource(media);
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(k => k.Listen(System.Net.IPAddress.Loopback, 0));
@@ -42,7 +42,7 @@ public sealed class MediaBridge : IAsyncDisposable
         if (context.Request.Method == "HEAD") return;
         try
         {
-            // A bounded pipeline keeps several requests in flight without caching the movie.
+            // A bounded pipeline plus a per-movie cache amortizes nearby seeks.
             var inflight = new Queue<Task<byte[]>>(); var offset = start;
             while (offset <= end || inflight.Count > 0)
             {

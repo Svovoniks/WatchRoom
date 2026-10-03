@@ -72,6 +72,8 @@ public partial class MainWindow : Window
     private bool scanning, seeking, tracksUpdating, ready, closing, fullscreen, light;
     private long tick, appliedRevision = -1;
     private readonly PlaybackSettling settling = new();
+    private readonly PlaybackIntent playbackIntent = new();
+    private long appliedGeneration = -1, readyGeneration = -1;
     private readonly PlaybackPause playbackPause = new();
     private readonly PlaybackPosition playbackPosition = new();
     private readonly PlaybackRateControl playbackRate = new();
@@ -172,13 +174,13 @@ public partial class MainWindow : Window
                     Dispatcher.BeginInvoke(() => { if (!closing) settling.Observe(e.Time, mono); });
                 };
                 RefreshTracks();
-                player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); try { room?.Send(new("ready")); } catch { } if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
+                player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); ReportReady(); if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
                 player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus("Playback failed. Check that the file is available and the connection is active."); });
                 player.Buffering += (_, e) => Dispatcher.BeginInvoke(() =>
                 {
                     if (closing) return;
                     if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("buffer", new { cache = e.Cache, position = player?.Time, revision = target?.Revision });
-                    if (buffering.Cache(e.Cache, Environment.TickCount64)) { try { room?.Send(new("ready")); } catch { } }
+                    if (buffering.Cache(e.Cache, Environment.TickCount64)) { readyGeneration = -1; ReportReady(); }
                 });
                 player.EndReached += (_, _) => Dispatcher.BeginInvoke(() =>
                 {
@@ -833,7 +835,7 @@ public partial class MainWindow : Window
                 }
                 RefreshPeople(snapshot);
                 SharedControls.IsEnabled = room.Identity?.Host == true; SharedControls.IsChecked = snapshot.SharedControls;
-                if (room.Identity?.Host != true && !snapshot.SharedControls) playbackPause.Clear();
+                if (room.Identity?.Host != true && !snapshot.SharedControls) { playbackPause.Clear(); playbackIntent.Clear(); }
                 if (snapshot.Playback is not null) AcceptState(snapshot.Playback);
                 if (snapshot.Media is not null && snapshot.Media.Id != loadedMedia) await LoadRoomMedia(snapshot.Media);
                 UpdateSessionControls();
@@ -849,9 +851,9 @@ public partial class MainWindow : Window
     {
         if (target is null || state.Revision > target.Revision)
         {
-            if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("revision", new { state.Revision, state.Playing, state.PositionMs, state.AtUnixMs, serverMs = room?.ServerNowMs });
+            if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("revision", new { state.Revision, state.Playing, state.PositionMs, state.AtUnixMs, state.CommandId, state.Generation, state.RequestedPlaying, serverMs = room?.ServerNowMs });
             target = state; appliedRevision = -1;
-            playbackPause.Observe(state);
+            playbackPause.Observe(state); playbackIntent.Observe(state);
             ApplyRoomPlayback();
             if (room is { } client && state.AtUnixMs > client.ServerNowMs)
                 _ = ApplyScheduledPlayback(client, state);
@@ -910,8 +912,8 @@ public partial class MainWindow : Window
         try
         {
             if (client != room || generation != loadGeneration) return;
-            ready = false; buffering = new(); player?.Stop();
-            if (target?.Playing == true) client.Send(new("buffering"));
+            ready = false; buffering = new(); appliedGeneration = readyGeneration = -1; player?.Stop();
+            if (target?.Playing == true) SendReadiness("buffering");
             if (bridge is not null) await bridge.DisposeAsync(); bridge = null;
             var source = await client.GetSourceAsync(media, lifetime.Token);
             if (client != room || generation != loadGeneration) return;
@@ -925,7 +927,7 @@ public partial class MainWindow : Window
             using var vlcMedia = source is ILocalMediaSource local
                 ? new Media(vlc!, local.LocalPath, FromType.FromPath)
                 : new Media(vlc!, streamUri!);
-            if (streamUri is not null) vlcMedia.AddOption($":network-caching={MediaStreaming.NetworkCacheMs}");
+            if (streamUri is not null) vlcMedia.AddOption($":network-caching={MediaStreaming.NetworkCacheForRtt(client.RecentRttMs)}");
             if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("media-input", new { local = source is ILocalMediaSource, media.Extension });
             // VLC's AVI demuxer reads slow-seekable HTTP inputs in 1.5-second
             // steps, exposing read-ahead time to the synchronization controller.
@@ -977,8 +979,10 @@ public partial class MainWindow : Window
             PlayerOverlay.Cursor = Cursors.None;
         }
         if (player is null) return;
-        if (room is not null && ready && buffering.Poll(target?.Playing == true, Environment.TickCount64))
-        { try { room.Send(new("buffering")); } catch { } }
+        buffering.Recover(Environment.TickCount64);
+        if (room is not null && ready && buffering.Poll(target?.WantsPlayback == true, Environment.TickCount64))
+        { readyGeneration = -1; SendReadiness("buffering"); }
+        ReportReady();
         UpdateSessionControls();
         MuteButton.Content = player.Mute ? "\uE74F" : "\uE767";
         MuteButton.ToolTip = player.Mute ? "Unmute (M)" : "Mute (M)";
@@ -990,8 +994,13 @@ public partial class MainWindow : Window
             Timeline.Maximum = Math.Max(1, player.Length); Timeline.Value = pendingSeek ?? Math.Max(0, player.Time);
             PlaybackTime.Text = FormatTime(player.Time) + " / " + FormatTime(player.Length);
         }
-        PlayButton.Content = player.IsPlaying ? "Ⅱ" : "▶";
-        PlayButton.ToolTip = player.IsPlaying ? "Pause (Space)" : "Play (Space)";
+        var wantsPlayback = room is null ? player.IsPlaying : playbackIntent.Playing(target, player.IsPlaying);
+        PlayButton.Content = wantsPlayback ? "Ⅱ" : "▶";
+        PlayButton.ToolTip = wantsPlayback ? "Pause (Space)" : "Play (Space)";
+        if (target is { WantsPlayback: true, Playing: false } && room?.Snapshot is { } snapshot)
+            RoomSubtitle.Text = "Waiting for " + string.Join(", ", snapshot.People.Where(p => p.Approved && !p.Ready).Select(p => p.Name)) + " to buffer";
+        else if (room?.Snapshot?.Media is { } movie)
+            RoomSubtitle.Text = movie.Title + " · " + (room.Identity?.Host == true ? "You are hosting" : "Streaming from host");
         if (++tick % 8 == 0 && ready) RefreshTracks();
         if (tick % 20 == 0 && ready) SavePlaybackPosition();
         if (PlaybackDiagnostics.Enabled)
@@ -1012,12 +1021,14 @@ public partial class MainWindow : Window
         if (playbackPause.Pending || seeking || pendingSeek is not null && target.Revision <= seekRevision) return;
         // Seeking or accelerating a starved input discards its recovering buffer
         // and can turn a brief network delay into repeated audio/video dropouts.
-        if (buffering.IsActive || player.State == VLCState.Buffering) return;
+        var newSeek = appliedGeneration != target.Generation;
+        if (newSeek && target.Seek) { buffering = new(); readyGeneration = -1; }
+        if (!newSeek && (buffering.IsActive || player.State == VLCState.Buffering)) return;
         long now = room.ServerNowMs;
         if (now < target.AtUnixMs) { player.SetPause(true); return; }
         long desired = SyncMath.TargetPosition(target, now);
         long drift = desired - playbackPosition.Estimate(player.Time, player.IsPlaying, player.Rate, Environment.TickCount64);
-        if (settling.Waiting(target.Revision, Math.Max(0, player.Time), Environment.TickCount64)) return;
+        if (!newSeek && settling.Waiting(target.Revision, Math.Max(0, player.Time), Environment.TickCount64)) return;
         if (appliedRevision != target.Revision || Math.Abs(drift) > SyncMath.HardSeekMs)
         {
             if ((player.State is VLCState.Ended or VLCState.Stopped) && (target.Playing || desired < player.Length - 250))
@@ -1031,14 +1042,14 @@ public partial class MainWindow : Window
                 return;
             }
             if (target.Playing && appliedRevision != target.Revision) settling.Seek(target.Revision, desired, Environment.TickCount64);
-            if (Math.Abs(drift) > 200)
+            if (Math.Abs(drift) > 200 || newSeek && target.Seek)
             {
                 if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("seek", new { serverMs = now, revision = target.Revision, position = player.Time, desired, drift });
-                settling.Seek(target.Revision, desired, Environment.TickCount64); player.Time = desired;
+                settling.Seek(target.Revision, desired, Environment.TickCount64, target.Playing); player.Time = desired;
             }
             playbackRate.Reset();
-            player.SetPause(!target.Playing); ApplyPlaybackRate(1); appliedRevision = target.Revision;
-            if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("applied", new { revision = appliedRevision, serverMs = now, desired, drift });
+            player.SetPause(!target.Playing); ApplyPlaybackRate(1); appliedRevision = target.Revision; appliedGeneration = target.Generation;
+            if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("applied", new { revision = appliedRevision, target.CommandId, target.Generation, target.RequestedPlaying, serverMs = now, desired, drift });
         }
         else if (target.Playing) ApplyPlaybackRate(SyncMath.UseTunedPolicy ? SyncMath.Correction(drift) : playbackRate.Update(drift, Environment.TickCount64));
     }
@@ -1049,13 +1060,34 @@ public partial class MainWindow : Window
         if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("rate", new { requested = rate, actual = player.Rate, result });
     }
     private static string FormatTime(long milliseconds) => TimeSpan.FromMilliseconds(Math.Max(0, milliseconds)).ToString(milliseconds >= 3600000 ? @"h\:mm\:ss" : @"mm\:ss");
-    private void SendPlayback(bool playing, long position)
+    private void SendReadiness(string type)
+    {
+        if (room is null || target is null) return;
+        try
+        {
+            room.Send(new(type, Data: Wire.Serialize(new PlaybackReadiness(target.MediaId, target.Generation))));
+            PlaybackDiagnostics.Record("readiness-sent", new { type, target.Generation, target.Revision, position = player?.Time });
+        }
+        catch (IOException) { }
+    }
+    private void ReportReady()
+    {
+        if (!ready || player is null || target is null || loadedMedia != target.MediaId ||
+            appliedGeneration != target.Generation || readyGeneration == target.Generation || buffering.IsActive ||
+            player.State == VLCState.Buffering || settling.Waiting(target.Revision, Math.Max(0, player.Time), Environment.TickCount64)) return;
+        readyGeneration = target.Generation;
+        SendReadiness("ready");
+    }
+    private void SendPlayback(bool playing, long position, bool seek = false)
     {
         if (room?.Snapshot?.Media is not { } media) return;
         if (room.Identity?.Host != true && room.Snapshot.SharedControls != true) { SetStatus("The host controls playback."); return; }
-        var command = new PlaybackState(0, media.Id, playing, position, 0, Guid.NewGuid().ToString("N"));
+        if (!seek && target is { } current && player?.State != VLCState.Ended)
+            position = playbackIntent.Position(current, Math.Max(0, player?.Time ?? 0), room.ServerNowMs);
+        var command = new PlaybackState(0, media.Id, playing, position, 0, Guid.NewGuid().ToString("N"), Seek: seek);
         room.Send(new("playback", Data: Wire.Serialize(command)));
         playbackPause.Request(command, target?.Revision ?? -1);
+        playbackIntent.Request(command, target?.Revision ?? -1);
         if (!playing)
         {
             player?.SetPause(true);
@@ -1067,7 +1099,7 @@ public partial class MainWindow : Window
     {
         videoClickDelay.Stop();
         if (player is null || PlayerEmpty.Visibility == Visibility.Visible) return;
-        if (room is not null) SendPlayback(!player.IsPlaying, player.Length > 0 && player.Time >= player.Length - 250 ? 0 : Math.Max(0, player.Time));
+        if (room is not null) SendPlayback(!playbackIntent.Playing(target, player.IsPlaying), player.Length > 0 && player.Time >= player.Length - 250 ? 0 : Math.Max(0, player.Time));
         else if (player.IsPlaying) player.SetPause(true); else { if (player.State == VLCState.Ended) player.Stop(); player.Play(); }
     }
     private bool CanSeek() => player is not null && player.Length > 0 && (room is null || room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
@@ -1093,7 +1125,7 @@ public partial class MainWindow : Window
         {
             var position = (long)Timeline.Value;
             pendingSeek = position; seekRevision = target?.Revision ?? -1; seekExpires = Wire.Now + 5000;
-            if (room is null) player!.Time = position; else SendPlayback(target?.Playing == true, position);
+            if (room is null) player!.Time = position; else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true);
         }
         if (Timeline.IsMouseCaptured) Timeline.ReleaseMouseCapture();
     }
@@ -1106,10 +1138,10 @@ public partial class MainWindow : Window
         Timeline.Value = e.Key switch { Key.Home => 0, Key.End => Timeline.Maximum, Key.Left => Math.Max(0, Timeline.Value - 5000), _ => Math.Min(Timeline.Maximum, Timeline.Value + 5000) };
     }
     private void SeekKeyFinished(object sender, KeyEventArgs e) { if (e.Key is Key.Left or Key.Right or Key.Home or Key.End) { CommitSeek(); e.Handled = true; } }
-    private void MovePlayback(long offset) { if (player is null || player.Length <= 0) return; var position = Math.Clamp(player.Time + offset, 0, player.Length); if (room is null) player.Time = position; else SendPlayback(target?.Playing == true, position); }
+    private void MovePlayback(long offset) { if (player is null || player.Length <= 0) return; var position = Math.Clamp((room is null ? player.Time : playbackIntent.Position(target, player.Time, room.ServerNowMs)) + offset, 0, player.Length); if (room is null) player.Time = position; else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true); }
     private void SkipBackward(object sender, RoutedEventArgs e) => MovePlayback(-10000);
     private void SkipForward(object sender, RoutedEventArgs e) => MovePlayback(10000);
-    private void StopPlayback(object sender, RoutedEventArgs e) { if (player is null) return; if (room is null) { player.Stop(); ready = false; } else SendPlayback(false, 0); }
+    private void StopPlayback(object sender, RoutedEventArgs e) { if (player is null) return; if (room is null) { player.Stop(); ready = false; } else SendPlayback(false, 0, seek: true); }
     private void MutePlayback(object sender, RoutedEventArgs e) { if (player is not null) player.Mute = !player.Mute; }
     private void VolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e) { if (player is not null) { player.Volume = (int)e.NewValue; if (e.NewValue > 0) player.Mute = false; } }
     private void RefreshTracks()
@@ -1255,7 +1287,7 @@ public partial class MainWindow : Window
         SavePlaybackPosition(); localResume = 0;
         if (fullscreen) SetFullscreen(false);
         PlayerEmpty.Visibility = Visibility.Visible;
-        pendingSeek = null; seeking = false; playbackPause.Clear(); ++loadGeneration; var old = room; room = null; target = null; loadedMedia = null; ready = false;
+        pendingSeek = null; seeking = false; playbackPause.Clear(); playbackIntent.Clear(); appliedGeneration = readyGeneration = -1; ++loadGeneration; var old = room; room = null; target = null; loadedMedia = null; ready = false;
         player?.Stop(); if (old is not null) await old.DisposeAsync();
         playingItem = null;
         await loading.WaitAsync();

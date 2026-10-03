@@ -83,6 +83,34 @@ static class StreamingAudioFixture
         var late = decoded.Count(block => block.At - block.Pts > 100000);
         check(late == 0, $"guest audio arrives before its playback deadline ({late} blocks over 100 ms late)");
         player.Stop();
+        // Exercise the native paused-seek path through the same guest HTTP input.
+        // Previously settling required advancement, which a paused input cannot do.
+        var settling = new PlaybackSettling();
+        var settleGate = new object();
+        player.TimeChanged += (_, e) => { lock (settleGate) settling.Observe(e.Time, Environment.TickCount64); };
+        check(player.Play(media), "cached guest stream restarts for seek recovery checks");
+        async Task WaitFor(Func<bool> predicate, string name)
+        {
+            var until = DateTime.UtcNow.AddSeconds(8);
+            while (!predicate() && DateTime.UtcNow < until) await Task.Delay(50);
+            check(predicate(), name);
+        }
+        await WaitFor(() => player.IsPlaying && player.Time >= 500, "restarted guest stream advances before seeking");
+        player.SetPause(true);
+        await WaitFor(() => player.State == VLCState.Paused, "guest Pause takes effect before a seek");
+        var seekStarted = Environment.TickCount64;
+        lock (settleGate) settling.Seek(1, 4000, seekStarted, playing: false);
+        player.Time = 4000;
+        bool SeekSettled() { lock (settleGate) return !settling.Waiting(1, player.Time, Environment.TickCount64) && Math.Abs(player.Time - 4000) < 300; }
+        await WaitFor(SeekSettled,
+            "native guest seek reaches its position while remaining paused");
+        check(!player.IsPlaying, "native seek does not override explicit Pause intent");
+        player.SetPause(false);
+        await WaitFor(() => player.IsPlaying && player.Time > 4200, "guest resumes from the newly sought position");
+        player.Time = 6500; player.Time = 1000;
+        await WaitFor(() => player.IsPlaying && player.Time >= 1000 && player.Time < 2500,
+            "latest rapid guest seek supersedes an older native seek");
+        player.Stop();
         cancellation.Cancel(); await pump;
     }
 

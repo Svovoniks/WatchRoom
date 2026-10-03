@@ -194,6 +194,7 @@ void Check(bool condition, string name) { if (!condition) throw new Exception("F
 RoomLibraryChecks.Run(Check);
 await DiagnosticLogFixture.Run(Path.Combine(root, "diagnostic-log"), Check);
 await RecoveryFixture.Run(Check);
+await MediaCacheFixture.Run(Check);
 await LibrarySearchFixture.Run(Check);
 await MetadataPipelineFixture.Run(Path.Combine(root, "metadata-pipeline"), Check);
 await MetadataRecoveryFixture.Run(Path.Combine(root, "metadata-recovery"), Check);

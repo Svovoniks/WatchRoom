@@ -74,6 +74,7 @@ public sealed class RoomClient : IAsyncDisposable
     private long pingId;
     public long ServerNowMs => clock.Now;
     public long ServerOffsetMs => clock.OffsetMs;
+    public long RecentRttMs => clock.RecentRttMs;
     public event Action<WireMessage>? Message;
     public event Action<string>? Status;
     public event Action<string>? LibraryPeerReady;
@@ -404,6 +405,8 @@ public sealed class RoomClient : IAsyncDisposable
     private void ApplyHostCommand(string sender, WireMessage message)
     {
         var now = clock.Now;
+        if (message.Type is "playback" or "ready" or "buffering")
+            PlaybackDiagnostics.Record("host-command-received", new { sender, message.Type, message.Data, serverMs = now });
         // Publish lease expiry even when the following command is rejected.
         if (coordinator!.ExpireLibrary(now)) PublishHostState();
         LibraryBrowseRequest? browse = null;
@@ -461,7 +464,9 @@ public sealed class RoomClient : IAsyncDisposable
         }
         PublishHostState();
         if (announcement is not null) { Message?.Invoke(announcement); Broadcast(announcement); }
-        if (PlaybackDiagnostics.Enabled && message.Type == "playback") PlaybackDiagnostics.Record("control-sent", new { message.Data, transport = "peer" });
+        if (message.Type is "playback" or "ready" or "buffering")
+            PlaybackDiagnostics.Record("host-command-accepted", new { sender, message.Type, playback = coordinator.Playback,
+                waiting = coordinator.Snapshot.People.Where(p => p.Approved && !p.Ready).Select(p => p.Id).ToArray() });
     }
     private void ApplySnapshot(RoomSnapshot snapshot)
     {
@@ -485,7 +490,12 @@ public sealed class RoomClient : IAsyncDisposable
     private void SendPeer(string id, WireMessage message)
     {
         if (!peers.TryGetValue(id, out var peer) || !peer.IsControlOpen) { DepartPeer(id); return; }
-        try { peer.SendControl(message); }
+        try
+        {
+            peer.SendControl(message);
+            if (message.Type is "playback" or "ready" or "buffering")
+                PlaybackDiagnostics.Record("control-transmitted", new { room = diagnosticId, transport = peer.DiagnosticId, message.Type, message.Data });
+        }
         catch (Exception ex) when (ex is IOException or InvalidOperationException)
         {
             PlaybackDiagnostics.Record("control-send-failed", new { room = diagnosticId, transport = peer.DiagnosticId, command = message.Type, error = ex.GetType().Name });

@@ -36,7 +36,12 @@ public record SavedRoom(string Id, string Name, string Server, string Code, stri
 public record SavedQueue(string Id, string Name, string[] MediaIds);
 public record SharedMedia(string Id, string Title, long Length, string Extension, SharedMedia[]? Subtitles = null);
 public record Participant(string Id, string Name, bool IsHost, bool Approved, bool Ready = false, string? GuestId = null);
-public record PlaybackState(long Revision, string MediaId, bool Playing, long PositionMs, long AtUnixMs, string? CommandId = null);
+public record PlaybackState(long Revision, string MediaId, bool Playing, long PositionMs, long AtUnixMs, string? CommandId = null,
+    bool? RequestedPlaying = null, long Generation = 0, bool Seek = false)
+{
+    public bool WantsPlayback => RequestedPlaying ?? Playing;
+}
+public record PlaybackReadiness(string MediaId, long Generation);
 public record WireMessage(string Type, string? Target = null, string? Sender = null,
     string? Text = null, string? Data = null, long Number = 0);
 public record Welcome(string Room, string Peer, bool Host, string[] IceServers, bool ForceRelay, string? HostKey = null, string? GuestKey = null);

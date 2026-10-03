@@ -74,14 +74,35 @@ static class RecoveryFixture
             "overshoot returns to normal speed before sustained reverse correction");
         rateControl.Update(400, 4000); rateControl.Reset();
         check(rateControl.Update(400, 4750) == 1, "new playback commands clear previous drift history");
+        var intent = new PlaybackIntent();
+        var waiting = new PlaybackState(10, "movie", false, 0, 0, RequestedPlaying: true);
+        check(intent.Playing(waiting, false), "buffering preserves the requested Play intent");
+        intent.Request(stop, 10);
+        check(!intent.Playing(waiting, false), "Pause toggles immediately while waiting for readiness");
+        intent.Observe(waiting with { Revision = 11, CommandId = "other" });
+        check(!intent.Playing(waiting, false), "unrelated acknowledgements cannot overwrite pending Pause");
+        intent.Observe(stop with { Revision = 12, RequestedPlaying = false });
+        check(!intent.Playing(stop, true), "acknowledged Pause overrides native playback state");
+        intent.Request(stop with { Playing = true }, 12); intent.Clear();
+        check(!intent.Playing(null, false), "disconnect clears pending Play intent");
+        intent.Request(stop with { Seek = true, PositionMs = 90000 }, 12);
+        check(intent.Position(waiting, 1000, 1000) == 90000, "Play or another skip preserves a seek still awaiting acknowledgement");
+        intent.Clear();
+        settling.Seek(20, 90000, 1000, playing: false); settling.Observe(90000, 1100);
+        check(!settling.Waiting(20, 90000, 1400), "paused seek settles without requiring the timeline to advance");
         var buffer = new PlaybackBuffering(); buffer.Cache(0, 1000); buffer.Cache(100, 1004);
         check(!buffer.Poll(true, 1600), "short seek buffering bursts do not pause the room");
-        buffer.Cache(0, 2000);
-        check(!buffer.Poll(true, 2499) && buffer.Poll(true, 2500) && !buffer.Poll(true, 3000), "sustained starvation pauses the room once");
-        check(buffer.Cache(100, 3100) && !buffer.Cache(100, 3101), "recovered buffering reports ready once");
+        buffer.Recover(1800); buffer.Cache(0, 2000);
+        check(!buffer.Poll(true, 2749) && buffer.Poll(true, 2750) && !buffer.Poll(true, 3000), "sustained starvation pauses the room once");
+        check(!buffer.Cache(100, 3100) && buffer.IsActive, "one full-cache event cannot prematurely resume playback");
+        buffer.Cache(60, 3300); buffer.Cache(100, 3500);
+        check(!buffer.Recover(4249) && buffer.Recover(4250) && !buffer.Recover(4500), "recovery waits for sustained full cache and reports ready once");
         buffer.Cache(60, 9000);
-        check(buffer.IsActive && buffer.Poll(true, 9500), "partial cache starvation is detected even without a zero-percent event");
-        check(buffer.Cache(100, 9600) && !buffer.IsActive, "full cache releases the synchronization hold and reports recovery");
+        check(buffer.IsActive && buffer.Poll(true, 9750), "partial cache starvation is detected even without a zero-percent event");
+        buffer.Cache(100, 9800);
+        check(buffer.Recover(10550) && !buffer.IsActive, "stable full cache releases the synchronization hold");
+        check(MediaStreaming.NetworkCacheForRtt(50) == 1500 && MediaStreaming.NetworkCacheForRtt(900) == 3600 &&
+            MediaStreaming.NetworkCacheForRtt(long.MaxValue) == 5000, "guest buffer adapts to RTT within a fixed upper bound");
 
         var cursors = new List<string>(); var gets = 0;
         using var handler = new Handler((request, ct) =>

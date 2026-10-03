@@ -65,7 +65,9 @@ static class DirectControlFixture
             b.Send(new("catalog-browse", Number: 104, Data: "{}"));
             await Wait(() => libraryMessages.Any(m => m.Type == "catalog-error" && m.Number == 104));
             check(true, "revoking library permission clears both clients and denies new catalog requests");
-            host.Send(new("ready")); a.Send(new("ready")); b.Send(new("ready"));
+            WireMessage ScopedReady(long generation) => new("ready", Data: Wire.Serialize(new PlaybackReadiness(source.Media.Id, generation)));
+            var initialGeneration = host.Snapshot!.Playback!.Generation;
+            host.Send(ScopedReady(initialGeneration)); a.Send(ScopedReady(initialGeneration)); b.Send(ScopedReady(initialGeneration));
             await Wait(() => host.Snapshot!.People.Where(p => p.Approved).All(p => p.Ready));
             var denied = new PlaybackState(0, source.Media.Id, true, 1000, 0, Guid.NewGuid().ToString("N"));
             a.Send(new("playback", Sender: host.Identity.Peer, Data: Wire.Serialize(denied)));
@@ -85,11 +87,24 @@ static class DirectControlFixture
             source.Release.TrySetResult();
             check((await mediaRead.WaitAsync(TimeSpan.FromSeconds(5))).Length == 32768, "media channel continues independently after direct stop");
             await Control(host, true, 2000, host, a, b);
-            b.Send(new("buffering"));
+            b.Send(new("buffering", Data: Wire.Serialize(new PlaybackReadiness(source.Media.Id, initialGeneration))));
             await Wait(() => host.Snapshot!.Playback!.Playing == false && a.Snapshot!.Playback!.Playing == false);
-            b.Send(new("ready"));
+            b.Send(ScopedReady(initialGeneration));
             await Wait(() => host.Snapshot!.Playback!.Playing && a.Snapshot!.Playback!.Playing && b.Snapshot!.Playback!.Playing);
             check(true, "host pauses and resumes all direct peers when a guest buffers");
+            var seek = new PlaybackState(0, source.Media.Id, true, 12000, 0, Guid.NewGuid().ToString("N"), Seek: true);
+            var previousGeneration = host.Snapshot!.Playback!.Generation;
+            a.Send(new("playback", Data: Wire.Serialize(seek)));
+            await Wait(() => new[] { host, a, b }.All(client => client.Snapshot!.Playback!.CommandId == seek.CommandId));
+            var seekGeneration = host.Snapshot!.Playback!.Generation;
+            check(new[] { host, a, b }.All(client => client.Snapshot!.Playback is { Playing: false, WantsPlayback: true }),
+                "seek acknowledgement reaches all peers while readiness holds playback");
+            b.Send(ScopedReady(previousGeneration));
+            await Task.Delay(100);
+            check(!host.Snapshot!.People.Single(p => p.Id == b.Identity!.Peer).Ready, "delayed peer readiness cannot acknowledge a newer seek");
+            host.Send(ScopedReady(seekGeneration)); a.Send(ScopedReady(seekGeneration)); b.Send(ScopedReady(seekGeneration));
+            await Wait(() => new[] { host, a, b }.All(client => client.Snapshot!.Playback!.Playing));
+            check(true, "scoped seek readiness resumes the room over the actual peer control channel");
             host.Send(new("queue", Data: Wire.Serialize(new[] { "Next", "Then" })));
             await Wait(() => b.Snapshot!.Queue?.Length == 2);
             check(a.Snapshot!.Queue!.SequenceEqual(new[] { "Next", "Then" }), "host distributes queue on the control channel");

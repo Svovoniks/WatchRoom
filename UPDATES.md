@@ -87,6 +87,18 @@ release a higher patch version with the fix; the updater refuses downgrades.
 
 ## Diagnosing room and playback failures
 
+Playback snapshots distinguish requested Play/Pause from a temporary buffering
+hold. Readiness messages from updated apps carry the movie ID and seek generation;
+late readiness for an earlier seek is ignored. Explicit seeks supersede buffering
+at the previous position. The guest bridge retains at most 16 MiB of recently read
+movie data; canceled seeks stop transfers that have no remaining consumers.
+Guest network caching is selected per movie from recent round-trip measurements,
+within 1.5–5 seconds. Buffering recovery requires 750 ms of stable full cache.
+Diagnostics include command queueing, host receipt/acceptance, acknowledgement,
+player application, and scoped readiness, making network delay distinguishable
+from a playback hold. The `applied` event records issuing the native player action;
+`native-time` and `settle-end` establish when the native position catches up.
+
 Windows builds save connection and playback diagnostics automatically to
 `%LOCALAPPDATA%\Watchroom\logs`. Settings offers **Open logs folder**. After
 reproducing a failed watch session, close both apps and share the logs from both
