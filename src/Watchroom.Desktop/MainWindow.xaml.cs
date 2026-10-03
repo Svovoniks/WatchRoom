@@ -96,6 +96,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        RoomPage.SizeChanged += (_, _) => PlayerOptionsScroll.MaxHeight = Math.Clamp(RoomPage.ActualHeight / 3, 120, 260);
         InitializeBackNavigation();
         videoClickDelay.Interval = TimeSpan.FromMilliseconds(GetDoubleClickTime());
         videoClickDelay.Tick += (_, _) =>
@@ -1290,6 +1291,8 @@ public partial class MainWindow : Window
         NowPlayingLabel.Text = "Now watching · " + RoomHeading.Text;
         var canControl = room is null || connectedRoom && (room!.Identity?.Host == true || room.Snapshot?.SharedControls == true);
         InviteButton.Visibility = RoomToggle.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
+        RoomLibraryButton.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
+        RoomLibraryButton.Content = room?.Identity?.Host == true ? "Library & guest access" : "Host library";
         LeaveButton.Content = room is null ? "Close player" : "Leave room";
         ChatInput.IsEnabled = SendChatButton.IsEnabled = connectedRoom && (room!.Identity?.Host == true || room.Snapshot?.People.Any(p => p.Id == room.Identity?.Peer && p.Approved) == true);
         PlayButton.IsEnabled = StopButton.IsEnabled = canControl && (ready || playingItem is not null && player?.State is VLCState.Stopped or VLCState.Ended);

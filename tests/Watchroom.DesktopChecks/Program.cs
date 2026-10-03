@@ -30,6 +30,11 @@ static class Program
         foreach (var element in resourceRoot.Descendants().Where(element => element.Name.NamespaceName == "clr-namespace:Watchroom.Desktop"))
             element.Name = System.Xml.Linq.XName.Get(element.Name.LocalName, "clr-namespace:Watchroom.Desktop;assembly=Watchroom");
         app.Resources = (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(resourceRoot.ToString());
+        if (args.FirstOrDefault() == "--player-layout")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            PlayerLayoutChecks.Run(); app.Shutdown(); return;
+        }
         if (args.FirstOrDefault() == "--guest-library-layout")
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;

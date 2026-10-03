@@ -43,6 +43,8 @@ jobs:
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release
       - name: Guest library layout checks
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --guest-library-layout
+      - name: Player layout checks
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --player-layout
       - name: Full playback and room checks
         run: dotnet run --project tests/Watchroom.Smoke -c Release -- artifacts/release-smoke
       - name: Publish Windows app

@@ -39,6 +39,7 @@ public partial class MainWindow
         if (roomLibrary is null || room?.Identity is null) { SetStatus("Create or join a room first."); return; }
         libraryWindow ??= new RoomLibraryWindow(roomLibrary, room.Identity.Host, HostPeerId,
             () => room?.Snapshot?.People ?? [], PublishRoomLibrary) { Owner = this };
+        if (room.Identity.Host) libraryWindow.ShowAccess();
         libraryWindow.Show(); libraryWindow.Activate();
     }
     private void PublishRoomLibrary(string[] kinds)

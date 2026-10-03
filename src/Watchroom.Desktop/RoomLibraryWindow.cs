@@ -112,6 +112,10 @@ public sealed class RoomLibraryWindow : Window
     {
         disposed = true; timer.Stop(); session.Changed -= OnChanged; session.Activity -= OnActivity; session.Result -= OnResult; Close();
     }
+    public void ShowAccess()
+    {
+        if (host) tabs.SelectedIndex = 2;
+    }
     private Button Button(string title, Action action)
     {
         var button = new Button { Content = title, Margin = new Thickness(4), Padding = new Thickness(10, 5, 10, 5) };
@@ -184,7 +188,7 @@ public sealed class RoomLibraryWindow : Window
     private void RenderBrowser()
     {
         var dataKey = Wire.Serialize(new { session.Generation, Count = session.Catalog.Count, Search = search.Text,
-            Category = category.SelectedIndex, Season = season.SelectedItem?.ToString(), Width = Math.Round(viewport.ActualWidth), Height = Math.Round(viewport.ActualHeight) });
+            Category = category.SelectedIndex, Season = season.SelectedItem?.ToString(), Page = page, Width = Math.Round(viewport.ActualWidth), Height = Math.Round(viewport.ActualHeight) });
         if (dataKey == browserDataSignature) return; browserDataSignature = dataKey;
         if (posterGeneration != session.Generation) { posters.Clear(); posterGeneration = session.Generation; }
         if (selected is not null && !session.Catalog.ContainsKey(selected)) { selected = null; detail.Text = ""; }

@@ -51,6 +51,12 @@ static class GuestLibraryLayoutChecks
         var scroll = Field<ScrollViewer>(hostWindow, "previewScroll");
         Check(previews.ActualHeight <= scroll.ViewportHeight + 1, "complete guest page fits host viewport without scrolling through cards");
         Save(guestWindow, "guest-grid.png"); Save(hostWindow, "host-preview.png");
+        hostTabs.SelectedIndex = 0; hostWindow.ShowAccess();
+        Check(hostTabs.SelectedIndex == 2, "host library entry opens guest access settings directly");
+        var nextPage = Descendants((DependencyObject)guestWindow.Content).OfType<Button>().Single(b => Equals(b.Content, "Next page"));
+        nextPage.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Invoke(guestWindow, "RenderBrowser");
+        Invoke(guestWindow, "SendView", true); Pump();
+        Check(host.Views["guest"].Page == 1 && host.Views["guest"].VisibleIds[0] == "item-" + (grid.Columns * grid.Rows + 1), "paging updates the guest grid and exact host mirror IDs");
         hovered.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseLeaveEvent });
         Invoke(guestWindow, "SendView", true); Pump();
         Check(host.Views["guest"].HoveredId is null, "leaving a guest card clears host hover state");
@@ -59,7 +65,15 @@ static class GuestLibraryLayoutChecks
         host.SetAccess("guest", new()); Pump(); Invoke(guestWindow, "RenderBrowser");
         Check(grid.Children.OfType<Button>().Count() == 0, "revoked catalog disappears from guest grid");
         guestWindow.Shutdown(); hostWindow.Shutdown();
-        Console.WriteLine("10 desktop layout checks passed.");
+        Console.WriteLine("12 desktop layout checks passed.");
+    }
+    static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i); yield return child;
+            foreach (var descendant in Descendants(child)) yield return descendant;
+        }
     }
     static T Field<T>(object target, string name) => (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target)!;
     static void Invoke(object target, string name, params object[] args) => target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(target, args);
