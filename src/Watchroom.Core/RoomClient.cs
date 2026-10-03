@@ -36,6 +36,8 @@ public sealed class RoomClient : IAsyncDisposable
     public Task DirectControlsReady => directConnected.Task;
     public bool DiscoveryOnline => Volatile.Read(ref discoveryFailed) == 0 && connection is not null;
     public IMediaSource? HostedMedia { get; set; }
+    private MediaItem[] hostedLibrary = [];
+    public void SetHostedLibrary(IEnumerable<MediaItem> items) => Volatile.Write(ref hostedLibrary, items.ToArray());
     private readonly ConcurrentDictionary<string, IMediaSource> assets = new();
     public void SetHostedFile(string path, string title)
     {
@@ -142,7 +144,7 @@ public sealed class RoomClient : IAsyncDisposable
     {
         if (!IsConnected) throw new IOException("Room connection is closed. Rejoin the room to reconnect.");
         if (message.Type == "remove" && !DiscoveryOnline) throw new IOException("Reconnect to the room service before revoking saved guest access.");
-        if (message.Type is "media" or "controls" or "room-name" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
+        if (message.Type is "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
         {
             if (Identity?.Host != true && !directConnected.Task.IsCompletedSuccessfully)
                 throw new IOException("Waiting for the host's direct control connection. All participants need the updated app.");
@@ -174,6 +176,7 @@ public sealed class RoomClient : IAsyncDisposable
             var tick = 0;
             while (!lifetime.IsCancellationRequested)
             {
+                if (Identity?.Host == true) Post(new("library-expire"));
                 if (tick++ % 5 == 0 && DiscoveryOnline)
                     try { QueueDiscovery(new("ping", Number: tick)); } catch (IOException ex) { DiscoveryLost(ex.Message); }
                 if (Identity?.Host == false && directConnected.Task.IsCompletedSuccessfully)
@@ -224,6 +227,7 @@ public sealed class RoomClient : IAsyncDisposable
                 {
                     switch (item.Kind)
                     {
+                        case "library-expire": if (coordinator?.ExpireLibrary(clock.Now) == true) PublishHostState(); break;
                         case "discovery": HandleDiscovery(item.Message!); break;
                         case "discovery-lost":
                             if (Identity is null || Identity.Host == false && !directConnected.Task.IsCompletedSuccessfully)
@@ -283,6 +287,7 @@ public sealed class RoomClient : IAsyncDisposable
                     roomControlsRestored = storedControls is not null;
                     if (storedControls == "true")
                         coordinator.Apply(Identity.Peer, new("controls", Number: 1), clock.Now, out _);
+                    coordinator.Apply(Identity.Peer, new("catalog-permission", Number: settings?.Setting(RoomSetting(Identity.Room, "libraryBrowsing")) == "true" ? 1 : 0), clock.Now, out _);
                     if (roomControlsRestored) QueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
                     Snapshot = coordinator.Snapshot; directConnected.TrySetResult();
                 }
@@ -377,18 +382,57 @@ public sealed class RoomClient : IAsyncDisposable
                     directConnected.TrySetResult();
                     break;
                 case "clock-pong": if (long.TryParse(message.Data, out var now)) clock.Receive(message.Number, now); break;
-                case "chat": case "notice": case "error": Message?.Invoke(message); break;
+                case "catalog-page": case "catalog-error": case "chat": case "notice": case "error": Message?.Invoke(message); break;
             }
         }
     }
     private void ApplyHostCommand(string sender, WireMessage message)
     {
-        if (!coordinator!.Apply(sender, message, clock.Now, out var announcement))
+        var now = clock.Now;
+        // Publish lease expiry even when the following command is rejected.
+        if (coordinator!.ExpireLibrary(now)) PublishHostState();
+        LibraryBrowseRequest? browse = null;
+        if (message.Type == "catalog-browse")
         {
-            var error = new WireMessage("error", Text: "The host controls this action, or the command is no longer valid.");
+            try
+            {
+                browse = Wire.Read<LibraryBrowseRequest>(message.Data ?? "{}");
+                if (browse.Query is null || browse.Query.Length > 100 || browse.Category is < 0 or > 3 || browse.Page is < 0 or > 100000 || browse.ParentId?.Length > 128)
+                    throw new InvalidDataException("Invalid library search");
+            }
+            catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
+            { SendPeer(sender, new("catalog-error", Number: message.Number, Text: "Invalid library search.")); return; }
+        }
+        if (!coordinator.Apply(sender, message, now, out var announcement))
+        {
+            var error = new WireMessage(browse is null ? "error" : "catalog-error", Number: message.Number,
+                Text: browse is null ? "The host controls this action, or the command is no longer valid." : !coordinator.LibraryBrowsing ? "The host has disabled library browsing." : "Another guest is browsing. Try again when they finish.");
             if (sender == Identity!.Peer) Message?.Invoke(error); else SendPeer(sender, error);
             return;
         }
+        if (browse is not null)
+        {
+            try
+            {
+                var page = SharedLibrary.Browse(Volatile.Read(ref hostedLibrary), browse);
+                coordinator.DescribeLibrary(page.Location, browse.Query, clock.Now);
+                PublishHostState();
+                SendPeer(sender, new("catalog-page", Number: message.Number, Data: Wire.Serialize(page)));
+            }
+            catch (InvalidDataException ex) { PublishHostState(); SendPeer(sender, new("catalog-error", Number: message.Number, Text: ex.Message)); }
+            return;
+        }
+        if (message.Type == "catalog-view")
+        {
+            var entry = Volatile.Read(ref hostedLibrary).FirstOrDefault(x => x.Id == message.Target && x.Available && !x.IsVirtual && !x.IsExtra);
+            if (entry is not null)
+            {
+                var title = entry.Series is null ? entry.Title : entry.Caption + " · " + entry.EpisodeDisplayTitle;
+                coordinator.DescribeLibrary(title[..Math.Min(240, title.Length)], "", clock.Now);
+            }
+        }
+        if (sender == Identity!.Peer && message.Type == "catalog-permission")
+            settings?.Setting(RoomSetting(Identity.Room, "libraryBrowsing"), coordinator.LibraryBrowsing ? "true" : "false");
         if (sender == Identity!.Peer && message.Type == "controls")
         {
             roomControlsRestored = true;

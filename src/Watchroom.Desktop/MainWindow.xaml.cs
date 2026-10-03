@@ -149,6 +149,7 @@ public partial class MainWindow : Window
         library.MediaSaved += QueueLibraryUpdate;
         libraryUpdateTimer.Tick += (_, _) => ApplyLibraryUpdates();
         libraryUpdateTimer.Start();
+        InitializeSharedLibrary();
         try { foreach (var id in Wire.Read<string[]>(savedQueue).Take(10000)) if (items.FirstOrDefault(x => x.Id == id) is { } queued) queue.Add(queued); }
         catch (System.Text.Json.JsonException) { }
         if (int.TryParse(library.Setting("queuePosition"), out var cursor)) queuePosition = Math.Clamp(cursor, -1, queue.Count - 1);
@@ -206,6 +207,7 @@ public partial class MainWindow : Window
     }
     private void ShowPage(string name)
     {
+        if (currentPage == "Library" && name != "Library") ReleaseHostLibrary();
         if (name != currentPage) RememberLocation();
         currentPage = name;
         if (name != "Room") videoClickDelay.Stop();
@@ -226,6 +228,7 @@ public partial class MainWindow : Window
         RoomPage.Visibility = name == "Room" ? Visibility.Visible : Visibility.Collapsed;
         ApplyPlayerLayout();
         UpdateSessionControls();
+        RefreshSharedLibrary();
         if (name == "Library") FilterLibrary();
         if (name == "Rooms") RefreshSavedRooms();
         UpdateLibraryCategorySelection(name is "Library" or "Details");
@@ -252,6 +255,13 @@ public partial class MainWindow : Window
     private void LibraryCategoryClick(object sender, RoutedEventArgs e) => NavigateLibrary(int.Parse((string)((Button)sender).Tag));
     private void NavigateLibrary(int category, string? series = null, string? kind = null, int? season = null)
     {
+        if (GuestLibrary)
+        {
+            ShowPage("Library"); GuestLibraryCategory.SelectedIndex = category; GuestLibrarySearch.Clear();
+            guestBrowse = new(Category: category);
+            if (OwnsLibrary) RequestHostLibrary();
+            return;
+        }
         if (currentPage != "Library" || libraryCategory != category || browseSeries != series || browseKind != kind || browseSeason != season || SearchBox.Text.Length > 0 || LibraryStatusFilter.SelectedIndex != 0) RememberLocation();
         var restoring = restoringNavigation; restoringNavigation = true;
         libraryCategory = category; browseSeries = series; browseKind = kind; browseSeason = season;
@@ -298,6 +308,7 @@ public partial class MainWindow : Window
     }
     private void RefreshLibraryFromItems(List<MediaItem> refreshedItems)
     {
+        room?.SetHostedLibrary(refreshedItems);
         items = refreshedItems;
         if (browseSeries is not null && !items.Any(x => LibraryIdentity.InShow(x, browseSeries, browseKind)))
         {
@@ -336,6 +347,7 @@ public partial class MainWindow : Window
         if (!changed) return;
         var browsedId = items.FirstOrDefault(item => LibraryIdentity.InShow(item, browseSeries, browseKind))?.Id;
         items = updated.Values.ToList();
+        room?.SetHostedLibrary(items);
         if (browseSeries is not null && !items.Any(item => LibraryIdentity.InShow(item, browseSeries, browseKind)))
         {
             var current = browsedId is null ? null : updated.GetValueOrDefault(browsedId);
@@ -751,6 +763,8 @@ public partial class MainWindow : Window
     private RoomClient NewRoom()
     {
         var client = new RoomClient(library); room = client;
+        guestBrowse = new(); guestLibraryNotice = null; guestBrowsePending = false; ++guestBrowseRequest;
+        client.SetHostedLibrary(items);
         client.Message += msg => Dispatcher.BeginInvoke(async () => { if (room == client) await Guard(() => OnRoomMessage(msg)); });
         client.LibraryPeerReady += id => Dispatcher.BeginInvoke(() =>
         {
@@ -775,6 +789,7 @@ public partial class MainWindow : Window
         if (room is null) return;
         switch (message.Type)
         {
+            case "library-page": case "library-error": ReceiveHostLibrary(message); break;
             case "welcome":
                 EnsureRoomLibrary();
                 RememberCurrentRoom();
@@ -811,6 +826,7 @@ public partial class MainWindow : Window
                 if (snapshot.Playback is not null) AcceptState(snapshot.Playback);
                 if (snapshot.Media is not null && snapshot.Media.Id != loadedMedia) await LoadRoomMedia(snapshot.Media);
                 UpdateSessionControls();
+                RefreshSharedLibrary();
                 break;
             case "playback": AcceptState(Wire.Read<PlaybackState>(message.Data!)); break;
             case "chat": case "notice":
@@ -1230,6 +1246,7 @@ public partial class MainWindow : Window
         try { if (bridge is not null) await bridge.DisposeAsync(); bridge = null; } finally { loading.Release(); }
         PeopleList.ItemsSource = null; pendingAdmissions.Clear(); RoomFeedback.Text = ""; RoomFeedback.Visibility = Visibility.Collapsed;
         RoomTabs.SelectedIndex = 0; chat.Clear(); SetThreadExecutionState(0x80000000); ConnectionStatus.Text = "Local playback";
+        guestBrowsePending = false; ++guestBrowseRequest; RefreshSharedLibrary();
         UpdateSessionControls();
     }
     private async void PrepareCopy(object sender, RoutedEventArgs e) => await Guard(async () =>
@@ -1423,7 +1440,9 @@ public partial class MainWindow : Window
         if (fullscreen && e.Key == Key.Tab) ShowPlayerControls();
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen)
         {
-            ShowPage("Library"); SearchBox.Focus(); SearchBox.SelectAll(); e.Handled = true; return;
+            ShowPage("Library");
+            var search = GuestLibrary ? GuestLibrarySearch : SearchBox;
+            search.Focus(); search.SelectAll(); e.Handled = true; return;
         }
         if (e.Key == Key.Escape && LibraryPage.Visibility == Visibility.Visible && SearchBox.IsKeyboardFocused)
         { SearchBox.Clear(); e.Handled = true; return; }
@@ -1483,7 +1502,7 @@ public partial class MainWindow : Window
     private async void WindowClosing(object? sender, CancelEventArgs e)
     {
         if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop(); videoClickDelay.Stop();
-        libraryUpdateTimer.Stop(); updateTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
+        guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
         library.Setting("volume", ((int)Volume.Value).ToString());
         await Task.Yield(); // Let WPF finish the first Closing event before calling Close again.
         foreach (var watcher in watchers) watcher.Dispose();

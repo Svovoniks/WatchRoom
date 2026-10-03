@@ -35,6 +35,9 @@ public partial class MainWindow
     }
     private void OpenRoomLibrary(object sender, RoutedEventArgs e)
     {
+        // Guests browse directly in the Library tab. The host window remains for
+        // choosing collections and managing the room queue/playback workflow.
+        if (room?.Identity?.Host == false) { ShowPage("Library"); return; }
         EnsureRoomLibrary();
         if (roomLibrary is null || room?.Identity is null) { SetStatus("Create or join a room first."); return; }
         libraryWindow ??= new RoomLibraryWindow(roomLibrary, room.Identity.Host, HostPeerId,

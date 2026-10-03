@@ -41,6 +41,10 @@ public partial class MainWindow
         SavedRoomLibraryButton.IsEnabled = connected;
         SavedRoomLibraryButton.Content = host ? "Library sharing & guest views" : "Browse host library";
         SavedRoomSharedControls.IsEnabled = host;
+        updatingLibraryPermission = true;
+        SavedRoomLibraryBrowsing.IsEnabled = host;
+        SavedRoomLibraryBrowsing.IsChecked = connected ? room!.Snapshot?.LibraryBrowsing == true : saved is not null && library.Setting(SavedRoomSetting(saved, "libraryBrowsing")) == "true";
+        updatingLibraryPermission = false;
         SavedRoomSharedControls.IsChecked = connected ? room!.Snapshot?.SharedControls == true : saved is not null && library.Setting(SavedRoomSetting(saved, "sharedControls")) == "true";
         SavedRoomControlHint.Text = host ? "Saved automatically for this room. Guests can play, pause and seek when enabled." : "Only the room host can change this setting.";
         AdmittedGuest[] remembered = [];

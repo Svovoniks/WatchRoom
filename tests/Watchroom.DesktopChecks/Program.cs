@@ -305,13 +305,19 @@ static class Program
         list.SelectedItem = first;
         Check(controls.IsEnabled && controls.IsChecked == false, "saved host room exposes its playback-control setting");
         controls.IsChecked = true;
+        var browsing = (System.Windows.Controls.CheckBox)window.FindName("SavedRoomLibraryBrowsing");
+        Check(browsing.IsEnabled && browsing.IsChecked == false, "library permission is integrated into host room settings and defaults off");
+        browsing.IsChecked = true;
+        Check(store.Setting("room:" + first.Server + ":" + first.Code + ":libraryBrowsing") == "true", "library permission persists per room while offline");
         typeof(MainWindow).GetMethod("SavedRoomControlsChanged", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [controls, new RoutedEventArgs()]);
         Check(store.Setting("room:" + first.Server + ":" + first.Code + ":sharedControls") == "true", "offline room setting saves immediately");
         list.SelectedItem = second;
+        Check(browsing.IsChecked == false, "library permission is isolated between saved rooms");
         Check(controls.IsChecked == false, "each room has an independent shared-controls setting");
         list.SelectedItem = first;
         Check(controls.IsChecked == true, "returning to a saved room restores its control setting");
         list.SelectedItem = guest;
+        Check(!browsing.IsEnabled, "guest cannot change host library permission");
         Check(!controls.IsEnabled, "guests cannot edit room settings");
         var rename = (System.Windows.Controls.Button)window.FindName("RenameSavedRoomButton");
         Check(!rename.IsEnabled, "guest room name is read only");
@@ -338,10 +344,50 @@ static class Program
                 "waiting guest replaces its room-code label with the host name and cannot rename it");
             Check(Wire.Read<SavedRoom[]>(store.Setting("rooms")!).Single(x => x.Id == guest.Id).Name == waitingSnapshot.Name,
                 "waiting guest's canonical room name is saved for the next app launch");
+            void RefreshLibraryUi() => typeof(MainWindow).GetMethod("RefreshSharedLibrary", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, []);
+            RefreshLibraryUi();
+            Check(((FrameworkElement)window.FindName("GuestLibraryPanel")).Visibility == Visibility.Visible &&
+                ((FrameworkElement)window.FindName("LocalLibraryContent")).Visibility == Visibility.Collapsed,
+                "guest library replaces the local catalog within the Library tab");
+            Check(!((System.Windows.Controls.Button)window.FindName("StartLibraryBrowseButton")).IsEnabled, "waiting guest cannot start browsing before direct admission");
+            ((TaskCompletionSource)typeof(RoomClient).GetField("directConnected", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(waitingClient)!).TrySetResult();
+            var busy = waitingSnapshot with { LibraryBrowsing = true, LibraryActivity = new("other", "Alice", "Example", "pilot", Wire.Now) };
+            typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, busy);
+            RefreshLibraryUi();
+            Check(!((System.Windows.Controls.Button)window.FindName("StartLibraryBrowseButton")).IsEnabled &&
+                ((System.Windows.Controls.TextBlock)window.FindName("GuestLibraryStatus")).Text.Contains("Alice"), "busy library identifies the current guest and locks the browse action");
+            typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, busy with { LibraryActivity = null });
+            RefreshLibraryUi();
+            Check(((System.Windows.Controls.Button)window.FindName("StartLibraryBrowseButton")).IsEnabled, "released browsing slot becomes available without reconnecting");
+            var pageField = typeof(MainWindow).GetField("currentPage", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            var previousPage = pageField.GetValue(window);
+            typeof(MainWindow).GetMethod("ShowPage", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, ["Library"]);
+            typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, busy with { LibraryActivity = new("guest", "Guest", "All titles", "", Wire.Now) });
+            var requestNumber = (long)typeof(MainWindow).GetField("guestBrowseRequest", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+            var catalog = new LibraryBrowsePage([
+                new("1", "The Grand Budapest Hotel", "Movie · 2014", "movie", null, "A concierge and his lobby boy become unlikely friends during a journey across a changing Europe."),
+                new("2", "Cowboy Bebop", "1 season · 26 episodes", "series", null, "A crew of bounty hunters travels through the solar system."),
+                new("3", "Severance", "2 seasons · 19 episodes", "series", null, "Office workers discover the consequences of separating their memories.")], 3, 0, "All titles");
+            var receive = typeof(MainWindow).GetMethod("ReceiveHostLibrary", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            receive.Invoke(window, [new WireMessage("catalog-page", Number: requestNumber, Data: Wire.Serialize(catalog))]);
+            var entries = (System.Windows.Controls.ItemsControl)window.FindName("GuestLibraryEntries");
+            Check(entries.Items.Count == 3, "active guest renders host catalog cards in the Library tab");
+            receive.Invoke(window, [new WireMessage("catalog-page", Number: requestNumber - 1, Data: Wire.Serialize(catalog with { Entries = [] }))]);
+            Check(entries.Items.Count == 3, "stale library responses cannot replace current results");
+            window.UpdateLayout();
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(window);
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder(); encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+            using (var imageFile = File.Create(Path.GetFullPath("artifacts/shared-library-ui.png"))) encoder.Save(imageFile);
+            typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, busy with { LibraryBrowsing = false, LibraryActivity = null });
+            RefreshLibraryUi();
+            Check(entries.Items.Count == 0 && ((FrameworkElement)window.FindName("GuestLibraryTools")).Visibility == Visibility.Collapsed, "revocation immediately clears visible catalog and browsing controls");
+            typeof(MainWindow).GetMethod("ShowPage", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [previousPage!]);
         }
         finally
         {
             roomField.SetValue(window, previousRoom);
+            typeof(MainWindow).GetMethod("RefreshSharedLibrary", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, []);
             waitingClient.DisposeAsync().AsTask().GetAwaiter().GetResult();
             list.SelectedItem = rooms.Single(x => x.Id == first.Id);
         }

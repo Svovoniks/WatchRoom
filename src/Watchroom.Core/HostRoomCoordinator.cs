@@ -12,7 +12,18 @@ internal sealed class HostRoomCoordinator(string host)
     private long revision;
     private bool resumeWhenReady;
     public AdmittedGuest[] AdmittedGuests { get; set; } = [];
-    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name);
+    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name, LibraryBrowsing, LibraryActivity);
+    public bool LibraryBrowsing { get; private set; }
+    public LibraryBrowseActivity? LibraryActivity { get; private set; }
+    public bool ExpireLibrary(long now)
+    {
+        if (LibraryActivity is null || now - LibraryActivity.UpdatedAt < 45000) return false;
+        LibraryActivity = null; return true;
+    }
+    public void DescribeLibrary(string location, string query, long now)
+    {
+        if (LibraryActivity is { } activity) LibraryActivity = activity with { Location = location, Query = query, UpdatedAt = now };
+    }
     public string? Name { get; private set; }
     internal static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 100 && !name.Any(char.IsControl);
     public SharedMedia? Media { get; private set; }
@@ -26,15 +37,19 @@ internal sealed class HostRoomCoordinator(string host)
         foreach (var id in people.Keys.Where(id => !ids.Contains(id)).ToArray()) people.Remove(id);
         foreach (var p in members)
             if (!departed.Contains(p.Id)) people[p.Id] = p with { Ready = people.GetValueOrDefault(p.Id)?.Ready ?? false };
+        if (LibraryActivity is { } activity && !Approved(activity.Peer)) LibraryActivity = null;
         TryResume(now);
     }
     public void Depart(string id, long now)
     {
-        departed.Add(id); people.Remove(id); limits.Remove(id); TryResume(now);
+        departed.Add(id); people.Remove(id); limits.Remove(id);
+        if (LibraryActivity?.Peer == id) LibraryActivity = null;
+        TryResume(now);
     }
     public bool Apply(string sender, WireMessage message, long now, out WireMessage? announcement)
     {
         announcement = null;
+        ExpireLibrary(now);
         if (!Approved(sender)) return false;
         if (sender != host)
         {
@@ -45,6 +60,19 @@ internal sealed class HostRoomCoordinator(string host)
         }
         switch (message.Type)
         {
+            case "catalog-permission" when sender == host:
+                LibraryBrowsing = message.Number == 1;
+                if (!LibraryBrowsing) LibraryActivity = null;
+                return true;
+            case "catalog-release" when sender == host || LibraryActivity is null || LibraryActivity.Peer == sender:
+                LibraryActivity = null; return true;
+            case "catalog-renew" when LibraryActivity?.Peer == sender:
+                LibraryActivity = LibraryActivity with { UpdatedAt = now }; return true;
+            case "catalog-view" when LibraryActivity?.Peer == sender && LibraryBrowsing:
+                return true;
+            case "catalog-browse" when sender != host && LibraryBrowsing:
+                if (LibraryActivity is not null && LibraryActivity.Peer != sender) return false;
+                LibraryActivity = new(sender, people[sender].Name, "All titles", "", now); return true;
             case "room-name" when sender == host:
                 if (!ValidName(message.Text)) return false;
                 Name = message.Text!.Trim(); return true;
