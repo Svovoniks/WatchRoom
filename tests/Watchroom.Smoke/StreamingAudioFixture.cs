@@ -5,7 +5,7 @@ using Watchroom.Core;
 
 static class StreamingAudioFixture
 {
-    public static async Task Run(string directory, Action<bool, string> check, int cacheMs = MediaStreaming.NetworkCacheMs)
+    public static async Task Run(string directory, Action<bool, string> check, int cacheMs = MediaStreaming.NetworkCacheMs, string[]? iceServers = null, bool relayOnly = false)
     {
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "generated-audio.wav");
@@ -35,9 +35,9 @@ static class StreamingAudioFixture
             check(delayed.Maximum >= 16 && delayed.Maximum <= MediaStreaming.Window,
                 "WAN-latency pipeline keeps sufficient requests in flight within its memory bound");
         }
-        using var host = new PeerTransport([]);
-        using var guest = new PeerTransport([]);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(35));
+        using var host = new PeerTransport(iceServers ?? [], relayOnly);
+        using var guest = new PeerTransport(iceServers ?? [], relayOnly);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(65));
         var signals = System.Threading.Channels.Channel.CreateUnbounded<(PeerTransport Peer, string Type, string Data)>();
         host.Signal += (type, data) => signals.Writer.TryWrite((guest, type, data));
         guest.Signal += (type, data) => signals.Writer.TryWrite((host, type, data));

@@ -96,6 +96,10 @@ devices, together with the approximate time of the failure.
 room-service capabilities, peer connection states, control-channel negotiation,
 guest departures, media loading, buffering, sync corrections, and transfer errors.
 It excludes invitation codes, credentials, raw signaling, and movie contents.
+Updated peers negotiate an independent connection for media so a congested movie
+transfer cannot queue playback commands behind its SCTP traffic. Diagnostics
+record `media-transport-isolated` and `media-transport-state` for this connection.
+Peers without this optional capability retain the legacy media protocol.
 The logger keeps four files of up to 5 MiB each and writes asynchronously.
 `WATCHROOM_DIAGNOSTICS` still overrides the output directory for test runs.
 
