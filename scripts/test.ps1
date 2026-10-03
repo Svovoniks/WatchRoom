@@ -7,4 +7,6 @@ try {
     if (!(Test-Path $sdk)) { $sdk = 'dotnet' }
     & $sdk run --project tests/Watchroom.Smoke -c Release --no-build
     if ($LASTEXITCODE -ne 0) { throw 'Smoke tests failed' }
+    & $sdk run --project tests/Watchroom.DesktopChecks -c Release --no-build
+    if ($LASTEXITCODE -ne 0) { throw 'Desktop layout tests failed' }
 } finally { Pop-Location }

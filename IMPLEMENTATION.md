@@ -1,5 +1,15 @@
 # Implementation status — September 30, 2026
 
+## Guest library addition — October 3, 2026
+
+- Added capability-negotiated WebRTC control and catalog channels. Library browsing, thumbnails, room queue commands, video-start requests, activity and browsing presence bypass the room server. Admission/signaling and existing playback timing/buffering remain server coordinated.
+- Host-selected category collections expose room-scoped IDs and metadata without local paths. Catalog transfers are paged and carry per-transfer generations so obsolete bulk responses cannot restore revoked access.
+- Host-authoritative room queue supports add/remove/reorder/clear, host undo, attributable entries, expected revisions, duplicate-request handling and the existing 50-entry limit. Solo queues remain local and separate.
+- Separate per-guest browse, queue and start permissions default off. Video preparation preserves the current source on failure; permissions, queue revision and catalog generation are rechecked before publishing a prepared selection. Competing starts are rejected. Playback begins through the existing all-ready synchronization flow.
+- The guest grid adapts its rows/columns to the available window area and reports exact page IDs and dimensions. Host previews fit every reported card in the available viewport, highlight hover in gold and selection in blue, and show search/filter context. Browsing updates are throttled to approximately 120 ms with presence heartbeats and expiry. The preview is reconstructed, not a pixel stream.
+- Host activity history retains 200 actions. The room UI exposes the library/access/preview window; no service deployment changes are needed.
+- Release build passed with zero warnings/errors; **68 smoke/integration checks and 10 detached WPF layout checks passed**. Native peer tests exercise catalog transfer, queue mutation, hover delivery, preserved media on preparation failure, and automatic video start after readiness. Rendered layout checks include the complete 32-card grid and both highlights. Public-network and forced-TURN performance remain unverified.
+
 ## Delivered
 
 - `artifacts/Watchroom-Setup-0.1.0-win-x64.exe`: per-user Windows installer, compiled with Inno Setup 7.1.0. Installer generation succeeded; installation/uninstallation on a clean Windows machine has not been tested.
@@ -32,7 +42,7 @@ Windows UI inspection verified folder setup rendering, library selection, movie 
 1. **Public internet validation:** no VPS is available yet. Test separate networks, forced TURN, restrictive firewalls, sustained playback, and observed synchronization drift. Same-machine success does not satisfy this gate.
 2. **Transcoding:** live/adaptive transcoding, automatic quality choice, 1080p preparation, hardware encoder selection and a bundled FFmpeg distribution are not complete. Current 720p preparation requires a configured FFmpeg executable and finishes before playback.
 3. **Media compatibility:** test real MKV/HEVC/AV1, styled ASS with font attachments, PGS, multitrack audio and variable-framerate files. Generated AVI playback is verified; it is not proof of the entire format matrix.
-4. **Recovery/catalog features:** rejoin is manual and host departure closes the room. Browsing host-approved collections and a richer guest suggestion/queue interface remain beyond the current selected-title sharing flow.
+4. **Recovery:** rejoin is manual and host departure closes the room. The October 3 addition supplies host-approved catalog browsing and peer queue management; room migration and automatic reconnection remain open.
 5. **Distribution:** installer clean-machine and upgrade tests, code signing, a signed update service, complete bundled-component license/source review, and official TMDB logo attribution before metadata-enabled public release.
 
 These gaps are not reported as completed. The artifact is a working preview for local use and controlled testing with a configured server, not a production release.

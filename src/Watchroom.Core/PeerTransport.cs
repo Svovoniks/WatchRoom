@@ -45,6 +45,10 @@ public sealed class PeerTransport : IDisposable
 {
     private readonly RtcPeerConnection peer;
     private IRtcDataChannel? channel;
+    private IRtcDataChannel? control;
+    private IRtcDataChannel? catalogChannel;
+    private readonly TaskCompletionSource controlOpened = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private volatile bool controlReady, catalogReady;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<byte[]>> pending = new();
     private readonly SemaphoreSlim window = new(8);
     private readonly Channel<RangeRequest> requests = Channel.CreateBounded<RangeRequest>(32);
@@ -55,6 +59,16 @@ public sealed class PeerTransport : IDisposable
     public event Action<string, string>? Signal;
     public event Action<string>? Status;
     public Task Ready => opened.Task;
+    public Task ControlReady => controlOpened.Task;
+    public event Action<WireMessage>? ControlMessage;
+    public void SendControl(WireMessage message)
+    {
+        var json = Wire.Serialize(message);
+        if (System.Text.Encoding.UTF8.GetByteCount(json) > 60000) throw new InvalidDataException("Peer control message too large");
+        var selectedChannel = message.Type is "library-item" or "library-page-end" ? catalogChannel : control;
+        if (selectedChannel?.IsOpen != true) throw new IOException("Guest library connection is not ready");
+        selectedChannel.Send(json);
+    }
 
     public PeerTransport(string[] iceServers, bool relayOnly = false)
     {
@@ -80,7 +94,16 @@ public sealed class PeerTransport : IDisposable
         };
         _ = ServeAsync();
     }
-    public void StartOffer() => Attach(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = "media" }));
+    public void StartOffer(bool librarySupported = true)
+    {
+        Attach(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = "media" }));
+        if (librarySupported) EnableLibraryChannel();
+    }
+    public void EnableLibraryChannel()
+    {
+        if (control is null) AttachControl(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = "room-library-v1" }));
+        if (catalogChannel is null) AttachControl(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = "room-catalog-v1" }));
+    }
     public void ReceiveSignal(string type, string data)
     {
         if (type == "sdp") peer.SetRemoteDescription(Wire.Read<RtcDescription>(data));
@@ -88,6 +111,8 @@ public sealed class PeerTransport : IDisposable
     }
     private void Attach(IRtcDataChannel data)
     {
+        if (data.Label is "room-library-v1" or "room-catalog-v1") { AttachControl(data); return; }
+        if (data.Label != "media") { data.Dispose(); return; }
         channel = data;
         data.OnOpen += _ => opened.TrySetResult();
         if (data.IsOpen) opened.TrySetResult();
@@ -114,6 +139,28 @@ public sealed class PeerTransport : IDisposable
                 }
             }
             catch (Exception ex) { Status?.Invoke("Invalid peer message: " + ex.GetType().Name); }
+        };
+    }
+    private void AttachControl(IRtcDataChannel data)
+    {
+        var catalog = data.Label == "room-catalog-v1";
+        if (catalog) catalogChannel = data; else control = data;
+        void Opened()
+        {
+            if (catalog) catalogReady = true; else controlReady = true;
+            if (controlReady && catalogReady) controlOpened.TrySetResult();
+        }
+        data.OnOpen += _ => Opened();
+        if (data.IsOpen) Opened();
+        data.OnClose += _ => controlOpened.TrySetException(new IOException("Guest library channel closed"));
+        data.OnTextReceivedSafe += (_, text) =>
+        {
+            try
+            {
+                if (System.Text.Encoding.UTF8.GetByteCount(text.Text) <= 60000)
+                    ControlMessage?.Invoke(Wire.Read<WireMessage>(text.Text));
+            }
+            catch (Exception ex) { Status?.Invoke("Invalid library message: " + ex.GetType().Name); }
         };
     }
     private void SendReply(RangeReply reply) => channel?.Send(Wire.Serialize(new WireMessage("bytes", Data: Wire.Serialize(reply))));
@@ -156,7 +203,7 @@ public sealed class PeerTransport : IDisposable
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         lifetime.Cancel(); requests.Writer.TryComplete();
         foreach (var p in pending.Values) p.TrySetException(new IOException("Peer disposed"));
-        opened.TrySetCanceled(); channel?.Dispose(); peer.Dispose();
+        opened.TrySetCanceled(); controlOpened.TrySetCanceled(); control?.Dispose(); catalogChannel?.Dispose(); channel?.Dispose(); peer.Dispose();
     }
 }
 

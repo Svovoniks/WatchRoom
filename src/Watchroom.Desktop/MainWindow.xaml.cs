@@ -31,6 +31,11 @@ public partial class MainWindow : Window
     private LibVLC? vlc;
     private LibVLCSharp.Shared.MediaPlayer? player;
     private RoomClient? room;
+    private RoomLibrary? roomLibrary;
+    private RoomLibraryWindow? libraryWindow;
+    private readonly Dictionary<string, MediaItem> sharedItems = new();
+    private readonly Dictionary<string, string> sharedIds = new();
+    private string[] sharedKinds = [];
     private MediaBridge? bridge;
     private PlaybackState? target;
     private string? loadedMedia;
@@ -92,6 +97,7 @@ public partial class MainWindow : Window
     {
         items = library.All(); FilterLibrary();
         SetStatus($"{items.Count(x => x.Available)} videos available · {folders.Count} folders");
+        if (room?.Identity?.Host == true && roomLibrary is not null) PublishRoomLibrary(sharedKinds);
     }
     private void FilterLibrary()
     {
@@ -229,6 +235,19 @@ public partial class MainWindow : Window
     {
         var client = new RoomClient(); room = client;
         client.Message += msg => Dispatcher.BeginInvoke(async () => { if (room == client) await Guard(() => OnRoomMessage(msg)); });
+        client.LibraryPeerReady += id => Dispatcher.BeginInvoke(() =>
+        {
+            if (room != client) return;
+            EnsureRoomLibrary();
+            try { roomLibrary?.PeerReady(id); } catch (IOException ex) { SetStatus(ex.Message); }
+        });
+        client.LibraryMessage += (id, message) => Dispatcher.BeginInvoke(() =>
+        {
+            if (room != client) return;
+            EnsureRoomLibrary();
+            try { roomLibrary?.Receive(id, message); }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException or ArgumentException) { SetStatus("Invalid guest library request: " + ex.Message); }
+        });
         client.Status += text => Dispatcher.BeginInvoke(() =>
         {
             if (room != client) return; ConnectionStatus.Text = text;
@@ -242,6 +261,7 @@ public partial class MainWindow : Window
         switch (message.Type)
         {
             case "welcome":
+                EnsureRoomLibrary();
                 if (room.Identity!.Host && room.HostedMedia is not null)
                 {
                     room.Send(new("media", Data: Wire.Serialize(room.HostedMedia.Media)));
@@ -253,7 +273,8 @@ public partial class MainWindow : Window
             case "admitted": RoomSubtitle.Text = "Admitted · Connecting to host…"; break;
             case "snapshot":
                 var snapshot = Wire.Read<RoomSnapshot>(message.Data!);
-                QueueStatus.Text = (snapshot.Queue?.Length > 0) ? "Up next: " + string.Join(" → ", snapshot.Queue) : "Queue is empty · Suggest a title in chat";
+                roomLibrary?.SetPeople(snapshot.People);
+                if (roomLibrary is null) QueueStatus.Text = (snapshot.Queue?.Length > 0) ? "Up next: " + string.Join(" → ", snapshot.Queue) : "Queue is empty";
                 PeopleList.ItemsSource = snapshot.People.Select(p => new { p.Id, p.Name, Status = !p.Approved ? "Waiting for approval" : (p.IsHost ? "Host · " : "") + (p.Ready ? "Ready" : "Buffering"), Actions = room.Identity?.Host == true && !p.IsHost ? Visibility.Visible : Visibility.Collapsed }).ToList();
                 SharedControls.IsEnabled = room.Identity?.Host == true; SharedControls.IsChecked = snapshot.SharedControls;
                 if (snapshot.Playback is not null) AcceptState(snapshot.Playback);
@@ -307,6 +328,7 @@ public partial class MainWindow : Window
     }
     private void PlaybackTick()
     {
+        roomLibrary?.ExpireViews(Wire.Now);
         if (player is null) return;
         if (!seeking)
         {
@@ -373,7 +395,12 @@ public partial class MainWindow : Window
         Clipboard.SetText(ServerBox.Text.TrimEnd('/') + "#" + room.Identity.Room); SetStatus("Invitation copied. Guests need the Windows app and host approval.");
     }
     private void Admit(object sender, RoutedEventArgs e) => room?.Send(new("admit", Target: (string)((Button)sender).Tag));
-    private void RemovePeer(object sender, RoutedEventArgs e) => room?.Send(new("remove", Target: (string)((Button)sender).Tag));
+    private void RemovePeer(object sender, RoutedEventArgs e)
+    {
+        var id = (string)((Button)sender).Tag;
+        if (room?.Snapshot?.People.Any(p => p.Id == id && p.Approved) == true) roomLibrary?.SetAccess(id, new());
+        room?.Send(new("remove", Target: id));
+    }
     private void ControlsChanged(object sender, RoutedEventArgs e) => room?.Send(new("controls", Number: SharedControls.IsChecked == true ? 1 : 0));
     private void SendChat(object sender, RoutedEventArgs e)
     {
@@ -384,18 +411,99 @@ public partial class MainWindow : Window
     private void QueueClick(object sender, RoutedEventArgs e)
     {
         if (selected is null) return;
-        if (room?.Identity?.Host == false) { room.Send(new("chat", Text: "Suggestion: " + selected.Title)); SetStatus("Suggested title to the room"); return; }
+        if (room is not null)
+        {
+            if (room.Identity?.Host == false) { OpenRoomLibrary(sender, e); SetStatus("Choose a title from the host library."); return; }
+            var id = sharedItems.FirstOrDefault(pair => pair.Value.Id == selected.Id).Key;
+            if (id is null) { OpenRoomLibrary(sender, e); SetStatus("Share this collection before adding its titles to the room queue."); return; }
+            roomLibrary?.Request(HostPeerId(), "add", id); return;
+        }
         if (queue.Count >= 50) { SetStatus("The queue can hold up to 50 titles."); return; }
         queue.Enqueue(selected); PublishQueue(); SetStatus("Added to your queue");
     }
     private void PublishQueue()
     {
+        if (roomLibrary is not null) return;
         var titles = queue.Select(x => x.Title).ToArray(); QueueStatus.Text = "Up next: " + string.Join(" → ", titles);
         if (room?.Identity?.Host == true) room.Send(new("queue", Data: Wire.Serialize(titles)));
     }
+    private string HostPeerId() => room?.Snapshot?.People.FirstOrDefault(p => p.IsHost)?.Id ?? room?.Identity?.Peer ?? "";
+    private void EnsureRoomLibrary()
+    {
+        if (roomLibrary is not null || room?.Identity is not { } identity) return;
+        var client = room;
+        var session = new RoomLibrary(identity.Host, identity.Peer); roomLibrary = session;
+        session.Send += (id, message) =>
+        {
+            if (room != client) return;
+            try { client.SendLibrary(id, message); } catch (IOException ex) { SetStatus(ex.Message); }
+        };
+        session.Changed += () =>
+        {
+            QueueStatus.Text = session.Queue.Entries.Length > 0 ? "Up next: " + string.Join(" → ", session.Queue.Entries.Select(e => e.Title)) : "Room queue empty · Open Host library / Guest views";
+        };
+        session.Activity += entry =>
+        {
+            chat.Add(entry.Actor + " " + entry.Text); if (chat.Count > 150) chat.RemoveAt(0);
+        };
+        session.Result += result => SetStatus(result.Text);
+        session.StartRequested += async request => await StartLibraryVideo(client, session, request);
+        session.SetPeople(client.Snapshot?.People ?? []);
+    }
+    private void OpenRoomLibrary(object sender, RoutedEventArgs e)
+    {
+        EnsureRoomLibrary();
+        if (roomLibrary is null || room?.Identity is null) { SetStatus("Create or join a room first."); return; }
+        libraryWindow ??= new RoomLibraryWindow(roomLibrary, room.Identity.Host, HostPeerId,
+            () => room?.Snapshot?.People ?? [], PublishRoomLibrary) { Owner = this };
+        libraryWindow.Show(); libraryWindow.Activate();
+    }
+    private void PublishRoomLibrary(string[] kinds)
+    {
+        if (roomLibrary is null || room?.Identity?.Host != true) return;
+        sharedKinds = kinds; sharedItems.Clear();
+        var catalog = new List<SharedLibraryItem>();
+        foreach (var item in items.Where(i => kinds.Contains(i.Kind)).Take(RoomLibrary.MaxCatalog))
+        {
+            if (!sharedIds.TryGetValue(item.Id, out var id)) sharedIds[item.Id] = id = Guid.NewGuid().ToString("N");
+            sharedItems[id] = item;
+            catalog.Add(new(id, item.Title, item.Kind, item.Year, item.Series, item.Season, item.Episode,
+                item.Overview is { Length: > 2000 } summary ? summary[..2000] : item.Overview, item.Available, MakeThumbnail(item.Poster)));
+        }
+        roomLibrary.Publish(catalog);
+    }
+    private static string? MakeThumbnail(string? path)
+    {
+        if (path is null || !File.Exists(path)) return null;
+        try
+        {
+            using var file = File.OpenRead(path);
+            var bitmap = new System.Windows.Media.Imaging.BitmapImage(); bitmap.BeginInit();
+            bitmap.DecodePixelWidth = 100; bitmap.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad; bitmap.StreamSource = file; bitmap.EndInit();
+            var encoder = new System.Windows.Media.Imaging.JpegBitmapEncoder { QualityLevel = 60 };
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap)); using var output = new MemoryStream(); encoder.Save(output);
+            return output.Length <= 12000 ? Convert.ToBase64String(output.ToArray()) : null;
+        }
+        catch (Exception) { return null; }
+    }
+    private async Task StartLibraryVideo(RoomClient client, RoomLibrary session, LibraryStart request)
+    {
+        try
+        {
+            if (!sharedItems.TryGetValue(request.Item.Id, out var item)) throw new FileNotFoundException("Title is no longer shared.");
+            var prepared = await Task.Run(() => RoomClient.PrepareHostedFile(item.Path, request.Item.DisplayTitle));
+            if (room != client || roomLibrary != session || !session.CanCommit(request))
+            { session.CompleteStart(request, false); return; }
+            // No await between final authorization and publication: revocation cannot race the commit.
+            client.PublishHostedFile(prepared, true);
+            selected = item; session.CompleteStart(request, true);
+        }
+        catch (Exception ex) { session.CompleteStart(request, false, ex.Message); }
+    }
     private async void NextQueued(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
-        if (room is not null && room.Identity?.Host != true) { SetStatus("The host controls the queue."); return; }
+        if (room is not null && roomLibrary is not null) { roomLibrary.Request(HostPeerId(), "next"); return; }
+        if (room is not null && room.Identity?.Host != true) { SetStatus("Open the host library to request the next video."); return; }
         if (!queue.TryDequeue(out var next)) { SetStatus("Queue is empty. Add titles from the library."); return; }
         selected = next;
         if (room is null) PlayLocal(sender, e);
@@ -405,6 +513,7 @@ public partial class MainWindow : Window
     private async void LeaveRoom(object sender, RoutedEventArgs e) => await Guard(async () => { await Disconnect(); player?.Stop(); RoomHeading.Text = "Your watch room"; RoomSubtitle.Text = "Room closed"; ShowPage("Library"); });
     private async Task Disconnect()
     {
+        libraryWindow?.Shutdown(); libraryWindow = null; roomLibrary = null; sharedItems.Clear(); sharedIds.Clear(); sharedKinds = [];
         ++loadGeneration; var old = room; room = null; target = null; loadedMedia = null; ready = false;
         player?.Stop(); if (old is not null) await old.DisposeAsync();
         await loading.WaitAsync();

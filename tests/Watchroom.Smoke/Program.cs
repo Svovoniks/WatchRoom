@@ -20,6 +20,7 @@ var root = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/smoke");
 Directory.CreateDirectory(root);
 int passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
+RoomLibraryChecks.Run(Check);
 Check(MediaBridge.TryRange("bytes=-30", 100, out var s, out var e) && s == 70 && e == 99, "suffix byte ranges");
 Check(MediaBridge.TryRange("bytes=40-999", 100, out s, out e) && s == 40 && e == 99, "range end clamped");
 Check(!MediaBridge.TryRange("bytes=100-", 100, out _, out _) && !MediaBridge.TryRange("bytes=0-1,3-4", 100, out _, out _), "invalid ranges rejected");
@@ -52,6 +53,11 @@ host.ResolveMedia = id => id == file.Media.Id ? file : null;
 host.StartOffer();
 await Task.WhenAll(host.Ready, guest.Ready).WaitAsync(TimeSpan.FromSeconds(20));
 Check(true, "native WebRTC peers connect");
+await Task.WhenAll(host.ControlReady, guest.ControlReady).WaitAsync(TimeSpan.FromSeconds(20));
+var controlReceived = new TaskCompletionSource<WireMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+host.ControlMessage += message => controlReceived.TrySetResult(message);
+guest.SendControl(new("library-view", Data: Wire.Serialize(new GuestLibraryView(1, true, "", "Movie", 2, 2, 0, ["a", "b", "c", "d"], "a", "d"))));
+Check((await controlReceived.Task.WaitAsync(TimeSpan.FromSeconds(5))).Type == "library-view", "separate native WebRTC library control channel");
 var remote = new RemoteMediaSource(guest, file.Media);
 await using var remoteBridge = new MediaBridge(); var remoteUrl = await remoteBridge.StartAsync(remote);
 var received = await http.GetByteArrayAsync(remoteUrl);
@@ -82,7 +88,8 @@ cts.Cancel(); try { await pump; } catch (OperationCanceledException) { }
 
 var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0); listener.Start(); var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
 var serverUrl = $"http://localhost:{port}";
-var start = new ProcessStartInfo(Path.GetFullPath(".tools/dotnet/dotnet.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+var sdkPath = File.Exists(".tools/dotnet/dotnet.exe") ? Path.GetFullPath(".tools/dotnet/dotnet.exe") : Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
+var start = new ProcessStartInfo(sdkPath) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
 start.ArgumentList.Add(Path.GetFullPath("src/Watchroom.Server/bin/Release/net10.0/Watchroom.Server.dll")); start.ArgumentList.Add("--urls"); start.ArgumentList.Add(serverUrl);
 using var server = Process.Start(start)!;
 var stdout = server.StandardOutput.ReadToEndAsync(); var stderr = server.StandardError.ReadToEndAsync();
@@ -90,6 +97,12 @@ try
 {
     for (int i = 0; i < 80; i++) { try { if ((await http.GetAsync(serverUrl + "/health")).IsSuccessStatusCode) break; } catch (HttpRequestException) { } await Task.Delay(100); }
     await using var roomHost = new RoomClient(); await using var roomGuest = new RoomClient();
+    var libraryHostReady = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var libraryGuestReady = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var libraryReceived = new TaskCompletionSource<WireMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+    roomHost.LibraryPeerReady += id => libraryHostReady.TrySetResult(id);
+    roomGuest.LibraryPeerReady += id => libraryGuestReady.TrySetResult(id);
+    roomHost.LibraryMessage += (_, message) => libraryReceived.TrySetResult(message);
     var hostMessages = new ConcurrentQueue<WireMessage>(); var guestMessages = new ConcurrentQueue<WireMessage>();
     roomHost.Message += hostMessages.Enqueue; roomGuest.Message += guestMessages.Enqueue;
     roomHost.HostedMedia = file;
@@ -102,6 +115,25 @@ try
     await Task.Delay(150); Check(!hostMessages.Any(x => x.Type == "playback"), "pending guests cannot control playback");
     roomHost.Send(new("admit", Target: roomGuest.Identity!.Peer));
     await Wait(() => roomGuest.Snapshot?.Media is not null, "guest admitted");
+    await Task.WhenAll(libraryHostReady.Task, libraryGuestReady.Task).WaitAsync(TimeSpan.FromSeconds(20));
+    roomGuest.SendLibrary(roomHost.Identity.Peer, new("library-command", Data: "direct"));
+    var direct = await libraryReceived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    Check(direct.Sender == roomGuest.Identity.Peer && !hostMessages.Any(m => m.Type == "library-command"), "room negotiates library capability and bypasses server for guest commands");
+    var peerHostLibrary = new RoomLibrary(true, roomHost.Identity.Peer);
+    var peerGuestLibrary = new RoomLibrary(false, roomGuest.Identity.Peer);
+    var libraryTraffic = new ConcurrentQueue<Action>();
+    roomHost.LibraryMessage += (id, message) => libraryTraffic.Enqueue(() => peerHostLibrary.Receive(id, message));
+    roomGuest.LibraryMessage += (id, message) => libraryTraffic.Enqueue(() => peerGuestLibrary.Receive(id, message));
+    peerHostLibrary.Send += roomHost.SendLibrary; peerGuestLibrary.Send += roomGuest.SendLibrary;
+    peerHostLibrary.SetPeople(roomHost.Snapshot!.People);
+    peerHostLibrary.Publish(Enumerable.Range(0, 43).Select(i => new SharedLibraryItem("shared-" + i, "Room title " + i, "Movie", 2026, null, null, null, null, true)));
+    peerHostLibrary.SetAccess(roomGuest.Identity.Peer, new(true, true, true));
+    bool PeerCondition(Func<bool> condition) { while (libraryTraffic.TryDequeue(out var action)) action(); return condition(); }
+    await Wait(() => PeerCondition(() => peerGuestLibrary.Catalog.Count == 43), "full paged catalog crosses native dedicated bulk channel");
+    peerGuestLibrary.Request(roomHost.Identity.Peer, "add", "shared-10");
+    await Wait(() => PeerCondition(() => peerGuestLibrary.Queue.Entries.Length == 1), "guest queue edit completes through real room peer channel");
+    peerGuestLibrary.SendView(roomHost.Identity.Peer, new(1, true, "", "Movie", 4, 2, 0, peerGuestLibrary.Catalog.Keys.Take(8).ToArray(), "shared-1", "shared-4"));
+    await Wait(() => PeerCondition(() => peerHostLibrary.Views.GetValueOrDefault(roomGuest.Identity.Peer)?.HoveredId == "shared-4"), "guest hover reaches host over native peer channel");
     var roomSource = await roomGuest.GetSourceAsync(file.Media, CancellationToken.None);
     Check((await roomSource.ReadAsync(900, 100, CancellationToken.None)).SequenceEqual(bytes[900..1000]), "signaled room serves host media");
     roomGuest.Send(new("playback", Data: Wire.Serialize(new PlaybackState(0, file.Media.Id, true, 1000, 0))));
@@ -124,8 +156,16 @@ try
     var subtitleText = "1\n00:00:00,000 --> 00:00:04,000\nWatchroom subtitle test\n";
     await File.WriteAllTextAsync(Path.ChangeExtension(videoPath, ".srt"), subtitleText);
     roomHost.SetHostedFile(videoPath, "Video with subtitle");
-    roomHost.Send(new("media", Data: Wire.Serialize(roomHost.HostedMedia!.Media)));
+    var priorMedia = roomHost.HostedMedia;
+    bool missingDenied = false;
+    try { roomHost.SetHostedFile(Path.Combine(root, "missing.avi"), "Missing"); } catch (FileNotFoundException) { missingDenied = true; }
+    Check(missingDenied && ReferenceEquals(roomHost.HostedMedia, priorMedia), "failed file preparation preserves host current media");
+    var queuedMedia = RoomClient.PrepareHostedFile(videoPath, "Video with subtitle");
+    roomHost.PublishHostedFile(queuedMedia, true);
     await Wait(() => roomGuest.Snapshot?.Media?.Subtitles?.Length == 1, "external subtitle advertised without local path");
+    Check(roomHost.Snapshot!.People.All(p => !p.Ready), "new video start waits for participant readiness");
+    roomHost.Send(new("ready")); roomGuest.Send(new("ready"));
+    await Wait(() => guestMessages.Any(m => m.Type == "playback" && Wire.Read<PlaybackState>(m.Data!).MediaId == queuedMedia.Media.Media.Id && Wire.Read<PlaybackState>(m.Data!).Playing), "published video starts automatically when all participants are ready");
     var subtitleSource = await roomGuest.GetSourceAsync(roomGuest.Snapshot!.Media!.Subtitles![0], CancellationToken.None);
     Check(System.Text.Encoding.UTF8.GetString(await subtitleSource.ReadAsync(0, (int)subtitleSource.Media.Length, CancellationToken.None)) == subtitleText, "subtitle transferred over authorized peer channel");
     roomHost.Send(new("remove", Target: roomGuest.Identity.Peer));
