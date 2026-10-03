@@ -2,13 +2,13 @@
 
 ## Guest library addition — October 3, 2026
 
-- Added capability-negotiated WebRTC control and catalog channels. Library browsing, thumbnails, room queue commands, video-start requests, activity and browsing presence bypass the room server. Admission/signaling and existing playback timing/buffering remain server coordinated.
+- Added capability-negotiated WebRTC control and catalog channels. Library browsing, thumbnails, room queue commands, video-start requests, activity and browsing presence bypass the room server. Admission/signaling remain discovery coordinated. Integration with the current release branch preserves host-owned peer playback timing/buffering.
 - Host-selected category collections expose room-scoped IDs and metadata without local paths. Catalog transfers are paged and carry per-transfer generations so obsolete bulk responses cannot restore revoked access.
 - Host-authoritative room queue supports add/remove/reorder/clear, host undo, attributable entries, expected revisions, duplicate-request handling and the existing 50-entry limit. Solo queues remain local and separate.
 - Separate per-guest browse, queue and start permissions default off. Video preparation preserves the current source on failure; permissions, queue revision and catalog generation are rechecked before publishing a prepared selection. Competing starts are rejected. Playback begins through the existing all-ready synchronization flow.
 - The guest grid adapts its rows/columns to the available window area and reports exact page IDs and dimensions. Host previews fit every reported card in the available viewport, highlight hover in gold and selection in blue, and show search/filter context. Browsing updates are throttled to approximately 120 ms with presence heartbeats and expiry. The preview is reconstructed, not a pixel stream.
 - Host activity history retains 200 actions. The room UI exposes the library/access/preview window; no service deployment changes are needed.
-- Release build passed with zero warnings/errors; **68 smoke/integration checks and 10 detached WPF layout checks passed**. Native peer tests exercise catalog transfer, queue mutation, hover delivery, preserved media on preparation failure, and automatic video start after readiness. Rendered layout checks include the complete 32-card grid and both highlights. Public-network and forced-TURN performance remain unverified.
+- Release build passed with zero warnings/errors; **406 full smoke/integration checks, 13 updater checks, 13 metadata-cache checks, 97 desktop responsiveness checks and 10 guest-grid layout checks passed for version 0.3.0**. Native peer tests exercise catalog transfer, queue mutation, hover delivery, preserved media on preparation failure, and automatic video start after readiness. Rendered layout checks include the complete 32-card grid and both highlights. Public-network and forced-TURN performance remain unverified.
 
 ## Delivered
 
@@ -46,3 +46,6 @@ Windows UI inspection verified folder setup rendering, library selection, movie 
 5. **Distribution:** installer clean-machine and upgrade tests, code signing, a signed update service, complete bundled-component license/source review, and official TMDB logo attribution before metadata-enabled public release.
 
 These gaps are not reported as completed. The artifact is a working preview for local use and controlled testing with a configured server, not a production release.
+# macOS preview
+
+An Avalonia client and architecture-specific `.app` ZIP packages have been added on the `sites-migration` branch. Both Mac architectures compile. The shared room/media checks and Windows-hosted interface playback were exercised; no actual Mac launch or cross-device validation was possible. Native VLC/libdatachannel setup and remaining Mac work are documented in [MAC-CLIENT.md](MAC-CLIENT.md).
