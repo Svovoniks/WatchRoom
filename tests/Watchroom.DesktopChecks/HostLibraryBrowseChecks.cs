@@ -14,6 +14,7 @@ static class HostLibraryBrowseChecks
     {
         // Detached fixture content; no desktop app is opened or personal library read.
         var window = new MainWindow(); var client = new RoomClient();
+        string? artworkData = null;
         void Call(string name, params object?[] args) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, args);
         T Field<T>(string name) => (T)typeof(MainWindow).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
         T Control<T>(string name) => (T)window.FindName(name);
@@ -22,6 +23,18 @@ static class HostLibraryBrowseChecks
         {
             while (!task.IsCompleted)
             {
+                if (artworkData is not null)
+                {
+                    var pending = Field<Dictionary<long, (TaskCompletionSource<string?> Completion, string Key, SortedDictionary<int, string> Chunks)>>("hostArtworkPending");
+                    foreach (var entry in pending.ToArray())
+                    {
+                        var count = (artworkData.Length + 7999) / 8000;
+                        for (var index = 0; index < count; index++)
+                            Call("ReceiveHostArtwork", new WireMessage("catalog-artwork-chunk", Number: entry.Key,
+                                Data: Wire.Serialize(new LibraryArtworkChunk(entry.Value.Key, index, count,
+                                    artworkData.Substring(index * 8000, Math.Min(8000, artworkData.Length - index * 8000))))));
+                    }
+                }
                 var frame = new DispatcherFrame();
                 Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => frame.Continue = false));
                 Dispatcher.PushFrame(frame);
@@ -36,12 +49,13 @@ static class HostLibraryBrowseChecks
         typeof(MainWindow).GetField("room", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, client);
         try
         {
-            var pixels = Enumerable.Repeat((byte)120, 64 * 96 * 3).ToArray();
-            var bitmap = BitmapSource.Create(64, 96, 96, 96, PixelFormats.Rgb24, null, pixels, 64 * 3);
+            var pixels = Enumerable.Repeat((byte)120, 720 * 1080 * 3).ToArray();
+            var bitmap = BitmapSource.Create(720, 1080, 96, 96, PixelFormats.Rgb24, null, pixels, 720 * 3);
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
             var path = Path.Combine(directory, "poster.png"); using (var file = File.Create(path)) encoder.Save(file);
             var movies = Enumerable.Range(0, 25).Select(i => new MediaItem("movie-" + i, "C:/private/movie.mkv", $"Movie {i:00}", "Movie", Poster: path)).ToArray();
             var thumbnail = (string)typeof(MainWindow).GetMethod("CachedLibraryThumbnail", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [path])!;
+            artworkData = (string)typeof(MainWindow).GetMethod("HighResolutionLibraryArtwork", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [path])!;
             var first = SharedLibrary.Browse(movies, new(), _ => thumbnail);
             Check(first.Entries.All(entry => entry.Thumbnail == thumbnail) && !Wire.Serialize(first).Contains("private") && !Wire.Serialize(first).Contains(path), "poster bytes cross the catalog without host paths");
             var show = new MediaItem("episode", "C:/private/episode.mkv", "Show", "Show", Series: "Show", Season: 1, Episode: 1,
@@ -58,6 +72,12 @@ static class HostLibraryBrowseChecks
                 "local-only toolbar actions are removed while browsing the host");
             Pump(cards[0].LoadPosterAsync());
             Check(cards[0].Poster is not null && cards[0].IsRemote && cards[0].Card.Poster is null, "remote poster decodes from bytes without local filesystem access");
+            Check(cards[0].Poster!.PixelWidth == 600, "separate artwork transfers upgrade posters to 600 pixels");
+            Call("OpenHostCard", cards[0].Card);
+            Check(Control<FrameworkElement>("Details").Visibility == Visibility.Visible && Control<Button>("DetailPlay").IsEnabled && Control<Button>("DetailPlay").Content.ToString() == "Play in room",
+                "guest video cards open playable room details without releasing the browsing lease");
+            Check(Control<TextBlock>("DetailContext").Text.Contains("Host"), "guest details identify the host by participant name");
+            Call("NavigateHostBreadcrumb", new LibraryBreadcrumb("All", "category"));
             var broken = LibraryCardView.FromSharedEntry(first.Entries[0] with { Thumbnail = "broken image" });
             Pump(broken.LoadPosterAsync()); Check(broken.Poster is null, "invalid remote artwork safely uses the regular placeholder");
             Call("RequestHostLibrary", true); Receive(SharedLibrary.Browse(movies, new(Page: 1), _ => thumbnail));
@@ -84,6 +104,22 @@ static class HostLibraryBrowseChecks
             typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryBrowsing = false, LibraryActivity = null });
             Call("RefreshSharedLibrary"); Receive(SharedLibrary.Browse(movies, new(Page: 2), _ => thumbnail));
             Check(cards.Count == 0 && !Field<bool>("guestBrowsePending"), "revoked access clears cached titles and ignores in-flight chunks");
+            // Reuse the detached fixture as host to verify following and independent browsing.
+            typeof(RoomClient).GetProperty("Identity")!.SetValue(client, new Welcome("fixture", "host", true, [], false));
+            typeof(MainWindow).GetField("items", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, movies.ToList());
+            var guestView = new LibraryBrowseView(new(), 8, 0, movies[2].Id);
+            typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryActivity = snapshot.LibraryActivity! with { View = guestView } });
+            Call("RefreshSharedLibrary");
+            var mirror = Field<LibraryCardCollection>("mirroredCards");
+            Check(ReferenceEquals(grid.ItemsSource, mirror) && mirror.Count == 8 && mirror[2].IsGuestHovered, "host follows the exact loaded guest entries and highlights guest hover");
+            Call("DetachGuestMirror");
+            Check(Control<Button>("BrowseWithGuestButton").Visibility == Visibility.Visible && Control<Button>("BrowseWithGuestButton").Content.ToString() == "Browse with Guest",
+                "independent host interaction exposes the named follow button");
+            Call("BrowseWithGuest", window, new RoutedEventArgs());
+            Check(Control<Button>("BrowseWithGuestButton").Visibility == Visibility.Collapsed && ReferenceEquals(grid.ItemsSource, mirror), "follow button returns host to the current guest location");
+            typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryActivity = snapshot.LibraryActivity! with { View = guestView with { SelectedId = movies[0].Id } } });
+            Call("RefreshSharedLibrary");
+            Check(Control<FrameworkElement>("Details").Visibility == Visibility.Visible && Field<MediaItem>("selected").Id == movies[0].Id, "following host opens the same video details as the guest");
         }
         finally
         {

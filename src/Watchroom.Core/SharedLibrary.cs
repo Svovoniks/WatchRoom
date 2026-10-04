@@ -4,10 +4,22 @@ public record LibraryBrowseRequest(string Query = "", int Category = 0, string? 
 public record SharedLibraryEntry(string Id, string Title, string Caption, string Level, int? Season, string Overview,
     string? Thumbnail = null, string Kind = "Movie", int? Episode = null, int? RuntimeMinutes = null);
 public record LibraryBrowsePage(SharedLibraryEntry[] Entries, int Total, int Page, string Location);
-public record LibraryBrowseActivity(string Peer, string Name, string Location, string Query, long UpdatedAt);
+public record LibraryBrowseView(LibraryBrowseRequest Browse, int LoadedCount, double ScrollFraction = 0, string? HoveredId = null, string? SelectedId = null);
+public record LibraryArtworkRequest(string Id, string Level, int? Season = null);
+public record LibraryArtworkChunk(string Key, int Index, int Count, string Data);
+public record LibraryBrowseActivity(string Peer, string Name, string Location, string Query, long UpdatedAt, LibraryBrowseView? View = null);
 
 public static class SharedLibrary
 {
+    public static string? ArtworkPath(IEnumerable<MediaItem> source, LibraryArtworkRequest request)
+    {
+        var items = source.Where(x => x.Available && !x.IsVirtual && !x.IsExtra).ToArray();
+        var item = items.FirstOrDefault(x => x.Id == request.Id);
+        if (item is null) return null;
+        return LibraryCatalog.Browse(items, request.Level is "series" or "movie" ? null : LibraryIdentity.ShowKey(item),
+            item.Kind, request.Level == "episode" ? item.Season ?? -1 : null)
+            .FirstOrDefault(card => card.Media.Id == request.Id && card.Level == request.Level && (request.Level != "season" || card.Season == request.Season))?.Poster;
+    }
     public const int PageSize = 8;
     private static string Limit(string? value, int length) => value is null ? "" : value[..Math.Min(value.Length, length)];
     public static LibraryBrowsePage Browse(IEnumerable<MediaItem> source, LibraryBrowseRequest request, Func<string?, string?>? thumbnail = null)

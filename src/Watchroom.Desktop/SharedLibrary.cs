@@ -35,7 +35,7 @@ public partial class MainWindow
         {
             if (guestBrowsePending && DateTime.UtcNow - guestBrowseSent > TimeSpan.FromSeconds(15))
             { guestBrowsePending = false; guestLibraryNotice = "The host did not respond. Select a category or search to try again."; }
-            if (currentPage == "Library" && OwnsLibrary) TryLibraryCommand(new("catalog-renew"));
+            if (currentPage is "Library" or "Details" && OwnsLibrary) TryLibraryCommand(new("catalog-renew"));
             RefreshSharedLibrary();
         };
         guestBrowseTimer.Start();
@@ -49,6 +49,7 @@ public partial class MainWindow
     {
         if (GuestLibraryStatus is null) return;
         var guest = GuestLibrary;
+        if (guest && !OwnsLibrary && !guestBrowsePending) ClearHostArtworkRequests();
         LibraryStatusFilter.Visibility = RescanButton.Visibility = guest ? Visibility.Collapsed : Visibility.Visible;
         GuestLibraryStatus.Visibility = guest ? Visibility.Visible : Visibility.Collapsed;
         HostLibraryActivity.Visibility = room?.Identity?.Host == true ? Visibility.Visible : Visibility.Collapsed;
@@ -57,7 +58,7 @@ public partial class MainWindow
             ? "No guest is browsing. Admitted guests can start from their Library tab."
             : "Guest browsing is off. Enable it in room settings."
             : $"{activity.Name} is browsing · {activity.Location}" + (activity.Query.Length == 0 ? "" : $" · Search: {activity.Query}");
-        EndLibrarySessionButton.IsEnabled = activity is not null;
+        RefreshGuestMirror(activity);
         if (!guest)
         {
             if (PosterGrid.ItemsSource == guestLibraryCards)
@@ -91,7 +92,7 @@ public partial class MainWindow
             : guestLibraryNotice is not null ? guestLibraryNotice
             : activity is not null && !OwnsLibrary ? $"{activity.Name} is browsing now. Their library will load when the slot is available."
             : guestBrowsePending && guestLibraryCards.Count == 0 ? "Loading the host’s library…"
-            : "Host’s library";
+            : HostLibraryName;
         if (allowed && (activity is null || OwnsLibrary) && currentPage == "Library" &&
             !guestBrowsePending && guestCurrentBrowse is null && guestLibraryNotice is null)
             RequestHostLibrary();
@@ -141,9 +142,9 @@ public partial class MainWindow
     }
     private void ReceiveHostLibrary(WireMessage message)
     {
-        if (message.Number != guestBrowseRequest || currentPage != "Library" || !GuestLibrary) return;
+        if (message.Number != guestBrowseRequest || currentPage is not ("Library" or "Details") || !GuestLibrary) return;
         guestBrowsePending = false;
-        if (message.Type == "catalog-error") { guestLibraryNotice = message.Text; RefreshSharedLibrary(); return; }
+        if (message.Type == "catalog-error") { guestLibraryNotice = message.Text; SetStatus(message.Text ?? "Library request failed."); RefreshSharedLibrary(); return; }
         if (!OwnsLibrary) { RefreshSharedLibrary(); return; }
         var page = Wire.Read<LibraryBrowsePage>(message.Data!);
         if (page.Page != guestBrowse.Page && page.Total > 0)
@@ -163,7 +164,9 @@ public partial class MainWindow
         cache.Total = page.Total; cache.NextPage = page.Page + 1; cache.Location = page.Location;
         var cards = page.Entries.Select(LibraryCardView.FromSharedEntry)
             .Where(card => !cache.Cards.Any(existing => existing.Card.Media.Id == card.Card.Media.Id && existing.Card.Level == card.Card.Level)).ToArray();
+        foreach (var card in cards) card.RemoteArtworkLoader = () => LoadHostArtwork(card.Card);
         cache.Cards.AddRange(cards); guestLibraryCards.AddBatch(cards);
+        ScheduleGuestView();
         guestLibraryNotice = page.Total == 0 ? "No matching titles. Try another search or category." : null;
         UpdateHostResultCount(); UpdateHostBreadcrumbs(); RefreshSharedLibrary();
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(LoadMoreHostTitles));
@@ -173,6 +176,7 @@ public partial class MainWindow
         guestLibraryCards.Clear(); guestLibraryCards.AddBatch(guestCurrentBrowse!.Cards);
         PosterGrid.ItemsSource = guestLibraryCards;
         UpdateHostResultCount(); UpdateHostBreadcrumbs();
+        ScheduleGuestView();
         // Renew host activity even when the data is already cached.
         TryLibraryCommand(new("catalog-view", Target: guestBrowse.ParentId, Data: Wire.Serialize(guestBrowse with { Page = 0 })));
         RefreshSharedLibrary();
@@ -181,7 +185,7 @@ public partial class MainWindow
     private void UpdateHostResultCount() => ResultCount.Text = $"{guestCurrentBrowse?.Total ?? 0} items";
     private void LibraryScrollChanged(object sender, ScrollChangedEventArgs e)
     {
-        if (GuestLibrary) LoadMoreHostTitles();
+        if (GuestLibrary) { LoadMoreHostTitles(); ScheduleGuestView(); }
     }
     private void LoadMoreHostTitles()
     {
@@ -195,6 +199,7 @@ public partial class MainWindow
     private void ReleaseHostLibrary()
     {
         guestSearchCancellation?.Cancel();
+        ClearHostArtworkRequests(); guestHoveredId = null;
         guestHadLibraryLease = false;
         if (GuestLibrary && (OwnsLibrary || guestBrowsePending)) TryLibraryCommand(new("catalog-release"));
         guestLibraryNotice = null; guestBrowsePending = false; ++guestBrowseRequest;
@@ -211,12 +216,13 @@ public partial class MainWindow
         }
         crumbs[^1] = crumbs[^1] with { IsCurrent = true };
         LibraryBreadcrumbs.ItemsSource = crumbs;
+        DetailBreadcrumbs.ItemsSource = currentPage == "Details" && selected is not null ? crumbs.Concat(new[] { new LibraryBreadcrumb(selected.Title, "media", IsCurrent: true) }).ToArray() : crumbs;
     }
     private void NavigateHostBreadcrumb(LibraryBreadcrumb crumb)
     {
         libraryCategory = crumb.Category;
         guestBrowse = new(Category: crumb.Category, ParentId: crumb.Series, Season: crumb.Season);
-        SearchBox.Clear(); FilterHostLibrary();
+        SearchBox.Clear(); ShowPage("Library"); FilterHostLibrary();
     }
     private void OpenHostCard(LibraryCard card)
     {
@@ -228,7 +234,7 @@ public partial class MainWindow
                 Season = card.Level == "season" ? card.Season : null, Query = "", Page = 0 };
             SearchBox.Clear(); FilterHostLibrary();
         }
-        else { TryLibraryCommand(new("catalog-view", Target: card.Media.Id)); SetStatus(card.DisplayTitle + (string.IsNullOrEmpty(card.Media.Overview) ? "" : " · " + card.Media.Overview)); }
+        else OpenGuestVideo(card);
     }
     private void OpenLibraryPermissions(object sender, RoutedEventArgs e) { RememberCurrentRoom(); ShowPage("Rooms"); }
     private void EndLibrarySession(object sender, RoutedEventArgs e) => TryLibraryCommand(new("catalog-release"));

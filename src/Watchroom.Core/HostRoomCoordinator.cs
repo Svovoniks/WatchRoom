@@ -25,6 +25,12 @@ internal sealed class HostRoomCoordinator(string host)
     {
         if (LibraryActivity is { } activity) LibraryActivity = activity with { Location = location, Query = query, UpdatedAt = now };
     }
+    public void DescribeLibraryView(LibraryBrowseView view, long now)
+    {
+        if (view.LoadedCount is < 0 or > 100000 || !double.IsFinite(view.ScrollFraction) || view.ScrollFraction is < 0 or > 1 ||
+            view.HoveredId?.Length > 128 || view.SelectedId?.Length > 128) throw new InvalidDataException("Invalid browsing view");
+        if (LibraryActivity is { } activity) LibraryActivity = activity with { View = view, UpdatedAt = now };
+    }
     public string? Name { get; private set; }
     internal static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 100 && !name.Any(char.IsControl);
     public SharedMedia? Media { get; private set; }
@@ -69,11 +75,14 @@ internal sealed class HostRoomCoordinator(string host)
                 LibraryActivity = null; return true;
             case "catalog-renew" when LibraryActivity?.Peer == sender:
                 LibraryActivity = LibraryActivity with { UpdatedAt = now }; return true;
+            case "catalog-follow" when LibraryActivity?.Peer == sender && LibraryBrowsing:
+            case "catalog-artwork" when LibraryActivity?.Peer == sender && LibraryBrowsing:
+            case "catalog-watch" when LibraryActivity?.Peer == sender && LibraryBrowsing:
             case "catalog-view" when LibraryActivity?.Peer == sender && LibraryBrowsing:
                 return true;
             case "catalog-browse" when sender != host && LibraryBrowsing:
                 if (LibraryActivity is not null && LibraryActivity.Peer != sender) return false;
-                LibraryActivity = new(sender, people[sender].Name, "All titles", "", now); return true;
+                LibraryActivity = LibraryActivity is { } owned ? owned with { UpdatedAt = now } : new(sender, people[sender].Name, "All titles", "", now); return true;
             case "room-name" when sender == host:
                 if (!ValidName(message.Text)) return false;
                 Name = message.Text!.Trim(); return true;

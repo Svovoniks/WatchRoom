@@ -12,6 +12,11 @@ static class SharedLibraryFixture
         room.Apply("host", new("catalog-permission", Number: 1), 1000, out _);
         check(!room.Apply("pending", new("catalog-browse"), 1000, out _), "unapproved guest cannot acquire library");
         check(room.Apply("a", new("catalog-browse"), 1000, out _) && !room.Apply("b", new("catalog-browse"), 1000, out _), "exactly one guest acquires browsing lock");
+        foreach (var command in new[] { "catalog-follow", "catalog-artwork", "catalog-watch" })
+            check(room.Apply("a", new(command), 1000, out _) && !room.Apply("b", new(command), 1000, out _), "only the browsing lock owner can " + command);
+        var view = new LibraryBrowseView(new(), 8, .5, "hover", "selected");
+        room.DescribeLibraryView(view, 1000); room.Apply("a", new("catalog-browse"), 1000, out _);
+        check(room.LibraryActivity?.View == view, "loading another chunk preserves the authenticated guest view");
         room.DescribeLibrary("Example · Season 1", "pilot", 1001);
         check(room.Snapshot.LibraryActivity is { Name: "Alice", Query: "pilot", Location: "Example · Season 1" }, "host sees authenticated guest activity");
         check(!room.Apply("b", new("catalog-release"), 1002, out _) && !room.Apply("b", new("catalog-view"), 1002, out _), "other guest cannot release lock or report activity");

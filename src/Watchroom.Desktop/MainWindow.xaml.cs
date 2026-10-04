@@ -235,7 +235,7 @@ public partial class MainWindow : Window
     }
     private void ShowPage(string name)
     {
-        if (currentPage == "Library" && name != "Library") ReleaseHostLibrary();
+        if (GuestLibrary && currentPage is "Library" or "Details" && name is not ("Library" or "Details")) ReleaseHostLibrary();
         if (name != currentPage) RememberLocation();
         currentPage = name;
         if (name != "Room") videoClickDelay.Stop();
@@ -395,6 +395,7 @@ public partial class MainWindow : Window
     {
         if (PosterGrid is null || LibraryStatusFilter is null || NoResults is null || library is null || closing) return;
         if (GuestLibrary) { await FilterHostLibraryAsync(debounce); return; }
+        if (FollowingGuest) { if (!applyingGuestMirror) ApplyGuestMirror(); return; }
         if (!libraryLoaded) return;
         librarySearchCancellation?.Cancel();
         using var request = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
@@ -509,7 +510,7 @@ public partial class MainWindow : Window
     }
     private void SearchChanged(object sender, TextChangedEventArgs e)
     {
-        FilterLibrary(debounce: true);
+        DetachGuestMirror(); FilterLibrary(debounce: true);
     }
     private void ClearSearch(object sender, RoutedEventArgs e) { SearchBox.Clear(); SearchBox.Focus(); }
     private void SearchFrameClick(object sender, MouseButtonEventArgs e) => SearchBox.Focus();
@@ -526,6 +527,7 @@ public partial class MainWindow : Window
     }
     private void SelectMovie(object sender, RoutedEventArgs e)
     {
+        DetachGuestMirror();
         var card = (LibraryCard)((Button)sender).Tag;
         if (GuestLibrary) { OpenHostCard(card); return; }
         if (card.Level == "series") NavigateLibrary(CategoryFor(card.Media), LibraryIdentity.ShowKey(card.Media), card.Media.Kind);
@@ -534,6 +536,7 @@ public partial class MainWindow : Window
     }
     private void Select(MediaItem item)
     {
+        DetailHost.Visibility = DetailQueue.Visibility = Visibility.Visible;
         if (currentPage != "Details" || selected?.Id != item.Id) RememberLocation();
         var restoring = restoringNavigation; restoringNavigation = true;
         selected = item; libraryCategory = CategoryFor(item);
@@ -751,7 +754,7 @@ public partial class MainWindow : Window
         foreach (var entry in items.Where(x => x.Id == selected.Id || LibraryIdentity.SameShow(x, selected))) library.Save(entry with { Poster = dest, SeriesPoster = entry.Series is null ? null : dest, Matched = true, PosterSource = "Local artwork", LockedFields = (entry.LockedFields ?? []).Append("Poster").Distinct().ToArray() });
         RefreshLibrary();
     }
-    private async void PlayLocal(object sender, RoutedEventArgs e) => await Guard(async () => { if (selected is not null) { queuePosition = -1; await PlayLocalItem(selected); PublishQueue(); } });
+    private async void PlayLocal(object sender, RoutedEventArgs e) => await Guard(async () => { if (GuestLibrary) { WatchGuestVideo(); return; } if (selected is not null) { queuePosition = -1; await PlayLocalItem(selected); PublishQueue(); } });
     private async Task PlayLocalItem(MediaItem item)
     {
         if (player is null) return;
@@ -786,6 +789,7 @@ public partial class MainWindow : Window
     }
     private async void HostClick(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
+        if (GuestLibrary) { WatchGuestVideo(); return; }
         if (selected is null || roomBusy) return;
         if (!File.Exists(selected.Path)) throw new FileNotFoundException("Movie file is unavailable.");
         var item = selected;
@@ -840,6 +844,8 @@ public partial class MainWindow : Window
         guestBrowse = new(); guestLibraryNotice = null; guestBrowsePending = false; ++guestBrowseRequest;
         guestCurrentBrowse = null; guestHadLibraryLease = false; guestParentTitle = null;
         client.LibraryThumbnail = CachedLibraryThumbnail;
+        client.LibraryArtwork = HighResolutionLibraryArtwork;
+        ResetGuestMirror();
         guestLibraryCache.Clear(); guestLibraryCards.Clear();
         client.SetHostedLibrary(items);
         client.Message += msg => Dispatcher.BeginInvoke(async () => { if (room == client) await Guard(() => OnRoomMessage(msg)); });
@@ -866,7 +872,11 @@ public partial class MainWindow : Window
         if (room is null) return;
         switch (message.Type)
         {
-            case "catalog-page": case "catalog-error": ReceiveHostLibrary(message); break;
+            case "catalog-artwork-chunk": ReceiveHostArtwork(message); break;
+            case "catalog-started":
+                if (!GuestLibrary) selected = playingItem = items.FirstOrDefault(item => item.Id == message.Target);
+                ShowPage("Room"); break;
+            case "catalog-page": case "catalog-error": if (!ReceiveArtworkError(message)) ReceiveHostLibrary(message); break;
             case "welcome":
                 EnsureRoomLibrary();
                 RememberCurrentRoom();

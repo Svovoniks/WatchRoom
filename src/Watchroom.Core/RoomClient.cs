@@ -4,7 +4,7 @@ using System.Threading.Channels;
 
 namespace Watchroom.Core;
 
-public sealed class RoomClient : IAsyncDisposable
+public sealed partial class RoomClient : IAsyncDisposable
 {
     private readonly LibraryStore? settings;
     private readonly string diagnosticId = Guid.NewGuid().ToString("N")[..8];
@@ -39,6 +39,7 @@ public sealed class RoomClient : IAsyncDisposable
     public IMediaSource? HostedMedia { get; set; }
     private MediaItem[] hostedLibrary = [];
     public Func<string?, string?>? LibraryThumbnail { get; set; }
+    public Func<string?, string?>? LibraryArtwork { get; set; }
     public void SetHostedLibrary(IEnumerable<MediaItem> items) => Volatile.Write(ref hostedLibrary, items.ToArray());
     private readonly ConcurrentDictionary<string, IMediaSource> assets = new();
     public void SetHostedFile(string path, string title)
@@ -153,7 +154,7 @@ public sealed class RoomClient : IAsyncDisposable
     {
         if (!IsConnected) throw new IOException("Room connection is closed. Rejoin the room to reconnect.");
         if (message.Type == "remove" && !DiscoveryOnline) throw new IOException("Reconnect to the room service before revoking saved guest access.");
-        if (message.Type is "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
+        if (message.Type is "catalog-follow" or "catalog-artwork" or "catalog-watch" or "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
         {
             if (Identity?.Host != true && !directConnected.Task.IsCompletedSuccessfully)
                 throw new IOException("Waiting for the host's direct control connection. All participants need the updated app.");
@@ -399,7 +400,7 @@ public sealed class RoomClient : IAsyncDisposable
                     directConnected.TrySetResult();
                     break;
                 case "clock-pong": if (long.TryParse(message.Data, out var now)) clock.Receive(message.Number, now); break;
-                case "catalog-page": case "catalog-error": case "chat": case "notice": case "error": Message?.Invoke(message); break;
+                case "catalog-artwork-chunk": case "catalog-started": case "catalog-page": case "catalog-error": case "chat": case "notice": case "error": Message?.Invoke(message); break;
             }
         }
     }
@@ -429,6 +430,7 @@ public sealed class RoomClient : IAsyncDisposable
             if (sender == Identity!.Peer) Message?.Invoke(error); else SendPeer(sender, error);
             return;
         }
+        if (HandleLibraryInteraction(sender, message)) return;
         if (browse is not null)
         {
             try

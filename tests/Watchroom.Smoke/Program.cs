@@ -6,6 +6,16 @@ using Watchroom.Core;
 using LibVLCSharp.Shared;
 using System.Diagnostics;
 
+if (args.FirstOrDefault() == "--guest-library-peer")
+{
+    var count = 0;
+    await GuestLibraryPeerFixture.RunIsolated(Path.GetFullPath(".tools/dotnet/dotnet.exe"),
+        Path.GetFullPath("src/Watchroom.Server/bin/Release/net10.0/Watchroom.Server.dll"),
+        Path.Combine("artifacts", "guest-peer-" + Guid.NewGuid().ToString("N")), Path.GetFullPath(args[1]),
+        (condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); count++; });
+    Console.WriteLine($"{count} guest peer checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--shared-library")
 {
     var checks = 0;

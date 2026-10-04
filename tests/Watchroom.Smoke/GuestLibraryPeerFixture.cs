@@ -35,6 +35,39 @@ static class GuestLibraryPeerFixture
         await host.ConnectAsync(server, "Library Host"); await guest.ConnectAsync(server, "Library Guest", host.Identity!.Room);
         host.Send(new("admit", Target: guest.Identity!.Peer));
         await Task.WhenAll(hostReady.Task, guestReady.Task, guest.DirectControlsReady).WaitAsync(TimeSpan.FromSeconds(25));
+        host.SetHostedLibrary([new MediaItem("direct-video", video, "Direct browsing fixture", "Movie")]);
+        var artworkBytes = Convert.ToBase64String(Enumerable.Range(0, 60000).Select(index => (byte)(index % 251)).ToArray());
+        host.LibraryArtwork = _ => artworkBytes;
+        LibraryBrowsePage? directPage = null; bool directStarted = false;
+        var artworkParts = new ConcurrentDictionary<int, string>();
+        guest.Message += message =>
+        {
+            if (message.Type == "catalog-page" && message.Number == 1001) directPage = Wire.Read<LibraryBrowsePage>(message.Data!);
+            if (message.Type == "catalog-started") directStarted = true;
+            if (message.Type == "catalog-artwork-chunk" && message.Number == 1003)
+            { var part = Wire.Read<LibraryArtworkChunk>(message.Data!); artworkParts[part.Index] = part.Data; }
+        };
+        async Task AwaitDirect(Func<bool> condition, string name)
+        {
+            var until = DateTime.UtcNow.AddSeconds(25);
+            while (!condition() && DateTime.UtcNow < until) await Task.Delay(20);
+            check(condition(), name);
+        }
+        host.Send(new("catalog-permission", Number: 1));
+        await AwaitDirect(() => guest.Snapshot?.LibraryBrowsing == true, "guest receives library permission over the peer connection");
+        guest.Send(new("catalog-browse", Number: 1001, Data: Wire.Serialize(new LibraryBrowseRequest())));
+        await AwaitDirect(() => directPage?.Entries.Length == 1 && host.Snapshot?.LibraryActivity?.Peer == guest.Identity.Peer,
+            "integrated guest browsing acquires the host-authoritative lock");
+        var directView = new LibraryBrowseView(new(), 1, .25, "direct-video", "direct-video");
+        guest.Send(new("catalog-follow", Data: Wire.Serialize(directView)));
+        await AwaitDirect(() => host.Snapshot?.LibraryActivity?.View == directView, "guest scroll, hover, and selected video reach the host mirror");
+        guest.Send(new("catalog-artwork", Number: 1003, Data: Wire.Serialize(new LibraryArtworkRequest("direct-video", "movie"))));
+        await AwaitDirect(() => artworkParts.Values.Sum(part => part.Length) == artworkBytes.Length, "high-resolution artwork crosses the peer channel in bounded chunks");
+        check(string.Concat(artworkParts.OrderBy(pair => pair.Key).Select(pair => pair.Value)) == artworkBytes, "artwork chunks reconstruct the original bytes without loss");
+        guest.Send(new("catalog-watch", Number: 1004, Target: "direct-video"));
+        await AwaitDirect(() => directStarted && guest.Snapshot?.Media?.Title == "Direct browsing fixture", "guest detail playback publishes the host video into the room");
+        guest.Send(new("catalog-release"));
+        await AwaitDirect(() => host.Snapshot?.LibraryActivity is null, "leaving guest browsing releases its lock after playback starts");
         var owned = new RoomLibrary(true, host.Identity.Peer); var remote = new RoomLibrary(false, guest.Identity.Peer);
         var traffic = new ConcurrentQueue<Action>();
         host.LibraryMessage += (id, message) => traffic.Enqueue(() => owned.Receive(id, message));

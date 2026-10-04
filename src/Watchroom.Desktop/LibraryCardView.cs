@@ -26,6 +26,9 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     private string? requestedPath;
     private Task loading = Task.CompletedTask;
     private string? remoteThumbnail;
+    public Func<Task<string?>>? RemoteArtworkLoader { get; set; }
+    public bool IsGuestHovered { get; private set; }
+    public void SetGuestHovered(bool value) { if (IsGuestHovered != value) { IsGuestHovered = value; Changed(nameof(IsGuestHovered)); } }
     private (long Length, long Modified) posterVersion;
     private static (long Length, long Modified) Version(string? path)
     {
@@ -86,14 +89,19 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     {
         if (IsRemote)
         {
-            if (requestedPath is not null || remoteThumbnail is null) return loading;
+            if (requestedPath is not null || remoteThumbnail is null && RemoteArtworkLoader is null) return loading;
             requestedPath = "remote";
-            return loading = LoadRemotePosterAsync(remoteThumbnail);
+            return loading = LoadEnhancedPosterAsync();
         }
         if (requestedPath == Card.Poster && Card.Poster is not null) return loading;
         return loading = LoadPosterCoreAsync();
     }
-    private async Task LoadRemotePosterAsync(string data)
+    private async Task LoadEnhancedPosterAsync()
+    {
+        if (remoteThumbnail is not null) await LoadRemotePosterAsync(remoteThumbnail);
+        if (RemoteArtworkLoader is { } load && await load() is { Length: > 0 } data) await LoadRemotePosterAsync(data, 600);
+    }
+    private async Task LoadRemotePosterAsync(string data, int width = 160)
     {
         var image = await Task.Run(async () =>
         {
@@ -102,7 +110,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
             {
                 using var stream = new MemoryStream(Convert.FromBase64String(data));
                 var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                bitmap.DecodePixelWidth = 160; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze();
+                bitmap.DecodePixelWidth = width; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze();
                 return (BitmapSource?)bitmap;
             }
             catch (Exception ex) when (ex is FormatException or IOException or NotSupportedException or ArgumentException) { return null; }

@@ -28,6 +28,7 @@ public partial class MainWindow
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
+    private string? HighResolutionLibraryArtwork(string? path) => MakeThumbnail(path, 100000, true);
     private string HostPeerId() => room?.Snapshot?.People.FirstOrDefault(p => p.IsHost)?.Id ?? room?.Identity?.Peer ?? "";
     private void EnsureRoomLibrary()
     {
@@ -78,18 +79,18 @@ public partial class MainWindow
         }
         roomLibrary.Publish(catalog);
     }
-    private static string? MakeThumbnail(string? path, int maximumBytes = 12000)
+    private static string? MakeThumbnail(string? path, int maximumBytes = 12000, bool highResolution = false)
     {
         if (path is null || !File.Exists(path)) return null;
         try
         {
             using var file = File.OpenRead(path);
-            foreach (var width in new[] { 160, 100, 64 })
+            foreach (var width in highResolution ? new[] { 600, 480, 360 } : new[] { 160, 100, 64 })
             {
                 file.Position = 0;
                 var bitmap = new System.Windows.Media.Imaging.BitmapImage(); bitmap.BeginInit();
                 bitmap.DecodePixelWidth = width; bitmap.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad; bitmap.StreamSource = file; bitmap.EndInit();
-                var encoder = new System.Windows.Media.Imaging.JpegBitmapEncoder { QualityLevel = 65 };
+                var encoder = new System.Windows.Media.Imaging.JpegBitmapEncoder { QualityLevel = highResolution ? 88 : 65 };
                 encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap)); using var output = new MemoryStream(); encoder.Save(output);
                 if (output.Length <= maximumBytes) return Convert.ToBase64String(output.ToArray());
             }
