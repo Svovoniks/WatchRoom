@@ -23,10 +23,40 @@ Source: "..\artifacts\Watchroom\*"; DestDir: "{app}"; Flags: ignoreversion recur
 Name: "{group}\Watchroom"; Filename: "{app}\Watchroom.exe"
 [Run]
 Filename: "{app}\Watchroom.exe"; Description: "Open Watchroom"; Flags: nowait postinstall skipifsilent
-Filename: "{app}\Watchroom.exe"; Flags: nowait; Check: IsWatchroomUpdate
 
 [Code]
 function IsWatchroomUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:WATCHROOMUPDATE|0}') = '1';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode, Attempts: Integer;
+  ReadyFile: String;
+  RelaunchPage: TOutputMarqueeProgressWizardPage;
+begin
+  if (CurStep = ssPostInstall) and IsWatchroomUpdate then
+  begin
+    ReadyFile := ExpandConstant('{localappdata}\Watchroom\updates\ready');
+    DeleteFile(ReadyFile);
+    RelaunchPage := CreateOutputMarqueeProgressPage('Opening Watchroom', 'Your update is installed. Watchroom is starting...');
+    RelaunchPage.SetText('Opening Watchroom...', 'Your library and settings are kept.');
+    RelaunchPage.Show;
+    try
+      if Exec(ExpandConstant('{app}\Watchroom.exe'), '--updated', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, ResultCode) then
+      begin
+        Attempts := 0;
+        while (not FileExists(ReadyFile)) and (Attempts < 600) do
+        begin
+          Sleep(100);
+          RelaunchPage.Animate;
+          Attempts := Attempts + 1;
+        end;
+        DeleteFile(ReadyFile);
+      end;
+    finally
+      RelaunchPage.Hide;
+    end;
+  end;
 end;

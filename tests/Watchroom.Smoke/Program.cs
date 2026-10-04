@@ -6,6 +6,11 @@ using Watchroom.Core;
 using LibVLCSharp.Shared;
 using System.Diagnostics;
 
+if (args.FirstOrDefault() == "--track-languages")
+{
+    TrackLanguageFixture.Run((condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); }); return;
+}
+
 if (args.FirstOrDefault() == "--guest-library-peer")
 {
     var count = 0;
@@ -217,6 +222,7 @@ Directory.CreateDirectory(root);
 PlaybackDiagnostics.Initialize(Path.Combine(root, "session-logs"));
 int passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
+TrackLanguageFixture.Run(Check);
 EpisodePlaybackFixture.Run(Check);
 RoomLibraryChecks.Run(Check);
 await DiagnosticLogFixture.Run(Path.Combine(root, "diagnostic-log"), Check);

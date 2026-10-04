@@ -83,14 +83,14 @@ app.Map("/room", async context =>
         var sender = member.SendLoop();
         lock (room.Gate)
         {
-            if (room.Closed || room.People.Count >= 9) throw new InvalidDataException("Room is full or closed");
+            if (room.People.Count >= 9) throw new InvalidDataException("Room is full");
             if (host && room.People.Values.Any(x => x.Host)) throw new InvalidDataException("The host is already connected to this room");
-            if (!host && !room.People.Values.Any(x => x.Host)) throw new InvalidDataException("The host is offline. Try again when they reopen the room.");
             if (!host && room.ApprovedGuests.Contains(member.GuestHash!) && room.People.Values.Count(x => x.Approved) < 5 && !room.People.Values.Any(x => x.GuestHash == member.GuestHash)) member.Approved = true;
             room.People.Add(member.Id, member);
             member.Send(new(member.Approved && !host ? "admitted" : "welcome", Data: Wire.Serialize(new Welcome(room.Code, member.Id, host, member.Approved ? IceServers(member.Id) : [], forceRelay, hostKey, guestKey))));
             room.Snapshot();
-            if (!host && member.Approved) room.People.Values.First(x => x.Host).Send(new("connect", Target: member.Id));
+            if (!host && member.Approved) room.People.Values.FirstOrDefault(x => x.Host)?.Send(new("connect", Target: member.Id));
+            if (host) foreach (var guest in room.People.Values.Where(x => !x.Host && x.Approved)) member.Send(new("connect", Target: guest.Id));
         }
         var messages = 0; var window = Wire.Now;
         while (!lifetime.IsCancellationRequested)
@@ -104,6 +104,10 @@ app.Map("/room", async context =>
                 if (!member.Approved) continue;
                 switch (message.Type)
                 {
+                    case "reconnect" when !member.Host:
+                        room.Snapshot();
+                        room.People.Values.FirstOrDefault(x => x.Host)?.Send(new("connect", Target: member.Id));
+                        break;
                     case "admit" when member.Host:
                         if (room.People.TryGetValue(message.Target ?? "", out var guest) && !guest.Approved && room.People.Values.Count(x => x.Approved) < 5)
                         {
@@ -184,9 +188,8 @@ app.Map("/room", async context =>
                 var registered = room.People.Remove(member.Id);
                 if (registered && member.Host)
                 {
-                    if (!room.Persistent) { room.Closed = true; rooms.TryRemove(room.Code, out _); }
-                    foreach (var other in room.People.Values) other.Lifetime.Cancel();
-                    room.People.Clear(); room.Media = null; room.Playback = null; room.Queue = []; room.ResumeWhenReady = false;
+                    room.Media = null; room.Playback = null; room.Queue = []; room.ResumeWhenReady = false;
+                    room.Broadcast(new("peer-left", Sender: member.Id)); room.Snapshot();
                 }
                 else if (registered) { room.Broadcast(new("peer-left", Sender: member.Id)); room.TryResume(); room.Snapshot(); }
             }
@@ -220,7 +223,7 @@ sealed class Member(string id, string name, bool host, WebSocket socket, Cancell
 }
 sealed class Room(string code, bool persistent = false)
 {
-    public object Gate { get; } = new(); public string Code => code; public bool Closed;
+    public object Gate { get; } = new(); public string Code => code;
     public bool Persistent { get; } = persistent;
     public string? Name;
     public long Expires { get; } = persistent ? long.MaxValue : Wire.Now + 6 * 3600000; public long Revision;

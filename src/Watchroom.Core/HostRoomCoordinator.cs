@@ -53,6 +53,8 @@ internal sealed class HostRoomCoordinator(string host)
         if (LibraryActivity?.Peer == id) LibraryActivity = null;
         TryResume(now);
     }
+    // Only an explicit connection authorized by discovery may restore a departed peer.
+    public void Reconnect(string id) => departed.Remove(id);
     public bool Apply(string sender, WireMessage message, long now, out WireMessage? announcement)
     {
         announcement = null;

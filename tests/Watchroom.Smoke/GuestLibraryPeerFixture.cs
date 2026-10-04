@@ -32,7 +32,7 @@ static class GuestLibraryPeerFixture
         var hostReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var guestReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         host.LibraryPeerReady += _ => hostReady.TrySetResult(); guest.LibraryPeerReady += _ => guestReady.TrySetResult();
-        await host.ConnectAsync(server, "Library Host"); await guest.ConnectAsync(server, "Library Guest", host.Identity!.Room);
+        await host.ConnectAsync(server, "Library Host", persistent: true); await guest.ConnectAsync(server, "Library Guest", host.Identity!.Room);
         host.Send(new("admit", Target: guest.Identity!.Peer));
         await Task.WhenAll(hostReady.Task, guestReady.Task, guest.DirectControlsReady).WaitAsync(TimeSpan.FromSeconds(25));
         host.SetHostedLibrary([new MediaItem("direct-video", video, "Direct browsing fixture", "Movie")]);
@@ -107,5 +107,36 @@ static class GuestLibraryPeerFixture
         check(missing && ReferenceEquals(previous, host.HostedMedia), "failed guest file preparation preserves current media");
         owned.SetAccess(guest.Identity.Peer, new());
         await Wait(() => !remote.OwnAccess.Browse && remote.Catalog.Count == 0, "host revocation clears native guest catalog");
+        var identity = host.Identity!;
+        var departures = new ConcurrentQueue<WireMessage>();
+        guest.Message += message => { if (message.Type == "peer-left") departures.Enqueue(message); };
+        await host.DisposeAsync();
+        await AwaitDirect(() => guest.IsConnected && guest.Snapshot?.People.All(p => !p.IsHost) == true,
+            "guest stays connected in the room after the host leaves");
+        check(guest.Snapshot?.Media is null && guest.Snapshot?.Playback is null, "host departure clears unavailable playback");
+        check(departures.Count == 1 && departures.Single().Text == "Library Host", "host departure emits one named disconnect notification");
+        await using var waiting = new RoomClient();
+        await waiting.ConnectAsync(server, "Offline joining guest", identity.Room);
+        await AwaitDirect(() => waiting.Snapshot?.People.Any(p => p.Id == waiting.Identity!.Peer) == true,
+            "new guest can join and wait while the host is offline");
+        await using var returning = new RoomClient();
+        await returning.ConnectAsync(server, "Library Host", identity.Room, identity.HostKey);
+        await guest.DirectControlsReady.WaitAsync(TimeSpan.FromSeconds(25));
+        await AwaitDirect(() => guest.Snapshot?.People.Any(p => p.Id == returning.Identity!.Peer && p.IsHost) == true,
+            "waiting admitted guest automatically reconnects when the host returns");
+        returning.SetHostedFile(video, "Returned video");
+        returning.Send(new("media", Data: Wire.Serialize(returning.HostedMedia!.Media)));
+        await AwaitDirect(() => guest.Snapshot?.Media?.Title == "Returned video", "returned host starts a fresh direct playback session");
+        returning.Send(new("admit", Target: waiting.Identity!.Peer));
+        await waiting.DirectControlsReady.WaitAsync(TimeSpan.FromSeconds(25));
+        check(waiting.Snapshot?.Media?.Title == "Returned video", "offline joining guest receives playback only after host admission");
+        await waiting.DisposeAsync();
+        await AwaitDirect(() => departures.Any(m => m.Text == "Offline joining guest"), "guests receive named notifications when another guest disconnects");
+        var transports = (System.Collections.IDictionary)typeof(RoomClient).GetField("peers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(guest)!;
+        ((IDisposable)transports[returning.Identity!.Peer]!).Dispose();
+        await AwaitDirect(() => guest.IsConnected && !guest.DirectControlsReady.IsCompletedSuccessfully,
+            "unexpected peer loss leaves guest in the room while rebuilding controls");
+        await guest.DirectControlsReady.WaitAsync(TimeSpan.FromSeconds(30));
+        check(guest.Snapshot?.Media?.Title == "Returned video", "guest automatically repairs a failed peer connection without rejoining the room");
     }
 }

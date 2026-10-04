@@ -39,6 +39,11 @@ static class Program
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             PlayerLayoutChecks.Run(); app.Shutdown(); return;
         }
+        if (args.FirstOrDefault() == "--track-preferences")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            TrackPreferenceChecks.Run(args[1]); app.Shutdown(); return;
+        }
         if (args.FirstOrDefault() == "--guest-library-layout")
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -168,6 +173,8 @@ static class Program
                 CheckRoomSettings(window, activeStore, Check);
                 CheckQueueEditing(window, activeStore, Check);
                 await CheckBackNavigation(window, Check);
+                PlayerInteractionChecks.Run(window, Check);
+                await RoomRecoveryChecks.Run(window, directory, Check);
                 Console.WriteLine($"Input heartbeat: maximum {gaps.Max():F1} ms; p95 {gaps.Order().ElementAt((int)(gaps.Count * .95)):F1} ms");
                 Console.WriteLine($"{checks} desktop responsiveness checks passed.");
             }
@@ -198,21 +205,22 @@ static class Program
         LibraryBreadcrumb[] Crumbs(bool details = false) => ((System.Windows.Controls.ItemsControl)window.FindName(details ? "DetailBreadcrumbs" : "LibraryBreadcrumbs")).Items.Cast<LibraryBreadcrumb>().ToArray();
         void ClickCrumb(LibraryBreadcrumb crumb) => Call("BreadcrumbClick", window,
             new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent, new System.Windows.Controls.Button { DataContext = crumb }));
-        Navigate(3); await Wait(() => cards.Count == 2 && cards.All(x => x.Card.Media.Kind == "Anime"));
+        Navigate(3); await Wait(() => cards.Count == 1 && cards.All(x => x.Card.Media.Kind == "Anime"));
         var categoryButton = (System.Windows.Controls.Button)window.FindName("ShowsLibraryNav");
         categoryButton.Focus(); Call("LibraryCategoryClick", categoryButton, new RoutedEventArgs());
         await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
         check(!((System.Windows.Controls.TextBox)window.FindName("SearchBox")).IsKeyboardFocusWithin, "category navigation does not move the cursor into search");
-        Navigate(3); await Wait(() => cards.Count == 2 && cards.All(x => x.Card.Media.Kind == "Anime"));
-        check(Crumbs().Select(x => x.Label).SequenceEqual(["All", "Anime"]), "Anime category includes anime shows and films with a clickable category path");
+        Navigate(3); await Wait(() => cards.Count == 1 && cards.All(x => x.Card.Media.Kind == "Anime"));
+        check(Crumbs().Select(x => x.Label).SequenceEqual(["All", "Anime"]), "Anime category excludes unavailable titles and preserves its category path");
         var status = (System.Windows.Controls.ComboBox)window.FindName("LibraryStatusFilter");
-        status.SelectedIndex = 2; await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == animeMovie.Id);
-        check(cards[0].Card.Media.Kind == "Anime", "availability status combines with the sidebar category");
+        Navigate(4); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == animeMovie.Id);
+        check(Crumbs().Last().Label == "Unavailable" && cards.All(x => !x.Card.Media.Available), "unavailable videos appear only in their separate library tab");
+        Navigate(3);
         status.SelectedIndex = 1; await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == anime.Id);
         check(cards[0].Card.Poster is null, "artwork status combines with the sidebar category");
         Navigate(2); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
-        status.SelectedIndex = 2; await Wait(() => cards.Count == 0);
-        check(((FrameworkElement)window.FindName("NoResults")).Visibility == Visibility.Visible, "empty category and status combination shows a useful empty result");
+        status.SelectedIndex = 1; await Wait(() => cards.Count == 1);
+        check(status.Items.Count == 2, "availability is a separate tab rather than a status filter");
         Navigate(2, LibraryIdentity.ShowKey(show), "Show"); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
         check(Crumbs().Select(x => x.Label).SequenceEqual(["All", "Shows", "Navigation Show"]), "show breadcrumb points to the season grid");
         Navigate(2, LibraryIdentity.ShowKey(show), "Show", 0); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == special.Id);
@@ -229,15 +237,15 @@ static class Program
         ClickCrumb(Crumbs().Single(x => x.Label == "Shows")); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
         var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
         search.Text = "no matching title"; await Wait(() => cards.Count == 0);
-        ClickCrumb(Crumbs().First()); await Wait(() => cards.Count == 753);
+        ClickCrumb(Crumbs().First()); await Wait(() => cards.Count == 752);
         check(Crumbs().Length == 1 && Crumbs()[0].IsCurrent, "All breadcrumb clears category, show, season, search, and status restrictions");
         var menu = (FrameworkElement)window.FindName("LibraryCategories");
         Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Collapsed, "Library button collapses its category menu");
         Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Visible, "Library button expands its category menu");
         Navigate(1); await Wait(() => cards.Count == 750 && cards.All(x => x.Card.Media.Kind == "Movie"));
         Call("Select", animeMovie);
-        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["All", "Anime", "Navigation Anime Film"]), "anime film details omit show and season levels");
-        ClickCrumb(Crumbs(true).First()); await Wait(() => cards.Count == 753);
+        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["All", "Unavailable", "Navigation Anime Film"]), "unavailable film details link back to the unavailable tab");
+        ClickCrumb(Crumbs(true).First()); await Wait(() => cards.Count == 752);
     }
 
     private static async Task CheckSearchLayout(MainWindow window, Action<bool, string> check)
@@ -275,10 +283,10 @@ static class Program
         object? Field(string name) => typeof(MainWindow).GetField(name, flags)!.GetValue(window);
         var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
         var filter = (System.Windows.Controls.ComboBox)window.FindName("LibraryStatusFilter");
-        Call("NavigateLibrary", 2, null!, null!, null!); search.Text = "Navigation"; filter.SelectedIndex = 2;
+        Call("NavigateLibrary", 4, null!, null!, null!); search.Text = "Navigation"; filter.SelectedIndex = 1;
         Call("ShowPage", "Settings");
         Call("BrowseHistory", true); await Task.Delay(150);
-        check(Field("currentPage") as string == "Library" && search.Text == "Navigation" && filter.SelectedIndex == 2, "back restores category, search, and availability filter");
+        check(Field("currentPage") as string == "Library" && (int)Field("libraryCategory")! == 4 && search.Text == "Navigation" && filter.SelectedIndex == 1, "back restores unavailable tab, search, and artwork filter");
         Call("BrowseHistory", false);
         check(Field("currentPage") as string == "Settings", "forward restores the page left by Back");
         Call("BrowseHistory", true); Call("ShowPage", "Queues");

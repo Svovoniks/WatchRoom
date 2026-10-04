@@ -63,13 +63,15 @@ public partial class MainWindow
             var installer = await new GitHubUpdates(updateHttp, UpdateRepository).DownloadAsync(availableUpdate, Path.Combine(App.DataDirectory, "updates"), progress, lifetime.Token);
             if (closing) return;
             var start = new ProcessStartInfo(installer) { UseShellExecute = false };
-            foreach (var argument in new[] { "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/WATCHROOMUPDATE=1", "/LOG=" + Path.Combine(App.DataDirectory, "updates", "install.log"), "/DIR=" + AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar) }) start.ArgumentList.Add(argument);
+            UpdateDownloadProgress.IsIndeterminate = true;
+            UpdateCardStatus.Text = "Installing and restarting Watchroom… The installer will show progress.";
+            foreach (var argument in new[] { "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/WATCHROOMUPDATE=1", "/LOG=" + Path.Combine(App.DataDirectory, "updates", "install.log"), "/DIR=" + AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar) }) start.ArgumentList.Add(argument);
             if (Process.Start(start) is null) throw new IOException("Could not start the installer.");
             Close();
         }
         catch (OperationCanceledException) { if (!closing) UpdateCardStatus.Text = "Download interrupted. Try again."; }
         catch (Exception ex) when (ex is IOException or HttpRequestException or System.ComponentModel.Win32Exception)
         { UpdateCardStatus.Text = "Update failed: " + ex.Message; }
-        finally { installingUpdate = false; InstallUpdateButton.IsEnabled = true; DismissUpdateButton.IsEnabled = true; UpdateDownloadProgress.Visibility = Visibility.Collapsed; }
+        finally { installingUpdate = false; InstallUpdateButton.IsEnabled = true; DismissUpdateButton.IsEnabled = true; UpdateDownloadProgress.IsIndeterminate = false; UpdateDownloadProgress.Visibility = Visibility.Collapsed; }
     }
 }

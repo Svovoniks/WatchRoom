@@ -21,6 +21,17 @@ public partial class App : Application
             MessageBox.Show(args.Exception.Message, "Watchroom", MessageBoxButton.OK, MessageBoxImage.Warning); args.Handled = true;
         };
         base.OnStartup(e);
+        if (e.Args.Contains("--updated"))
+        {
+            EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent, new RoutedEventHandler((sender, _) =>
+            {
+                if (sender is MainWindow)
+                {
+                    var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Watchroom", "updates"); Directory.CreateDirectory(directory);
+                    File.WriteAllText(Path.Combine(directory, "ready"), "ready");
+                }
+            }));
+        }
     }
     protected override void OnExit(ExitEventArgs e)
     {

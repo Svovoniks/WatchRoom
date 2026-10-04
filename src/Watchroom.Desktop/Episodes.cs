@@ -62,8 +62,8 @@ public partial class MainWindow
         if (room is null) await PlayLocalItem(next);
         else
         {
-            room.SetHostedFile(next.Path, PlaybackTitle(next)); playingItem = next;
-            room.Send(new("media", Data: Wire.Serialize(room.HostedMedia!.Media))); ShowPage("Room");
+            StartHostedVideo(next);
+            ShowPage("Room");
         }
     }
     private void ToggleCardWatched(object sender, RoutedEventArgs e)

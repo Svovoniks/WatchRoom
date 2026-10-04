@@ -119,7 +119,7 @@ static class PlayerLayoutChecks
         docked.Children.Remove(transport); fullscreenHost.Children.Add(transport);
         window.WindowStyle = WindowStyle.None;
         typeof(MainWindow).GetField("fullscreen", flags)!.SetValue(window, true);
-        var disconnect = (Task)typeof(MainWindow).GetMethod("Disconnect", flags)!.Invoke(window, [true])!;
+        var disconnect = (Task)typeof(MainWindow).GetMethod("Disconnect", flags)!.Invoke(window, [true, false])!;
         Check(disconnect.IsCompletedSuccessfully && (bool)typeof(MainWindow).GetField("fullscreen", flags)!.GetValue(window)! &&
             window.WindowStyle == WindowStyle.None && fullscreenHost.Children.Contains(transport),
             "local media cleanup preserves fullscreen and its transport controls during episode changes");
