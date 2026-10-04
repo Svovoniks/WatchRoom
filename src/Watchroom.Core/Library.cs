@@ -317,6 +317,25 @@ public sealed class LibraryStore
         }
         transaction.Commit(); CleanHierarchy();
     }
+    public int RemoveUnavailable(IEnumerable<string> ids)
+    {
+        using var db = Open(); using var transaction = db.BeginTransaction();
+        var removed = 0;
+        foreach (var id in ids.Distinct())
+        {
+            using var command = db.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "DELETE FROM media WHERE id=$id AND json_extract(json,'$.available')=0";
+            command.Parameters.AddWithValue("$id", id);
+            if (command.ExecuteNonQuery() == 0) continue;
+            removed++;
+            command.CommandText = "DELETE FROM settings WHERE key=$position OR key=$watched";
+            command.Parameters.AddWithValue("$position", "position:" + id);
+            command.Parameters.AddWithValue("$watched", "watched:" + id);
+            command.ExecuteNonQuery();
+        }
+        transaction.Commit(); CleanHierarchy();
+        return removed;
+    }
     public void GroupShowsByProvider()
     {
         if (!MetadataOptions.Load(this).GroupShowsByProvider) return;

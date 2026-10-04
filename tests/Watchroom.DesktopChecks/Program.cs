@@ -174,6 +174,8 @@ static class Program
                 CheckQueueEditing(window, activeStore, Check);
                 await CheckBackNavigation(window, Check);
                 PlayerInteractionChecks.Run(window, Check);
+                UnavailableLibraryChecks.Run(window, activeStore, directory, Check);
+                await PlayerShutdownChecks.Run(window, Check);
                 await RoomRecoveryChecks.Run(window, directory, Check);
                 Console.WriteLine($"Input heartbeat: maximum {gaps.Max():F1} ms; p95 {gaps.Order().ElementAt((int)(gaps.Count * .95)):F1} ms");
                 Console.WriteLine($"{checks} desktop responsiveness checks passed.");

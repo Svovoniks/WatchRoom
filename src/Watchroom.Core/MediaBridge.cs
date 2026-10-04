@@ -12,6 +12,8 @@ public sealed class MediaBridge : IAsyncDisposable
     private readonly string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
     private IMediaSource? source;
     private long diagnosticReads;
+    private readonly CancellationTokenSource shutdown = new();
+    private int stopped;
     public Uri? Url { get; private set; }
     public async Task<Uri> StartAsync(IMediaSource media)
     {
@@ -27,6 +29,8 @@ public sealed class MediaBridge : IAsyncDisposable
     }
     private async Task Serve(HttpContext context)
     {
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, shutdown.Token);
+        using var abort = shutdown.Token.Register(context.Abort);
         if (!string.Equals(context.Request.RouteValues["secret"]?.ToString(), token, StringComparison.Ordinal) || source is null)
         { context.Response.StatusCode = 404; return; }
         var length = source.Media.Length;
@@ -49,10 +53,10 @@ public sealed class MediaBridge : IAsyncDisposable
                 while (offset <= end && inflight.Count < MediaStreaming.Window)
                 {
                     int count = (int)Math.Min(MediaStreaming.ChunkBytes, end - offset + 1);
-                    inflight.Enqueue(ReadRange(offset, count, context.RequestAborted)); offset += count;
+                    inflight.Enqueue(ReadRange(offset, count, cancellation.Token)); offset += count;
                 }
                 var bytes = await inflight.Dequeue();
-                await context.Response.Body.WriteAsync(bytes, context.RequestAborted);
+                await context.Response.Body.WriteAsync(bytes, cancellation.Token);
             }
         }
         catch (Exception) { context.Abort(); }
@@ -92,5 +96,18 @@ public sealed class MediaBridge : IAsyncDisposable
         if (parts[1] != "" && (!long.TryParse(parts[1], out end) || end < start)) return false;
         end = Math.Min(end, length - 1); return true;
     }
-    public async ValueTask DisposeAsync() { if (app is not null) { await app.StopAsync(); await app.DisposeAsync(); } }
+    public void CancelPendingReads()
+    {
+        if (Interlocked.Exchange(ref stopped, 1) == 0) shutdown.Cancel();
+    }
+    public async ValueTask DisposeAsync()
+    {
+        CancelPendingReads();
+        var server = Interlocked.Exchange(ref app, null);
+        if (server is null) return;
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        try { await server.StopAsync(deadline.Token); }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested) { }
+        finally { await server.DisposeAsync(); }
+    }
 }

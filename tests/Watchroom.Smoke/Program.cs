@@ -228,6 +228,7 @@ RoomLibraryChecks.Run(Check);
 await DiagnosticLogFixture.Run(Path.Combine(root, "diagnostic-log"), Check);
 await RecoveryFixture.Run(Check);
 await MediaCacheFixture.Run(Check);
+await BridgeShutdownFixture.Run(Check);
 await LibrarySearchFixture.Run(Check);
 await MetadataPipelineFixture.Run(Path.Combine(root, "metadata-pipeline"), Check);
 await MetadataRecoveryFixture.Run(Path.Combine(root, "metadata-recovery"), Check);

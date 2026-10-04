@@ -262,6 +262,13 @@ public partial class MainWindow
             PublishQueue(); RefreshQueuePickers(); NextQueued(button, new RoutedEventArgs());
         };
         menu.Items.Add(play); menu.Items.Add(QueueMenu(videos));
+        var unavailable = UnavailableCardItems(card).ToArray();
+        if (unavailable.Length > 0)
+        {
+            var remove = new MenuItem { Header = card.Level is "series" or "season" ? "Remove unavailable videos from library" : "Remove from library", IsEnabled = !scanning };
+            remove.Click += (_, _) => RemoveUnavailableItems(unavailable);
+            menu.Items.Add(new Separator()); menu.Items.Add(remove);
+        }
         var members = items.Where(x => x.Id == card.Media.Id || card.Level is "series" or "season" && LibraryIdentity.SameShow(x, card.Media)).ToArray();
         var locked = new MenuItem { Header = "Lock metadata", IsCheckable = true, IsChecked = members.All(x => x.MetadataLocked) };
         locked.Click += (_, _) => { foreach (var item in members) library.Save(item with { MetadataLocked = locked.IsChecked }); RefreshLibrary(); };

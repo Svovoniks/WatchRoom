@@ -80,6 +80,8 @@ public partial class MainWindow : Window
     private readonly PlaybackRateControl playbackRate = new();
     private PlaybackBuffering buffering = new();
     private int loadGeneration;
+    private CancellationTokenSource? mediaLoadCancellation;
+    private int nativeStopCount;
     private long? pendingSeek;
     private long seekExpires, seekRevision;
     private WindowState previousState;
@@ -204,8 +206,8 @@ public partial class MainWindow : Window
                     Dispatcher.BeginInvoke(() => { if (!closing) settling.Observe(e.Time, mono); });
                 };
                 RefreshTracks();
-                player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); ReportReady(); if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
-                player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus("Playback failed. Check that the file is available and the connection is active."); });
+                player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); ReportReady(); if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
+                player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus("Playback failed. Check that the file is available and the connection is active."); });
                 player.Buffering += (_, e) => Dispatcher.BeginInvoke(() =>
                 {
                     if (closing) return;
@@ -271,7 +273,8 @@ public partial class MainWindow : Window
     private static string SeasonName(int season) => season < 0 ? "Season unknown" : season == 0 ? "Specials" : $"Season {season}";
     private void UpdateLibraryCategorySelection(bool active)
     {
-        UnavailableLibraryNav.Visibility = GuestLibrary ? Visibility.Collapsed : Visibility.Visible;
+        UnavailableLibraryNav.Visibility = !GuestLibrary && items.Any(item => !item.Available && !item.IsExtra)
+            ? Visibility.Visible : Visibility.Collapsed;
         foreach (var button in new[] { AllLibraryNav, AnimeLibraryNav, ShowsLibraryNav, MoviesLibraryNav, UnavailableLibraryNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, active && int.Parse((string)button.Tag) == libraryCategory ? "Selected" : "");
     }
@@ -340,6 +343,7 @@ public partial class MainWindow : Window
     {
         room?.SetHostedLibrary(refreshedItems);
         items = refreshedItems;
+        UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
         if (browseSeries is not null && !items.Any(x => LibraryIdentity.InShow(x, browseSeries, browseKind)))
         {
             var changed = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries));
@@ -379,6 +383,7 @@ public partial class MainWindow : Window
         var browsedId = items.FirstOrDefault(item => LibraryIdentity.InShow(item, browseSeries, browseKind))?.Id;
         items = updated.Values.ToList();
         room?.SetHostedLibrary(items);
+        UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
         if (browseSeries is not null && !items.Any(item => LibraryIdentity.InShow(item, browseSeries, browseKind)))
         {
             var current = browsedId is null ? null : updated.GetValueOrDefault(browsedId);
@@ -547,6 +552,8 @@ public partial class MainWindow : Window
         ShowPage("Details"); UpdateBreadcrumbs(); DetailTitle.Text = item.EpisodeDisplayTitle;
         restoringNavigation = restoring;
         DetailPlay.IsEnabled = DetailHost.IsEnabled = DetailQueue.IsEnabled = item.Available && File.Exists(item.Path);
+        DetailRemove.Visibility = item.Available ? Visibility.Collapsed : Visibility.Visible;
+        DetailRemove.IsEnabled = !scanning;
         var resume = long.TryParse(library.Setting("position:" + item.Id), out var position) && position >= 10000 ? position : 0;
         DetailPlay.Content = resume > 0 ? "Resume at " + FormatTime(resume) : "Play locally";
         RestartButton.Visibility = resume > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -762,11 +769,14 @@ public partial class MainWindow : Window
         if (player is null) return;
         if (!File.Exists(item.Path)) throw new FileNotFoundException("Movie file is unavailable. Reconnect its drive and rescan.");
         await Disconnect(preserveFullscreen: fullscreen && room is null); target = null; loadedMedia = null; playingItem = item;
+        var generation = loadGeneration;
         localResume = !WasWatched(item.Id) && long.TryParse(library.Setting("position:" + item.Id), out var saved) ? saved : 0;
         using var media = new Media(vlc!, item.Path, FromType.FromPath);
         ready = false; RoomHeading.Text = PlaybackTitle(item); RoomSubtitle.Text = "Local playback";
         ConnectionStatus.Text = "Local playback";
-        await PrepareVideoSurface(); player.Play(media);
+        await PrepareVideoSurface();
+        if (closing || generation != loadGeneration || room is not null) return;
+        player.Play(media);
     }
     private void RestartLocal(object sender, RoutedEventArgs e)
     {
@@ -783,7 +793,7 @@ public partial class MainWindow : Window
     }
     private void SavePlaybackPosition()
     {
-        if (room is null && playingItem is not null && player is not null && player.Time >= 0)
+        if (nativeStopCount == 0 && room is null && playingItem is not null && player is not null && player.Time >= 0)
         {
             library.Setting("position:" + playingItem.Id, WasWatched(playingItem.Id) || player.Length > 0 && player.Time >= player.Length - 2000 ? "0" : Math.Max(0, player.Time).ToString());
             foreach (var card in libraryCards.Where(x => x.Card.Media.Id == playingItem.Id)) UpdateCardPlayback(card);
@@ -990,14 +1000,19 @@ public partial class MainWindow : Window
         PlaybackDiagnostics.Record("media-load-start", new { media.Extension, bytes = media.Length });
         var client = room; if (client is null) return;
         var generation = ++loadGeneration; loadedMedia = media.Id;
-        await loading.WaitAsync(lifetime.Token);
+        mediaLoadCancellation?.Cancel();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        mediaLoadCancellation = cancellation;
+        var locked = false;
         try
         {
+            await loading.WaitAsync(cancellation.Token); locked = true;
             if (client != room || generation != loadGeneration) return;
-            ready = false; buffering = new(); appliedGeneration = readyGeneration = -1; player?.Stop();
+            ready = false; buffering = new(); appliedGeneration = readyGeneration = -1; bridge?.CancelPendingReads(); await StopNativePlayback();
+            cancellation.Token.ThrowIfCancellationRequested();
             if (target?.Playing == true) SendReadiness("buffering");
             if (bridge is not null) await bridge.DisposeAsync(); bridge = null;
-            var source = await client.GetSourceAsync(media, lifetime.Token);
+            var source = await client.GetSourceAsync(media, cancellation.Token);
             if (client != room || generation != loadGeneration) return;
             Uri? streamUri = null;
             if (source is not ILocalMediaSource)
@@ -1018,15 +1033,15 @@ public partial class MainWindow : Window
             foreach (var subtitle in (media.Subtitles ?? []).Take(12))
             {
                 if (subtitle.Length is <= 0 or > 8388608 || !new[] { ".srt", ".ass", ".ssa" }.Contains(subtitle.Extension.ToLowerInvariant())) continue;
-                var asset = await client.GetSourceAsync(subtitle, lifetime.Token);
+                var asset = await client.GetSourceAsync(subtitle, cancellation.Token);
                 var dir = Path.Combine(App.DataDirectory, "subtitles"); Directory.CreateDirectory(dir);
                 var subtitlePath = Path.Combine(dir, Guid.NewGuid().ToString("N") + subtitle.Extension.ToLowerInvariant());
                 await using (var output = File.Create(subtitlePath))
                     for (long offset = 0; offset < subtitle.Length;)
                     {
-                        var bytes = await asset.ReadAsync(offset, (int)Math.Min(32768, subtitle.Length - offset), lifetime.Token);
+                        var bytes = await asset.ReadAsync(offset, (int)Math.Min(32768, subtitle.Length - offset), cancellation.Token);
                         if (bytes.Length == 0) throw new IOException("Subtitle transfer ended early. Rejoin the room to retry.");
-                        await output.WriteAsync(bytes, lifetime.Token); offset += bytes.Length;
+                        await output.WriteAsync(bytes, cancellation.Token); offset += bytes.Length;
                     }
                 vlcMedia.AddSlave(MediaSlaveType.Subtitle, 2, new Uri(subtitlePath).AbsoluteUri);
             }
@@ -1037,8 +1052,9 @@ public partial class MainWindow : Window
             var started = player!.Play(vlcMedia);
             PlaybackDiagnostics.Record("media-play-request", new { started });
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex) { PlaybackDiagnostics.Record("media-load-failed", new { error = ex.GetType().Name, media.Extension }); if (generation == loadGeneration) loadedMedia = null; throw; }
-        finally { loading.Release(); }
+        finally { if (locked) loading.Release(); if (mediaLoadCancellation == cancellation) mediaLoadCancellation = null; }
     }
     private async Task PrepareVideoSurface(bool openPlayer = true)
     {
@@ -1060,7 +1076,7 @@ public partial class MainWindow : Window
             PlaybackControls.Visibility = FullscreenHint.Visibility = Visibility.Collapsed;
             PlayerOverlay.Cursor = Cursors.None;
         }
-        if (player is null) return;
+        if (player is null || nativeStopCount > 0) return;
         buffering.Recover(Environment.TickCount64);
         if (room is not null && ready && buffering.Poll(target?.WantsPlayback == true, Environment.TickCount64))
         { readyGeneration = -1; SendReadiness("buffering"); }
@@ -1223,7 +1239,15 @@ public partial class MainWindow : Window
     private void MovePlayback(long offset) { if (player is null || player.Length <= 0) return; var position = Math.Clamp((room is null ? player.Time : playbackIntent.Position(target, player.Time, room.ServerNowMs)) + offset, 0, player.Length); if (room is null) player.Time = position; else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true); }
     private void SkipBackward(object sender, RoutedEventArgs e) => MovePlayback(-10000);
     private void SkipForward(object sender, RoutedEventArgs e) => MovePlayback(10000);
-    private void StopPlayback(object sender, RoutedEventArgs e) { if (player is null) return; if (room is null) { player.Stop(); ready = false; } else SendPlayback(false, 0, seek: true); }
+    private async void StopPlayback(object sender, RoutedEventArgs e) => await Guard(async () =>
+    {
+        if (player is null || nativeStopCount > 0) return;
+        if (room is not null) { SendPlayback(false, 0, seek: true); return; }
+        ready = false;
+        await loading.WaitAsync();
+        try { await StopNativePlayback(); }
+        finally { loading.Release(); }
+    });
     private void MutePlayback(object sender, RoutedEventArgs e) { if (player is not null) player.Mute = !player.Mute; }
     private void VolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e) { if (player is not null) { player.Volume = (int)e.NewValue; if (e.NewValue > 0) player.Mute = false; } }
     private void VolumeWheel(object sender, MouseWheelEventArgs e)
@@ -1251,7 +1275,7 @@ public partial class MainWindow : Window
     }
     private void RefreshTracks()
     {
-        if (player is null) return; tracksUpdating = true;
+        if (player is null || nativeStopCount > 0) return; tracksUpdating = true;
         try
         {
             var audio = player.AudioTrackDescription.Select(x => new TrackChoice(x.Id, x.Name)).ToArray();
@@ -1391,7 +1415,7 @@ public partial class MainWindow : Window
         var prepared = RoomClient.PrepareHostedFile(item.Path, PlaybackTitle(item));
         room!.PublishHostedFile(prepared, true); playingItem = item;
     }
-    private async void LeaveRoom(object sender, RoutedEventArgs e) => await Guard(async () => { var wasRoom = room is not null; await Disconnect(); player?.Stop(); RoomHeading.Text = "Your watch room"; RoomSubtitle.Text = "Room closed"; ShowPage(wasRoom ? "Rooms" : "Library"); });
+    private async void LeaveRoom(object sender, RoutedEventArgs e) => await Guard(async () => { var wasRoom = room is not null; ShowPage(wasRoom ? "Rooms" : "Library"); await Disconnect(); RoomHeading.Text = "Your watch room"; RoomSubtitle.Text = "Room closed"; });
     private async Task Disconnect(bool preserveFullscreen = false, bool reconnecting = false)
     {
         if (!reconnecting) { roomReconnect?.Cancel(); roomReconnect = null; }
@@ -1401,10 +1425,19 @@ public partial class MainWindow : Window
         if (fullscreen && !preserveFullscreen) SetFullscreen(false);
         PlayerEmpty.Visibility = Visibility.Visible;
         pendingSeek = null; seeking = false; playbackPause.Clear(); playbackIntent.Clear(); appliedGeneration = readyGeneration = -1; ++loadGeneration; var old = room; room = null; target = null; loadedMedia = null; ready = false;
-        player?.Stop(); if (old is not null) await old.DisposeAsync();
+        mediaLoadCancellation?.Cancel();
+        bridge?.CancelPendingReads();
+        var disconnect = old is null ? Task.CompletedTask : Task.Run(async () => await old.DisposeAsync());
         playingItem = null;
         await loading.WaitAsync();
-        try { if (bridge is not null) await bridge.DisposeAsync(); bridge = null; } finally { loading.Release(); }
+        try
+        {
+            var oldBridge = bridge; bridge = null;
+            oldBridge?.CancelPendingReads();
+            var stopBridge = oldBridge is null ? Task.CompletedTask : oldBridge.DisposeAsync().AsTask();
+            await Task.WhenAll(StopNativePlayback(), stopBridge, disconnect);
+        }
+        finally { loading.Release(); }
         PeopleList.ItemsSource = null; pendingAdmissions.Clear(); RoomFeedback.Text = ""; RoomFeedback.Visibility = Visibility.Collapsed;
         RoomTabs.SelectedIndex = 0; chat.Clear(); SetThreadExecutionState(0x80000000); ConnectionStatus.Text = "Local playback";
         guestBrowsePending = false; ++guestBrowseRequest; RefreshSharedLibrary();
@@ -1671,7 +1704,15 @@ public partial class MainWindow : Window
         library.Setting("volume", ((int)Volume.Value).ToString());
         await Task.Yield(); // Let WPF finish the first Closing event before calling Close again.
         foreach (var watcher in watchers) watcher.Dispose();
-        try { await Disconnect(); } finally { Video.MediaPlayer = null; player?.Dispose(); vlc?.Dispose(); Close(); }
+        Hide();
+        try { await Disconnect(); }
+        finally
+        {
+            Video.MediaPlayer = null;
+            var native = player; var engine = vlc; player = null; vlc = null;
+            await Task.Run(() => { native?.Dispose(); engine?.Dispose(); });
+            Close();
+        }
     }
     [DllImport("user32.dll")] private static extern uint GetDoubleClickTime();
     [DllImport("kernel32.dll")] private static extern uint SetThreadExecutionState(uint flags);
