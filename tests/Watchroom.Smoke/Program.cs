@@ -236,6 +236,7 @@ await MetadataCacheFixture.Run(Path.Combine(root, "metadata-cache"), Check);
 await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
 await GroupingAuditFixture.Run(Path.Combine(root, "grouping-audit"), Check);
 HostRoomFixture.Run(Check);
+RoomTrackFixture.Run(Check);
 SharedLibraryFixture.Run(Check);
 await StreamingAudioFixture.Run(Path.Combine(root, "streaming-audio"), Check);
 await PeerMediaFixture.Run(Check);

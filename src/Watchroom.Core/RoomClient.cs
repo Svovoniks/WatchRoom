@@ -14,7 +14,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     private readonly CancellationTokenSource lifetime = new();
     private readonly CancellationTokenSource discoveryLifetime = new();
     private readonly Channel<WireMessage> outgoing = Channel.CreateBounded<WireMessage>(128);
-    private sealed record RoomEvent(string Kind, string? Peer = null, WireMessage? Message = null, PeerTransport? Transport = null, HostedFileSelection? Selection = null, bool Play = false);
+    private sealed record RoomEvent(string Kind, string? Peer = null, WireMessage? Message = null, PeerTransport? Transport = null, HostedFileSelection? Selection = null, bool Play = false, IMediaSource? Subtitle = null, string? MediaId = null);
     private readonly Channel<RoomEvent> events = Channel.CreateBounded<RoomEvent>(256);
     private readonly ConcurrentDictionary<string, PeerTransport> peers = new();
     private readonly ConcurrentDictionary<string, byte> negotiated = new();
@@ -38,6 +38,15 @@ public sealed partial class RoomClient : IAsyncDisposable
     public Task DirectControlsReady => directConnected.Task;
     public bool DiscoveryOnline => Volatile.Read(ref discoveryFailed) == 0 && connection is not null;
     public IMediaSource? HostedMedia { get; set; }
+    public void ShareSubtitle(string path)
+    {
+        if (!IsConnected || Identity?.Host != true || Snapshot?.Media is not { } media) throw new IOException("Only the host can load room subtitles.");
+        var asset = new FileMediaSource(path, Path.GetFileName(path));
+        if (asset.Media.Length is <= 0 or > 8388608 || !new[] { ".srt", ".ass", ".ssa", ".sub" }.Contains(asset.Media.Extension.ToLowerInvariant()))
+            throw new IOException("Choose a subtitle file up to 8 MiB.");
+        if ((media.Subtitles ?? []).Count(s => s.Id != asset.Media.Id) >= 12) throw new IOException("A video can share up to 12 subtitle files.");
+        if (!events.Writer.TryWrite(new("subtitle-selection", Subtitle: asset, MediaId: media.Id))) throw new IOException("Room control queue is full.");
+    }
     private MediaItem[] hostedLibrary = [];
     public Func<string?, string?>? LibraryThumbnail { get; set; }
     public Func<string?, string?>? LibraryArtwork { get; set; }
@@ -155,7 +164,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     {
         if (!IsConnected) throw new IOException("Room connection is closed. Rejoin the room to reconnect.");
         if (message.Type == "remove" && !DiscoveryOnline) throw new IOException("Reconnect to the room service before revoking saved guest access.");
-        if (message.Type is "catalog-follow" or "catalog-artwork" or "catalog-watch" or "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
+        if (message.Type is "tracks" or "catalog-follow" or "catalog-artwork" or "catalog-watch" or "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
         {
             if (Identity?.Host != true && !directConnected.Task.IsCompletedSuccessfully)
                 throw new IOException("Waiting for the host's direct control connection. All participants need the updated app.");
@@ -251,6 +260,13 @@ public sealed partial class RoomClient : IAsyncDisposable
                             else Status?.Invoke("Room discovery is offline. Existing peer playback continues; new joins are unavailable.");
                             break;
                         case "local": HandleLocal(item.Message!); break;
+                        case "subtitle-selection":
+                            if (coordinator?.Media?.Id != item.MediaId || item.Subtitle is null) break;
+                            assets[item.Subtitle.Media.Id] = item.Subtitle;
+                            ApplyHostCommand(Identity!.Peer, new("subtitle", Data: Wire.Serialize(new SubtitleAttachment(item.MediaId!, item.Subtitle.Media))));
+                            if (HostedMedia is ILocalMediaSource local && coordinator?.Media is { } updated)
+                                HostedMedia = new UpdatedHostedMedia(local, updated);
+                            break;
                         case "selection":
                             ApplyHostedFile(item.Selection!);
                             ApplyHostCommand(Identity!.Peer, new("media", Data: Wire.Serialize(item.Selection!.Media.Media)));
@@ -642,5 +658,11 @@ internal sealed class MediaWithSubtitles(FileMediaSource source, SharedMedia[] s
 {
     public string LocalPath => source.LocalPath;
     public SharedMedia Media { get; } = source.Media with { Subtitles = subtitles };
+    public Task<byte[]> ReadAsync(long offset, int count, CancellationToken ct) => source.ReadAsync(offset, count, ct);
+}
+internal sealed class UpdatedHostedMedia(ILocalMediaSource source, SharedMedia media) : ILocalMediaSource
+{
+    public string LocalPath => source.LocalPath;
+    public SharedMedia Media => media;
     public Task<byte[]> ReadAsync(long offset, int count, CancellationToken ct) => source.ReadAsync(offset, count, ct);
 }

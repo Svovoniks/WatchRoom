@@ -39,6 +39,17 @@ static class Program
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             PlayerLayoutChecks.Run(); app.Shutdown(); return;
         }
+        if (args.FirstOrDefault() == "--room-tracks")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                try { await RoomTrackChecks.Run(args[1], directory); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
+        }
         if (args.FirstOrDefault() == "--track-preferences")
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;

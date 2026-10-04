@@ -42,12 +42,15 @@ public record PlaybackState(long Revision, string MediaId, bool Playing, long Po
     public bool WantsPlayback => RequestedPlaying ?? Playing;
 }
 public record PlaybackReadiness(string MediaId, long Generation);
+public record SharedTrack(int Index, string? AssetId = null);
+public record RoomTracks(string MediaId, SharedTrack? Audio = null, SharedTrack? Subtitles = null, long Revision = 0);
+public record SubtitleAttachment(string MediaId, SharedMedia Subtitle);
 public record WireMessage(string Type, string? Target = null, string? Sender = null,
     string? Text = null, string? Data = null, long Number = 0);
 public record Welcome(string Room, string Peer, bool Host, string[] IceServers, bool ForceRelay, string? HostKey = null, string? GuestKey = null);
 public record AdmittedGuest(string Id, string Name);
 public record RoomSnapshot(Participant[] People, SharedMedia? Media, PlaybackState? Playback, bool SharedControls, string[]? Queue = null, AdmittedGuest[]? AdmittedGuests = null, string? Name = null,
-    bool LibraryBrowsing = false, LibraryBrowseActivity? LibraryActivity = null);
+    bool LibraryBrowsing = false, LibraryBrowseActivity? LibraryActivity = null, RoomTracks? Tracks = null);
 
 public static class Wire
 {

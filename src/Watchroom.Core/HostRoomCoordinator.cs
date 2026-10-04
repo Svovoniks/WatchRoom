@@ -13,7 +13,9 @@ internal sealed class HostRoomCoordinator(string host)
     private long revision, generation;
     private bool resumeWhenReady;
     public AdmittedGuest[] AdmittedGuests { get; set; } = [];
-    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name, LibraryBrowsing, LibraryActivity);
+    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name, LibraryBrowsing, LibraryActivity, Tracks);
+    public RoomTracks? Tracks { get; private set; }
+    private long trackRevision;
     public bool LibraryBrowsing { get; private set; }
     public LibraryBrowseActivity? LibraryActivity { get; private set; }
     public bool ExpireLibrary(long now)
@@ -91,9 +93,23 @@ internal sealed class HostRoomCoordinator(string host)
             case "media" when sender == host:
                 var media = Wire.Read<SharedMedia>(message.Data!);
                 if (!ValidMedia(media)) throw new InvalidDataException("Invalid shared media");
-                Media = media; resumeWhenReady = false; generation++;
+                Media = media; Tracks = null; resumeWhenReady = false; generation++;
                 foreach (var p in people.Values.ToArray()) people[p.Id] = p with { Ready = false };
                 Playback = new(++revision, media.Id, false, 0, now, RequestedPlaying: false, Generation: generation);
+                return true;
+            case "subtitle" when sender == host:
+                var attachment = Wire.Read<SubtitleAttachment>(message.Data!);
+                if (Media is null || attachment.MediaId != Media.Id || attachment.Subtitle is null || !ValidMedia(attachment.Subtitle, true) ||
+                    !new[] { ".srt", ".ass", ".ssa", ".sub" }.Contains(attachment.Subtitle.Extension.ToLowerInvariant())) return false;
+                var subtitles = (Media.Subtitles ?? []).Where(s => s.Id != attachment.Subtitle.Id).Append(attachment.Subtitle).ToArray();
+                if (subtitles.Length > 12) return false;
+                Media = Media with { Subtitles = subtitles };
+                Tracks = new(Media.Id, Tracks?.Audio, new(0, attachment.Subtitle.Id), ++trackRevision);
+                return true;
+            case "tracks" when sender == host || SharedControls:
+                var tracks = Wire.Read<RoomTracks>(message.Data!);
+                if (Media is null || tracks.MediaId != Media.Id || !ValidTrack(tracks.Audio, false) || !ValidTrack(tracks.Subtitles, true)) return false;
+                Tracks = new(Media.Id, tracks.Audio ?? Tracks?.Audio, tracks.Subtitles ?? Tracks?.Subtitles, ++trackRevision);
                 return true;
             case "controls" when sender == host: SharedControls = message.Number == 1; return true;
             case "queue" when sender == host:
@@ -154,4 +170,7 @@ internal sealed class HostRoomCoordinator(string host)
         m.Id is { Length: > 0 and <= 128 } && m.Title is { Length: <= 300 } && m.Length > 0 && m.Extension is { Length: <= 16 } &&
         (sidecar ? m.Length <= 8388608 && m.Subtitles is null or { Length: 0 } :
             m.Subtitles is null || m.Subtitles.Length <= 12 && m.Subtitles.All(s => s is not null && ValidMedia(s, true)));
+    private bool ValidTrack(SharedTrack? track, bool subtitle) => track is null ||
+        track.Index is >= -1 and <= 255 && (track.AssetId is null || subtitle && track.Index >= 0 &&
+            Media?.Subtitles?.Any(asset => asset.Id == track.AssetId) == true);
 }

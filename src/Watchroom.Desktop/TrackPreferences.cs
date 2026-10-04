@@ -33,6 +33,7 @@ public partial class MainWindow
     private void ApplyTrackPreferences(TrackChoice[] audio, TrackChoice[] subtitles)
     {
         if (player is null || !ready) return;
+        if (room?.Identity?.Host == false) return;
         if (preferredTrackGeneration != loadGeneration)
         {
             preferredTrackGeneration = loadGeneration; audioTrackChosen = subtitleTrackChosen = false;
@@ -42,9 +43,9 @@ public partial class MainWindow
         var metadata = media?.Tracks ?? [];
         LanguageTrack[] Choices(TrackChoice[] choices, TrackType type) => choices.Select(choice =>
             new LanguageTrack(choice.Id, choice.Name, metadata.FirstOrDefault(track => track.Id == choice.Id && track.TrackType == type).Language)).ToArray();
-        if (!audioTrackChosen && TrackLanguages.Select(Choices(audio, TrackType.Audio), videoAudioLanguages) is { } preferredAudio)
+        if (room?.Snapshot?.Tracks?.Audio is null && !audioTrackChosen && TrackLanguages.Select(Choices(audio, TrackType.Audio), videoAudioLanguages) is { } preferredAudio)
             audioTrackChosen = player.AudioTrack == preferredAudio || player.SetAudioTrack(preferredAudio);
-        if (!subtitleTrackChosen && TrackLanguages.Select(Choices(subtitles, TrackType.Text), videoSubtitleLanguages, true) is { } preferredSubtitle)
+        if (room?.Snapshot?.Tracks?.Subtitles is null && !subtitleTrackChosen && TrackLanguages.Select(Choices(subtitles, TrackType.Text), videoSubtitleLanguages, true) is { } preferredSubtitle)
             subtitleTrackChosen = player.Spu == preferredSubtitle || player.SetSpu(preferredSubtitle);
     }
 }

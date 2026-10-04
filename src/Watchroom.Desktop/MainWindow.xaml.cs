@@ -929,6 +929,7 @@ public partial class MainWindow : Window
                 if (room.Identity?.Host != true && !snapshot.SharedControls) { playbackPause.Clear(); playbackIntent.Clear(); }
                 if (snapshot.Playback is not null) AcceptState(snapshot.Playback);
                 if (snapshot.Media is not null && snapshot.Media.Id != loadedMedia) await LoadRoomMedia(snapshot.Media);
+                if (ready) RefreshTracks();
                 UpdateSessionControls();
                 RefreshSharedLibrary();
                 break;
@@ -1000,6 +1001,7 @@ public partial class MainWindow : Window
         PlaybackDiagnostics.Record("media-load-start", new { media.Extension, bytes = media.Length });
         var client = room; if (client is null) return;
         var generation = ++loadGeneration; loadedMedia = media.Id;
+        ResetRoomTracks();
         mediaLoadCancellation?.Cancel();
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         mediaLoadCancellation = cancellation;
@@ -1030,21 +1032,7 @@ public partial class MainWindow : Window
             // steps, exposing read-ahead time to the synchronization controller.
             // The avformat demuxer provides a regularly advancing timeline.
             if (media.Extension.Equals(".avi", StringComparison.OrdinalIgnoreCase)) vlcMedia.AddOption(":demux=avformat");
-            foreach (var subtitle in (media.Subtitles ?? []).Take(12))
-            {
-                if (subtitle.Length is <= 0 or > 8388608 || !new[] { ".srt", ".ass", ".ssa" }.Contains(subtitle.Extension.ToLowerInvariant())) continue;
-                var asset = await client.GetSourceAsync(subtitle, cancellation.Token);
-                var dir = Path.Combine(App.DataDirectory, "subtitles"); Directory.CreateDirectory(dir);
-                var subtitlePath = Path.Combine(dir, Guid.NewGuid().ToString("N") + subtitle.Extension.ToLowerInvariant());
-                await using (var output = File.Create(subtitlePath))
-                    for (long offset = 0; offset < subtitle.Length;)
-                    {
-                        var bytes = await asset.ReadAsync(offset, (int)Math.Min(32768, subtitle.Length - offset), cancellation.Token);
-                        if (bytes.Length == 0) throw new IOException("Subtitle transfer ended early. Rejoin the room to retry.");
-                        await output.WriteAsync(bytes, cancellation.Token); offset += bytes.Length;
-                    }
-                vlcMedia.AddSlave(MediaSlaveType.Subtitle, 2, new Uri(subtitlePath).AbsoluteUri);
-            }
+            vlcMedia.AddOption(":sub-autodetect-file=0");
             if (client != room || generation != loadGeneration) return;
             RoomHeading.Text = client.Snapshot?.Name ?? media.Title; RoomSubtitle.Text = media.Title + " · " + (client.Identity?.Host == true ? "You are hosting" : "Streaming from host");
             await PrepareVideoSurface(openPlayer: RoomPage.Visibility == Visibility.Visible);
@@ -1279,26 +1267,34 @@ public partial class MainWindow : Window
         try
         {
             var audio = player.AudioTrackDescription.Select(x => new TrackChoice(x.Id, x.Name)).ToArray();
-            var subs = player.SpuDescription.Select(x => new TrackChoice(x.Id, x.Name)).ToArray();
+            var subs = player.SpuDescription.Select(x => new TrackChoice(x.Id, RoomSubtitleName(x.Id, x.Name))).ToArray();
             ApplyTrackPreferences(audio, subs);
+            SynchronizeRoomTracks(audio, subs);
             if (!(AudioTracks.ItemsSource is TrackChoice[] currentAudio) || !currentAudio.SequenceEqual(audio)) AudioTracks.ItemsSource = audio;
             if (!(SubtitleTracks.ItemsSource is TrackChoice[] currentSubs) || !currentSubs.SequenceEqual(subs)) SubtitleTracks.ItemsSource = subs;
             AudioTracks.SelectedItem = audio.FirstOrDefault(x => x.Id == player.AudioTrack);
             SubtitleTracks.SelectedItem = subs.FirstOrDefault(x => x.Id == player.Spu);
-            AudioTracks.IsEnabled = audio.Length > 0; SubtitleTracks.IsEnabled = subs.Length > 0;
+            AudioTracks.IsEnabled = audio.Length > 0 && CanChangeRoomTracks;
+            SubtitleTracks.IsEnabled = subs.Length > 0 && CanChangeRoomTracks;
             var audioCount = audio.Count(x => x.Id >= 0); var subtitleCount = subs.Count(x => x.Id >= 0);
             TrackSummary.Text = $"{audioCount} audio {(audioCount == 1 ? "track" : "tracks")} · {subtitleCount} subtitle {(subtitleCount == 1 ? "track" : "tracks")}. External subtitles can be loaded below.";
         }
         finally { tracksUpdating = false; }
     }
-    private void AudioChanged(object sender, SelectionChangedEventArgs e) { if (!tracksUpdating && AudioTracks.SelectedItem is TrackChoice t) { audioTrackChosen = true; player?.SetAudioTrack(t.Id); } }
-    private void SubtitlesChanged(object sender, SelectionChangedEventArgs e) { if (!tracksUpdating && SubtitleTracks.SelectedItem is TrackChoice t) { subtitleTrackChosen = true; player?.SetSpu(t.Id); } }
+    private void AudioChanged(object sender, SelectionChangedEventArgs e) { if (!tracksUpdating && CanChangeRoomTracks && AudioTracks.SelectedItem is TrackChoice t) { audioTrackChosen = true; player?.SetAudioTrack(t.Id); PublishRoomTrack(t.Id, false); } }
+    private void SubtitlesChanged(object sender, SelectionChangedEventArgs e) { if (!tracksUpdating && CanChangeRoomTracks && SubtitleTracks.SelectedItem is TrackChoice t) { subtitleTrackChosen = true; player?.SetSpu(t.Id); PublishRoomTrack(t.Id, true); } }
     private void LoadSubtitles(object sender, RoutedEventArgs e)
     {
-        if (player is null || !ready) return;
+        if (player is null || !ready || room?.Identity?.Host == false) return;
         var picker = new OpenFileDialog { Filter = "Subtitles|*.srt;*.ass;*.ssa;*.sub" };
         if (picker.ShowDialog(this) == true)
         {
+            if (room is not null)
+            {
+                try { room.ShareSubtitle(picker.FileName); SetStatus("Sharing subtitles with the room…"); }
+                catch (IOException ex) { SetStatus(ex.Message); }
+                return;
+            }
             subtitleTrackChosen = true;
             if (!player.AddSlave(MediaSlaveType.Subtitle, new Uri(picker.FileName).AbsoluteUri, true)) SetStatus("Subtitles could not be loaded. Check the file format and try again.");
             else { RefreshTracks(); SetStatus("Subtitles loaded for your player."); }
@@ -1427,6 +1423,7 @@ public partial class MainWindow : Window
         pendingSeek = null; seeking = false; playbackPause.Clear(); playbackIntent.Clear(); appliedGeneration = readyGeneration = -1; ++loadGeneration; var old = room; room = null; target = null; loadedMedia = null; ready = false;
         mediaLoadCancellation?.Cancel();
         bridge?.CancelPendingReads();
+        ResetRoomTracks();
         var disconnect = old is null ? Task.CompletedTask : Task.Run(async () => await old.DisposeAsync());
         playingItem = null;
         await loading.WaitAsync();
@@ -1519,7 +1516,7 @@ public partial class MainWindow : Window
         QueueEarlier.IsEnabled = RemoveQueueButton.IsEnabled && QueueList.SelectedIndex > 0;
         QueueLater.IsEnabled = RemoveQueueButton.IsEnabled && QueueList.SelectedIndex < queue.Count - 1;
         PrepareButton.IsEnabled = playingItem is not null && !preparing && (room is null || connectedRoom && room!.Identity?.Host == true);
-        LoadSubtitlesButton.IsEnabled = ready;
+        LoadSubtitlesButton.IsEnabled = ready && room?.Identity?.Host != false;
     }
     private void Fullscreen(object sender, RoutedEventArgs e)
     {
