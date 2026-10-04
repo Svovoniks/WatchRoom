@@ -23,7 +23,8 @@ static class RoomRecoveryChecks
         var url = "http://localhost:" + port;
         Process Start()
         {
-            var info = new ProcessStartInfo(Path.GetFullPath(".tools/dotnet/dotnet.exe")) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            var sdkPath = File.Exists(".tools/dotnet/dotnet.exe") ? Path.GetFullPath(".tools/dotnet/dotnet.exe") : Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
+            var info = new ProcessStartInfo(sdkPath) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             info.ArgumentList.Add(Path.GetFullPath("src/Watchroom.Server/bin/Release/net10.0/Watchroom.Server.dll"));
             info.ArgumentList.Add("--urls"); info.ArgumentList.Add(url);
             info.Environment["WATCHROOM_DATA"] = Path.Combine(directory, "recovery-server");
