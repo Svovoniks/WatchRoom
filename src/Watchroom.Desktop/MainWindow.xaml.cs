@@ -285,9 +285,7 @@ public partial class MainWindow : Window
     {
         if (GuestLibrary)
         {
-            ShowPage("Library"); GuestLibraryCategory.SelectedIndex = category; GuestLibrarySearch.Clear();
-            guestBrowse = new(Category: category);
-            if (OwnsLibrary) RequestHostLibrary();
+            libraryCategory = category; guestBrowse = new(Category: category); SearchBox.Clear(); ShowPage("Library");
             return;
         }
         if (currentPage != "Library" || libraryCategory != category || browseSeries != series || browseKind != kind || browseSeason != season || SearchBox.Text.Length > 0 || LibraryStatusFilter.SelectedIndex != 0) RememberLocation();
@@ -300,6 +298,7 @@ public partial class MainWindow : Window
     private void UpdateBreadcrumbs()
     {
         if (LibraryBreadcrumbs is null || DetailBreadcrumbs is null) return;
+        if (GuestLibrary) { UpdateHostBreadcrumbs(); return; }
         var detail = Details.Visibility == Visibility.Visible ? selected : null;
         var show = detail?.Series is not null ? detail : browseSeries is null ? null : items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind));
         var category = detail is not null ? CategoryFor(detail) : libraryCategory;
@@ -323,6 +322,7 @@ public partial class MainWindow : Window
         if (e.OriginalSource is not FrameworkElement element) return;
         var crumb = element.DataContext as LibraryBreadcrumb;
         if (crumb is null) return;
+        if (GuestLibrary) { NavigateHostBreadcrumb(crumb); e.Handled = true; return; }
         if (crumb.Level == "media") { if (items.FirstOrDefault(x => x.Id == crumb.MediaId) is { } item) Select(item); }
         else NavigateLibrary(crumb.Category, crumb.Series, crumb.Kind, crumb.Season);
         e.Handled = true;
@@ -393,7 +393,9 @@ public partial class MainWindow : Window
     }
     private async void FilterLibrary(bool debounce = false, bool backgroundUpdate = false)
     {
-        if (PosterGrid is null || LibraryStatusFilter is null || NoResults is null || library is null || closing || !libraryLoaded) return;
+        if (PosterGrid is null || LibraryStatusFilter is null || NoResults is null || library is null || closing) return;
+        if (GuestLibrary) { await FilterHostLibraryAsync(debounce); return; }
+        if (!libraryLoaded) return;
         librarySearchCancellation?.Cancel();
         using var request = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         librarySearchCancellation = request;
@@ -525,6 +527,7 @@ public partial class MainWindow : Window
     private void SelectMovie(object sender, RoutedEventArgs e)
     {
         var card = (LibraryCard)((Button)sender).Tag;
+        if (GuestLibrary) { OpenHostCard(card); return; }
         if (card.Level == "series") NavigateLibrary(CategoryFor(card.Media), LibraryIdentity.ShowKey(card.Media), card.Media.Kind);
         else if (card.Level == "season") NavigateLibrary(libraryCategory, browseSeries, browseKind, card.Season);
         else { Select(card.Media); Details.ScrollToTop(); }
@@ -560,7 +563,7 @@ public partial class MainWindow : Window
         if (closing || generation != detailPosterGeneration) return;
         if (path == detailPosterPath && (path is null || DetailPoster.Source is not null)) return;
         detailPosterPath = path; DetailPoster.Source = null;
-        var view = new LibraryCardView(new(item.DisplayTitle, item.Caption, path, item, "episode"));
+        var view = new LibraryCardView(new LibraryCard(item.DisplayTitle, item.Caption, path, item, "episode"));
         await view.LoadPosterAsync();
         if (!closing && generation == detailPosterGeneration) DetailPoster.Source = view.Poster;
     }
@@ -835,6 +838,9 @@ public partial class MainWindow : Window
     {
         var client = new RoomClient(library); room = client;
         guestBrowse = new(); guestLibraryNotice = null; guestBrowsePending = false; ++guestBrowseRequest;
+        guestCurrentBrowse = null; guestHadLibraryLease = false; guestParentTitle = null;
+        client.LibraryThumbnail = CachedLibraryThumbnail;
+        guestLibraryCache.Clear(); guestLibraryCards.Clear();
         client.SetHostedLibrary(items);
         client.Message += msg => Dispatcher.BeginInvoke(async () => { if (room == client) await Guard(() => OnRoomMessage(msg)); });
         client.LibraryPeerReady += id => Dispatcher.BeginInvoke(() =>
@@ -927,6 +933,7 @@ public partial class MainWindow : Window
     }
     private async Task ImproveEpisodeArtwork(LibraryCardView view)
     {
+        if (view.IsRemote) return;
         var item = view.Card.Media;
         var token = MetadataToken.Password; var ffmpeg = FfmpegBox.Text.Trim();
         var options = MetadataOptions.Load(library);
@@ -1572,7 +1579,7 @@ public partial class MainWindow : Window
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen)
         {
             ShowPage("Library");
-            var search = GuestLibrary ? GuestLibrarySearch : SearchBox;
+            var search = SearchBox;
             search.Focus(); search.SelectAll(); e.Handled = true; return;
         }
         if (e.Key == Key.Escape && LibraryPage.Visibility == Visibility.Visible && SearchBox.IsKeyboardFocused)

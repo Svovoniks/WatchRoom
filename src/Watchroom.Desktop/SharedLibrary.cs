@@ -1,7 +1,6 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Threading;
 using Watchroom.Core;
 
@@ -14,6 +13,19 @@ public partial class MainWindow
     private bool guestBrowsePending, updatingLibraryPermission;
     private DateTime guestBrowseSent;
     private string? guestLibraryNotice;
+    private CancellationTokenSource? guestSearchCancellation;
+    private readonly LibraryCardCollection guestLibraryCards = [];
+    private readonly Dictionary<LibraryBrowseRequest, CachedHostBrowse> guestLibraryCache = [];
+    private CachedHostBrowse? guestCurrentBrowse;
+    private bool guestHadLibraryLease;
+    private string? guestParentTitle;
+    private sealed class CachedHostBrowse
+    {
+        public DateTime Created { get; } = DateTime.UtcNow;
+        public List<LibraryCardView> Cards { get; } = [];
+        public int Total, NextPage;
+        public string Location = "All titles";
+    }
     private readonly DispatcherTimer guestBrowseTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private bool GuestLibrary => room?.Identity?.Host == false;
     private bool OwnsLibrary => room?.IsConnected == true && room.Snapshot?.LibraryActivity?.Peer == room.Identity?.Peer;
@@ -22,7 +34,7 @@ public partial class MainWindow
         guestBrowseTimer.Tick += (_, _) =>
         {
             if (guestBrowsePending && DateTime.UtcNow - guestBrowseSent > TimeSpan.FromSeconds(15))
-            { guestBrowsePending = false; guestLibraryNotice = "The host did not respond. Try browsing again; both devices need the updated app."; }
+            { guestBrowsePending = false; guestLibraryNotice = "The host did not respond. Select a category or search to try again."; }
             if (currentPage == "Library" && OwnsLibrary) TryLibraryCommand(new("catalog-renew"));
             RefreshSharedLibrary();
         };
@@ -35,10 +47,10 @@ public partial class MainWindow
     }
     private void RefreshSharedLibrary()
     {
-        if (GuestLibraryPanel is null) return;
+        if (GuestLibraryStatus is null) return;
         var guest = GuestLibrary;
-        GuestLibraryPanel.Visibility = guest ? Visibility.Visible : Visibility.Collapsed;
-        LocalLibraryHeader.Visibility = LocalLibraryContent.Visibility = guest ? Visibility.Collapsed : Visibility.Visible;
+        LibraryStatusFilter.Visibility = RescanButton.Visibility = guest ? Visibility.Collapsed : Visibility.Visible;
+        GuestLibraryStatus.Visibility = guest ? Visibility.Visible : Visibility.Collapsed;
         HostLibraryActivity.Visibility = room?.Identity?.Host == true ? Visibility.Visible : Visibility.Collapsed;
         var activity = room?.Snapshot?.LibraryActivity;
         HostLibraryActivityText.Text = activity is null ? room?.Snapshot?.LibraryBrowsing == true
@@ -46,82 +58,177 @@ public partial class MainWindow
             : "Guest browsing is off. Enable it in room settings."
             : $"{activity.Name} is browsing · {activity.Location}" + (activity.Query.Length == 0 ? "" : $" · Search: {activity.Query}");
         EndLibrarySessionButton.IsEnabled = activity is not null;
-        var owns = guest && OwnsLibrary;
+        if (!guest)
+        {
+            if (PosterGrid.ItemsSource == guestLibraryCards)
+            {
+                PosterGrid.ItemsSource = libraryCards;
+                guestLibraryCache.Clear(); guestLibraryCards.Clear(); guestCurrentBrowse = null;
+                if (currentPage == "Library") FilterLibrary();
+            }
+            return;
+        }
+        librarySearchCancellation?.Cancel();
+        PosterGrid.ItemsSource = guestLibraryCards;
+        EmptyLibrary.Visibility = NoResults.Visibility = SeasonInformation.Visibility = Visibility.Collapsed;
         var connected = room?.IsConnected == true && room.DirectControlsReady.IsCompletedSuccessfully;
-        StartLibraryBrowseButton.IsEnabled = guest && connected && room?.Snapshot?.LibraryBrowsing == true && (activity is null || owns) && !guestBrowsePending;
-        StartLibraryBrowseButton.Content = owns ? "Refresh titles" : "Browse host’s library";
-        FinishLibraryBrowseButton.IsEnabled = owns || guestBrowsePending;
-        GuestLibraryTools.Visibility = GuestLibraryPaging.Visibility = owns ? Visibility.Visible : Visibility.Collapsed;
-        GuestLibraryTools.IsEnabled = GuestLibraryPaging.IsEnabled = !guestBrowsePending;
-        if (!owns) GuestLibraryEntries.ItemsSource = null;
+        var allowed = connected && room?.Snapshot?.LibraryBrowsing == true;
+        if (guestHadLibraryLease && !OwnsLibrary)
+        {
+            guestLibraryCards.Clear(); guestLibraryCache.Clear(); guestCurrentBrowse = null;
+            guestBrowsePending = false; ++guestBrowseRequest;
+            guestLibraryNotice = "Browsing session ended. Search or select a category to browse again.";
+        }
+        guestHadLibraryLease = OwnsLibrary;
+        if (!allowed || activity is not null && !OwnsLibrary)
+        {
+            guestLibraryCards.Clear(); guestLibraryCache.Clear(); guestCurrentBrowse = null;
+            guestBrowsePending = false; ++guestBrowseRequest;
+        }
         GuestLibraryStatus.Text = room?.IsConnected != true ? "Disconnected from the host. Rejoin the room to browse their library."
             : !connected ? "Waiting for admission and a direct connection to the host…"
             : room?.Snapshot?.LibraryBrowsing != true ? "The host has disabled library browsing. They can enable it in room settings."
-            : guestBrowsePending ? "Loading titles from the host…"
             : guestLibraryNotice is not null ? guestLibraryNotice
-            : owns ? "You have the browsing slot. Finish browsing to let another guest explore."
-            : activity is not null ? $"{activity.Name} is browsing now. The slot becomes available when they finish."
-            : "Explore the host’s movies, shows and anime. One guest can browse at a time.";
+            : activity is not null && !OwnsLibrary ? $"{activity.Name} is browsing now. Their library will load when the slot is available."
+            : guestBrowsePending && guestLibraryCards.Count == 0 ? "Loading the host’s library…"
+            : "Host’s library";
+        if (allowed && (activity is null || OwnsLibrary) && currentPage == "Library" &&
+            !guestBrowsePending && guestCurrentBrowse is null && guestLibraryNotice is null)
+            RequestHostLibrary();
     }
-    private void RequestHostLibrary()
+    private async Task FilterHostLibraryAsync(bool debounce)
     {
-        if (!GuestLibrary || room?.IsConnected != true) return;
+        guestSearchCancellation?.Cancel();
+        using var request = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        guestSearchCancellation = request;
+        try
+        {
+            if (debounce) await Task.Delay(200, request.Token);
+            if (!request.IsCancellationRequested && GuestLibrary && currentPage == "Library") FilterHostLibrary();
+        }
+        catch (OperationCanceledException) when (request.IsCancellationRequested) { }
+        finally { if (guestSearchCancellation == request) guestSearchCancellation = null; }
+    }
+    private void FilterHostLibrary()
+    {
+        if (!GuestLibrary || currentPage != "Library") return;
+        guestLibraryNotice = null;
+        var query = SearchBox.Text.Trim();
+        guestBrowse = guestBrowse with { Query = query[..Math.Min(query.Length, 100)], Page = 0 };
+        SearchHint.Text = guestBrowse.ParentId is null ? "Search host’s library" : guestBrowse.Season is null ? "Search seasons" : "Search episodes";
+        SearchBox.ToolTip = SearchHint.Text + " (Ctrl+F)";
+        ClearSearchButton.Visibility = SearchBox.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        UpdateHostBreadcrumbs(); UpdateLibraryCategorySelection(true);
+        var key = guestBrowse with { Page = 0 };
+        LibraryScroll.ScrollToTop();
+        if (guestLibraryCache.TryGetValue(key, out var cached) && DateTime.UtcNow - cached.Created < TimeSpan.FromMinutes(2) && OwnsLibrary)
+        {
+            ++guestBrowseRequest; guestBrowsePending = false; guestCurrentBrowse = cached;
+            ShowCachedHostBrowse(); return;
+        }
+        guestLibraryCards.Clear(); guestCurrentBrowse = null;
+        RequestHostLibrary();
+    }
+    private void RequestHostLibrary(bool more = false)
+    {
+        if (!GuestLibrary || currentPage != "Library" || room?.IsConnected != true ||
+            !room.DirectControlsReady.IsCompletedSuccessfully || room.Snapshot?.LibraryBrowsing != true ||
+            room.Snapshot.LibraryActivity is not null && !OwnsLibrary || more && guestBrowsePending) return;
         guestLibraryNotice = null; guestBrowsePending = true; guestBrowseSent = DateTime.UtcNow;
+        guestBrowse = guestBrowse with { Page = more ? guestCurrentBrowse?.NextPage ?? 0 : 0 };
         TryLibraryCommand(new("catalog-browse", Number: ++guestBrowseRequest, Data: Wire.Serialize(guestBrowse)));
         RefreshSharedLibrary();
     }
     private void ReceiveHostLibrary(WireMessage message)
     {
         if (message.Number != guestBrowseRequest || currentPage != "Library" || !GuestLibrary) return;
-        guestBrowsePending = false; RefreshSharedLibrary();
+        guestBrowsePending = false;
         if (message.Type == "catalog-error") { guestLibraryNotice = message.Text; RefreshSharedLibrary(); return; }
-        if (!OwnsLibrary) return;
+        if (!OwnsLibrary) { RefreshSharedLibrary(); return; }
         var page = Wire.Read<LibraryBrowsePage>(message.Data!);
-        guestBrowse = guestBrowse with { Page = page.Page };
-        GuestLibraryEntries.ItemsSource = page.Entries;
-        GuestLibraryLocation.Text = page.Location;
-        GuestLibraryBack.IsEnabled = guestBrowse.ParentId is not null;
-        GuestLibraryPrevious.IsEnabled = page.Page > 0;
-        GuestLibraryNext.IsEnabled = (page.Page + 1) * SharedLibrary.PageSize < page.Total;
-        GuestLibraryCount.Text = page.Total == 0 ? "No matching titles" : $"{page.Total} titles · Page {page.Page + 1} of {Math.Max(1, (page.Total + SharedLibrary.PageSize - 1) / SharedLibrary.PageSize)}";
-        guestLibraryNotice = page.Total == 0 ? "No titles here. Try another search or category; the host may need to scan their folders." : null;
+        if (page.Page != guestBrowse.Page && page.Total > 0)
+        {
+            // The host collection shrank while scrolling. Restart this location.
+            guestLibraryCache.Remove(guestBrowse with { Page = 0 }); guestCurrentBrowse = null; guestLibraryCards.Clear();
+            RequestHostLibrary(); return;
+        }
+        var key = guestBrowse with { Page = 0 };
+        if (page.Page == 0 || guestCurrentBrowse is null)
+        {
+            if (guestLibraryCache.Count >= 32) guestLibraryCache.Remove(guestLibraryCache.MinBy(pair => pair.Value.Created).Key);
+            guestLibraryCache[key] = guestCurrentBrowse = new();
+            guestLibraryCards.Clear();
+        }
+        var cache = guestCurrentBrowse;
+        cache.Total = page.Total; cache.NextPage = page.Page + 1; cache.Location = page.Location;
+        var cards = page.Entries.Select(LibraryCardView.FromSharedEntry)
+            .Where(card => !cache.Cards.Any(existing => existing.Card.Media.Id == card.Card.Media.Id && existing.Card.Level == card.Card.Level)).ToArray();
+        cache.Cards.AddRange(cards); guestLibraryCards.AddBatch(cards);
+        guestLibraryNotice = page.Total == 0 ? "No matching titles. Try another search or category." : null;
+        UpdateHostResultCount(); UpdateHostBreadcrumbs(); RefreshSharedLibrary();
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(LoadMoreHostTitles));
+    }
+    private void ShowCachedHostBrowse()
+    {
+        guestLibraryCards.Clear(); guestLibraryCards.AddBatch(guestCurrentBrowse!.Cards);
+        PosterGrid.ItemsSource = guestLibraryCards;
+        UpdateHostResultCount(); UpdateHostBreadcrumbs();
+        // Renew host activity even when the data is already cached.
+        TryLibraryCommand(new("catalog-view", Target: guestBrowse.ParentId, Data: Wire.Serialize(guestBrowse with { Page = 0 })));
         RefreshSharedLibrary();
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(LoadMoreHostTitles));
+    }
+    private void UpdateHostResultCount() => ResultCount.Text = $"{guestCurrentBrowse?.Total ?? 0} items";
+    private void LibraryScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (GuestLibrary) LoadMoreHostTitles();
+    }
+    private void LoadMoreHostTitles()
+    {
+        if (!GuestLibrary || currentPage != "Library" || !OwnsLibrary || guestBrowsePending ||
+            guestLibraryNotice is not null || guestCurrentBrowse is not { } cache ||
+            cache.NextPage * SharedLibrary.PageSize >= cache.Total) return;
+        if (PosterGrid.Template.FindName("LibraryScroll", PosterGrid) is ScrollViewer scroll &&
+            scroll.VerticalOffset + scroll.ViewportHeight + 660 >= scroll.ExtentHeight)
+            RequestHostLibrary(more: true);
     }
     private void ReleaseHostLibrary()
     {
+        guestSearchCancellation?.Cancel();
+        guestHadLibraryLease = false;
         if (GuestLibrary && (OwnsLibrary || guestBrowsePending)) TryLibraryCommand(new("catalog-release"));
-        guestLibraryNotice = null; guestBrowsePending = false; ++guestBrowseRequest; GuestLibraryEntries.ItemsSource = null;
+        guestLibraryNotice = null; guestBrowsePending = false; ++guestBrowseRequest;
+        guestCurrentBrowse = null; guestLibraryCards.Clear();
     }
-    private void StartLibraryBrowse(object sender, RoutedEventArgs e) => RequestHostLibrary();
-    private void FinishLibraryBrowse(object sender, RoutedEventArgs e) { ReleaseHostLibrary(); RefreshSharedLibrary(); }
-    private void SearchHostLibrary(object sender, RoutedEventArgs e)
+    private void UpdateHostBreadcrumbs()
     {
-        var category = GuestLibraryCategory.SelectedIndex;
-        guestBrowse = guestBrowse with { Query = GuestLibrarySearch.Text.Trim(), Category = category, Page = 0,
-            ParentId = category != guestBrowse.Category ? null : guestBrowse.ParentId, Season = category != guestBrowse.Category ? null : guestBrowse.Season };
-        RequestHostLibrary();
-    }
-    private void GuestLibrarySearchKey(object sender, KeyEventArgs e) { if (e.Key == Key.Enter) { SearchHostLibrary(sender, e); e.Handled = true; } }
-    private void HostLibraryRoot(object sender, RoutedEventArgs e)
-    {
-        guestBrowse = new(); GuestLibrarySearch.Clear(); GuestLibraryCategory.SelectedIndex = 0; RequestHostLibrary();
-    }
-    private void HostLibraryBack(object sender, RoutedEventArgs e)
-    {
-        guestBrowse = guestBrowse with { ParentId = guestBrowse.Season is null ? null : guestBrowse.ParentId, Season = null, Query = "", Page = 0 };
-        GuestLibrarySearch.Clear(); RequestHostLibrary();
-    }
-    private void HostLibraryPage(object sender, RoutedEventArgs e)
-    { guestBrowse = guestBrowse with { Page = Math.Max(0, guestBrowse.Page + int.Parse((string)((Button)sender).Tag)) }; RequestHostLibrary(); }
-    private void OpenHostLibraryEntry(object sender, RoutedEventArgs e)
-    {
-        if (!OwnsLibrary || guestBrowsePending || ((Button)sender).Tag is not SharedLibraryEntry entry) return;
-        if (entry.Level is "series" or "season")
+        var crumbs = new List<LibraryBreadcrumb> { new("All", "category", Separator: "") };
+        if (guestBrowse.Category != 0) crumbs.Add(new(CategoryName(guestBrowse.Category), "category", guestBrowse.Category));
+        if (guestBrowse.ParentId is not null)
         {
-            guestBrowse = guestBrowse with { ParentId = entry.Id, Season = entry.Level == "season" ? entry.Season : null, Query = "", Page = 0 };
-            GuestLibrarySearch.Clear(); RequestHostLibrary();
+            crumbs.Add(new(guestParentTitle ?? "Show", "show", guestBrowse.Category, guestBrowse.ParentId));
+            if (guestBrowse.Season is { } season) crumbs.Add(new(SeasonName(season), "season", guestBrowse.Category, guestBrowse.ParentId, Season: season));
         }
-        else { TryLibraryCommand(new("catalog-view", Target: entry.Id)); GuestLibraryLocation.Text = entry.Title; }
+        crumbs[^1] = crumbs[^1] with { IsCurrent = true };
+        LibraryBreadcrumbs.ItemsSource = crumbs;
+    }
+    private void NavigateHostBreadcrumb(LibraryBreadcrumb crumb)
+    {
+        libraryCategory = crumb.Category;
+        guestBrowse = new(Category: crumb.Category, ParentId: crumb.Series, Season: crumb.Season);
+        SearchBox.Clear(); FilterHostLibrary();
+    }
+    private void OpenHostCard(LibraryCard card)
+    {
+        if (!OwnsLibrary) return;
+        if (card.Level is "series" or "season")
+        {
+            if (card.Level == "series") guestParentTitle = card.DisplayTitle;
+            guestBrowse = guestBrowse with { ParentId = card.Level == "season" ? guestBrowse.ParentId : card.Media.Id,
+                Season = card.Level == "season" ? card.Season : null, Query = "", Page = 0 };
+            SearchBox.Clear(); FilterHostLibrary();
+        }
+        else { TryLibraryCommand(new("catalog-view", Target: card.Media.Id)); SetStatus(card.DisplayTitle + (string.IsNullOrEmpty(card.Media.Overview) ? "" : " · " + card.Media.Overview)); }
     }
     private void OpenLibraryPermissions(object sender, RoutedEventArgs e) { RememberCurrentRoom(); ShowPage("Rooms"); }
     private void EndLibrarySession(object sender, RoutedEventArgs e) => TryLibraryCommand(new("catalog-release"));

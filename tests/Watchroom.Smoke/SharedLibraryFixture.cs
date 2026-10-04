@@ -42,5 +42,15 @@ static class SharedLibraryFixture
         var unicode = Enumerable.Range(0, 8).Select(i => new MediaItem("u" + i, "", new string('界', 180), "Movie", Overview: new string('界', 1000)));
         var message = new WireMessage("catalog-page", Data: Wire.Serialize(SharedLibrary.Browse(unicode, new())));
         check(System.Text.Encoding.UTF8.GetByteCount(Wire.Serialize(message)) < 65536, "Unicode catalog page stays within peer transport limit");
+        var thumbnail = Convert.ToBase64String(new byte[4000]);
+        var illustrated = SharedLibrary.Browse(unicode, new(), _ => thumbnail);
+        check(illustrated.Entries.All(entry => entry.Thumbnail == thumbnail), "all cards retain bounded thumbnail bytes");
+        check(System.Text.Encoding.UTF8.GetByteCount(Wire.Serialize(new WireMessage("catalog-page", Number: long.MaxValue, Data: Wire.Serialize(illustrated)))) < 65536,
+            "Unicode titles and posters fit the nested peer transport envelope");
+        check(SharedLibrary.Browse(items, new(), _ => new string('A', 5401)).Entries.All(entry => entry.Thumbnail is null),
+            "oversized thumbnail payloads are excluded");
+        var escaped = SharedLibrary.Browse(unicode, new(), _ => new string('+', 5400));
+        check(System.Text.Encoding.UTF8.GetByteCount(Wire.Serialize(new WireMessage("catalog-page", Number: long.MaxValue, Data: Wire.Serialize(escaped)))) < 65536,
+            "heavily escaped thumbnail bytes cannot exceed the control channel limit");
     }
 }

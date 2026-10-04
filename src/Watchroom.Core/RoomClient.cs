@@ -38,6 +38,7 @@ public sealed class RoomClient : IAsyncDisposable
     public bool DiscoveryOnline => Volatile.Read(ref discoveryFailed) == 0 && connection is not null;
     public IMediaSource? HostedMedia { get; set; }
     private MediaItem[] hostedLibrary = [];
+    public Func<string?, string?>? LibraryThumbnail { get; set; }
     public void SetHostedLibrary(IEnumerable<MediaItem> items) => Volatile.Write(ref hostedLibrary, items.ToArray());
     private readonly ConcurrentDictionary<string, IMediaSource> assets = new();
     public void SetHostedFile(string path, string title)
@@ -432,7 +433,7 @@ public sealed class RoomClient : IAsyncDisposable
         {
             try
             {
-                var page = SharedLibrary.Browse(Volatile.Read(ref hostedLibrary), browse);
+                var page = SharedLibrary.Browse(Volatile.Read(ref hostedLibrary), browse, LibraryThumbnail);
                 coordinator.DescribeLibrary(page.Location, browse.Query, clock.Now);
                 PublishHostState();
                 SendPeer(sender, new("catalog-page", Number: message.Number, Data: Wire.Serialize(page)));
@@ -442,6 +443,18 @@ public sealed class RoomClient : IAsyncDisposable
         }
         if (message.Type == "catalog-view")
         {
+            if (message.Data is not null)
+            {
+                try
+                {
+                    var location = Wire.Read<LibraryBrowseRequest>(message.Data);
+                    var cached = SharedLibrary.Browse(Volatile.Read(ref hostedLibrary), location);
+                    coordinator.DescribeLibrary(cached.Location, location.Query, clock.Now);
+                    PublishHostState();
+                }
+                catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException) { }
+                return;
+            }
             var entry = Volatile.Read(ref hostedLibrary).FirstOrDefault(x => x.Id == message.Target && x.Available && !x.IsVirtual && !x.IsExtra);
             if (entry is not null)
             {

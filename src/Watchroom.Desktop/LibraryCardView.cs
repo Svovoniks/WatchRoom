@@ -25,6 +25,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     private int imageGeneration;
     private string? requestedPath;
     private Task loading = Task.CompletedTask;
+    private string? remoteThumbnail;
     private (long Length, long Modified) posterVersion;
     private static (long Length, long Modified) Version(string? path)
     {
@@ -36,6 +37,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     public string DisplayTitle => Card.DisplayTitle;
     public string Caption => Card.Caption;
     public bool IsEpisode => Card.Level == "episode";
+    public bool IsRemote { get; private set; }
     public string EpisodeMeta => (Card.Media.Season is { } season ? $"S{season:00} · " : "") +
         (Card.Media.Episode is { } episode ? $"E{episode:00}" + (Card.Media.EpisodeEnd > episode ? $"–{Card.Media.EpisodeEnd:00}" : "") : "Episode unknown") +
         (Card.Media.RuntimeMinutes is > 0 ? $" · {Card.Media.RuntimeMinutes} min" : "") + (Card.Media.IsVirtual ? " · Missing" : Card.Media.Available ? "" : " · Unavailable");
@@ -48,6 +50,14 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         ? $"{card.Level}:{LibraryIdentity.ShowKey(card.Media)}:{card.Season}"
         : card.Level + ":" + card.Media.Id;
     public LibraryCardView(LibraryCard card) { Card = card; posterVersion = Version(card.Poster); }
+    public static LibraryCardView FromSharedEntry(SharedLibraryEntry entry) => new(entry);
+    private LibraryCardView(SharedLibraryEntry entry) : this(new LibraryCard(entry.Title, entry.Caption, null,
+        new MediaItem(entry.Id, "", entry.Title, entry.Kind, Season: entry.Season, Episode: entry.Episode,
+            Overview: entry.Overview, RuntimeMinutes: entry.RuntimeMinutes), entry.Level, entry.Season))
+    {
+        IsRemote = true;
+        remoteThumbnail = entry.Thumbnail is { Length: > 0 and <= 5400 } data ? data : null;
+    }
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Changed(string property) => PropertyChanged?.Invoke(this, new(property));
     public void Update(LibraryCard card)
@@ -74,8 +84,31 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     }
     public Task LoadPosterAsync()
     {
+        if (IsRemote)
+        {
+            if (requestedPath is not null || remoteThumbnail is null) return loading;
+            requestedPath = "remote";
+            return loading = LoadRemotePosterAsync(remoteThumbnail);
+        }
         if (requestedPath == Card.Poster && Card.Poster is not null) return loading;
         return loading = LoadPosterCoreAsync();
+    }
+    private async Task LoadRemotePosterAsync(string data)
+    {
+        var image = await Task.Run(async () =>
+        {
+            await imageWorkers.WaitAsync();
+            try
+            {
+                using var stream = new MemoryStream(Convert.FromBase64String(data));
+                var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.DecodePixelWidth = 160; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze();
+                return (BitmapSource?)bitmap;
+            }
+            catch (Exception ex) when (ex is FormatException or IOException or NotSupportedException or ArgumentException) { return null; }
+            finally { imageWorkers.Release(); }
+        });
+        if (image is not null) { Poster = image; Changed(nameof(Poster)); }
     }
     private async Task LoadPosterCoreAsync()
     {

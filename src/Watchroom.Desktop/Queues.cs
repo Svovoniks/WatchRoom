@@ -249,6 +249,7 @@ public partial class MainWindow
     }
     private void CardContextMenu(object sender, ContextMenuEventArgs e)
     {
+        if (GuestLibrary) { e.Handled = true; return; }
         if (sender is not Button button || button.Tag is not LibraryCard card) return;
         var videos = LibraryCatalog.CardItems(items, card, displaySpecialsWithinSeasons).ToArray();
         var menu = new ContextMenu { PlacementTarget = button };

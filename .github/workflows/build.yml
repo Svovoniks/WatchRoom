@@ -43,6 +43,10 @@ jobs:
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release
       - name: Guest library layout checks
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --guest-library-layout
+      - name: Host library browsing checks
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --host-library-browse
+      - name: Shared library transport checks
+        run: dotnet run --project tests/Watchroom.Smoke -c Release -- --shared-library
       - name: Player layout checks
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --player-layout
       - name: Full playback and room checks

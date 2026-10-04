@@ -44,6 +44,11 @@ static class Program
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             GuestLibraryLayoutChecks.Run(); app.Shutdown(); return;
         }
+        if (args.FirstOrDefault() == "--host-library-browse")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            HostLibraryBrowseChecks.Run(directory); app.Shutdown(); return;
+        }
         var startupGaps = new List<double>(); var startupClock = Stopwatch.StartNew(); var startupPrior = startupClock.Elapsed.TotalMilliseconds;
         var startupHeartbeat = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(10) };
         startupHeartbeat.Tick += (_, _) => { var now = startupClock.Elapsed.TotalMilliseconds; startupGaps.Add(now - startupPrior); startupPrior = now; };
@@ -417,19 +422,19 @@ static class Program
                 "waiting guest's canonical room name is saved for the next app launch");
             void RefreshLibraryUi() => typeof(MainWindow).GetMethod("RefreshSharedLibrary", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, []);
             RefreshLibraryUi();
-            Check(((FrameworkElement)window.FindName("GuestLibraryPanel")).Visibility == Visibility.Visible &&
-                ((FrameworkElement)window.FindName("LocalLibraryContent")).Visibility == Visibility.Collapsed,
-                "guest library replaces the local catalog within the Library tab");
-            Check(!((System.Windows.Controls.Button)window.FindName("StartLibraryBrowseButton")).IsEnabled, "waiting guest cannot start browsing before direct admission");
+            Check(((FrameworkElement)window.FindName("GuestLibraryStatus")).Visibility == Visibility.Visible &&
+                ((FrameworkElement)window.FindName("LocalLibraryContent")).Visibility == Visibility.Visible,
+                "guest library shares the regular library layout within the Library tab");
+            Check(!(bool)typeof(MainWindow).GetField("guestBrowsePending", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!, "waiting guest cannot start browsing before direct admission");
             ((TaskCompletionSource)typeof(RoomClient).GetField("directConnected", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(waitingClient)!).TrySetResult();
             var busy = waitingSnapshot with { LibraryBrowsing = true, LibraryActivity = new("other", "Alice", "Example", "pilot", Wire.Now) };
             typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, busy);
             RefreshLibraryUi();
-            Check(!((System.Windows.Controls.Button)window.FindName("StartLibraryBrowseButton")).IsEnabled &&
+            Check(!(bool)typeof(MainWindow).GetField("guestBrowsePending", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)! &&
                 ((System.Windows.Controls.TextBlock)window.FindName("GuestLibraryStatus")).Text.Contains("Alice"), "busy library identifies the current guest and locks the browse action");
             typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, busy with { LibraryActivity = null });
             RefreshLibraryUi();
-            Check(((System.Windows.Controls.Button)window.FindName("StartLibraryBrowseButton")).IsEnabled, "released browsing slot becomes available without reconnecting");
+            Check(!((System.Windows.Controls.TextBlock)window.FindName("GuestLibraryStatus")).Text.Contains("Alice"), "released browsing slot becomes available without reconnecting");
             var pageField = typeof(MainWindow).GetField("currentPage", BindingFlags.NonPublic | BindingFlags.Instance)!;
             var previousPage = pageField.GetValue(window);
             typeof(MainWindow).GetMethod("ShowPage", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, ["Library"]);
@@ -442,7 +447,7 @@ static class Program
             var dispatch = typeof(MainWindow).GetMethod("OnRoomMessage", BindingFlags.NonPublic | BindingFlags.Instance)!;
             void Receive(WireMessage message) => ((Task)dispatch.Invoke(window, [message])!).GetAwaiter().GetResult();
             Receive(new WireMessage("catalog-page", Number: requestNumber, Data: Wire.Serialize(catalog)));
-            var entries = (System.Windows.Controls.ItemsControl)window.FindName("GuestLibraryEntries");
+            var entries = (System.Windows.Controls.ItemsControl)window.FindName("PosterGrid");
             Check(entries.Items.Count == 3, "active guest renders host catalog cards in the Library tab");
             Receive(new WireMessage("catalog-page", Number: requestNumber - 1, Data: Wire.Serialize(catalog with { Entries = [] })));
             Check(entries.Items.Count == 3, "stale library responses cannot replace current results");
@@ -458,7 +463,7 @@ static class Program
             using (var imageFile = File.Create(Path.GetFullPath("artifacts/shared-library-ui.png"))) encoder.Save(imageFile);
             typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, busy with { LibraryBrowsing = false, LibraryActivity = null });
             RefreshLibraryUi();
-            Check(entries.Items.Count == 0 && ((FrameworkElement)window.FindName("GuestLibraryTools")).Visibility == Visibility.Collapsed, "revocation immediately clears visible catalog and browsing controls");
+            Check(entries.Items.Count == 0 && !(bool)typeof(MainWindow).GetField("guestBrowsePending", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!, "revocation immediately clears visible catalog and pending requests");
             typeof(MainWindow).GetMethod("ShowPage", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [previousPage!]);
         }
         finally

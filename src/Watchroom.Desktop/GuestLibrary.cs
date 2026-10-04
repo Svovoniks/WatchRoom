@@ -9,6 +9,25 @@ public partial class MainWindow
     private readonly Dictionary<string, MediaItem> sharedItems = new();
     private readonly Dictionary<string, string> sharedIds = new();
     private string[] sharedKinds = [];
+    private readonly Dictionary<string, (long Length, long Modified, string? Data)> libraryThumbnails = new();
+    private string? CachedLibraryThumbnail(string? path)
+    {
+        if (path is null) return null;
+        try
+        {
+            var file = new FileInfo(path);
+            if (!file.Exists) return null;
+            lock (libraryThumbnails)
+            {
+                if (libraryThumbnails.TryGetValue(path, out var cached) && cached.Length == file.Length && cached.Modified == file.LastWriteTimeUtc.Ticks) return cached.Data;
+                var data = MakeThumbnail(path, 4000);
+                if (libraryThumbnails.Count >= 512) libraryThumbnails.Clear();
+                libraryThumbnails[path] = (file.Length, file.LastWriteTimeUtc.Ticks, data);
+                return data;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
     private string HostPeerId() => room?.Snapshot?.People.FirstOrDefault(p => p.IsHost)?.Id ?? room?.Identity?.Peer ?? "";
     private void EnsureRoomLibrary()
     {
@@ -59,17 +78,22 @@ public partial class MainWindow
         }
         roomLibrary.Publish(catalog);
     }
-    private static string? MakeThumbnail(string? path)
+    private static string? MakeThumbnail(string? path, int maximumBytes = 12000)
     {
         if (path is null || !File.Exists(path)) return null;
         try
         {
             using var file = File.OpenRead(path);
-            var bitmap = new System.Windows.Media.Imaging.BitmapImage(); bitmap.BeginInit();
-            bitmap.DecodePixelWidth = 100; bitmap.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad; bitmap.StreamSource = file; bitmap.EndInit();
-            var encoder = new System.Windows.Media.Imaging.JpegBitmapEncoder { QualityLevel = 60 };
-            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap)); using var output = new MemoryStream(); encoder.Save(output);
-            return output.Length <= 12000 ? Convert.ToBase64String(output.ToArray()) : null;
+            foreach (var width in new[] { 160, 100, 64 })
+            {
+                file.Position = 0;
+                var bitmap = new System.Windows.Media.Imaging.BitmapImage(); bitmap.BeginInit();
+                bitmap.DecodePixelWidth = width; bitmap.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad; bitmap.StreamSource = file; bitmap.EndInit();
+                var encoder = new System.Windows.Media.Imaging.JpegBitmapEncoder { QualityLevel = 65 };
+                encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap)); using var output = new MemoryStream(); encoder.Save(output);
+                if (output.Length <= maximumBytes) return Convert.ToBase64String(output.ToArray());
+            }
+            return null;
         }
         catch (Exception) { return null; }
     }

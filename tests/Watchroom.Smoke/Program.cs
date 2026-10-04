@@ -6,6 +6,14 @@ using Watchroom.Core;
 using LibVLCSharp.Shared;
 using System.Diagnostics;
 
+if (args.FirstOrDefault() == "--shared-library")
+{
+    var checks = 0;
+    SharedLibraryFixture.Run((condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} shared library checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--episode-playback")
 {
     var checks = 0;
