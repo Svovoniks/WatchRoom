@@ -45,7 +45,7 @@ public partial class MainWindow
         if (identity.Host && identity.HostKey is null) return;
         using var retry = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         roomReconnect = retry;
-        var name = DisplayNameBox.Text;
+        var name = SavedDisplayName;
         var roomName = previous.Snapshot?.Name;
         var source = previous.HostedMedia as ILocalMediaSource;
         var playback = previous.Snapshot?.Playback;

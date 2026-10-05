@@ -52,7 +52,25 @@ public partial class MainWindow
         SavedQueueItems.ItemsSource = saved?.MediaIds.Select((id, index) => new QueueEntry(index, items.FirstOrDefault(x => x.Id == id))).ToArray() ?? [];
         QueueDetailTitle.Text = saved?.Name ?? "Choose a queue";
         QueueDetailCaption.Text = saved is null ? "Create a queue to get started." : $"{saved.MediaIds.Length} videos · Order saved automatically";
-        QueueEmpty.Visibility = saved?.MediaIds.Length > 0 ? Visibility.Collapsed : Visibility.Visible;
+        UpdateSavedQueueActions();
+    }
+    private void SavedQueueSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSavedQueueActions();
+    private void UpdateSavedQueueActions()
+    {
+        if (PlaySavedQueueButton is null || SavedQueueEarlier is null || SavedQueueFeedback is null) return;
+        var saved = QueuePicker.SelectedItem as SavedQueue;
+        var canEdit = room is null || room.IsConnected && room.Identity?.Host == true;
+        var playable = saved is not null && ResolveQueue(saved).Any(x => x.Available && File.Exists(x.Path));
+        PlaySavedQueueButton.IsEnabled = canEdit && playable;
+        PlaySavedQueueButton.Style = (Style)FindResource(playable ? "Primary" : typeof(Button));
+        AddQueueVideosButton.Style = (Style)FindResource(playable ? typeof(Button) : "Primary");
+        AddQueueVideosButton.IsEnabled = canEdit && saved is not null;
+        var index = SavedQueueItems.SelectedIndex;
+        SavedQueueEarlier.IsEnabled = canEdit && index > 0;
+        SavedQueueLater.IsEnabled = canEdit && index >= 0 && index < (saved?.MediaIds.Length ?? 0) - 1;
+        SavedQueueFeedback.Text = !canEdit ? "The host controls the queue."
+            : saved?.MediaIds.Length == 0 ? "Add videos to enable playback."
+            : !playable ? "No available videos. Reconnect their drive or add videos from your library." : "";
     }
     private void SavedQueueChanged(object sender, SelectionChangedEventArgs e) { if (!updatingQueues && SavedQueueItems is not null) RefreshSavedItems(); }
     private void SelectPlaybackQueue(SavedQueue saved)
@@ -103,7 +121,8 @@ public partial class MainWindow
     private void StartQueue(SavedQueue? saved, object sender, RoutedEventArgs e)
     {
         if (saved is null || saved == noPlaybackQueue || !CanEditQueue()) return;
-        if (!ResolveQueue(saved).Any(x => File.Exists(x.Path))) { SetStatus("This queue has no available videos."); return; }
+        if (!ResolveQueue(saved).Any(x => x.Available && File.Exists(x.Path)))
+        { UpdateSavedQueueActions(); SetStatus("This queue has no available videos."); return; }
         SelectPlaybackQueue(saved); NextQueued(sender, e);
     }
     private void ApplyQueueOrder(SavedQueue saved, int[] order)
@@ -210,10 +229,18 @@ public partial class MainWindow
     private void AddQueueVideos(object sender, RoutedEventArgs e)
     {
         if (QueuePicker.SelectedItem is not SavedQueue saved || !CanEditQueue()) return;
+        var available = items.Where(x => x.Available && File.Exists(x.Path)).ToArray();
+        if (available.Length == 0)
+        {
+            ShowPage("Folders");
+            SetStatus("Add or reconnect a video folder, then return to Queues to add videos.");
+            return;
+        }
         var win = new Window { Owner = this, Title = "Add videos", Width = 650, Height = 480, WindowStartupLocation = WindowStartupLocation.CenterOwner };
         var panel = new DockPanel { Margin = new Thickness(20) };
-        var add = new Button { Content = "Add selected", IsDefault = true }; DockPanel.SetDock(add, Dock.Bottom); panel.Children.Add(add);
-        var list = new ListBox { ItemsSource = items.Where(x => x.Available).ToArray(), DisplayMemberPath = "QueueTitle", SelectionMode = SelectionMode.Extended }; panel.Children.Add(list);
+        var add = new Button { Content = "Add selected", IsDefault = true, IsEnabled = false }; DockPanel.SetDock(add, Dock.Bottom); panel.Children.Add(add);
+        var list = new ListBox { ItemsSource = available, DisplayMemberPath = "QueueTitle", SelectionMode = SelectionMode.Extended }; panel.Children.Add(list);
+        list.SelectionChanged += (_, _) => add.IsEnabled = list.SelectedItems.Count > 0;
         add.Click += (_, _) => { if (list.SelectedItems.Count > 0) win.DialogResult = true; };
         win.Content = panel;
         if (win.ShowDialog() == true) AddToSavedQueue(saved, list.SelectedItems.Cast<MediaItem>());

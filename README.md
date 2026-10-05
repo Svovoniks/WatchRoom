@@ -8,10 +8,10 @@ A Windows desktop preview for watching local movies together. C# / WPF, LibVLCSh
 
 Open `artifacts/Watchroom/Watchroom.exe` after publishing, or build from source below. The self-contained publish includes the .NET runtime, libVLC, and app-local Microsoft Visual C++ x64 runtime dependencies; installing VLC or copying runtime DLLs separately is unnecessary.
 
-1. On first launch, add movie, show or anime folders and click **Scan library**. You can skip this when only joining friends.
+1. On first launch, choose **Add my videos** to set up folders and scan your library, or **Join a friend** to enter an invitation. Only the host needs video files.
 2. Browse the poster grid, open a series, then a season, then an episode. On Windows, selecting a movie or episode opens its own information page with artwork, metadata, and **Play locally** / **Watch together** actions. **Back to library** restores the same season, search, and filter.
 3. Artwork and metadata are fetched automatically after scanning. Configurable providers try TMDB (with a session token), TVmaze, and Wikipedia in priority order. NFO files and locked fields take priority. Settings offer fill missing, refresh text, and replace downloaded artwork, plus language, refresh interval, and optional missing/upcoming episodes. Shows and seasons have stable identities; filename aliases in one show folder stay together, while same-name remakes stay separate. See [metadata and library behavior](METADATA.md) for numbering, duplicate versions, NFO support, and migration details.
-4. For a room, configure a deployed HTTPS server in Settings. Create the room, copy its invitation, and admit friends when they join.
+4. For a room, configure a deployed HTTPS server in Settings and choose **Save changes**. Create the room, copy its invitation, and admit friends when they join. Settings drafts apply when saved; **Cancel** restores saved preferences. The TMDB key has its own **Save key** action.
 5. Host controls playback by default; **Allow shared controls** permits guests to play, pause and seek. Volume, audio and subtitle selections are personal for original media. Buffering pauses everyone and resumes when participants report ready.
 6. Open **Host library / Guest views** in the room panel. The host chooses shared category collections and grants each admitted guest **Browse**, **Manage queue**, and **Start videos** permissions. Guests can search titles/seasons, edit a shared room queue, and start a title or the next video. The host's saved queues remain available separately.
 

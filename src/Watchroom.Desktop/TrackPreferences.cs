@@ -28,7 +28,7 @@ public partial class MainWindow
             library.Setting("subtitleLanguages", string.Join(", ", subtitles));
             return true;
         }
-        catch (ArgumentException ex) { SetStatus(ex.Message); return false; }
+        catch (ArgumentException ex) { TrackPreferencesError.Text = ex.Message; return false; }
     }
     private void ApplyTrackPreferences(TrackChoice[] audio, TrackChoice[] subtitles)
     {

@@ -22,6 +22,11 @@ public partial class MainWindow
     {
         if (SavedRoomsList is null) return;
         ReturnToRoomButton.IsEnabled = ready || room is not null;
+        ReturnToRoomButton.Visibility = ReturnToRoomButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
+        RoomsEmptyState.Visibility = savedRooms.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        CreateSavedRoomButton.Visibility = AddSavedInvitationButton.Visibility = savedRooms.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        SavedRoomsContent.Visibility = savedRooms.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        SavedRoomDetails.Visibility = SavedRoomsList.SelectedItem is SavedRoom ? Visibility.Visible : Visibility.Collapsed;
         ConnectSavedRoomButton.IsEnabled = !roomBusy && SavedRoomsList.SelectedItem is SavedRoom;
         ForgetSavedRoomButton.IsEnabled = CopySavedInviteButton.IsEnabled = SavedRoomsList.SelectedItem is SavedRoom;
         RefreshRoomSettings();
@@ -33,6 +38,8 @@ public partial class MainWindow
         var saved = SavedRoomsList.SelectedItem as SavedRoom;
         var connected = saved is not null && room?.IsConnected == true && room.ServerAddress == saved.Server && room.Identity?.Room == saved.Code;
         var host = saved is not null && (connected ? room!.Identity!.Host : saved.HostKey is not null);
+        SavedRoomHostControls.Visibility = SavedRoomGuestManagement.Visibility = host ? Visibility.Visible : Visibility.Collapsed;
+        RenameSavedRoomButton.Visibility = host ? Visibility.Visible : Visibility.Collapsed;
         RenameSavedRoomButton.IsEnabled = host;
         RenameSavedRoomButton.ToolTip = host ? "Change the room name for everyone" : "Only the host can change the room name";
         SavedRoomHeading.Text = saved?.Name ?? "Choose a room";
@@ -112,7 +119,7 @@ public partial class MainWindow
         try
         {
             await Disconnect(); var client = NewRoom();
-            try { await client.ConnectAsync(ServerBox.Text, DisplayNameBox.Text, persistent: true, roomName: name); }
+            try { await client.ConnectAsync(SavedServerAddress, SavedDisplayName, persistent: true, roomName: name); }
             catch { await Disconnect(); throw; }
             RememberCurrentRoom(); RoomHeading.Text = name; RoomSubtitle.Text = "Share an invitation, then choose a video from the library.";
             roomPanelVisible = true; ShowPage("Rooms");
@@ -122,9 +129,9 @@ public partial class MainWindow
     private void SaveRoomInvitation(object sender, RoutedEventArgs e)
     {
         var invitation = Dialogs.Prompt(this, "Add room by invitation", "Invitation link or room code", validate: value =>
-        { try { RoomAddress.Parse(value, ServerBox.Text); return null; } catch (ArgumentException ex) { return ex.Message; } });
+        { try { RoomAddress.Parse(value, SavedServerAddress); return null; } catch (ArgumentException ex) { return ex.Message; } });
         if (invitation is null) return;
-        var address = RoomAddress.Parse(invitation, ServerBox.Text);
+        var address = RoomAddress.Parse(invitation, SavedServerAddress);
         var existing = savedRooms.FirstOrDefault(x => x.Server == address.Server && x.Code == address.Code);
         if (existing is not null) { SavedRoomsList.SelectedItem = existing; SetStatus("This room is already saved."); return; }
         var saved = new SavedRoom(Guid.NewGuid().ToString("N"), "Room " + address.Code[..6], address.Server, address.Code);
@@ -138,7 +145,7 @@ public partial class MainWindow
         try
         {
             await Disconnect(); var client = NewRoom();
-            try { await client.ConnectAsync(saved.Server, DisplayNameBox.Text, saved.Code, saved.HostKey, roomName: saved.HostKey is null ? null : saved.Name); }
+            try { await client.ConnectAsync(saved.Server, SavedDisplayName, saved.Code, saved.HostKey, roomName: saved.HostKey is null ? null : saved.Name); }
             catch { await Disconnect(); throw; }
             RoomHeading.Text = client.Snapshot?.Name ?? saved.Name;
             RoomSubtitle.Text = saved.HostKey is null ? "Waiting for host approval" : "Choose a video from the library.";

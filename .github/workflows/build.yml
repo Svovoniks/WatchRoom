@@ -41,6 +41,8 @@ jobs:
         run: dotnet run --project tests/Watchroom.Smoke -c Release -- --metadata-cache
       - name: Desktop regression checks
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release
+      - name: UI findings regression checks
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --ui-findings
       - name: Guest library layout checks
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --guest-library-layout
       - name: Host library browsing checks
