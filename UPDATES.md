@@ -85,6 +85,45 @@ ship a higher version and leave the failed draft unpublished. Never overwrite
 bytes for an already published version. For a defective published version,
 release a higher patch version with the fix; the updater refuses downgrades.
 
+## Shipping with the release script
+
+Run `scripts/ship.ps1` in PowerShell 7 from a checkout at `origin/master`.
+Select individual files explicitly; unrelated staged and unstaged changes are
+preserved. The script applies only those files to an isolated Git worktree, bumps
+the version, runs the release checks plus the full smoke suite in a fresh test
+directory, commits, pushes `master`, and pushes an annotated version tag. It waits
+for the tag workflow and verifies the public release, updater feed, installer size,
+and SHA-256 against both GitHub and `SHA256SUMS.txt`.
+
+```powershell
+# Preview the selected paths and next patch version without changing files or publishing.
+./scripts/ship.ps1 -Paths src/Watchroom.Desktop/MainWindow.xaml -Plan
+
+# Ship those changes. Omit Version to choose the next patch automatically.
+./scripts/ship.ps1 -Paths src/Watchroom.Desktop/MainWindow.xaml -Version 0.3.18 -Message 'Clarify playback language preferences'
+
+# For multiple files, use a comma-separated PowerShell array.
+./scripts/ship.ps1 -Paths 'src/Watchroom.Desktop/MainWindow.xaml','scripts/ship.ps1','scripts/ship-checks.ps1','UPDATES.md' -Plan
+
+# Recheck an already pushed tag after a timeout or network interruption.
+./scripts/ship.ps1 -VerifyOnly -Version 0.3.18
+
+# Offline safety checks for the script; no release is created.
+./scripts/ship-checks.ps1
+```
+
+Use `-Sdk C:/path/to/dotnet.exe` when the SDK is outside this checkout. Otherwise
+the script uses `.tools/dotnet/dotnet.exe` from this checkout or its main checkout,
+then `dotnet` from PATH. Git authentication
+must allow pushes to the public repository; public Actions and release verification
+do not require a GitHub CLI installation or token. `-TimeoutMinutes` defaults to 60.
+Verification records and downloaded installers remain under ignored `artifacts/`.
+Release checkouts and fresh smoke data use short paths under the system temp
+directory to keep SQLite paths within Windows limits; failed checkouts are retained at the printed path
+for investigation. A failed workflow
+stops the script; it never rewrites a tag, overwrites a published installer, or
+installs the app locally. If master advances during checks, integrate it and rerun.
+
 ## Diagnosing room and playback failures
 
 Playback snapshots distinguish requested Play/Pause from a temporary buffering
