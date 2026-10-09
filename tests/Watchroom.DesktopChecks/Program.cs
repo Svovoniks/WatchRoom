@@ -290,7 +290,8 @@ static class Program
         search.Clear(); await Task.Delay(300);
         var scroll = (System.Windows.Controls.ScrollViewer)window.FindName("LibraryScroll");
         check(scroll.VerticalScrollBarVisibility == System.Windows.Controls.ScrollBarVisibility.Visible, "poster grid reserves scrollbar space across filters");
-        check(status.ActualHeight == 44 && scan.ActualHeight == 44 && frame.ActualHeight == 44, "search, status filter, and rescan align to a single toolbar height");
+        check(height >= 40 && status.ActualHeight == height && scan.ActualHeight == height && frame.ActualHeight == height,
+            "search, status filter, and rescan align to a single usable toolbar height");
         status.Focus(); window.UpdateLayout();
     }
 

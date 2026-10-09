@@ -11,8 +11,8 @@ public static class Dialogs
         var win = new Window { Owner = owner, Title = "Watch next episode?", Width = 560, SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
         var panel = new StackPanel { Margin = new Thickness(24) };
-        panel.Children.Add(new TextBlock { Text = "Watch the next episode?", FontSize = 24, FontWeight = FontWeights.SemiBold });
-        panel.Children.Add(new TextBlock { Text = next.Series, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 6) });
+        panel.Children.Add(new TextBlock { Text = next.Series, FontSize = 20, FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
         panel.Children.Add(new TextBlock { Text = $"Season {next.Season} · {next.EpisodeDisplayTitle}",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) });
         var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
@@ -33,9 +33,7 @@ public static class Dialogs
         var win = new Window { Owner = owner, Title = "Watch together", Width = 560, SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
         var panel = new StackPanel { Margin = new Thickness(24) };
-        panel.Children.Add(new TextBlock { Text = "Choose a room", FontSize = 24, FontWeight = FontWeights.SemiBold });
-        panel.Children.Add(new TextBlock { Text = "Play this video in a room you host, or create a new one.",
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 16) });
+        panel.Children.Add(new TextBlock { Text = "Room", Margin = new Thickness(0, 0, 0, 4) });
         var choices = rooms.Select(room => new WatchRoomOption(room.Name + (room.Id == current?.Id ? " · Current room" : ""), room)).ToList();
         choices.Add(new("Create new room", null));
         var picker = new ComboBox { ItemsSource = choices, DisplayMemberPath = nameof(WatchRoomOption.Label), MinHeight = 40,

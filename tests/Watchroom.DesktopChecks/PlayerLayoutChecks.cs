@@ -18,7 +18,7 @@ static class PlayerLayoutChecks
         var page = (Grid)window.FindName("RoomPage");
         var video = (FrameworkElement)window.FindName("Video");
         // Enough queue rows to exercise the expanded panel's worst case.
-        ((ListBox)window.FindName("QueueList")).ItemsSource = Enumerable.Range(1, 40).Select(i => "Fixture video " + i).ToArray();
+        ((ListBox)window.FindName("QueueList")).ItemsSource = Enumerable.Range(1, 40).Select(i => new { QueueTitle = "Fixture video " + i }).ToArray();
         var root = (FrameworkElement)window.Content;
         var volume = (Slider)window.FindName("Volume");
         System.Windows.Input.MouseWheelEventArgs Wheel(UIElement element, int delta, bool preview = true)
@@ -64,6 +64,27 @@ static class PlayerLayoutChecks
         void Layout(int width, int height)
         {
             root.Measure(new Size(width, height)); root.Arrange(new Rect(0, 0, width, height)); root.UpdateLayout();
+        }
+        var queueList = (ListBox)window.FindName("QueueList");
+        var queueActions = (FrameworkElement)window.FindName("QueueEditActions");
+        var playQueue = (Button)window.FindName("PlayPlayerQueueButton");
+        var populatedQueue = queueList.ItemsSource;
+        foreach (var name in new[] { "AudioTracks", "SubtitleTracks" })
+        {
+            var picker = (ComboBox)window.FindName(name);
+            picker.ItemsSource = new[] { new { Name = "English" } }; picker.SelectedIndex = 0;
+        }
+        foreach (var size in new[] { (900, 600), (1280, 810) })
+        {
+            queueList.ItemsSource = Array.Empty<string>(); Invoke(window, "UpdateSessionControls");
+            options.Visibility = Visibility.Visible; Layout(size.Item1, size.Item2);
+            Check(queueList.Visibility == Visibility.Collapsed && queueActions.Visibility == Visibility.Collapsed &&
+                playQueue.Visibility == Visibility.Collapsed, "empty player queue hides its blank list and inactive actions at " + size);
+            Check(scroll.ScrollableHeight == 0, "empty playback options fit without scrolling at " + size);
+            Save(root, "player-options-empty-" + size.Item1 + ".png");
+            queueList.ItemsSource = populatedQueue; Invoke(window, "UpdateSessionControls"); Layout(size.Item1, size.Item2);
+            Check(queueList.Visibility == Visibility.Visible && queueActions.Visibility == Visibility.Visible &&
+                playQueue.Visibility == Visibility.Visible, "populating the player queue restores its list and controls at " + size);
         }
         foreach (var size in new[] { (900, 600), (1280, 810) })
         {
@@ -126,7 +147,7 @@ static class PlayerLayoutChecks
         typeof(MainWindow).GetField("fullscreen", flags)!.SetValue(window, false);
         fullscreenHost.Children.Remove(transport); docked.Children.Add(transport); window.WindowStyle = WindowStyle.SingleBorderWindow;
         window.Close();
-        Console.WriteLine("32 player layout and control checks passed.");
+        Console.WriteLine("38 player layout and control checks passed.");
     }
     static bool IsDescendant(DependencyObject child, DependencyObject parent)
     {

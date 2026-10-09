@@ -51,7 +51,7 @@ public partial class MainWindow
         var saved = QueuePicker.SelectedItem as SavedQueue;
         SavedQueueItems.ItemsSource = saved?.MediaIds.Select((id, index) => new QueueEntry(index, items.FirstOrDefault(x => x.Id == id))).ToArray() ?? [];
         QueueDetailTitle.Text = saved?.Name ?? "Choose a queue";
-        QueueDetailCaption.Text = saved is null ? "Create a queue to get started." : $"{saved.MediaIds.Length} videos · Order saved automatically";
+        QueueDetailCaption.Text = saved is null ? "Create a queue to get started." : $"{saved.MediaIds.Length} videos";
         UpdateSavedQueueActions();
     }
     private void SavedQueueSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSavedQueueActions();

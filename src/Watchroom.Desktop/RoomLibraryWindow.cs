@@ -56,14 +56,20 @@ public sealed class RoomLibraryWindow : Window
         this.session = session; this.host = host; this.hostId = hostId; this.people = people; this.share = share;
         SetResourceReference(StyleProperty, typeof(Window));
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/Watchroom;component/RoomLibraryStyles.xaml", UriKind.Relative) });
-        Title = host ? "Room library · Guest views" : "Host library · Your browsing is visible to the host";
+        Title = host ? "Room library" : "Host library";
         Width = 1050; Height = 780; MinWidth = 700; MinHeight = 540;
         var root = new DockPanel { Margin = new Thickness(16) };
         root.SetResourceReference(Panel.BackgroundProperty, "Canvas"); root.SetResourceReference(TextElement.ForegroundProperty, "Ink");
         DockPanel.SetDock(status, Dock.Bottom); root.Children.Add(status); root.Children.Add(tabs); Content = root;
         var browser = new DockPanel();
         var top = new StackPanel(); DockPanel.SetDock(top, Dock.Top); browser.Children.Add(top);
-        top.Children.Add(new TextBlock { Text = host ? "Shared room library" : "The host can see this grid, your selection and hovered title.", Margin = new Thickness(4, 8, 4, 8) });
+        if (!host)
+        {
+            var notice = new TextBlock { Text = "Your browsing is visible to the host.", Margin = new Thickness(0, 0, 0, 8) };
+            notice.SetResourceReference(TextBlock.ForegroundProperty, "Muted"); top.Children.Add(notice);
+        }
+        search.ToolTip = "Search shared titles";
+        System.Windows.Automation.AutomationProperties.SetName(search, "Search shared titles");
         var filters = new WrapPanel(); filters.Children.Add(search); filters.Children.Add(category); filters.Children.Add(season); top.Children.Add(filters);
         foreach (var value in new[] { "All titles", "Movie", "Show", "Anime" }) category.Items.Add(value); category.SelectedIndex = 0;
         season.Items.Add("All seasons"); season.SelectedIndex = 0;
@@ -91,8 +97,14 @@ public sealed class RoomLibraryWindow : Window
         {
             var hostPanel = new DockPanel(); var settings = new StackPanel(); DockPanel.SetDock(settings, Dock.Top); hostPanel.Children.Add(settings);
             settings.Children.Add(Button("Choose shared collections", ChooseCollections));
-            settings.Children.Add(new TextBlock { Text = "Select an admitted guest and grant access. Revocation takes effect immediately." });
-            var permissions = new WrapPanel(); permissions.Children.Add(guests); permissions.Children.Add(browse); permissions.Children.Add(edit); permissions.Children.Add(start);
+            guests.ToolTip = "Choose an admitted guest. Permission changes apply immediately.";
+            System.Windows.Automation.AutomationProperties.SetName(guests, "Guest permissions");
+            var permissions = new WrapPanel(); permissions.Children.Add(guests);
+            foreach (var permission in new[] { browse, edit, start })
+            {
+                permission.Margin = new Thickness(0, 4, 12, 4);
+                permissions.Children.Add(permission);
+            }
             permissions.Children.Add(Button("Apply permissions", () =>
             {
                 if (guests.SelectedItem is GuestChoice guest) session.SetAccess(guest.Id, new(browse.IsChecked == true, edit.IsChecked == true, start.IsChecked == true));
@@ -155,7 +167,7 @@ public sealed class RoomLibraryWindow : Window
     {
         var dialog = new Window { Owner = this, Title = "Share collections for this room", Width = 370, Height = 320, WindowStartupLocation = WindowStartupLocation.CenterOwner };
         var panel = new StackPanel { Margin = new Thickness(20) }; dialog.Content = panel;
-        panel.Children.Add(new TextBlock { Text = "Only checked categories are exposed to guests.", TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(new TextBlock { Text = "Only enabled categories are shared with guests.", TextWrapping = TextWrapping.Wrap });
         var choices = new[] { "Movie", "Show", "Anime", "Mixed" }.Select(kind => new CheckBox { Content = kind, Margin = new Thickness(5) }).ToArray();
         foreach (var choice in choices) { choice.IsChecked = session.Catalog.Values.Any(i => i.Kind == (string)choice.Content); panel.Children.Add(choice); }
         panel.Children.Add(Button("Share selected", () => { share(choices.Where(c => c.IsChecked == true).Select(c => (string)c.Content).ToArray()); dialog.Close(); }));

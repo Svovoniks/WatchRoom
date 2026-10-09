@@ -46,14 +46,13 @@ public partial class MainWindow
         SavedRoomStatus.Text = saved is null ? "Create a room or save an invitation to get started." : connected ? (host ? "Connected · You are the host" : "Connected · Guest") : (host ? "Your room · Offline" : "Saved invitation · Offline");
         ConnectSavedRoomButton.Content = connected ? "Open player" : "Connect";
         SavedRoomLibraryButton.IsEnabled = connected;
-        SavedRoomLibraryButton.Content = host ? "Library sharing & guest views" : "Browse host library";
+        SavedRoomLibraryButton.Content = host ? "Room library" : "Browse host library";
         SavedRoomSharedControls.IsEnabled = host;
         updatingLibraryPermission = true;
         SavedRoomLibraryBrowsing.IsEnabled = host;
         SavedRoomLibraryBrowsing.IsChecked = connected ? room!.Snapshot?.LibraryBrowsing == true : saved is not null && library.Setting(SavedRoomSetting(saved, "libraryBrowsing")) == "true";
         updatingLibraryPermission = false;
         SavedRoomSharedControls.IsChecked = connected ? room!.Snapshot?.SharedControls == true : saved is not null && library.Setting(SavedRoomSetting(saved, "sharedControls")) == "true";
-        SavedRoomControlHint.Text = host ? "Saved automatically for this room. Guests can play, pause and seek when enabled." : "Only the room host can change this setting.";
         AdmittedGuest[] remembered = [];
         if (saved is not null && host)
         {
@@ -64,7 +63,7 @@ public partial class MainWindow
         var rows = active.Select(p => new RoomGuestRow(p.Id, p.Name, p.Approved ? "Admitted · Connected" : "Waiting for approval", !p.Approved, connected && host, pendingAdmissions.ContainsKey(p.Id))).ToList();
         rows.AddRange(remembered.Where(p => !active.Any(a => a.GuestId == p.Id)).Select(p => new RoomGuestRow(p.Id, p.Name, "Admitted · Remembered", false, connected && host, false)));
         SavedRoomGuests.ItemsSource = rows;
-        SavedRoomGuestHint.Text = !host ? "Connect as the host to manage guests." : connected ? "Admission is remembered on each guest's device. Remove revokes their saved access." : "Remembered guests are listed below. Connect to admit or remove guests.";
+        SavedRoomGuestHint.Text = !host ? "Connect as the host to manage guests." : connected ? "Admitted guests can reconnect. Remove revokes access." : "Connect to admit or remove guests.";
     }
     private sealed record RoomGuestRow(string Id, string Name, string Status, bool Waiting, bool CanRemove, bool Pending)
     {

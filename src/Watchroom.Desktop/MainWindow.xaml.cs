@@ -559,7 +559,7 @@ public partial class MainWindow : Window
         DetailPlay.Content = resume > 0 ? "Resume at " + FormatTime(resume) : "Play locally";
         RestartButton.Visibility = resume > 0 ? Visibility.Visible : Visibility.Collapsed;
         RestartButton.IsEnabled = DetailPlay.IsEnabled;
-        DetailContext.Text = item.Series is null ? "MOVIE" : item.Series;
+        DetailContext.Text = item.Series ?? "";
         DetailMeta.Text = item.Caption + " · " + Path.GetExtension(item.Path).TrimStart('.').ToUpperInvariant() + (string.IsNullOrWhiteSpace(item.AirDate) ? "" : " · " + item.AirDate) + (item.RuntimeMinutes is > 0 ? $" · {item.RuntimeMinutes} min" : "");
         _ = UpdateDetailPosterAsync(item);
         DetailFile.Text = item.Path;
@@ -1263,8 +1263,6 @@ public partial class MainWindow : Window
             SubtitleTracks.SelectedItem = subs.FirstOrDefault(x => x.Id == player.Spu);
             AudioTracks.IsEnabled = audio.Length > 0 && CanChangeRoomTracks;
             SubtitleTracks.IsEnabled = subs.Length > 0 && CanChangeRoomTracks;
-            var audioCount = audio.Count(x => x.Id >= 0); var subtitleCount = subs.Count(x => x.Id >= 0);
-            TrackSummary.Text = $"{audioCount} audio {(audioCount == 1 ? "track" : "tracks")} · {subtitleCount} subtitle {(subtitleCount == 1 ? "track" : "tracks")}. External subtitles can be loaded below.";
         }
         finally { tracksUpdating = false; }
     }
@@ -1499,7 +1497,10 @@ public partial class MainWindow : Window
             : QueuePlayback.FindNext(queue, queuePosition, 1, x => File.Exists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
         PreviousButton.IsEnabled = QueuePlayback.FindNext(queue, queuePosition, -1, x => File.Exists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
         ReturnToRoomButton.IsEnabled = ready || room is not null;
-        RemoveQueueButton.IsEnabled = QueueList.SelectedIndex >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
+        var canManageQueue = room is null || connectedRoom && room!.Identity?.Host == true;
+        QueueEditActions.Visibility = canManageQueue && QueueList.HasItems ? Visibility.Visible : Visibility.Collapsed;
+        PlayPlayerQueueButton.IsEnabled = canManageQueue && queue.Any(item => item.Available);
+        RemoveQueueButton.IsEnabled = QueueList.SelectedIndex >= 0 && canManageQueue;
         QueueEarlier.IsEnabled = RemoveQueueButton.IsEnabled && QueueList.SelectedIndex > 0;
         QueueLater.IsEnabled = RemoveQueueButton.IsEnabled && QueueList.SelectedIndex < queue.Count - 1;
         PrepareButton.IsEnabled = playingItem is not null && !preparing && (room is null || connectedRoom && room!.Identity?.Host == true);
@@ -1514,8 +1515,8 @@ public partial class MainWindow : Window
     {
         bool inPlayer = RoomPage.Visibility == Visibility.Visible;
         Rail.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
-        RailWidth.Width = new GridLength(inPlayer ? 0 : 208);
-        ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(30, 24, 30, 18);
+        RailWidth.Width = new GridLength(inPlayer ? 0 : 192);
+        ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(24, 20, 24, 16);
         AppStatusBar.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
         StatusRow.Height = new GridLength(inPlayer ? 0 : 34);
         RoomHeader.Visibility = fullscreen ? Visibility.Collapsed : Visibility.Visible;

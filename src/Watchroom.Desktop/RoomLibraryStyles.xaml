@@ -9,10 +9,14 @@
   </ControlTemplate></Setter.Value></Setter>
  </Style>
  <Style TargetType="TabItem">
-  <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Surface}"/>
+  <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Background" Value="Transparent"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem">
-   <Border x:Name="Tab" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="6" Padding="14,9" Margin="0,0,6,0"><ContentPresenter ContentSource="Header"/></Border>
-   <ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Tab" Property="BorderBrush" Value="{DynamicResource Accent}"/><Setter TargetName="Tab" Property="Background" Value="{DynamicResource Elevated}"/></Trigger></ControlTemplate.Triggers>
+   <Border x:Name="Tab" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="0,0,0,2" Padding="12,10" Margin="0,0,4,0"><ContentPresenter ContentSource="Header"/></Border>
+   <ControlTemplate.Triggers>
+    <Trigger Property="IsSelected" Value="True"><Setter TargetName="Tab" Property="BorderBrush" Value="{DynamicResource Accent}"/><Setter Property="Foreground" Value="{DynamicResource Accent}"/></Trigger>
+    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tab" Property="Background" Value="{DynamicResource Elevated}"/></Trigger>
+    <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Tab" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
+   </ControlTemplate.Triggers>
   </ControlTemplate></Setter.Value></Setter>
  </Style>
 </ResourceDictionary>
