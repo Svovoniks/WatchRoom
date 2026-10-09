@@ -63,12 +63,14 @@ public partial class MainWindow
         }
     }
 
-    private void PublishRoomTrack(int id, bool subtitle)
+    private void PublishRoomTrack(int id, bool subtitle, int? preferredSubtitle = null)
     {
         if (room?.Snapshot?.Media is not { } media || player is null || !CanChangeRoomTracks) return;
         var choices = (subtitle ? player.SpuDescription : player.AudioTrackDescription).Select(t => new TrackChoice(t.Id, t.Name)).ToArray();
         if (DescribeRoomTrack(id, choices, subtitle) is not { } track) return;
-        room.Send(new("tracks", Data: Wire.Serialize(new RoomTracks(media.Id, subtitle ? null : track, subtitle ? track : null))));
+        var subtitleTrack = subtitle ? track : preferredSubtitle is { } subtitleId
+            ? DescribeRoomTrack(subtitleId, player.SpuDescription.Select(t => new TrackChoice(t.Id, t.Name)).ToArray(), true) : null;
+        room.Send(new("tracks", Data: Wire.Serialize(new RoomTracks(media.Id, subtitle ? null : track, subtitleTrack))));
     }
 
     private async Task AttachRoomSubtitles(RoomClient client, SharedMedia media, int generation)

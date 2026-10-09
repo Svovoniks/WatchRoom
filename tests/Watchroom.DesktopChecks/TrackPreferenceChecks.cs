@@ -1,4 +1,5 @@
 using System.IO;
+using System.Collections;
 using System.Reflection;
 using System.Windows.Controls;
 using LibVLCSharp.Shared;
@@ -26,6 +27,14 @@ static class TrackPreferenceChecks
         }
         var audioInput = (TextBox)window.FindName("PreferredAudioLanguages");
         var subtitlesInput = (TextBox)window.FindName("PreferredSubtitleLanguages");
+        var rules = (IList)typeof(MainWindow).GetField("subtitleRuleDrafts", flags)!.GetValue(window)!;
+        void AddRule(string audio, string subtitles)
+        {
+            Call("AddSubtitleRule", window, new System.Windows.RoutedEventArgs());
+            var rule = rules[^1]!;
+            rule.GetType().GetProperty("AudioLanguage")!.SetValue(rule, audio);
+            rule.GetType().GetProperty("SubtitleLanguages")!.SetValue(rule, subtitles);
+        }
         try
         {
             audioInput.Text = "Russian, English"; subtitlesInput.Text = "English, off";
@@ -51,6 +60,34 @@ static class TrackPreferenceChecks
             subtitlesInput.Text = "off, English"; Call("SaveTrackPreferences");
             Field("loadGeneration", 3); Call("RefreshTracks"); Wait(() => player.Spu == -1);
             Check(true, "off preference disables native subtitles");
+            subtitlesInput.Text = "English, off";
+            AddRule("Russian", "off"); AddRule("English", "Russian, English, off");
+            Check((bool)Call("SaveTrackPreferences")!, "audio-specific subtitle lists save with the default priority");
+            Field("loadGeneration", 4); Call("RefreshTracks"); Wait(() => player.AudioTrack == russian && player.Spu == -1);
+            Check(true, "native playback uses the selected audio language's subtitle rule");
+            picker.SelectedItem = picker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == english);
+            var russianSubtitle = tracks.Single(t => t.TrackType == TrackType.Text && t.Language == "rus").Id;
+            Call("RefreshTracks"); Wait(() => player.AudioTrack == english && player.Spu == russianSubtitle);
+            Check(true, "manual audio changes apply the matching subtitle priority");
+            var subtitlePicker = (ComboBox)window.FindName("SubtitleTracks");
+            subtitlePicker.SelectedItem = subtitlePicker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == subtitle);
+            picker.SelectedItem = picker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == russian);
+            Call("RefreshTracks"); Wait(() => player.AudioTrack == russian && player.Spu == subtitle);
+            Check(true, "manual subtitle selection survives audio changes and periodic refreshes");
+            rules.Clear(); AddRule("Japanese", "off"); Call("SaveTrackPreferences");
+            Call("RefreshTracks"); Wait(() => player.Spu == subtitle);
+            Check(true, "saving new rules leaves the current video's manual subtitle choice intact");
+            Field("loadGeneration", 5); Call("RefreshTracks"); Wait(() => player.AudioTrack == russian && player.Spu == subtitle);
+            Check(true, "a new video uses default subtitles for audio without a configured rule");
+            audioInput.Text = "Japanese, English"; rules.Clear(); AddRule("English", "off"); Call("SaveTrackPreferences");
+            Field("loadGeneration", 6); Call("RefreshTracks"); Wait(() => player.AudioTrack == english && player.Spu == -1);
+            Check(true, "subtitle rules follow the actual audio fallback when the first audio language is unavailable");
+            audioInput.Text = "Russian, English"; rules.Clear(); AddRule("Russian", "off"); AddRule("English", ""); Call("SaveTrackPreferences");
+            player.SetSpu(subtitle); Wait(() => player.Spu == subtitle);
+            Field("loadGeneration", 7); Call("RefreshTracks"); Wait(() => player.AudioTrack == russian && player.Spu == -1);
+            picker.SelectedItem = picker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == english);
+            Call("RefreshTracks"); Wait(() => player.Spu == subtitle);
+            Check(true, "switching to a blank subtitle rule restores the video's original subtitle default");
             audioInput.Text = "Not a language";
             Check(!(bool)Call("SaveTrackPreferences")!, "invalid settings are rejected without replacing saved preferences");
             player.Stop(); Field("player", null);

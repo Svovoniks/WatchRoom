@@ -20,6 +20,14 @@ static class UiFindingsChecks
         object? Call(string name, params object[] args) => typeof(MainWindow).GetMethod(name, flags)!.Invoke(window, args);
         T Control<T>(string name) where T : FrameworkElement => (T)window.FindName(name);
         var store = (LibraryStore)Field("library");
+        var subtitleRules = (IList)Field("subtitleRuleDrafts");
+        void AddRule(string audio, string subtitles)
+        {
+            Call("AddSubtitleRule", window, new RoutedEventArgs());
+            var draft = subtitleRules[^1]!;
+            draft.GetType().GetProperty("AudioLanguage")!.SetValue(draft, audio);
+            draft.GetType().GetProperty("SubtitleLanguages")!.SetValue(draft, subtitles);
+        }
         var checks = 0;
         void Check(bool value, string message) { if (!value) throw new Exception("FAIL: " + message); checks++; Console.WriteLine("PASS: " + message); }
         var root = (FrameworkElement)window.Content;
@@ -101,6 +109,15 @@ static class UiFindingsChecks
             Check(Control<TextBox>("DisplayNameBox").Text == "Draft name", "unsaved preferences survive page navigation");
             Call("CancelPreferences", window, new RoutedEventArgs());
             Check(Control<TextBox>("DisplayNameBox").Text == originalName && !Control<Button>("SavePreferencesButton").IsEnabled, "Cancel restores persisted values and clears dirty state");
+            Check(window.FindName("SaveMetadataKeyButton") is null, "TMDB uses the common Save changes action without a separate key button");
+            Control<PasswordBox>("MetadataToken").Password = "draft-fixture-key";
+            Check(Control<Button>("SavePreferencesButton").IsEnabled && MetadataCredential.Load(App.DataDirectory) == "", "key edits enable Save without writing the credential vault");
+            Call("CancelPreferences", window, new RoutedEventArgs());
+            Check(Control<PasswordBox>("MetadataToken").Password == "" && !Control<Button>("SavePreferencesButton").IsEnabled, "Cancel discards an unsaved key and clears dirty state");
+            AddRule("Japanese", "Russian, English, off");
+            Check(Control<Button>("SavePreferencesButton").IsEnabled && store.Setting("subtitleLanguageRules") is null, "audio-specific subtitle drafts enable Save without writing settings");
+            Call("CancelPreferences", window, new RoutedEventArgs());
+            Check(subtitleRules.Count == 0 && !Control<Button>("SavePreferencesButton").IsEnabled, "Cancel discards added subtitle rules");
             Control<TextBox>("PreferredAudioLanguages").Text = "Russian, English";
             Control<TextBox>("PreferredSubtitleLanguages").Text = "English, off";
             Check(Control<Button>("SavePreferencesButton").IsEnabled && ((string[])Field("audioLanguages")).Length == 0,
@@ -114,9 +131,11 @@ static class UiFindingsChecks
             Check((bool)Call("TrySavePreferences")! == false && Control<TextBlock>("ServerError").Text.Length > 0, "invalid server gets field-specific validation");
             Control<TextBox>("ServerBox").Text = "https://room.test";
             Control<TextBox>("MetadataRefreshDays").Text = "999";
+            Control<PasswordBox>("MetadataToken").Password = "invalid-settings-fixture-key";
             Check((bool)Call("TrySavePreferences")! == false && Control<TextBlock>("RefreshDaysError").Text.Length > 0 && Control<FrameworkElement>("MetadataPreferences").Visibility == Visibility.Visible,
                 "invalid refresh frequency selects its section and identifies the offending field");
             Check(store.Setting("name") != "Saved name", "invalid preferences do not partially save profile fields");
+            Check(MetadataCredential.Load(App.DataDirectory) == "", "failed settings validation does not save a drafted key");
             Control<TextBox>("MetadataRefreshDays").Text = "365";
             Call("ChangeRefreshDays", Control<Button>("RefreshMore"), new RoutedEventArgs());
             Check(Control<TextBox>("MetadataRefreshDays").Text == "365", "refresh stepper clamps to the upper limit");
@@ -126,19 +145,49 @@ static class UiFindingsChecks
                 "invalid track preferences identify Playback and do not partially save settings");
             Control<TextBox>("PreferredAudioLanguages").Text = "Russian, English";
             Control<TextBox>("PreferredSubtitleLanguages").Text = "English, off";
+            AddRule("Japanese", "Russian, English, off"); AddRule("ja-JP", "off");
+            Check(!(bool)Call("TrySavePreferences")! && Control<TextBlock>("TrackPreferencesError").Text.Contains("already") && store.Setting("subtitleLanguageRules") is null,
+                "duplicate audio rules reject the whole draft with an actionable error");
+            Call("RemoveSubtitleRule", new Button { DataContext = subtitleRules[1] }, new RoutedEventArgs());
+            AddRule("English", "off");
             var providers = (IList)Field("providerChoices");
             foreach (var provider in providers) provider!.GetType().GetProperty("Enabled")!.SetValue(provider, false);
             Control<CheckBox>("NeverRefresh").IsChecked = true;
             Control<ComboBox>("MetadataLanguage").SelectedValue = "fr-FR"; Control<ComboBox>("MetadataCountry").SelectedValue = "FR";
+            Control<PasswordBox>("MetadataToken").Password = new string('x', 1281);
+            Check(!(bool)Call("TrySavePreferences")! && Control<TextBlock>("MetadataKeyStatus").Text.Contains("too long") && store.Setting("audioLanguages") is null && store.Setting("name") != "Saved name",
+                "credential storage failure identifies Metadata and leaves other settings unsaved");
+            Control<PasswordBox>("MetadataToken").Password = " fixture-key-one ";
             Check((bool)Call("TrySavePreferences")!, "valid structured preferences save successfully");
             Check(store.Setting("audioLanguages") == "ru, en" && store.Setting("subtitleLanguages") == "en, off",
                 "Save persists normalized audio and subtitle preferences together");
+            var savedRules = Wire.Read<SubtitleLanguageRule[]>(store.Setting("subtitleLanguageRules")!);
+            Check(savedRules.Length == 2 && savedRules[0].AudioLanguage == "ja" && savedRules[0].Languages.SequenceEqual(["ru", "en", "off"]) && savedRules[1].Languages.SequenceEqual(["off"]),
+                "Save changes persists audio-specific subtitle priority lists in order");
+            Check(MetadataCredential.Load(App.DataDirectory) == "fixture-key-one" && (string)Field("savedMetadataToken") == "fixture-key-one",
+                "Save changes stores the trimmed key in the credential vault and activates it");
+            Check(!((string)Call("PreferenceSnapshot")!).Contains("fixture-key-one"), "preference snapshots exclude the secret key");
+            var restoredWindow = new MainWindow();
+            try
+            {
+                Check(((PasswordBox)restoredWindow.FindName("MetadataToken")).Password == "fixture-key-one" &&
+                    !((Button)restoredWindow.FindName("SavePreferencesButton")).IsEnabled, "a reopened settings window restores the saved key without an unsaved draft");
+            }
+            finally { restoredWindow.Close(); }
             var options = MetadataOptions.Load(store);
             Check(options.ProviderOrder.Length == 0 && options.RefreshDays == 0 && options.Language == "fr-FR" && options.Country == "FR", "local-only providers, Never and locale selections round-trip");
             Call("CancelPreferences", window, new RoutedEventArgs());
             Check(Control<CheckBox>("NeverRefresh").IsChecked == true && !Control<TextBox>("MetadataRefreshDays").IsEnabled, "Never restores with its numeric field disabled");
             Check(Control<TextBox>("PreferredAudioLanguages").Text == "ru, en" && !Control<Button>("SavePreferencesButton").IsEnabled,
                 "saved track preferences reload without leaving a dirty draft");
+            Check(subtitleRules.Count == 2 && (string)subtitleRules[0]!.GetType().GetProperty("AudioLanguage")!.GetValue(subtitleRules[0])! == "ja",
+                "saved subtitle rules reload with normalized audio languages");
+            Control<PasswordBox>("MetadataToken").Password = "replacement-fixture-key";
+            Call("CancelPreferences", window, new RoutedEventArgs());
+            Check(Control<PasswordBox>("MetadataToken").Password == "fixture-key-one" && MetadataCredential.Load(App.DataDirectory) == "fixture-key-one", "Cancel restores the saved key after an unsaved replacement");
+            Control<PasswordBox>("MetadataToken").Clear();
+            Check(MetadataCredential.Load(App.DataDirectory) == "fixture-key-one", "clearing a key remains a draft until Save changes");
+            Check((bool)Call("TrySavePreferences")! && MetadataCredential.Load(App.DataDirectory) == "" && (string)Field("savedMetadataToken") == "", "Save changes removes a cleared key from the vault and active metadata client");
             var first = providers[0]!; first.GetType().GetProperty("Enabled")!.SetValue(first, true);
             var move = new Button { Tag = "Down", DataContext = first }; Call("ProviderMoved", move, new RoutedEventArgs());
             Check(ReferenceEquals(providers[1], first), "provider move changes the fallback ordering");
@@ -162,11 +211,13 @@ static class UiFindingsChecks
                     Capture("metadata-" + size.Item1);
                 }
             }
+            Call("ToggleTheme", window, new RoutedEventArgs()); Call("ShowPreferenceSection", "Playback");
+            foreach (var size in new[] { (900, 600), (1280, 810) }) { Layout(size.Item1, size.Item2); Capture("playback-light-" + size.Item1); }
             Call("ShowPage", "Welcome"); Layout(); Capture("welcome-900");
             Check(Control<FrameworkElement>("WelcomePage").Visibility == Visibility.Visible && Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Collapsed,
                 "welcome provides a separate first-run choice before folder management");
             Console.WriteLine($"{checks} UI findings checks passed.");
         }
-        finally { window.Close(); }
+        finally { MetadataCredential.Save(App.DataDirectory, ""); window.Close(); }
     }
 }

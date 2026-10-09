@@ -127,13 +127,12 @@ public partial class MainWindow : Window
         foreach (var f in Wire.Read<List<LibraryFolder>>(library.Setting("folders") ?? "[]")) folders.Add(f);
         FolderList.ItemsSource = folders; ChatList.ItemsSource = chat;
         ScanButton.IsEnabled = folders.Count > 0;
-        InitializePreferences();
         try
         {
             MetadataToken.Password = savedMetadataToken = MetadataCredential.Load(App.DataDirectory);
-            MetadataKeyStatus.Text = MetadataToken.Password.Length > 0 ? "Saved key loaded." : "";
         }
         catch (Win32Exception) { SetStatus("Could not read the saved TMDB token. Enter it again in Settings."); }
+        InitializePreferences();
         displaySpecialsWithinSeasons = MetadataOptions.Load(library).DisplaySpecialsWithinSeasons;
         foreach (var path in Wire.Read<string[]>(library.Setting("exclusions") ?? "[]")) exclusions.Add(path);
         ExcludedFolderList.ItemsSource = exclusions;
@@ -670,17 +669,21 @@ public partial class MainWindow : Window
     }
     private bool SaveMetadataToken()
     {
-        try { MetadataCredential.Save(App.DataDirectory, MetadataToken.Password); savedMetadataToken = MetadataToken.Password; return true; }
+        if (MetadataToken.Password == savedMetadataToken) return true;
+        try
+        {
+            MetadataCredential.Save(App.DataDirectory, MetadataToken.Password);
+            MetadataToken.Password = savedMetadataToken = MetadataToken.Password.Trim();
+            return true;
+        }
         catch (Exception ex) when (ex is Win32Exception or ArgumentException)
-        { SetStatus("Could not save the TMDB credential. " + ex.Message); return false; }
+        { MetadataKeyStatus.Text = "Could not save the TMDB key. " + ex.Message; return false; }
     }
-    private void SaveMetadataKey(object sender, RoutedEventArgs e)
+    private void MetadataKeyChanged(object sender, RoutedEventArgs e)
     {
-        MetadataKeyStatus.Text = SaveMetadataToken()
-            ? string.IsNullOrWhiteSpace(MetadataToken.Password) ? "Saved key removed." : "Key saved securely."
-            : "Could not save the key. See the status message below.";
+        PreferencesChanged(sender, e);
+        MetadataKeyStatus.Text = MetadataToken.Password != savedMetadataToken ? "Unsaved key." : savedMetadataToken.Length > 0 ? "Key saved securely." : "";
     }
-    private void MetadataKeyChanged(object sender, RoutedEventArgs e) => MetadataKeyStatus.Text = "Unsaved changes.";
     private Task FetchArtwork() => FetchArtwork(lifetime.Token);
     private async Task FetchArtwork(CancellationToken cancellation, bool force = false, MetadataRefresh? refresh = null)
     {
@@ -1266,8 +1269,16 @@ public partial class MainWindow : Window
         }
         finally { tracksUpdating = false; }
     }
-    private void AudioChanged(object sender, SelectionChangedEventArgs e) { if (!tracksUpdating && CanChangeRoomTracks && AudioTracks.SelectedItem is TrackChoice t) { audioTrackChosen = true; player?.SetAudioTrack(t.Id); PublishRoomTrack(t.Id, false); } }
-    private void SubtitlesChanged(object sender, SelectionChangedEventArgs e) { if (!tracksUpdating && CanChangeRoomTracks && SubtitleTracks.SelectedItem is TrackChoice t) { subtitleTrackChosen = true; player?.SetSpu(t.Id); PublishRoomTrack(t.Id, true); } }
+    private void AudioChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!tracksUpdating && CanChangeRoomTracks && AudioTracks.SelectedItem is TrackChoice t && player?.SetAudioTrack(t.Id) == true)
+        {
+            audioTrackChosen = true;
+            var subtitle = ApplySubtitlesForAudio(t.Id);
+            PublishRoomTrack(t.Id, false, subtitle);
+        }
+    }
+    private void SubtitlesChanged(object sender, SelectionChangedEventArgs e) { if (!tracksUpdating && CanChangeRoomTracks && SubtitleTracks.SelectedItem is TrackChoice t) { subtitleTrackChosen = subtitleTrackManuallyChosen = true; player?.SetSpu(t.Id); PublishRoomTrack(t.Id, true); } }
     private void LoadSubtitles(object sender, RoutedEventArgs e)
     {
         if (player is null || !ready || room?.Identity?.Host == false) return;
@@ -1276,13 +1287,12 @@ public partial class MainWindow : Window
         {
             if (room is not null)
             {
-                try { room.ShareSubtitle(picker.FileName); SetStatus("Sharing subtitles with the room…"); }
+                try { room.ShareSubtitle(picker.FileName); subtitleTrackChosen = subtitleTrackManuallyChosen = true; SetStatus("Sharing subtitles with the room…"); }
                 catch (IOException ex) { SetStatus(ex.Message); }
                 return;
             }
-            subtitleTrackChosen = true;
             if (!player.AddSlave(MediaSlaveType.Subtitle, new Uri(picker.FileName).AbsoluteUri, true)) SetStatus("Subtitles could not be loaded. Check the file format and try again.");
-            else { RefreshTracks(); SetStatus("Subtitles loaded for your player."); }
+            else { subtitleTrackChosen = subtitleTrackManuallyChosen = true; RefreshTracks(); SetStatus("Subtitles loaded for your player."); }
         }
     }
     private void CopyInvite(object sender, RoutedEventArgs e)

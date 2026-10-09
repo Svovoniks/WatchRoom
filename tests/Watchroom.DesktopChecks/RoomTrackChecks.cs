@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections;
 using System.IO;
 using System.Reflection;
 using System.Windows;
@@ -14,6 +15,14 @@ static class RoomTrackChecks
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
         void Set(MainWindow window, string name, object? value) => typeof(MainWindow).GetField(name, flags)!.SetValue(window, value);
         object? Call(MainWindow window, string method, params object[] args) => typeof(MainWindow).GetMethod(method, flags)!.Invoke(window, args);
+        void AddRule(MainWindow window, string audio, string subtitles)
+        {
+            Call(window, "AddSubtitleRule", window, new RoutedEventArgs());
+            var rules = (IList)typeof(MainWindow).GetField("subtitleRuleDrafts", flags)!.GetValue(window)!;
+            var rule = rules[^1]!;
+            rule.GetType().GetProperty("AudioLanguage")!.SetValue(rule, audio);
+            rule.GetType().GetProperty("SubtitleLanguages")!.SetValue(rule, subtitles);
+        }
         void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); }
         async Task Wait(Func<bool> condition, Action? refresh = null)
         {
@@ -56,8 +65,12 @@ static class RoomTrackChecks
                     Set(tuple.Item1, "player", tuple.Item2); Set(tuple.Item1, "vlc", tuple.Item3); Set(tuple.Item1, "room", tuple.Item4);
                     Set(tuple.Item1, "loadGeneration", 1); Set(tuple.Item1, "loadedMedia", host.Snapshot!.Media!.Id);
                 }
-                ((TextBox)hostWindow.FindName("PreferredAudioLanguages")).Text = "Russian, English"; Call(hostWindow, "SaveTrackPreferences");
-                ((TextBox)guestWindow.FindName("PreferredAudioLanguages")).Text = "English, Russian"; Call(guestWindow, "SaveTrackPreferences");
+                ((TextBox)hostWindow.FindName("PreferredAudioLanguages")).Text = "Russian, English";
+                ((TextBox)hostWindow.FindName("PreferredSubtitleLanguages")).Text = "English, off";
+                AddRule(hostWindow, "Russian", "off"); AddRule(hostWindow, "English", "Russian, English, off"); Call(hostWindow, "SaveTrackPreferences");
+                ((TextBox)guestWindow.FindName("PreferredAudioLanguages")).Text = "English, Russian";
+                ((TextBox)guestWindow.FindName("PreferredSubtitleLanguages")).Text = "English, off";
+                AddRule(guestWindow, "English", "off"); Call(guestWindow, "SaveTrackPreferences");
                 hostPlayer.Play(hostMedia); guestPlayer.Play(guestMedia);
                 await Wait(() => hostPlayer.AudioTrackDescription.Count(t => t.Id >= 0) == 2 && guestPlayer.AudioTrackDescription.Count(t => t.Id >= 0) == 2);
                 Set(hostWindow, "ready", true); Set(guestWindow, "ready", true);
@@ -66,15 +79,27 @@ static class RoomTrackChecks
                 var english = hostMedia.Tracks.Single(t => t.TrackType == TrackType.Audio && t.Language == "eng").Id;
                 await Wait(() => hostPlayer.AudioTrack == russian && guestPlayer.AudioTrack == russian && guest.Snapshot?.Tracks?.Audio is not null, Refresh);
                 Check(true, "guest follows host preferred audio rather than its own language preference");
+                await Wait(() => hostPlayer.Spu == -1 && guestPlayer.Spu == -1 && guest.Snapshot?.Tracks?.Subtitles?.Index == -1, Refresh);
+                Check(true, "guest follows the host's audio-specific subtitle rule instead of its default list");
                 var picker = (ComboBox)hostWindow.FindName("AudioTracks");
                 picker.SelectedItem = picker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == english);
                 await Wait(() => guestPlayer.AudioTrack == english, Refresh);
                 Check(true, "host audio track changes reach the guest native player");
+                var russianSubtitles = hostMedia.Tracks.Single(track => track.TrackType == TrackType.Text && track.Language == "rus").Id;
+                await Wait(() => hostPlayer.Spu == russianSubtitles && guestPlayer.Spu == russianSubtitles, Refresh);
+                Check(true, "changing host audio publishes its matching subtitle choice to the guest");
                 Check(!((ComboBox)guestWindow.FindName("AudioTracks")).IsEnabled, "guest track picker respects host-only controls");
                 var embeddedSubtitles = (ComboBox)hostWindow.FindName("SubtitleTracks");
-                embeddedSubtitles.SelectedItem = embeddedSubtitles.Items.Cast<object>().First(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! >= 0);
-                await Wait(() => guestPlayer.Spu == hostPlayer.Spu && guestPlayer.Spu >= 0, Refresh);
+                var manualSubtitleChoice = embeddedSubtitles.Items.Cast<object>().First(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! >= 0);
+                var manualSubtitle = (int)manualSubtitleChoice.GetType().GetProperty("Id")!.GetValue(manualSubtitleChoice)!;
+                embeddedSubtitles.SelectedItem = manualSubtitleChoice;
+                await Wait(() => guestPlayer.Spu == manualSubtitle && hostPlayer.Spu == manualSubtitle, Refresh);
                 Check(guestPlayer.AudioTrack == english, "embedded subtitle selection synchronizes without changing room audio");
+                picker.SelectedItem = picker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == russian);
+                await Wait(() => guestPlayer.AudioTrack == russian, Refresh);
+                Check(hostPlayer.Spu == manualSubtitle && guestPlayer.Spu == manualSubtitle, "manual room subtitles survive host audio changes");
+                picker.SelectedItem = picker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == english);
+                await Wait(() => guestPlayer.AudioTrack == english, Refresh);
                 var subtitle = Path.Combine(directory, "shared-manual.srt");
                 await File.WriteAllTextAsync(subtitle, "1\n00:00:00,000 --> 00:00:20,000\nHost-loaded subtitles\n");
                 var playback = host.Snapshot!.Playback;

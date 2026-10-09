@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 namespace Watchroom.Core;
 
 public record LanguageTrack(int Id, string Name, string? Language);
+public record SubtitleLanguageRule(string AudioLanguage, string[] Languages);
 
 public static class TrackLanguages
 {
@@ -32,6 +33,28 @@ public static class TrackLanguages
             .Select(value => subtitles && value.Equals("off", StringComparison.OrdinalIgnoreCase) ? "off" :
                 Normalize(value) ?? throw new ArgumentException($"Unknown language '{value}'. Use a language name or code, such as English, Russian, en or ru."))
             .Distinct().ToArray();
+    }
+    public static SubtitleLanguageRule[] ParseSubtitleRules(IEnumerable<KeyValuePair<string, string>> rules)
+    {
+        var result = new List<SubtitleLanguageRule>();
+        foreach (var rule in rules)
+        {
+            if (rule.Key.Split([',', ';', '\r', '\n'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Length != 1)
+                throw new ArgumentException("Enter one audio language for each subtitle rule, such as Japanese or ja.");
+            var audio = Normalize(rule.Key) ?? throw new ArgumentException("Enter one audio language for each subtitle rule, such as Japanese or ja.");
+            if (result.Any(r => r.AudioLanguage == audio))
+                throw new ArgumentException($"There is already a subtitle rule for '{audio}'. Combine its priorities into one list.");
+            result.Add(new(audio, Parse(rule.Value, true)));
+        }
+        return result.ToArray();
+    }
+    public static string? LanguageOf(LanguageTrack? track) => track is null ? null : Normalize(track.Language) ??
+        Regex.Split(track.Name, @"[\s\[\]():,;/]+").Select(Normalize).FirstOrDefault(language => language is not null);
+
+    public static IReadOnlyList<string> SubtitlePreferences(LanguageTrack? audio, IReadOnlyList<string> defaults, IReadOnlyList<SubtitleLanguageRule> rules)
+    {
+        var language = LanguageOf(audio);
+        return rules.FirstOrDefault(rule => rule.AudioLanguage == language)?.Languages ?? defaults;
     }
     public static int? Select(IEnumerable<LanguageTrack> tracks, IReadOnlyList<string> preferences, bool subtitles = false)
     {
