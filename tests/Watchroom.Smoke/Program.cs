@@ -61,6 +61,14 @@ if (args.FirstOrDefault() == "--room-reconnect")
     Console.WriteLine($"{checks} room reconnect checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--peer-recovery")
+{
+    var checks = 0;
+    await PeerRecoveryFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/peer-recovery"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} peer recovery checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--library-snapshot")
 {
     var store = new LibraryStore(Path.GetFullPath(args[1]));

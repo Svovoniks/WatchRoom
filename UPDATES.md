@@ -133,6 +133,14 @@ at the previous position. The guest bridge retains at most 16 MiB of recently re
 movie data; canceled seeks stop transfers that have no remaining consumers.
 Guest network caching is selected per movie from recent round-trip measurements,
 within 1.5–5 seconds. Buffering recovery requires 750 ms of stable full cache.
+Temporary peer losses request a replacement immediately while room discovery is
+available. Six seconds without host control replies also starts recovery, checked
+every two seconds. The guest retains its video input and cache, pauses quietly,
+and retries interrupted media ranges for up to 45 seconds. Restored connections
+resynchronize playback and report readiness again. A failed native player input
+is reopened when necessary; genuine host departure still clears unavailable media.
+Participant departure alerts wait 30 seconds and are canceled when that peer's
+control handshake returns, avoiding sounds and floating alerts for brief losses.
 Diagnostics include command queueing, host receipt/acceptance, acknowledgement,
 player application, and scoped readiness, making network delay distinguishable
 from a playback hold. The `applied` event records issuing the native player action;

@@ -11,6 +11,32 @@ public partial class MainWindow
 {
     private CancellationTokenSource? roomReconnect;
     private Window? disconnectToast;
+    private readonly Dictionary<string, CancellationTokenSource> peerNotices = [];
+
+    private void CancelPeerNotice(string? id)
+    {
+        if (id is not null && peerNotices.Remove(id, out var pending)) pending.Cancel();
+    }
+    private void CancelPeerNotices()
+    {
+        var pendingNotices = peerNotices.Values.ToArray();
+        peerNotices.Clear();
+        foreach (var pending in pendingNotices) pending.Cancel();
+    }
+    private async Task NotifyPeerDeparture(RoomClient client, WireMessage message)
+    {
+        var id = message.Sender ?? "participant";
+        CancelPeerNotice(id);
+        using var pending = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        peerNotices[id] = pending;
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(30), pending.Token);
+            if (room == client && !closing) NotifyDisconnected(message.Text ?? "A participant");
+        }
+        catch (OperationCanceledException) when (pending.IsCancellationRequested) { }
+        finally { if (peerNotices.GetValueOrDefault(id) == pending) peerNotices.Remove(id); }
+    }
 
     private void NotifyDisconnected(string name)
     {
@@ -51,7 +77,7 @@ public partial class MainWindow
         var playback = previous.Snapshot?.Playback;
         var position = playback is null ? 0 : SyncMath.TargetPosition(playback, previous.ServerNowMs);
         var attempt = 0;
-        NotifyDisconnected("Room connection");
+        SetStatus("Connection interrupted · Reconnecting…");
         try
         {
             while (!retry.IsCancellationRequested)

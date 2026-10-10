@@ -98,6 +98,8 @@ public sealed class PeerTransport : IDisposable
     private readonly TaskCompletionSource opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource controlOpened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int controlClosed;
+    private int mediaInterrupted;
+    internal bool IsInterrupted => Volatile.Read(ref disposed) != 0 || Volatile.Read(ref controlClosed) != 0 || Volatile.Read(ref mediaInterrupted) != 0;
     private int disposed;
     public Func<string, IMediaSource?>? ResolveMedia { get; set; }
     public event Action<string, string>? Signal;
@@ -168,9 +170,11 @@ public sealed class PeerTransport : IDisposable
                     PlaybackDiagnostics.Record("media-transport-route", new { transport = DiagnosticId, relay = route.LocalCandidate?.Contains("typ relay") == true || route.RemoteCandidate?.Contains("typ relay") == true });
                 if (state is rtcState.RTC_FAILED or rtcState.RTC_CLOSED or rtcState.RTC_DISCONNECTED)
                 {
+                    Interlocked.Exchange(ref mediaInterrupted, 1);
                     var error = new IOException("Media connection interrupted");
                     isolatedMediaOpened.TrySetException(error);
                     foreach (var range in pending.Values) range.Completion.TrySetException(error);
+                    CloseControls();
                 }
             };
             if (offering) Attach(mediaPeer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = "media-v2", Unordered = true }));
@@ -216,7 +220,14 @@ public sealed class PeerTransport : IDisposable
             channel = data;
             markOpen = () => opened.TrySetResult();
         }
-        data.OnClose += _ => { foreach (var p in pending.Values) p.Completion.TrySetException(new IOException("Media channel closed")); };
+        data.OnClose += _ =>
+        {
+            // A replaced legacy channel is no longer the active media path.
+            if (channel != data) return;
+            Interlocked.Exchange(ref mediaInterrupted, 1);
+            foreach (var p in pending.Values) p.Completion.TrySetException(new IOException("Media channel closed"));
+            CloseControls();
+        };
         data.OnBinaryReceivedSafe += (_, frame) =>
         {
             try
@@ -394,8 +405,12 @@ public sealed class PeerTransport : IDisposable
     }
 }
 
-public sealed class RemoteMediaSource(PeerTransport peer, SharedMedia media) : IMediaSource
+public sealed class RemoteMediaSource : IMediaSource
 {
-    public SharedMedia Media => media;
-    public Task<byte[]> ReadAsync(long offset, int count, CancellationToken ct) => peer.ReadAsync(media.Id, offset, count, ct);
+    private readonly Func<long, int, CancellationToken, Task<byte[]>> read;
+    public SharedMedia Media { get; }
+    public RemoteMediaSource(PeerTransport peer, SharedMedia media) : this(media, (offset, count, ct) => peer.ReadAsync(media.Id, offset, count, ct)) { }
+    internal RemoteMediaSource(SharedMedia media, Func<long, int, CancellationToken, Task<byte[]>> read)
+    { Media = media; this.read = read; }
+    public Task<byte[]> ReadAsync(long offset, int count, CancellationToken ct) => read(offset, count, ct);
 }

@@ -34,6 +34,18 @@ static class Program
         foreach (var element in resourceRoot.Descendants().Where(element => element.Name.NamespaceName == "clr-namespace:Watchroom.Desktop"))
             element.Name = System.Xml.Linq.XName.Get(element.Name.LocalName, "clr-namespace:Watchroom.Desktop;assembly=Watchroom");
         app.Resources = (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(resourceRoot.ToString());
+        if (args.FirstOrDefault() == "--guest-recovery")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var recoveryWindow = new MainWindow { Left = -20000, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+            recoveryWindow.Loaded += async (_, _) =>
+            {
+                try { await GuestRecoveryChecks.Run(recoveryWindow, directory); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { recoveryWindow.Close(); app.Shutdown(); }
+            };
+            recoveryWindow.Show(); app.Run(); return;
+        }
         if (args.FirstOrDefault() == "--ui-findings")
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -195,6 +207,7 @@ static class Program
                 UnavailableLibraryChecks.Run(window, activeStore, directory, Check);
                 await PlayerShutdownChecks.Run(window, Check);
                 await RoomRecoveryChecks.Run(window, directory, Check);
+                await GuestRecoveryChecks.Run(window, directory, Check);
                 Console.WriteLine($"Input heartbeat: maximum {gaps.Max():F1} ms; p95 {gaps.Order().ElementAt((int)(gaps.Count * .95)):F1} ms");
                 Console.WriteLine($"{checks} desktop responsiveness checks passed.");
             }

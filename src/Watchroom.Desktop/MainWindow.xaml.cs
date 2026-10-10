@@ -197,7 +197,7 @@ public partial class MainWindow : Window
                 };
                 RefreshTracks();
                 player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); ReportReady(); if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
-                player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus("Playback failed. Check that the file is available and the connection is active."); });
+                player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus(room?.IsPeerRecovering == true ? "Connection interrupted · Reconnecting…" : "Playback failed. Check that the file is available and the connection is active."); });
                 player.Buffering += (_, e) => Dispatcher.BeginInvoke(() =>
                 {
                     if (closing) return;
@@ -881,7 +881,25 @@ public partial class MainWindow : Window
         if (room is null) return;
         switch (message.Type)
         {
-            case "peer-left": NotifyDisconnected(message.Text ?? "A participant"); break;
+            case "peer-left": _ = NotifyPeerDeparture(room, message); break;
+            case "peer-connected": CancelPeerNotice(message.Sender); break;
+            case "peer-recovering":
+                // Keep VLC's current input and cached bytes. A small connection
+                // indicator replaces clearing the movie and sounding an alarm.
+                player?.SetPause(true); appliedRevision = readyGeneration = -1;
+                RoomSubtitle.Text = "Connection interrupted · Reconnecting…";
+                UpdateSessionControls();
+                break;
+            case "peer-recovered":
+                CancelPeerNotice(message.Sender);
+                appliedRevision = readyGeneration = -1;
+                // A long outage can exhaust VLC's HTTP input. Reopen only that
+                // failed input; ordinary reconnects retain the same player/bridge.
+                if (player?.State == VLCState.Error && room.Snapshot?.Media is { } recoveredMedia)
+                    await LoadRoomMedia(recoveredMedia);
+                ApplyRoomPlayback(); ReportReady();
+                UpdateSessionControls();
+                break;
             case "catalog-artwork-chunk": ReceiveHostArtwork(message); break;
             case "catalog-started":
                 if (!GuestLibrary) selected = playingItem = items.FirstOrDefault(item => item.Id == message.Target);
@@ -1076,7 +1094,9 @@ public partial class MainWindow : Window
         var wantsPlayback = room is null ? player.IsPlaying : playbackIntent.Playing(target, player.IsPlaying);
         PlayButton.Content = wantsPlayback ? "Ⅱ" : "▶";
         PlayButton.ToolTip = wantsPlayback ? "Pause (Space)" : "Play (Space)";
-        if (target is { WantsPlayback: true, Playing: false } && room?.Snapshot is { } snapshot)
+        if (room?.IsPeerRecovering == true)
+            RoomSubtitle.Text = "Connection interrupted · Reconnecting…";
+        else if (target is { WantsPlayback: true, Playing: false } && room?.Snapshot is { } snapshot)
             RoomSubtitle.Text = "Waiting for " + string.Join(", ", snapshot.People.Where(p => p.Approved && !p.Ready).Select(p => p.Name)) + " to buffer";
         else if (room?.Snapshot?.Media is { } movie)
             RoomSubtitle.Text = movie.Title + " · " + (room.Identity?.Host == true ? "You are hosting" : "Streaming from host");
@@ -1094,7 +1114,7 @@ public partial class MainWindow : Window
     }
     private void ApplyRoomPlayback()
     {
-        if (player is null || room is null || !room.IsConnected || target is null || loadedMedia != target.MediaId || !ready) return;
+        if (player is null || room is null || !room.IsConnected || room.IsPeerRecovering || target is null || loadedMedia != target.MediaId || !ready) return;
         // Pause before clock checks, settling, or a potentially slow remote seek.
         if (playbackPause.Pending || !target.Playing) player.SetPause(true);
         if (playbackPause.Pending || seeking || pendingSeek is not null && target.Revision <= seekRevision) return;
@@ -1151,7 +1171,7 @@ public partial class MainWindow : Window
     }
     private void ReportReady()
     {
-        if (!ready || player is null || target is null || loadedMedia != target.MediaId ||
+        if (!ready || player is null || target is null || room?.IsPeerRecovering == true || loadedMedia != target.MediaId ||
             appliedGeneration != target.Generation || readyGeneration == target.Generation || buffering.IsActive ||
             player.State == VLCState.Buffering || settling.Waiting(target.Revision, Math.Max(0, player.Time), Environment.TickCount64)) return;
         readyGeneration = target.Generation;
@@ -1409,6 +1429,7 @@ public partial class MainWindow : Window
     private async void LeaveRoom(object sender, RoutedEventArgs e) => await Guard(async () => { var wasRoom = room is not null; ShowPage(wasRoom ? "Rooms" : "Library"); await Disconnect(); RoomHeading.Text = "Your watch room"; RoomSubtitle.Text = "Room closed"; });
     private async Task Disconnect(bool preserveFullscreen = false, bool reconnecting = false)
     {
+        CancelPeerNotices();
         if (!reconnecting) { roomReconnect?.Cancel(); roomReconnect = null; }
         libraryWindow?.Shutdown(); libraryWindow = null; roomLibrary = null; sharedItems.Clear(); sharedIds.Clear(); sharedKinds = [];
         videoClickDelay.Stop();
@@ -1495,12 +1516,12 @@ public partial class MainWindow : Window
         PlaybackTitleLabel.Text = room is null
             ? (playingItem is null ? "" : PlaybackTitle(playingItem))
             : room.Snapshot?.Media?.Title ?? "";
-        var canControl = room is null || connectedRoom && (room!.Identity?.Host == true || room.Snapshot?.SharedControls == true);
+        var canControl = room is null || connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
         InviteButton.Visibility = RoomToggle.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
         RoomLibraryButton.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
         RoomLibraryButton.Content = room?.Identity?.Host == true ? "Library & guest access" : "Host library";
         LeaveButton.Content = room is null ? "Close player" : "Leave room";
-        ChatInput.IsEnabled = SendChatButton.IsEnabled = connectedRoom && (room!.Identity?.Host == true || room.Snapshot?.People.Any(p => p.Id == room.Identity?.Peer && p.Approved) == true);
+        ChatInput.IsEnabled = SendChatButton.IsEnabled = connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.People.Any(p => p.Id == room.Identity?.Peer && p.Approved) == true);
         PlayButton.IsEnabled = StopButton.IsEnabled = canControl && (ready || playingItem is not null && player?.State is VLCState.Stopped or VLCState.Ended);
         Timeline.IsEnabled = BackwardButton.IsEnabled = ForwardButton.IsEnabled = canControl && player?.Length > 0;
         NextButton.Visibility = PreviousButton.Visibility = HasPlaybackQueue ? Visibility.Visible : Visibility.Collapsed;

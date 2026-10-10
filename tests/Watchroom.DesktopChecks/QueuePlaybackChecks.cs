@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using LibVLCSharp.Shared;
 using Watchroom.Core;
 using Watchroom.Desktop;
@@ -26,6 +27,14 @@ static class QueuePlaybackChecks
         // MainWindow loads the native player asynchronously after its library.
         // Wait for that prerequisite before exercising the playback buttons.
         await WaitFor(() => Field<MediaPlayer?>("player") is not null);
+        // Earlier UI fixtures create files inside the watched test profile. A
+        // delayed rescan would remove the synthetic IDs injected below. Drain
+        // those notifications and finish any scan before checking queue actions.
+        var watched = Field<List<FileSystemWatcher>>("watchers").Where(w => w.EnableRaisingEvents).ToArray();
+        foreach (var watcher in watched) watcher.EnableRaisingEvents = false;
+        await Dispatcher.Yield(DispatcherPriority.Background);
+        Field<DispatcherTimer>("scanDelay").Stop();
+        await WaitFor(() => !Field<bool>("scanning"));
         // Keep synthetic queue IDs out of the watched library: discovering these
         // files during the fixture replaces them with scanner-generated IDs.
         var fixtureDirectory = Path.Combine(Path.GetTempPath(), "wr-queue-" + Guid.NewGuid().ToString("N"));
@@ -126,6 +135,7 @@ static class QueuePlaybackChecks
             Set("activeQueueId", previousId); Set("queuePosition", previousPosition);
             Call("SaveQueues"); Call("RefreshQueuePickers", previousId!); Call("PublishQueue"); Call("ShowPage", "Library");
             File.Delete(firstPath); File.Delete(lastPath); Directory.Delete(fixtureDirectory);
+            foreach (var watcher in watched) watcher.EnableRaisingEvents = true;
         }
     }
 }

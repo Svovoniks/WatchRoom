@@ -28,6 +28,8 @@ public sealed partial class RoomClient : IAsyncDisposable
     private bool admitted;
     private bool roomControlsRestored;
     private int discoveryFailed;
+    private int peerRecovering;
+    private long lastHostMessageMs, nextHostRetryMs;
     private Task? readTask, sendTask, controlTask, pingTask;
     private int disposed;
     private readonly TaskCompletionSource<Welcome> connected = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -37,6 +39,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     public RoomSnapshot? Snapshot { get; private set; }
     public Task DirectControlsReady => directConnected.Task;
     public bool DiscoveryOnline => Volatile.Read(ref discoveryFailed) == 0 && connection is not null;
+    public bool IsPeerRecovering => Volatile.Read(ref peerRecovering) != 0;
     public IMediaSource? HostedMedia { get; set; }
     public void ShareSubtitle(string path)
     {
@@ -198,7 +201,9 @@ public sealed partial class RoomClient : IAsyncDisposable
             {
                 if (Identity?.Host == true) Post(new("library-expire"));
                 if (tick++ % 5 == 0 && DiscoveryOnline)
-                    try { QueueDiscovery(new("ping", Number: tick)); Post(new("retry-host")); } catch (IOException ex) { DiscoveryLost(ex.Message); }
+                    try { QueueDiscovery(new("ping", Number: tick)); } catch (IOException ex) { DiscoveryLost(ex.Message); }
+                Post(new("retry-host"));
+                Post(new("peer-health"));
                 if (Identity?.Host == false && directConnected.Task.IsCompletedSuccessfully)
                     Post(new("clock", Message: new("clock-ping", Number: Interlocked.Increment(ref pingId))));
                 await Task.Delay(2000, lifetime.Token);
@@ -250,8 +255,17 @@ public sealed partial class RoomClient : IAsyncDisposable
                     {
                         case "library-expire": if (coordinator?.ExpireLibrary(clock.Now) == true) PublishHostState(); break;
                         case "retry-host":
-                            if (Identity?.Host == false && admitted && hostPeer is not null && !peers.ContainsKey(hostPeer) && DiscoveryOnline)
-                                QueueDiscovery(new("reconnect"));
+                            RequestHostReconnect();
+                            break;
+                        case "peer-health":
+                            // Clock replies travel on the independent control connection.
+                            // Recover a silent peer before its native timeout aborts VLC's input.
+                            if (Identity?.Host == false && directConnected.Task.IsCompletedSuccessfully &&
+                                DiscoveryOnline && hostPeer is not null && Environment.TickCount64 - lastHostMessageMs >= 6000)
+                            {
+                                PlaybackDiagnostics.Record("peer-unresponsive", new { room = diagnosticId, silentMs = Environment.TickCount64 - lastHostMessageMs });
+                                DepartPeer(hostPeer, "Host control replies stopped arriving");
+                            }
                             break;
                         case "discovery": HandleDiscovery(item.Message!); break;
                         case "discovery-lost":
@@ -311,6 +325,9 @@ public sealed partial class RoomClient : IAsyncDisposable
                 if (!welcome.Host && welcome.GuestKey is null && Identity?.Room == welcome.Room)
                     welcome = welcome with { GuestKey = Identity.GuestKey };
                 Identity = welcome; admitted = Identity.Host || message.Type == "admitted";
+                // Admission already starts an offer at the host. Give that first
+                // offer time to arrive before requesting another negotiation.
+                if (message.Type == "admitted") nextHostRetryMs = Environment.TickCount64 + 10000;
                 PlaybackDiagnostics.Record("room-identity", new { room = diagnosticId, role = welcome.Host ? "host" : "guest", admitted, iceServers = welcome.IceServers.Length, welcome.ForceRelay });
                 if (Identity.GuestKey is { Length: 64 } key) settings?.Setting(RoomSetting(Identity.Room, "guestKey"), key);
                 if (Identity.Host && coordinator is null)
@@ -348,11 +365,11 @@ public sealed partial class RoomClient : IAsyncDisposable
                 else
                 {
                     var discoveredHost = discovery.People.SingleOrDefault(p => p.IsHost && p.Approved)?.Id;
-                    if (hostPeer is not null && hostPeer != discoveredHost) DepartPeer(hostPeer);
+                    if (hostPeer is not null && hostPeer != discoveredHost) DepartPeer(hostPeer, recover: false);
                     hostPeer = discoveredHost;
                     // Once bootstrapped, only the host's direct channel can update
                     // the room. Sites snapshots contain stale readiness/playback.
-                    if (!directConnected.Task.IsCompletedSuccessfully)
+                    if (!directConnected.Task.IsCompletedSuccessfully && !IsPeerRecovering)
                     { Snapshot = new(discovery.People, null, null, false, [], Name: HostRoomCoordinator.ValidName(discovery.Name) ? discovery.Name : Snapshot?.Name); Message?.Invoke(new("snapshot", Data: Wire.Serialize(Snapshot))); }
                     if (hostPeer is null) Status?.Invoke("Host offline. Waiting in the room for the host to return.");
                 }
@@ -372,7 +389,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                 if (message.Text == "library-capability") { if (message.Data == "1" && Identity?.Host == true) peer.EnableLibraryChannel(); }
                 else peer.ReceiveSignal(message.Text!, message.Data!);
                 break;
-            case "peer-left": if (message.Sender is not null) DepartPeer(message.Sender, "Room service reported peer departure"); break;
+            case "peer-left": if (message.Sender is not null) DepartPeer(message.Sender, "Room service reported peer departure", recover: false); break;
             case "error":
                 if (Identity is null) FailRoom(message.Text ?? "Could not join this room");
                 else Message?.Invoke(message);
@@ -394,11 +411,13 @@ public sealed partial class RoomClient : IAsyncDisposable
     private void HandlePeer(string sender, WireMessage message)
     {
         if (Identity?.Host == true && !coordinator!.Approved(sender) || Identity?.Host == false && sender != hostPeer) return;
+        if (Identity?.Host == false) lastHostMessageMs = Environment.TickCount64;
         if (message.Type == "control-hello")
         {
             PlaybackDiagnostics.Record("peer-handshake", new { room = diagnosticId, protocol = message.Number, host = Identity?.Host == true });
             if (message.Number != 2) { DepartPeer(sender, "Update all participants to use direct room controls."); return; }
             negotiated.TryAdd(sender, 0);
+            Message?.Invoke(new("peer-connected", Sender: sender));
             connection?.UseDiscoveryPolling();
             if (Identity?.Host == true) PublishHostState();
             return;
@@ -418,7 +437,7 @@ public sealed partial class RoomClient : IAsyncDisposable
         {
             switch (message.Type)
             {
-                case "peer-left": if (message.Sender is not null) DepartPeer(message.Sender); break;
+                case "peer-left": if (message.Sender is not null) DepartPeer(message.Sender, recover: false); break;
                 case "host-state":
                     var state = Wire.Read<HostRoomState>(message.Data!);
                     if (state.Sequence <= receivedSequence) return;
@@ -426,6 +445,12 @@ public sealed partial class RoomClient : IAsyncDisposable
                     if (!directConnected.Task.IsCompletedSuccessfully) clock.Initialize(state.HostNowMs);
                     receivedSequence = state.Sequence; ApplySnapshot(state.Snapshot);
                     directConnected.TrySetResult();
+                    if (Interlocked.Exchange(ref peerRecovering, 0) != 0)
+                    {
+                        PlaybackDiagnostics.Record("peer-recovered", new { room = diagnosticId, transport = peers.GetValueOrDefault(sender)?.DiagnosticId });
+                        Message?.Invoke(new("peer-recovered", Sender: sender));
+                        Status?.Invoke("Host connection restored");
+                    }
                     break;
                 case "clock-pong": if (long.TryParse(message.Data, out var now)) clock.Receive(message.Number, now); break;
                 case "catalog-artwork-chunk": case "catalog-started": case "catalog-page": case "catalog-error": case "chat": case "notice": case "error": Message?.Invoke(message); break;
@@ -545,7 +570,15 @@ public sealed partial class RoomClient : IAsyncDisposable
             DepartPeer(id, "Direct control send failed");
         }
     }
-    private void DepartPeer(string id, string? reason = null)
+    private void RequestHostReconnect()
+    {
+        if (Identity?.Host != false || !admitted || hostPeer is null || peers.ContainsKey(hostPeer) || !DiscoveryOnline ||
+            Environment.TickCount64 < nextHostRetryMs) return;
+        nextHostRetryMs = Environment.TickCount64 + 10000;
+        QueueDiscovery(new("reconnect"));
+        PlaybackDiagnostics.Record("peer-reconnect-request", new { room = diagnosticId });
+    }
+    private void DepartPeer(string id, string? reason = null, bool recover = true)
     {
         var name = Snapshot?.People.FirstOrDefault(p => p.Id == id)?.Name;
         var present = negotiated.ContainsKey(id) || peers.ContainsKey(id) || name is not null;
@@ -566,6 +599,20 @@ public sealed partial class RoomClient : IAsyncDisposable
             if (directConnected.Task.IsCompleted)
                 directConnected = new(TaskCreationOptions.RunContinuationsAsynchronously);
             receivedSequence = 0;
+            if (recover && admitted && DiscoveryOnline)
+            {
+                // Keep the authoritative media, timeline and cache while replacing
+                // the transport. Discovery snapshots cannot reset this playback.
+                if (Interlocked.Exchange(ref peerRecovering, 1) == 0)
+                {
+                    Message?.Invoke(new("peer-recovering", Sender: id));
+                    Status?.Invoke("Reconnecting to host…");
+                }
+                nextHostRetryMs = 0;
+                RequestHostReconnect();
+                return;
+            }
+            Interlocked.Exchange(ref peerRecovering, 0);
             if (Snapshot is { } snapshot) ApplySnapshot(snapshot with { People = snapshot.People.Where(p => p.Id != id).ToArray(), Media = null, Playback = null, LibraryActivity = null, LibraryBrowsing = false });
             if (present) Message?.Invoke(new("peer-left", Sender: id, Text: name));
             Status?.Invoke("Host disconnected. Waiting in the room for the host to return.");
@@ -629,7 +676,39 @@ public sealed partial class RoomClient : IAsyncDisposable
         var peer = hostPeer is not null && peers.TryGetValue(hostPeer, out var host) ? host : throw new IOException("Host media connection is unavailable");
         await peer.Ready.WaitAsync(deadline.Token);
         PlaybackDiagnostics.Record("media-source-ready", new { room = diagnosticId, transport = peer.DiagnosticId });
-        return new RemoteMediaSource(peer, media);
+        return new RemoteMediaSource(media, (offset, count, token) => ReadRemoteRangeAsync(media, offset, count, token));
+    }
+    private async Task<byte[]> ReadRemoteRangeAsync(SharedMedia media, long offset, int count, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, lifetime.Token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(45));
+        PeerTransport? failed = null;
+        try
+        {
+            while (true)
+            {
+                deadline.Token.ThrowIfCancellationRequested();
+                await directConnected.Task.WaitAsync(deadline.Token);
+                if (Snapshot?.Media is not { } selected || selected.Id != media.Id && selected.Subtitles?.Any(s => s.Id == media.Id) != true)
+                    throw new IOException("The host is no longer sharing this media.");
+                var hostId = hostPeer;
+                if (hostId is null || !peers.TryGetValue(hostId, out var peer) || peer == failed || !negotiated.ContainsKey(hostId))
+                { await Task.Delay(50, deadline.Token); continue; }
+                try
+                {
+                    await peer.Ready.WaitAsync(deadline.Token);
+                    return await peer.ReadAsync(media.Id, offset, count, deadline.Token);
+                }
+                catch (Exception ex) when (!deadline.IsCancellationRequested && (peer.IsInterrupted || ex is TimeoutException))
+                {
+                    PlaybackDiagnostics.Record("media-range-retry", new { room = diagnosticId, transport = peer.DiagnosticId, error = ex.GetType().Name });
+                    failed = peer;
+                    Post(new("closed", hostId, Transport: peer));
+                }
+            }
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested && !lifetime.IsCancellationRequested)
+        { throw new IOException("The host connection did not recover within 45 seconds.", ex); }
     }
     private static string DiagnosticReason(string reason)
     {
