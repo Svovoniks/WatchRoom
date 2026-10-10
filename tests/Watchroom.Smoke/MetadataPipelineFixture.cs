@@ -244,6 +244,8 @@ static class MetadataPipelineFixture
             try{await tmdb.SearchAsync("Cancelled",true,cancelled.Token);}catch(OperationCanceledException){stopped=true;}
             check(stopped,"metadata cancellation stops requests without becoming a fallback failure");
         }
+        await MetadataEfficiencyFixture.Run(Path.Combine(directory, "efficiency"), check);
+        await MetadataDiscoveryFixture.Run(Path.Combine(directory, "discovery"), check);
     }
 
     private sealed class RejectAllHandler : HttpMessageHandler

@@ -24,7 +24,19 @@ Settings controls provider order (`tmdb, tvmaze, wikipedia`), language, country,
 
 TMDB searches consider localized and original titles, exact/prefix title similarity, and exact/adjacent release years. Weak and tied candidates require a manual match. IMDb/TVDB IDs can identify a TMDB show or movie; TVmaze can identify shows through IMDb/TVDB IDs. Anime alias lookup is available to both TMDB and TVmaze through the locally cached AniDB title index. Movie/show ambiguity remains unresolved.
 
-Metadata responses cache within each fetch run. Rate limits and server errors retry up to twice, honoring a bounded Retry-After delay. Cancellation stops the run. Downloaded images are size-limited, validated, and saved atomically; API authorization is never attached to image CDN requests. Updated image paths avoid stale desktop thumbnail caches.
+Unresolved TMDB and TVmaze searches check provider aliases for at most four compatible candidates. Crowded results are left unresolved rather than truncating away possible competitors. Alias lookups run concurrently within each provider's request limit. If a lookup fails, incomplete alias evidence cannot produce an automatic winner. Canonical provider titles remain the displayed result.
+
+After exact title, original-title, filename/folder and provider-alias searches, a typo fallback permits one insertion, deletion, substitution or adjacent-letter transposition. It requires at least five normalized characters, an exact release year, known movie/show type, unchanged numeric title components and no competing title within two edits. Anime needs positive animation evidence. Candidates found by earlier searches remain competitors when later queries broaden the search. Missing years, ties, contradictory evidence and incomplete candidate checks stay unresolved.
+
+Series searches also use up to four distinct titles extracted directly from numbered filenames across the same show. This preserves an original-language filename alias when a localized folder supplies the displayed title, including when the first episode has only an episode number. Aliases are fallback search evidence: they do not change folder membership or file IDs, and candidates still need to pass the existing confidence and ambiguity checks.
+
+Successful JSON responses are shared across clients within a fetch and saved under the library's `metadata-http-cache` directory. Ordinary responses expire after one hour; provider aliases expire after seven days. Cache keys separate provider URLs, language, region, provider configuration and credentials, using hashed filenames without saving request credentials. Empty searches, HTTP errors and provider-error JSON are not cached. Corrupt/unwritable cache files fall back to the provider. All explicit metadata refresh modes bypass saved responses while sharing fresh responses within that run. Duplicate concurrent requests reuse one successful response; cancelling a waiter does not cancel another caller's work.
+
+The blanket 550 ms delay after every title is replaced by provider request pacing: TMDB requests start at least 100 ms apart, TVmaze 550 ms, and Wikipedia 200 ms. TMDB/TVmaze allow at most two active requests each; Wikipedia allows one. HTTP 429 backs off the whole provider, respecting Retry-After (or a short increasing delay if absent); 5xx responses also retry, up to twice. These are conservative client settings, not promises about provider capacity. Cancellation stops queued requests and backoff waits. Downloaded images remain size-limited, validated, and saved atomically; API authorization is never attached to image CDN requests. Updated image paths avoid stale desktop thumbnail caches.
+
+Provider references: [TMDB TV aliases](https://developer.themoviedb.org/reference/tv-series-alternative-titles), [movie aliases](https://developer.themoviedb.org/reference/movie-alternative-titles), [TMDB rate limits](https://developer.themoviedb.org/docs/rate-limiting), and [TVmaze aliases and rate limits](https://www.tvmaze.com/api).
+
+AniDB dumps are parsed once per cached file version into an in-memory title index. Lookups share that index until the dump's size or modification time changes; a failed refresh keeps the previous validated dump. Repeated aliases within one anime remain valid, while aliases shared by different anime remain ambiguous. Metadata fetching re-reads affected file IDs and their current show/season records after provider requests, avoiding repeated whole-library reads while retaining protection against concurrent identity and lock edits.
 
 ## Refreshing and locks
 
@@ -55,5 +67,7 @@ NFO fields take precedence over remote fields, including during explicit refresh
 ## Verification
 
 `dotnet run --project tests/Watchroom.Smoke -- --metadata-pipeline` runs isolated metadata, migration, identity, provider, refresh, numbering, and placeholder checks without live provider credentials. The regular smoke suite also runs these checks. `tests/Watchroom.DesktopChecks` verifies incremental library updates and dispatcher responsiveness. Native macOS UI behavior requires testing on a Mac; the Mac client can be compiled on Windows.
+
+`dotnet run --project tests/Watchroom.Smoke -- --metadata-discovery` runs the labeled alias/typo corpus and response-cache/pacing checks in isolation. It writes a synthetic accuracy report under `artifacts/metadata-discovery`; these results do not estimate accuracy on a personal library.
 
 `dotnet run --project tests/Watchroom.Smoke -- --grouping-audit` reproduces the audited failures against fresh and historical records, including repeated rescans, backups, repair logs, queue IDs, manual matches, locks, extras, and movie/TV ambiguity.

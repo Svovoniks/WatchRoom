@@ -4,7 +4,8 @@ using System.Text.Json;
 namespace Watchroom.Core;
 
 public record MetadataMatch(int Id, string Type, string Title, string? Year, string? Poster, string Overview, string? Kind = null,
-    string? OriginalTitle = null, Dictionary<string, string>? ProviderIds = null, string[]? Genres = null, string[]? Cast = null, double? Rating = null, bool? Animated = null)
+    string? OriginalTitle = null, Dictionary<string, string>? ProviderIds = null, string[]? Genres = null, string[]? Cast = null, double? Rating = null, bool? Animated = null,
+    string[]? Aliases = null)
 {
     public override string ToString() => $"{Title} ({Year ?? "Unknown year"}) · {Type}";
 }
@@ -16,7 +17,6 @@ public sealed class MetadataClient : IDisposable
     private readonly HttpMessageHandler? imageHandler;
     private readonly MetadataOptions options;
     private readonly string? apiKey;
-    private readonly Dictionary<string, string> responses = [];
     public MetadataClient(string token, HttpMessageHandler? handler = null, MetadataOptions? options = null)
     {
         http = handler is null ? new HttpClient() : new HttpClient(handler, false);
@@ -31,9 +31,8 @@ public sealed class MetadataClient : IDisposable
     {
         path += (path.Contains('?') ? "&" : "?") + "language=" + Uri.EscapeDataString(language ?? options.Language);
         if (apiKey is not null) path += "&api_key=" + Uri.EscapeDataString(apiKey);
-        if (responses.TryGetValue(path, out var cached)) return JsonDocument.Parse(cached);
         var body = await MetadataHttp.GetString(http, http.BaseAddress + path, ct);
-        responses[path] = body; return JsonDocument.Parse(body);
+        return JsonDocument.Parse(body);
     }
     public async Task<MetadataSeason?> SeasonAsync(int showId, int season, CancellationToken ct = default)
     {
@@ -84,7 +83,7 @@ public sealed class MetadataClient : IDisposable
             Rating = root.TryGetProperty("vote_average", out var rating) && rating.ValueKind == JsonValueKind.Number && rating.TryGetDouble(out var value) ? value : null,
             Poster = Text("poster_path") ?? match.Poster, Overview = overview ?? match.Overview, Year = date?.Length >= 4 ? date[..4] : match.Year };
     }
-    public async Task<MetadataMatch?> MatchAsync(MediaItem item, CancellationToken ct = default)
+    public async Task<MetadataMatch?> MatchAsync(MediaItem item, CancellationToken ct = default, IReadOnlyList<string>? queries = null)
     {
         if (item.Year is null && !LibraryIdentity.Locked(item, "Year") && MetadataTitles.FolderYear(item) is { } folderYear) item = item with { Year = folderYear };
         var known = System.Text.RegularExpressions.Regex.Match(item.PosterSource ?? "", @"^https://www\.themoviedb\.org/(tv|movie)/(\d+)");
@@ -130,21 +129,24 @@ public sealed class MetadataClient : IDisposable
             }
         }
         var movieEvidence = !item.Matched && !item.MetadataLocked && MetadataMatching.HasMovieEvidence(item);
+        var typoSearches = new List<(MediaItem Item, MetadataMatch[]? Candidates)>();
+        Task<MetadataMatch?> ChooseSearch(IEnumerable<MetadataMatch> candidates, MediaItem source) =>
+            MetadataMatching.ChooseWithAliasesAsync(candidates, source, AlternativeTitlesAsync, ct, rows => typoSearches.Add((source, rows)));
         var tv = movieEvidence ? [] : await SearchAsync(item.DisplayTitle, true, ct, item.Year);
         var movies = item.Episode is not null || item.MetadataType == "tv" ? [] : await SearchAsync(item.DisplayTitle, false, ct, item.Year);
-        var best = MetadataMatching.Choose(tv.Concat(movies), item);
+        var best = await ChooseSearch(tv.Concat(movies), item);
         // A region's release year can differ; broaden the query without accepting tied matches.
         if (best is null && item.Year is not null)
         {
             tv = movieEvidence ? [] : await SearchAsync(item.DisplayTitle, true, ct);
             movies = item.Episode is not null || item.MetadataType == "tv" ? [] : await SearchAsync(item.DisplayTitle, false, ct);
-            best = MetadataMatching.Choose(tv.Concat(movies), item);
+            best = await ChooseSearch(tv.Concat(movies), item);
         }
-        if (best is null) foreach (var query in MetadataTitles.Queries(item).Skip(1))
+        if (best is null) foreach (var query in (queries ?? MetadataTitles.Queries(item)).Skip(1))
         {
             tv = movieEvidence ? [] : await SearchAsync(query, true, ct);
             movies = item.Episode is not null || item.MetadataType == "tv" ? [] : await SearchAsync(query, false, ct);
-            best = MetadataMatching.Choose(tv.Concat(movies), item with { Title = query, Series = item.Series is null ? null : query });
+            best = await ChooseSearch(tv.Concat(movies), item with { Title = query, Series = item.Series is null ? null : query });
             if (best is not null) break;
         }
         // Inconsistent romanization can prevent a full query from reaching the correct
@@ -159,7 +161,19 @@ public sealed class MetadataClient : IDisposable
                 if (best is not null) break;
             }
         }
-        return best is null ? null : await DetailsAsync(best, ct);
+        var typoFallback = best is null;
+        best ??= MetadataMatching.ChooseTypoFallback(typoSearches);
+        if (best is null) return null;
+        var selected = await DetailsAsync(best, ct);
+        return MetadataMatching.Compatible(item, selected) && (!typoFallback || selected.Year == best.Year) ? selected : null;
+    }
+    private async Task<string[]> AlternativeTitlesAsync(MetadataMatch match, CancellationToken ct)
+    {
+        using var json = await Get($"{match.Type}/{match.Id}/alternative_titles", ct);
+        if (json.RootElement.ValueKind != JsonValueKind.Object || !json.RootElement.TryGetProperty(match.Type == "tv" ? "results" : "titles", out var list) || list.ValueKind != JsonValueKind.Array)
+            throw new JsonException("Invalid alternative-title response.");
+        return list.EnumerateArray().Where(x => x.TryGetProperty("title", out var title) && title.ValueKind == JsonValueKind.String)
+            .Select(x => x.GetProperty("title").GetString()!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
     public Task<string?> CachePosterAsync(MetadataMatch match, string directory, CancellationToken ct = default) =>
         CacheImageAsync(match.Poster, $"{match.Type}-{match.Id}", directory, ct);

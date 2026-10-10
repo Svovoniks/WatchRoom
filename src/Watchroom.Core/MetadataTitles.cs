@@ -22,7 +22,24 @@ public static class MetadataTitles
         !LibraryIdentity.Locked(item, "Episode") && item.NumberingSource is not ("filename" or "season-folder") &&
         Regex.IsMatch(Path.GetFileNameWithoutExtension(item.Path), @"(?i)\b(?:Collection|Compilation)\b") &&
         !Regex.IsMatch(Path.GetFileNameWithoutExtension(item.Path), @"(?i)\bS\d{1,2}[ ._-]*E\d{1,3}\b|\b\d{1,2}x\d{1,3}\b");
-    public static string[] Queries(MediaItem item)
+    // Read only the filename: using FileNames.Parse here would apply folder/NFO
+    // titles again and erase the independent alias we are trying to recover.
+    internal static string? FilenameAlias(string path)
+    {
+        var name = Regex.Replace(Path.GetFileNameWithoutExtension(path), @"\[[^\]]*\]", " ");
+        name = Regex.Replace(name, @"[._]+", " ").Trim();
+        name = Regex.Split(name, @"(?i)\b(?:BDRip|BRRip|DVDRip|HDTVRip|2160p|1080p|720p|480p|\d{3,4}x\d{3,4}p?|WEB[ -]DL|WEBRip|BluRay|x264|x265|HEVC)\b")[0].TrimEnd(' ', '(');
+        var numbering = Regex.Match(name, @"(?i)\bS\d{1,2}[ -]*E\d{1,3}(?:v\d+)?\b|\b\d{1,2}x\d{1,3}(?:v\d+)?\b|\b\d{1,2}\s*сезон\s*\d{1,4}\s*сери(?:я|и|й)\b");
+        if (!numbering.Success)
+            numbering = Regex.Match(name, @"(?i)(?:(?:^|\s)-\s(?:E(?:P(?:ISODE)?)?\s*)?|\sE(?:P(?:ISODE)?)?\s*)(\d{1,4})(?:\s*-\s*\d{1,4})?(?:\s*v\d+)?(?:\s+END)?\s*$|\b(\d{1,4})\s*(?:серия|эпизод)\b|\s+(\d{2,4})\s*$");
+        if (!numbering.Success || numbering.Groups.Cast<Group>().Skip(1).Any(g => g.Success && int.TryParse(g.Value, out var number) && number >= 1900)) return null;
+        var title = name[..numbering.Index].Trim(' ', '-');
+        // A numeric prefix with an episode subtitle is not a series alias.
+        if (Regex.IsMatch(title, @"^\d{2,4}\s+[-–]\s+")) return null;
+        title = Regex.Replace(title, @"\s+\(?(?:19|20)\d{2}\)?\s*$", "").Trim();
+        return title.Length >= 3 ? title : null;
+    }
+    public static string[] Queries(MediaItem item, IEnumerable<MediaItem>? entries = null)
     {
         var titles = new List<string> { item.DisplayTitle };
         void Add(string? title)
@@ -37,6 +54,11 @@ public static class MetadataTitles
         }
         Add(item.DisplayTitle);
         Add(Regex.Replace(item.DisplayTitle, @"\b(\d+)\s+1\s+([23])\b", "$1 1/$2"));
+        if (item.Series is not null)
+        {
+            foreach (var alias in new[] { item }.Concat(entries ?? []).Where(x => !x.IsVirtual && !x.IsExtra && LibraryIdentity.SameShow(item, x))
+                .Select(x => FilenameAlias(x.Path)).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Take(4)) Add(alias);
+        }
         if (item.Series is null)
         {
             var clean = Regex.Replace(item.Title, @"^\d{1,2}\s+(.+?)\s+-\s+(?:Comedy|Action|Drama|Horror|Thriller)\b.*$", "$1", RegexOptions.IgnoreCase);
@@ -53,11 +75,6 @@ public static class MetadataTitles
                 Add(parentTitle + " " + Path.GetFileName(nested));
             if (RussianSearchAlias(Regex.Replace(item.DisplayTitle, @"\[[^\]]*\]", "").Trim()) is { } translated && Normalize(translated) == Normalize(parentTitle))
                 Add(parentTitle);
-        }
-        if (item.Series is not null)
-        {
-            // Filename aliases are useful when a folder uses a translated or regional title.
-            Add(FileNames.Parse(item.Path, item.SourceLibraryKind ?? item.Kind).Title);
         }
         if (item.Series is null)
         {

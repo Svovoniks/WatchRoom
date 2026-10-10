@@ -16,6 +16,7 @@ public static class AutomaticArtwork
         using var owned = client is null ? new HttpClient { Timeout = TimeSpan.FromSeconds(20) } : null;
         var http = client ?? owned!; http.DefaultRequestHeaders.UserAgent.ParseAdd("Watchroom/0.2 (desktop media library)");
         var options = MetadataOptions.Load(library); var mode = refresh ?? (force ? MetadataRefresh.RefreshText : MetadataRefresh.FillMissing);
+        using var requests = MetadataHttp.BeginScope(library, force || refresh is not null, options);
         using var ownedTmdb = metadata is null && !string.IsNullOrWhiteSpace(token) ? new MetadataClient(token, options: options) : null;
         var tmdb = metadata ?? ownedTmdb;
         foreach (var entry in library.All().Where(x => x.Available && !x.IsVirtual && !x.IsExtra))
@@ -31,7 +32,15 @@ public static class AutomaticArtwork
             { progress?.Report("NFO artwork unavailable · " + entry.DisplayTitle); }
             if (Wire.Serialize(local) != Wire.Serialize(entry)) library.Save(local);
         }
-        var groups = library.All().Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.MetadataLocked).GroupBy(LibraryIdentity.ShowKey, StringComparer.OrdinalIgnoreCase)
+        var snapshot = library.All();
+        var folderIds = snapshot.ToLookup(x => Path.GetDirectoryName(x.Path) ?? "", x => x.Id,
+            OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        IEnumerable<MediaItem> CurrentSiblings(MediaItem item)
+        {
+            // Deferred until WithSplitIdentity actually needs sibling evidence.
+            foreach (var sibling in library.ByIds(folderIds[Path.GetDirectoryName(item.Path) ?? ""])) yield return sibling;
+        }
+        var groups = snapshot.Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.MetadataLocked).GroupBy(LibraryIdentity.ShowKey, StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(group => group.First().Series is not null).ToArray();
         int fetched = 0, overviews = 0, missing = 0, failed = 0; string? error = null;
         var issues = new List<object>();
@@ -44,7 +53,7 @@ public static class AutomaticArtwork
                 !string.IsNullOrWhiteSpace(x.Overview) && (ArtworkCache.IsUsable(x.SeriesPoster) || ArtworkCache.IsUsable(x.Poster)) &&
                 (options.RefreshDays <= 0 || x.ArtworkFetchedAt >= Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds))) continue;
             var ids = group.Select(x => x.Id).ToHashSet();
-            var entries = library.All().Where(x => ids.Contains(x.Id)).ToArray();
+            var entries = library.ByIds(ids).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.MetadataLocked).ToArray();
             if (entries.Length == 0 || entries.Select(LibraryIdentity.ShowKey).Distinct().Count() != 1) continue;
             var existingOverview = entries.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Overview))?.Overview;
             if (existingOverview is not null)
@@ -74,9 +83,9 @@ public static class AutomaticArtwork
             try
             {
                 string? poster = null, source = null, overview = null;
-                var resolved = await ResolveAsync(http, tmdb, MetadataTitles.WithSplitIdentity(item, library.All()), options, directory, ct);
+                var resolved = await ResolveAsync(http, tmdb, MetadataTitles.WithSplitIdentity(item, CurrentSiblings(item)), options, directory, ct, entries);
                 attemptUnmatched = resolved is null;
-                var currentEntries = library.All().Where(x => ids.Contains(x.Id)).ToDictionary(x => x.Id);
+                var currentEntries = library.ByIds(ids).ToDictionary(x => x.Id);
                 if (entries.Any(x => !currentEntries.TryGetValue(x.Id, out var current) || !SameFetchIdentity(x, current)))
                 {
                     issues.Add(new { Title = item.DisplayTitle, Code = "changed-during-fetch", Detail = "Identity or locks changed while the provider request was running; stale result discarded." });
@@ -114,21 +123,19 @@ public static class AutomaticArtwork
                         if (LibraryIdentity.Locked(entry, "Title")) updated = updated with { Title = entry.Title, Series = type == "tv" ? entry.Series ?? entry.Title : null };
                         return LibraryIdentity.WithProvider(updated, provider, id, !entry.Matched || entry.MetadataProvider == provider);
                     }).ToArray();
-                    foreach (var entry in entries) library.Save(entry);
                 }
                 void SaveOverview()
                 {
                     if (!needsOverview || string.IsNullOrWhiteSpace(overview)) return;
                     entries = entries.Select(entry => LibraryIdentity.Locked(entry, "Overview") || mode == MetadataRefresh.FillMissing && !string.IsNullOrWhiteSpace(entry.Overview)
                         ? entry : entry with { Overview = overview }).ToArray();
-                    foreach (var entry in entries) library.Save(entry);
                     overviews++;
                 }
                 if (poster is not null)
                 {
                     var expected = entries.ToDictionary(x => x.Id);
                     var installed = false;
-                    foreach (var entry in library.All().Where(x => ids.Contains(x.Id) && !LibraryIdentity.Locked(x, "Poster")))
+                    foreach (var entry in library.ByIds(ids).Where(x => !LibraryIdentity.Locked(x, "Poster")))
                         if (expected.TryGetValue(entry.Id, out var previous) && SameFetchIdentity(previous, entry))
                         { library.Save(entry with { Poster = poster, SeriesPoster = entry.Series is null ? null : poster, PosterSource = source }); installed = true; }
                     if (installed) fetched++;
@@ -139,7 +146,7 @@ public static class AutomaticArtwork
                     issues.Add(new { Title = item.DisplayTitle, Code = resolved is null ? "no-confident-match" : "provider-missing-fields",
                         PosterMissing = needsPoster && poster is null, OverviewMissing = needsOverview && string.IsNullOrWhiteSpace(overview) });
                 }
-                if (resolved is not null) foreach (var entry in library.All().Where(x => entries.Any(e => e.Id == x.Id)))
+                if (resolved is not null) foreach (var entry in library.ByIds(entries.Select(x => x.Id)))
                 {
                     library.Save(entry with { ArtworkFetchedAt = Wire.Now });
                     if (options.SaveNfo) LocalMetadata.Export(entry);
@@ -147,8 +154,7 @@ public static class AutomaticArtwork
             }
             catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or XmlException or InvalidOperationException or KeyNotFoundException or TaskCanceledException && !ct.IsCancellationRequested)
             { attemptFailed = true; failed++; error = FailureReason(ex); issues.Add(new { Title = item.DisplayTitle, Code = "provider-failure", Detail = error }); progress?.Report("Metadata unavailable · " + item.DisplayTitle + " · " + error); }
-            MetadataFetchPolicy.Record(library, "title", library.All().Where(x => ids.Contains(x.Id)), options, token, attemptFailed, attemptUnmatched);
-            await Task.Delay(550, ct);
+            MetadataFetchPolicy.Record(library, "title", library.ByIds(ids), options, token, attemptFailed, attemptUnmatched);
         }
         library.GroupShowsByProvider();
         var seriesReport = await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, refresh);
@@ -204,9 +210,10 @@ public static class AutomaticArtwork
             Rating = LibraryIdentity.Locked(item, "Rating") ? item.Rating : match.Rating ?? item.Rating,
             Year = LibraryIdentity.Locked(item, "Year") ? item.Year : int.TryParse(match.Year, out var year) ? year : item.Year };
     }
-    internal static async Task<Resolved?> ResolveAsync(HttpClient http, MetadataClient? tmdb, MediaItem item, MetadataOptions options, string directory, CancellationToken ct)
+    internal static async Task<Resolved?> ResolveAsync(HttpClient http, MetadataClient? tmdb, MediaItem item, MetadataOptions options, string directory, CancellationToken ct, MediaItem[]? entries = null)
     {
         Exception? failure = null; Resolved? best = null;
+        var queries = MetadataTitles.Queries(item, entries);
         bool Accept(Resolved candidate)
         {
             if (best is null) best = candidate;
@@ -228,7 +235,7 @@ public static class AutomaticArtwork
             {
                 if (provider == "tmdb" && tmdb is not null)
                 {
-                    var match = await tmdb.MatchAsync(item, ct);
+                    var match = await tmdb.MatchAsync(item, ct, queries);
                     if (match is null && MetadataTitles.IsAnimeSource(item))
                         foreach (var alias in await AnimeTitles.AliasesAsync(http, directory, item.DisplayTitle, ct))
                         { match = await tmdb.MatchAsync(item with { Title = alias, Series = item.Series is null ? null : alias }, ct); if (match is not null) break; }
@@ -239,7 +246,7 @@ public static class AutomaticArtwork
                 if (provider == "tvmaze" && item.MetadataType != "movie" &&
                     (item.Matched || !MetadataMatching.HasMovieEvidence(item)))
                 {
-                    var show = await LookupShow(http, item, ct);
+                    var show = await LookupShow(http, item, ct, queries);
                     if (show is null && MetadataTitles.IsAnimeSource(item)) foreach (var alias in await AnimeTitles.AliasesAsync(http, directory, item.DisplayTitle, ct))
                     { show = await LookupShow(http, item with { Title = alias, Series = alias }, ct); if (show is not null) break; }
                     if (show is { } value)
@@ -261,7 +268,7 @@ public static class AutomaticArtwork
         return null;
     }
     private static async Task<JsonDocument> Json(HttpClient http, string url, CancellationToken ct) => JsonDocument.Parse(await MetadataHttp.GetString(http, url, ct));
-    private static async Task<(string? Image, string Source, string? Overview, string Kind, string Type, string Provider, int? Id, string? Title, int? Year, bool? Animated)?> LookupShow(HttpClient http, MediaItem item, CancellationToken ct)
+    private static async Task<(string? Image, string Source, string? Overview, string Kind, string Type, string Provider, int? Id, string? Title, int? Year, bool? Animated)?> LookupShow(HttpClient http, MediaItem item, CancellationToken ct, IReadOnlyList<string>? queries = null)
     {
             var known = Regex.Match(item.PosterSource ?? "", @"^https://www\.tvmaze\.com/shows/(\d+)");
             var knownId = int.TryParse(LibraryIdentity.ProviderId(item, "tvmaze"), out var stored) ? stored : known.Success ? int.Parse(known.Groups[1].Value) : (int?)null;
@@ -286,20 +293,33 @@ public static class AutomaticArtwork
             }
             if (knownId is not > 0 && external is null)
             {
-                int? Best(JsonElement[] candidates, string title)
+                var typoSearches = new List<(MediaItem Item, MetadataMatch[]? Candidates)>();
+                var seen = matches.ToDictionary(x => x.GetProperty("id").GetInt32());
+                async Task<int?> Best(JsonElement[] candidates, string title)
                 {
-                    return MetadataMatching.Choose(candidates.Select(Candidate), item with { Title = title, Series = title })?.Id;
+                    var source = item with { Title = title, Series = item.Series is null ? null : title };
+                    foreach (var candidate in candidates) seen[candidate.GetProperty("id").GetInt32()] = candidate;
+                    var chosen = await MetadataMatching.ChooseWithAliasesAsync(candidates.Select(Candidate), source, async (match, cancellation) =>
+                    {
+                        using var aliases = await Json(http, $"https://api.tvmaze.com/shows/{match.Id}/akas", cancellation);
+                        if (aliases.RootElement.ValueKind != JsonValueKind.Array) throw new JsonException("Invalid show-alias response.");
+                        return aliases.RootElement.EnumerateArray()
+                            .Where(x => x.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String)
+                            .Select(x => x.GetProperty("name").GetString()!).ToArray();
+                    }, ct, rows => typoSearches.Add((source, rows)));
+                    return chosen?.Id;
                 }
-                var best = Best(matches, item.DisplayTitle);
-                if (best is null) foreach (var query in MetadataTitles.Queries(item).Skip(1))
+                var best = await Best(matches, item.DisplayTitle);
+                if (best is null) foreach (var query in (queries ?? MetadataTitles.Queries(item)).Skip(1))
                 {
                     using var aliases = await Json(http, "https://api.tvmaze.com/search/shows?q=" + Uri.EscapeDataString(query), ct);
                     var aliasMatches = aliases.RootElement.EnumerateArray().Select(x => x.GetProperty("show").Clone()).ToArray();
-                    best = Best(aliasMatches, query);
+                    best = await Best(aliasMatches, query);
                     if (best is not null) { matches = aliasMatches; break; }
                 }
+                best ??= MetadataMatching.ChooseTypoFallback(typoSearches)?.Id;
                 if (best is null) return null;
-                matches = matches.Where(x => x.GetProperty("id").GetInt32() == best).ToArray();
+                matches = [seen[best.Value]];
             }
             if (matches.Length != 1) return null; var show = matches[0];
             var imageUrl = show.TryGetProperty("image", out var image) && image.ValueKind == JsonValueKind.Object

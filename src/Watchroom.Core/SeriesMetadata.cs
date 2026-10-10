@@ -16,6 +16,7 @@ public static class SeriesMetadata
         CancellationToken ct, HttpClient http, bool force = false, MetadataClient? metadata = null, MetadataRefresh? refresh = null)
     {
         var options = MetadataOptions.Load(library); var mode = refresh ?? (force ? MetadataRefresh.RefreshText : MetadataRefresh.FillMissing);
+        using var requests = MetadataHttp.BeginScope(library, force || refresh is not null, options);
         using var owned = metadata is null && !string.IsNullOrWhiteSpace(token) ? new MetadataClient(token, options: options) : null;
         var tmdb = metadata ?? owned;
         foreach (var compilation in library.All().Where(x => x.Series is not null && MetadataTitles.IsUnverifiedCompilation(x)))
@@ -56,7 +57,7 @@ public static class SeriesMetadata
                     }
                     if (id is null || !item.Matched && MetadataTitles.IsAnimeSource(item))
                     {
-                        var resolved = await AutomaticArtwork.ResolveAsync(http, tmdb, item, options with { Providers = [provider] }, directory, ct);
+                        var resolved = await AutomaticArtwork.ResolveAsync(http, tmdb, item, options with { Providers = [provider] }, directory, ct, entries);
                         id = resolved?.Id;
                     }
                     if (id is null) continue;
@@ -77,7 +78,7 @@ public static class SeriesMetadata
                     else details = await TvmazeSeasons(http, id.Value, ct);
                     if (details.Length == 0) continue;
                     var entryIds = entries.Select(x => x.Id).ToHashSet();
-                    var latest = library.All().Where(x => entryIds.Contains(x.Id)).ToDictionary(x => x.Id);
+                    var latest = library.ByIds(entryIds).ToDictionary(x => x.Id);
                     if (entries.Any(x => !latest.TryGetValue(x.Id, out var updated) || !AutomaticArtwork.SameFetchIdentity(x, updated)))
                     { progress?.Report("Kept newer numbering/identity · " + item.DisplayTitle); superseded = true; matched = true; break; }
                     entries = entries.Select(x => latest[x.Id]).ToArray();
@@ -162,7 +163,7 @@ public static class SeriesMetadata
             if (!superseded)
             {
                 var ids = entries.Select(x => x.Id).ToHashSet();
-                MetadataFetchPolicy.Record(library, "episodes", library.All().Where(x => ids.Contains(x.Id)), options, token, attemptFailed && !matched, !matched);
+                MetadataFetchPolicy.Record(library, "episodes", library.ByIds(ids), options, token, attemptFailed && !matched, !matched);
             }
         }
         return $"Seasons: {seasons} · Episodes: {episodes} · {unmatched} shows need matching · {failed} metadata failures.";
@@ -180,7 +181,7 @@ public static class SeriesMetadata
     }
     private static void ReconcileMissing(LibraryStore library, string directory, MediaItem show, MetadataSeason[] seasons, string provider, int id, MetadataOptions options)
     {
-        var existing = library.All().Where(x => LibraryIdentity.SameShow(x, show)).ToArray();
+        var existing = library.InShow(show).ToArray();
         var physical = existing.Where(x => !x.IsVirtual).SelectMany(x => LibraryIdentity.EpisodeNumbers(x).Select(n => (x.Season, Number: n))).ToHashSet();
         var wanted = new HashSet<string>();
         foreach (var season in seasons) foreach (var episode in season.Episodes)

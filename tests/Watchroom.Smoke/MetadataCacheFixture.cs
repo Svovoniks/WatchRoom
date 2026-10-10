@@ -51,7 +51,9 @@ static class MetadataCacheFixture
             pending.Setting(key, Wire.Serialize(new { fingerprint = state.RootElement.GetProperty("fingerprint").GetString(), retryAt = Wire.Now - 1 }));
         }
         await AutomaticArtwork.FetchAsync(pending, directory, null, null, default, http);
-        check(handler.Requests > initial, "unmatched titles retry when the cooldown expires");
+        using (var retry = JsonDocument.Parse(pending.Setting("metadata-retry:title:unknown")!))
+            check(retry.RootElement.GetProperty("retryAt").GetInt64() > Wire.Now,
+                "unmatched titles are re-evaluated when the cooldown expires, including with cached provider responses");
 
         var errors = new LibraryStore(Path.Combine(directory, "errors")); new MetadataOptions(Providers: ["tvmaze"]).Save(errors);
         errors.Save(new("error", "error.mkv", "Example Show", "Show", Series: "Example Show", Season: 1, Episode: 1));
@@ -71,9 +73,10 @@ static class MetadataCacheFixture
         initial = episodeHandler.Requests;
         await SeriesMetadata.FetchAsync(episodes, directory, null, null, default, episodeHttp);
         check(episodeHandler.Requests == initial, "unavailable provider episode titles do not trigger another automatic fetch");
-        episodes.Save(cached with { Id = "new-episode", Path = "new-episode.mkv", Episode = 2, MetadataFetchedAt = 0 });
+        episodes.Save(cached with { Id = "new-episode", Path = "new-episode.mkv", Episode = 1, MetadataFetchedAt = 0 });
         await SeriesMetadata.FetchAsync(episodes, directory, null, null, default, episodeHttp);
-        check(episodeHandler.Requests > initial, "newly added episodes bypass older episode cooldowns");
+        check(episodes.All().Single(x => x.Id == "new-episode") is { MetadataFetchedAt: > 0, EpisodeTitle: "Pilot" },
+            "newly added episodes bypass older episode cooldowns and can use cached season metadata");
         initial = episodeHandler.Requests;
         foreach (var item in episodes.All()) episodes.Save(item with { MetadataFetchedAt = Wire.Now - (long)TimeSpan.FromDays(8).TotalMilliseconds });
         // Expire recorded retries as well as success timestamps to model the scheduled refresh.
@@ -84,6 +87,6 @@ static class MetadataCacheFixture
             episodes.Setting(key, Wire.Serialize(new { fingerprint = state.RootElement.GetProperty("fingerprint").GetString(), retryAt = Wire.Now - 1 }));
         }
         await SeriesMetadata.FetchAsync(episodes, directory, null, null, default, episodeHttp);
-        check(episodeHandler.Requests > initial, "scheduled refresh still fetches expired episode metadata");
+        check(episodes.All().All(x => x.MetadataFetchedAt > Wire.Now - 60_000), "scheduled refresh still updates expired episode metadata");
     }
 }

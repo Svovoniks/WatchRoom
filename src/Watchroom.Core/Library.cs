@@ -9,6 +9,7 @@ public sealed class LibraryStore
 {
     public event Action<MediaItem>? MediaSaved;
     private readonly string connection;
+    internal string MetadataCacheDirectory => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(new SqliteConnectionStringBuilder(connection).DataSource))!, "metadata-http-cache");
     public LibraryStore(string directory)
     {
         Directory.CreateDirectory(directory);
@@ -16,6 +17,8 @@ public sealed class LibraryStore
         using var db = Open();
         using var cmd = db.CreateCommand();
         cmd.CommandText = "CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY, path TEXT UNIQUE NOT NULL, json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS shows(id TEXT PRIMARY KEY, json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS seasons(id TEXT PRIMARY KEY, show_id TEXT NOT NULL, json TEXT NOT NULL);";
+        cmd.ExecuteNonQuery();
+        cmd.CommandText = "CREATE INDEX IF NOT EXISTS media_show_id ON media(json_extract(json, '$.showId'));";
         cmd.ExecuteNonQuery();
         // Additive migration: file IDs and saved queues remain unchanged.
         if (Setting("hierarchy-version") != "1")
@@ -235,25 +238,72 @@ public sealed class LibraryStore
         using var rows = c.ExecuteReader(); var items = new List<MediaItem>();
         while (rows.Read()) items.Add(Wire.Read<MediaItem>(rows.GetString(0)));
         var shows = Shows().ToDictionary(x => x.Id); var seasons = Seasons().ToDictionary(x => x.Id);
-        return items.Select(item =>
+        return SortItems(items.Select(item => ApplyHierarchy(item,
+            item.ShowId is { } showId ? shows.GetValueOrDefault(showId) : null,
+            item.SeasonId is { } seasonId ? seasons.GetValueOrDefault(seasonId) : null)));
+    }
+    // Fetch stages re-read only their affected records after awaiting providers.
+    // Join current hierarchy data too: a sibling edit can change the shared show.
+    private const string MediaWithHierarchy = "SELECT m.json, s.json, se.json FROM media m " +
+        "LEFT JOIN shows s ON s.id=json_extract(m.json, '$.showId') " +
+        "LEFT JOIN seasons se ON se.id=json_extract(m.json, '$.seasonId') ";
+    internal List<MediaItem> ByIds(IEnumerable<string> ids)
+    {
+        using var db = Open(); var result = new List<MediaItem>();
+        foreach (var batch in ids.Distinct(StringComparer.Ordinal).Chunk(500))
         {
-            if (item.ShowId is { } showId && shows.TryGetValue(showId, out var show))
-            {
-                var ids = new Dictionary<string, string>(item.ProviderIds ?? [], StringComparer.OrdinalIgnoreCase);
-                foreach (var id in show.ProviderIds) ids.TryAdd(id.Key, id.Value);
-                item = item with { Series = LibraryIdentity.Locked(item, "Title") ? item.Series : show.Title, Kind = show.Kind,
-                    Year = LibraryIdentity.Locked(item, "Year") ? item.Year : show.Year, SeriesPoster = show.Poster ?? item.SeriesPoster,
-                    Overview = LibraryIdentity.Locked(item, "Overview") ? item.Overview : show.Overview ?? item.Overview,
-                    ProviderIds = ids, NumberingOrder = show.NumberingOrder };
-            }
-            if (item.SeasonId is { } seasonId && seasons.TryGetValue(seasonId, out var season)) item = item with
-            {
-                SeasonTitle = LibraryIdentity.Locked(item, "SeasonTitle") ? item.SeasonTitle : season.Title ?? item.SeasonTitle,
-                SeasonOverview = LibraryIdentity.Locked(item, "SeasonOverview") ? item.SeasonOverview : season.Overview ?? item.SeasonOverview,
-                SeasonPoster = season.Poster ?? item.SeasonPoster
-            };
-            return item;
-        }).OrderBy(x => x.DisplayTitle).ThenBy(x => x.Season).ThenBy(x => x.Episode).ToList();
+            using var command = db.CreateCommand();
+            var parameters = batch.Select((id, index) => "$id" + index).ToArray();
+            command.CommandText = MediaWithHierarchy + "WHERE m.id IN (" + string.Join(",", parameters) + ")";
+            for (var index = 0; index < batch.Length; index++) command.Parameters.AddWithValue(parameters[index], batch[index]);
+            result.AddRange(ReadMedia(command));
+        }
+        return SortItems(result);
+    }
+    internal List<MediaItem> InShow(MediaItem show)
+    {
+        if (show.Series is null) return ByIds([show.Id]);
+        using var db = Open(); using var command = db.CreateCommand();
+        command.CommandText = MediaWithHierarchy + "WHERE json_extract(m.json, '$.showId')=$show";
+        command.Parameters.AddWithValue("$show", LibraryIdentity.ShowKey(show));
+        return SortItems(ReadMedia(command));
+    }
+    private static List<MediaItem> ReadMedia(SqliteCommand command)
+    {
+        using var rows = command.ExecuteReader(); var result = new List<MediaItem>();
+        var shows = new Dictionary<string, LibraryShow>(); var seasons = new Dictionary<string, LibrarySeason>();
+        while (rows.Read())
+        {
+            var item = Wire.Read<MediaItem>(rows.GetString(0));
+            LibraryShow? show = null; LibrarySeason? season = null;
+            if (item.ShowId is { } showId && !rows.IsDBNull(1) && !shows.TryGetValue(showId, out show))
+                shows[showId] = show = Wire.Read<LibraryShow>(rows.GetString(1));
+            if (item.SeasonId is { } seasonId && !rows.IsDBNull(2) && !seasons.TryGetValue(seasonId, out season))
+                seasons[seasonId] = season = Wire.Read<LibrarySeason>(rows.GetString(2));
+            result.Add(ApplyHierarchy(item, show, season));
+        }
+        return result;
+    }
+    private static List<MediaItem> SortItems(IEnumerable<MediaItem> items) =>
+        items.OrderBy(x => x.DisplayTitle).ThenBy(x => x.Season).ThenBy(x => x.Episode).ToList();
+    private static MediaItem ApplyHierarchy(MediaItem item, LibraryShow? show, LibrarySeason? season)
+    {
+        if (show is not null)
+        {
+            var ids = new Dictionary<string, string>(item.ProviderIds ?? [], StringComparer.OrdinalIgnoreCase);
+            foreach (var id in show.ProviderIds) ids.TryAdd(id.Key, id.Value);
+            item = item with { Series = LibraryIdentity.Locked(item, "Title") ? item.Series : show.Title, Kind = show.Kind,
+                Year = LibraryIdentity.Locked(item, "Year") ? item.Year : show.Year, SeriesPoster = show.Poster ?? item.SeriesPoster,
+                Overview = LibraryIdentity.Locked(item, "Overview") ? item.Overview : show.Overview ?? item.Overview,
+                ProviderIds = ids, NumberingOrder = show.NumberingOrder };
+        }
+        if (season is not null) item = item with
+        {
+            SeasonTitle = LibraryIdentity.Locked(item, "SeasonTitle") ? item.SeasonTitle : season.Title ?? item.SeasonTitle,
+            SeasonOverview = LibraryIdentity.Locked(item, "SeasonOverview") ? item.SeasonOverview : season.Overview ?? item.SeasonOverview,
+            SeasonPoster = season.Poster ?? item.SeasonPoster
+        };
+        return item;
     }
     public void Save(MediaItem item)
     {

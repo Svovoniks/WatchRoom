@@ -37,6 +37,14 @@ if (args.FirstOrDefault() == "--episode-playback")
     Console.WriteLine($"{checks} episode continuation and watched-state checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--metadata-discovery")
+{
+    var checks = 0;
+    await MetadataDiscoveryFixture.Run(Path.Combine("artifacts/metadata-discovery", Guid.NewGuid().ToString("N")), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} metadata discovery checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--metadata-cache")
 {
     var checks = 0;
