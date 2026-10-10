@@ -105,8 +105,8 @@ static class UiFindingsChecks
             Control<TextBox>("DisplayNameBox").Text = "Draft name";
             Check(Control<Button>("SavePreferencesButton").IsEnabled && Control<Button>("CancelPreferencesButton").IsEnabled, "profile edits reveal persistent Save and Cancel actions");
             Check((string)typeof(MainWindow).GetProperty("SavedDisplayName", flags)!.GetValue(window)! == originalName, "room connections ignore unsaved profile drafts");
-            Call("ShowPage", "Rooms"); Call("ShowPage", "Settings");
-            Check(Control<TextBox>("DisplayNameBox").Text == "Draft name", "unsaved preferences survive page navigation");
+            Call("ShowPage", "Settings");
+            Check(Control<TextBox>("DisplayNameBox").Text == "Draft name", "selecting the current settings page preserves its draft");
             Call("CancelPreferences", window, new RoutedEventArgs());
             Check(Control<TextBox>("DisplayNameBox").Text == originalName && !Control<Button>("SavePreferencesButton").IsEnabled, "Cancel restores persisted values and clears dirty state");
             Check(window.FindName("SaveMetadataKeyButton") is null, "TMDB uses the common Save changes action without a separate key button");

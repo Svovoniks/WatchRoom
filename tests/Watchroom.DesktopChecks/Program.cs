@@ -188,6 +188,8 @@ static class Program
                 await CheckLibraryNavigation(window, activeStore, cards, directory, posterPath, Check);
                 CheckRoomSettings(window, activeStore, Check);
                 CheckQueueEditing(window, activeStore, Check);
+                PreferenceNavigationChecks.Run(window, activeStore, Check);
+                await QueuePlaybackChecks.Run(window, activeStore, directory, Check);
                 await CheckBackNavigation(window, Check);
                 PlayerInteractionChecks.Run(window, Check);
                 UnavailableLibraryChecks.Run(window, activeStore, directory, Check);

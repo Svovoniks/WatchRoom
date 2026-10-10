@@ -6,6 +6,29 @@ namespace Watchroom.Desktop;
 
 public static class Dialogs
 {
+    public static MessageBoxResult ConfirmUnsavedSettings(Window owner)
+    {
+        var result = MessageBoxResult.Cancel;
+        var win = new Window { Owner = owner, Title = "Unsaved settings", Width = 530, SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
+        var panel = new StackPanel { Margin = new Thickness(24) };
+        panel.Children.Add(new TextBlock { Text = "Save your settings before switching tabs?", FontSize = 20,
+            FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) });
+        panel.Children.Add(new TextBlock { Text = "You have unsaved changes.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) });
+        var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = new Button { Content = "Keep editing", IsCancel = true };
+        var discard = new Button { Content = "Discard changes" };
+        var save = new Button { Content = "Save changes", IsDefault = true };
+        save.SetResourceReference(FrameworkElement.StyleProperty, "Primary");
+        cancel.Click += (_, _) => win.DialogResult = false;
+        discard.Click += (_, _) => { result = MessageBoxResult.No; win.DialogResult = true; };
+        save.Click += (_, _) => { result = MessageBoxResult.Yes; win.DialogResult = true; };
+        actions.Children.Add(cancel); actions.Children.Add(discard); actions.Children.Add(save); panel.Children.Add(actions);
+        win.Content = panel;
+        win.ShowDialog();
+        return result;
+    }
+
     public static bool OfferNextEpisode(Window owner, MediaItem next)
     {
         var win = new Window { Owner = owner, Title = "Watch next episode?", Width = 560, SizeToContent = SizeToContent.Height,

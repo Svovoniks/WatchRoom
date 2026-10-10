@@ -28,6 +28,9 @@ public partial class MainWindow
     private readonly ObservableCollection<ProviderChoice> providerChoices = [];
     private bool loadingPreferences, preferencesReady;
     private string preferencesBaseline = "";
+    private string preferenceSection = "";
+    private bool HasUnsavedPreferences => preferencesReady &&
+        (PreferenceSnapshot() != preferencesBaseline || MetadataToken.Password != savedMetadataToken);
     private string SavedServerAddress => library.Setting("server") ?? "https://watchroom-rooms.svovoniks.chatgpt.site";
     private string SavedDisplayName => library.Setting("name") ?? Environment.UserName;
     private string SavedFfmpeg => library.Setting("ffmpeg") ?? "";
@@ -104,7 +107,7 @@ public partial class MainWindow
     {
         if (!preferencesReady || loadingPreferences) return;
         MetadataRefreshDays.IsEnabled = RefreshLess.IsEnabled = RefreshMore.IsEnabled = NeverRefresh.IsChecked != true;
-        var dirty = PreferenceSnapshot() != preferencesBaseline || MetadataToken.Password != savedMetadataToken;
+        var dirty = HasUnsavedPreferences;
         SavePreferencesButton.IsEnabled = CancelPreferencesButton.IsEnabled = dirty;
         PreferencesStatus.Text = dirty ? "Unsaved changes · Save or cancel when ready." : "Changes apply when you save.";
         ClearPreferenceErrors();
@@ -136,9 +139,26 @@ public partial class MainWindow
         for (var i = 0; i < providerChoices.Count; i++) providerChoices[i].SetPosition(i, providerChoices.Count);
     }
     private void CancelPreferences(object sender, RoutedEventArgs e) => LoadPreferences();
-    private void PreferenceSectionClicked(object sender, RoutedEventArgs e) => ShowPreferenceSection((string)((Button)sender).Tag);
+    private bool ConfirmPreferenceNavigation()
+    {
+        if (!HasUnsavedPreferences) return true;
+        switch (Dialogs.ConfirmUnsavedSettings(this))
+        {
+            case MessageBoxResult.Yes: return TrySavePreferences();
+            case MessageBoxResult.No: LoadPreferences(); return true;
+            default: return false;
+        }
+    }
+    private bool ConfirmPageNavigation(string name) => name == currentPage || currentPage != "Settings" || ConfirmPreferenceNavigation();
+    private void PreferenceSectionClicked(object sender, RoutedEventArgs e)
+    {
+        var section = (string)((Button)sender).Tag;
+        if (section != preferenceSection && !ConfirmPreferenceNavigation()) return;
+        ShowPreferenceSection(section);
+    }
     private void ShowPreferenceSection(string section)
     {
+        preferenceSection = section;
         foreach (var panel in new[] { ProfilePreferences, MetadataPreferences, PlaybackPreferences, AppearancePreferences, UpdatePreferences })
             panel.Visibility = (string)panel.Tag == section ? Visibility.Visible : Visibility.Collapsed;
         foreach (Button button in PreferenceSections.Children)

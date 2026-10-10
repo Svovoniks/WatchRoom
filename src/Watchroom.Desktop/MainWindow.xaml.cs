@@ -228,6 +228,7 @@ public partial class MainWindow : Window
     }
     private void ShowPage(string name)
     {
+        if (!ConfirmPageNavigation(name)) return;
         if (GuestLibrary && currentPage is "Library" or "Details" && name is not ("Library" or "Details")) ReleaseHostLibrary();
         if (name != currentPage)
         {
@@ -280,6 +281,7 @@ public partial class MainWindow : Window
     }
     private void LibraryMenuClick(object sender, RoutedEventArgs e)
     {
+        if (!ConfirmPageNavigation("Library")) return;
         var visible = LibraryCategories.Visibility == Visibility.Visible;
         LibraryCategories.Visibility = LibraryPage.Visibility == Visibility.Visible && visible ? Visibility.Collapsed : Visibility.Visible;
         LibraryChevron.Text = LibraryCategories.Visibility == Visibility.Visible ? "▾" : "▸";
@@ -288,6 +290,7 @@ public partial class MainWindow : Window
     private void LibraryCategoryClick(object sender, RoutedEventArgs e) => NavigateLibrary(int.Parse((string)((Button)sender).Tag));
     private void NavigateLibrary(int category, string? series = null, string? kind = null, int? season = null)
     {
+        if (!ConfirmPageNavigation("Library")) return;
         if (GuestLibrary)
         {
             libraryCategory = category; guestBrowse = new(Category: category); SearchBox.Clear(); ShowPage("Library");
@@ -1394,12 +1397,9 @@ public partial class MainWindow : Window
     private async Task PlayQueueStep(int direction)
     {
         if (!CanEditQueue()) return;
-        var index = QueuePlayback.FindNext(queue, queuePosition, direction, x => File.Exists(x.Path));
+        var index = QueuePlayback.FindNext(queue, queuePosition, direction, QueueItemAvailable);
         if (index < 0) { SetStatus(direction > 0 ? "End of queue." : "Start of queue."); return; }
-        queuePosition = index; selected = queue[index];
-        if (room is null) await PlayLocalItem(selected);
-        else { StartHostedVideo(selected); ShowPage("Room"); }
-        PublishQueue();
+        await PlayQueueAt(index);
     }
     private void StartHostedVideo(MediaItem item)
     {
@@ -1511,6 +1511,7 @@ public partial class MainWindow : Window
         QueueEditActions.Visibility = canManageQueue && QueueList.HasItems ? Visibility.Visible : Visibility.Collapsed;
         PlayPlayerQueueButton.IsEnabled = canManageQueue && queue.Any(item => item.Available);
         RemoveQueueButton.IsEnabled = QueueList.SelectedIndex >= 0 && canManageQueue;
+        PlaySelectedQueueButton.IsEnabled = canManageQueue && QueueList.SelectedItem is MediaItem queued && QueueItemAvailable(queued);
         QueueEarlier.IsEnabled = RemoveQueueButton.IsEnabled && QueueList.SelectedIndex > 0;
         QueueLater.IsEnabled = RemoveQueueButton.IsEnabled && QueueList.SelectedIndex < queue.Count - 1;
         PrepareButton.IsEnabled = playingItem is not null && !preparing && (room is null || connectedRoom && room!.Identity?.Host == true);
@@ -1633,13 +1634,14 @@ public partial class MainWindow : Window
         if (fullscreen && e.Key == Key.Tab) ShowPlayerControls();
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen)
         {
+            if (!ConfirmPageNavigation("Library")) { e.Handled = true; return; }
             ShowPage("Library");
             var search = SearchBox;
             search.Focus(); search.SelectAll(); e.Handled = true; return;
         }
         if (e.Key == Key.Escape && LibraryPage.Visibility == Visibility.Visible && SearchBox.IsKeyboardFocused)
         { SearchBox.Clear(); e.Handled = true; return; }
-        if (Keyboard.FocusedElement is TextBox or PasswordBox or ComboBox || RoomPage.Visibility != Visibility.Visible) return;
+        if (Keyboard.FocusedElement is TextBox or PasswordBox or ComboBox or ListBox or ListBoxItem || RoomPage.Visibility != Visibility.Visible) return;
         if (e.Key == Key.Space && Keyboard.FocusedElement is Button) return;
         if (e.Key is Key.F or Key.F11) { Fullscreen(sender, e); e.Handled = true; }
         else if (e.Key == Key.Space) { TogglePlayback(sender, e); e.Handled = true; }

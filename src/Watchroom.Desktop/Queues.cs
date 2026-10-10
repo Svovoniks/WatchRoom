@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using Watchroom.Core;
@@ -12,9 +13,11 @@ public partial class MainWindow
     private static readonly SavedQueue noPlaybackQueue = new("", "No queue", []);
     private bool CanEditQueue()
     {
-        if (room?.Identity?.Host == false) { SetStatus("The host controls the queue."); return false; }
+        if (room is not null && (!room.IsConnected || room.Identity?.Host != true))
+        { SetStatus("The host controls the queue. Rejoin the room if disconnected."); return false; }
         return true;
     }
+    private static bool QueueItemAvailable(MediaItem item) => item.Available && File.Exists(item.Path);
     private IEnumerable<MediaItem> ResolveQueue(SavedQueue saved) => saved.MediaIds.Select(id => items.FirstOrDefault(x => x.Id == id)).OfType<MediaItem>();
     private void SaveActiveQueueEdits()
     {
@@ -62,6 +65,7 @@ public partial class MainWindow
         var canEdit = room is null || room.IsConnected && room.Identity?.Host == true;
         var playable = saved is not null && ResolveQueue(saved).Any(x => x.Available && File.Exists(x.Path));
         PlaySavedQueueButton.IsEnabled = canEdit && playable;
+        PlaySelectedSavedQueueButton.IsEnabled = canEdit && SavedQueueItems.SelectedItem is QueueEntry { Media: { } selectedItem } && QueueItemAvailable(selectedItem);
         PlaySavedQueueButton.Style = (Style)FindResource(playable ? "Primary" : typeof(Button));
         AddQueueVideosButton.Style = (Style)FindResource(playable ? typeof(Button) : "Primary");
         AddQueueVideosButton.IsEnabled = canEdit && saved is not null;
@@ -118,6 +122,52 @@ public partial class MainWindow
     }
     private void PlaySavedQueue(object sender, RoutedEventArgs e) => StartQueue(QueuePicker.SelectedItem as SavedQueue, sender, e);
     private void PlayPlayerQueue(object sender, RoutedEventArgs e) => StartQueue(PlayerQueuePicker.SelectedItem as SavedQueue, sender, e);
+    private async void PlaySelectedSavedQueue(object sender, RoutedEventArgs e) => await Guard(async () =>
+    {
+        if (QueuePicker.SelectedItem is SavedQueue saved && SavedQueueItems.SelectedItem is QueueEntry entry)
+            await PlaySavedQueueEntry(saved, entry.Index);
+    });
+    private async Task PlaySavedQueueEntry(SavedQueue saved, int index)
+    {
+        if (!CanEditQueue() || !savedQueues.Contains(saved) || index < 0 || index >= saved.MediaIds.Length) return;
+        var item = items.FirstOrDefault(x => x.Id == saved.MediaIds[index]);
+        if (item is null || !QueueItemAvailable(item)) { SetStatus("This queue video is unavailable."); return; }
+        // Missing library references are omitted from the playback queue. Count
+        // occurrences before the clicked row so duplicate videos keep their place.
+        var playbackIndex = saved.MediaIds.Take(index).Count(id => items.Any(x => x.Id == id));
+        SelectPlaybackQueue(saved);
+        await PlayQueueAt(playbackIndex);
+    }
+    private async void PlaySelectedQueued(object sender, RoutedEventArgs e) => await Guard(() => PlayQueueAt(QueueList.SelectedIndex));
+    private async Task PlayQueueAt(int index)
+    {
+        if (!CanEditQueue() || index < 0 || index >= queue.Count) return;
+        var item = queue[index];
+        if (!QueueItemAvailable(item)) { SetStatus("This queue video is unavailable."); return; }
+        if (room is null) await PlayLocalItem(item);
+        else { StartHostedVideo(item); ShowPage("Room"); }
+        queuePosition = index; selected = item;
+        PublishQueue();
+    }
+    private void QueueItemDoubleClicked(object sender, MouseButtonEventArgs e)
+    {
+        var list = (ListBox)sender;
+        var node = e.OriginalSource as DependencyObject;
+        while (node is not null && node is not ListBoxItem)
+        {
+            if (node is ButtonBase || node is FrameworkElement { Cursor: { } cursor } && cursor == Cursors.SizeAll) return;
+            node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node);
+        }
+        if (node is not ListBoxItem) return;
+        if (list == SavedQueueItems) PlaySelectedSavedQueue(sender, e); else PlaySelectedQueued(sender, e);
+        e.Handled = true;
+    }
+    private void QueueItemKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || e.OriginalSource is not (ListBox or ListBoxItem)) return;
+        if (sender == SavedQueueItems) PlaySelectedSavedQueue(sender, e); else PlaySelectedQueued(sender, e);
+        e.Handled = true;
+    }
     private void StartQueue(SavedQueue? saved, object sender, RoutedEventArgs e)
     {
         if (saved is null || saved == noPlaybackQueue || !CanEditQueue()) return;

@@ -30,6 +30,7 @@ public partial class MainWindow
         var source = back ? backLocations : forwardLocations;
         var destination = back ? forwardLocations : backLocations;
         if (source.Count == 0) return false;
+        if (!ConfirmPageNavigation(source[^1].Page)) return false;
         destination.Add(CaptureLocation()); var location = source[^1]; source.RemoveAt(source.Count - 1);
         restoringNavigation = true;
         try
