@@ -12,9 +12,18 @@ or update the user's desktop app as part of shipping. Install a release locally
 only when the user explicitly requests a local installation. Computer use is not
 part of this release checklist.
 
+Preferred release flow for agents: use `./scripts/ship.ps1` for the full release
+and reserve manual commands for exception handling, inspection, or recovery. The
+script already performs the work that would otherwise be repeated across many
+steps: it selects the intended paths, runs in an isolated worktree, bumps the
+version, executes the release checks and smoke suite, commits, pushes, tags, waits
+for the tag workflow, and verifies the public release and installer checksums.
+
+If you must fall back to the manual path, keep it brief and explicit:
+
 1. Inspect `git status`, fetch `origin`, and inspect the latest GitHub release.
-   Preserve unrelated changes. Stage the intended source, tests, build files, and
-   general documentation explicitly. Keep personal HTML investigations, library
+   Preserve unrelated changes. Stage only the intended source, tests, build files,
+   and general documentation. Keep personal HTML investigations, library
    snapshots, credentials, and unrelated `sites` submodule changes out of commits.
 2. Choose a version higher than the latest published stable release. Update
    `<Version>` in `Directory.Build.props` (the single source of the app version).
@@ -38,6 +47,10 @@ part of this release checklist.
 7. Check that the public GitHub release page is available and links to the
    installer and checksums. Report the version, release URL, Actions result, and
    any validation limitations. Leave the user's installed app unchanged.
+
+Use the scripted flow by default. The goal is to let the automation do the bulk
+of the work while agents stay focused on explicit file selection, failure
+triage, and release validation.
 
 PowerShell checks (use `dotnet` instead of the workspace SDK path on other machines):
 
