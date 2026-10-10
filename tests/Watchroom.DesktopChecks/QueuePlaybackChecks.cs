@@ -20,11 +20,18 @@ static class QueuePlaybackChecks
         {
             var until = Environment.TickCount64 + 10000;
             while (!predicate() && Environment.TickCount64 < until) await Task.Delay(25);
-            if (!predicate()) throw new Exception($"Queue playback fixture timed out: native={Field<MediaPlayer>("player").State}, " +
+            if (!predicate()) throw new Exception($"Queue playback fixture timed out: native={Field<MediaPlayer?>("player")?.State}, " +
                 $"item={Field<MediaItem?>("playingItem")?.Id}, cursor={Field<int>("queuePosition")}, status={Control<TextBlock>("StatusText").Text}");
         }
-        var firstPath = Path.Combine(directory, "Queue first.avi");
-        var lastPath = Path.Combine(directory, "Queue last.avi");
+        // MainWindow loads the native player asynchronously after its library.
+        // Wait for that prerequisite before exercising the playback buttons.
+        await WaitFor(() => Field<MediaPlayer?>("player") is not null);
+        // Keep synthetic queue IDs out of the watched library: discovering these
+        // files during the fixture replaces them with scanner-generated IDs.
+        var fixtureDirectory = Path.Combine(Path.GetTempPath(), "wr-queue-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(fixtureDirectory);
+        var firstPath = Path.Combine(fixtureDirectory, "Queue first.avi");
+        var lastPath = Path.Combine(fixtureDirectory, "Queue last.avi");
         VideoFixture.Write(firstPath, 30); VideoFixture.Write(lastPath, 30);
         var first = new MediaItem("queue-play-first", firstPath, "Queue first", "Movie");
         var last = new MediaItem("queue-play-last", lastPath, "Queue last", "Movie");
@@ -118,6 +125,7 @@ static class QueuePlaybackChecks
             var queue = Field<List<MediaItem>>("queue"); queue.Clear(); queue.AddRange(previousQueue);
             Set("activeQueueId", previousId); Set("queuePosition", previousPosition);
             Call("SaveQueues"); Call("RefreshQueuePickers", previousId!); Call("PublishQueue"); Call("ShowPage", "Library");
+            File.Delete(firstPath); File.Delete(lastPath); Directory.Delete(fixtureDirectory);
         }
     }
 }

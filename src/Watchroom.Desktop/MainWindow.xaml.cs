@@ -1492,6 +1492,9 @@ public partial class MainWindow : Window
         SharedControls.IsEnabled = connectedRoom && room!.Identity?.Host == true;
         NowPlayingStrip.Visibility = ready || room is not null ? Visibility.Visible : Visibility.Collapsed;
         NowPlayingLabel.Text = "Now watching · " + RoomHeading.Text;
+        PlaybackTitleLabel.Text = room is null
+            ? (playingItem is null ? "" : PlaybackTitle(playingItem))
+            : room.Snapshot?.Media?.Title ?? "";
         var canControl = room is null || connectedRoom && (room!.Identity?.Host == true || room.Snapshot?.SharedControls == true);
         InviteButton.Visibility = RoomToggle.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
         RoomLibraryButton.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
