@@ -11,7 +11,7 @@ public record MetadataOptions(string[]? Providers = null, string Language = "en-
     }
     public void Save(LibraryStore library) => library.Setting("metadata-options", Wire.Serialize(this));
 }
-public enum MetadataRefresh { FillMissing, RefreshText, ReplaceArtwork }
+public enum MetadataRefresh { FillMissing, RefreshText, ReplaceArtwork, RetryArtwork }
 
 public static class MetadataMatching
 {
@@ -20,17 +20,25 @@ public static class MetadataMatching
     public static bool HasMovieEvidence(MediaItem item) => item.Episode is null && item.AbsoluteEpisode is null && item.SourcePartEpisode is null &&
         (item.MetadataType == "movie" || item.SourceLibraryKind == "Movie" || item.Path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             .Any(part => System.Text.RegularExpressions.Regex.IsMatch(part, @"(?i)^(?:Movies?|Films?|Фильмы)$")));
-    public static MetadataMatch? Choose(IEnumerable<MetadataMatch> results, MediaItem item) =>
-        Choose(results.Where(match => Compatible(item, match) && (item.Matched || item.MetadataLocked ||
-            (item.Episode is not null || item.SourcePartEpisode is not null ? match.Type == "tv" : !HasMovieEvidence(item) || match.Type == "movie"))), item.DisplayTitle, item.Year,
-            MetadataTitles.IsAnimeSource(item) ? "Anime" : null);
+    public static MetadataMatch? Choose(IEnumerable<MetadataMatch> results, MediaItem item)
+    {
+        var compatible = new List<MetadataMatch>();
+        foreach (var match in results)
+        {
+            var rejection = !Compatible(item, match) ? "live-action-in-anime" : !item.Matched && !item.MetadataLocked &&
+                (item.Episode is not null || item.SourcePartEpisode is not null ? match.Type != "tv" : HasMovieEvidence(item) && match.Type != "movie") ? "media-type" : null;
+            if (rejection is null) compatible.Add(match);
+            else MetadataDiagnostics.Record("metadata-candidate-rejected", new { match.Provider, match.Id, match.Title, match.Year, Reason = rejection });
+        }
+        return Choose(compatible, item.DisplayTitle, item.Year, MetadataTitles.IsAnimeSource(item) ? "Anime" : null);
+    }
     public static int Score(string title, int? year, string candidate, string? original, int? candidateYear)
     {
         static int Title(string a, string b)
         {
             var left = MetadataTitles.Normalize(a); var right = MetadataTitles.Normalize(b);
             if (left.Length == 0) return 0;
-            if (left == right) return 8;
+            if (left == right) return MetadataTitles.Normalize(a, false) == MetadataTitles.Normalize(b, false) ? 8 : 7;
             if (System.Text.RegularExpressions.Regex.IsMatch(a + b, @"\p{IsCyrillic}") && MetadataTitles.Romanized(a) == MetadataTitles.Romanized(b)) return 8;
             // Prefix matching only at word boundaries; never "Wall" against "Wallstreet".
             var clean = System.Text.RegularExpressions.Regex.Replace(b, @"[^\p{L}\p{N}\p{M}]+", " ").Trim();
@@ -45,11 +53,16 @@ public static class MetadataMatching
     }
     public static MetadataMatch? Choose(IEnumerable<MetadataMatch> results, string title, int? year, string? preferredKind = null)
     {
-        var ranked = results.DistinctBy(x => (x.Type, x.Id)).Select(x => (Match: x,
+        var ranked = results.DistinctBy(x => (x.Provider, x.Type, x.Id)).Select(x => (Match: x,
             Score: CandidateScore(x, title, year)))
             .Select(x => (x.Match, x.Score, Rank: x.Score + (preferredKind is not null && (x.Match.Kind == preferredKind || preferredKind == "Anime" && x.Match.Animated == true) ? 2 : 0))).OrderByDescending(x => x.Rank).ToArray();
         // Keep conservative automatic matching: weak or tied results require Identify.
-        return ranked.Length > 0 && ranked[0].Score >= 6 && (ranked.Length == 1 || ranked[0].Rank > ranked[1].Rank) ? ranked[0].Match : null;
+        var winner = ranked.Length > 0 && ranked[0].Score >= 6 && (ranked.Length == 1 || ranked[0].Rank > ranked[1].Rank) ? ranked[0].Match : null;
+        MetadataDiagnostics.Outcome(winner is not null ? "matched" : ranked.Length == 0 ? "no-candidates" : ranked[0].Score < 6 ? "weak-title" : "ambiguous-candidates");
+        MetadataDiagnostics.Record("metadata-candidates", new { Query = title, Year = year, SelectedId = winner?.Id,
+            Outcome = winner is not null ? "matched" : ranked.Length == 0 ? "no-candidates" : ranked[0].Score < 6 ? "weak-title" : "ambiguous-candidates",
+            Candidates = ranked.Select(x => new { x.Match.Provider, x.Match.Id, x.Match.Type, x.Match.Title, x.Match.Year, x.Match.Animated, x.Score, x.Rank }).ToArray() });
+        return winner;
     }
     private static int CandidateScore(MetadataMatch match, string title, int? year) =>
         new[] { match.Title, match.OriginalTitle ?? "" }.Concat(match.Aliases ?? [])
@@ -59,7 +72,7 @@ public static class MetadataMatching
         Func<MetadataMatch, CancellationToken, Task<string[]>> aliases, CancellationToken ct, Action<MetadataMatch[]?>? unresolved = null)
     {
         ct.ThrowIfCancellationRequested();
-        var candidates = results.DistinctBy(x => (x.Type, x.Id)).ToArray();
+        var candidates = results.DistinctBy(x => (x.Provider, x.Type, x.Id)).ToArray();
         if (Choose(candidates, item) is { } exact) return exact;
         // Do not truncate a crowded result set and hide an unchecked competitor.
         var shortlist = candidates.Where(x => Compatible(item, x) &&
@@ -75,23 +88,23 @@ public static class MetadataMatching
             return ChooseTypo(enriched, item);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or IOException or System.Text.Json.JsonException)
-        { unresolved?.Invoke(null); return null; } // Missing evidence cannot make a partial shortlist look unique.
+        { MetadataDiagnostics.Failure("candidate-aliases", item.DisplayTitle, null, ex); throw; }
     }
     internal static MetadataMatch? ChooseTypoFallback(IEnumerable<(MediaItem Item, MetadataMatch[]? Candidates)> searches)
     {
         var attempts = searches.ToArray();
         if (attempts.Any(x => x.Candidates is null || x.Candidates.Any(c => CandidateScore(c, x.Item.DisplayTitle, x.Item.Year) >= 6))) return null;
-        var all = attempts.SelectMany(x => x.Candidates!).GroupBy(x => (x.Type, x.Id)).Select(group => group.First() with
+        var all = attempts.SelectMany(x => x.Candidates!).GroupBy(x => (x.Provider, x.Type, x.Id)).Select(group => group.First() with
         { Aliases = group.SelectMany(x => new[] { x.Title, x.OriginalTitle ?? "" }.Concat(x.Aliases ?? [])).Distinct().ToArray() }).ToArray();
         // Different filename/folder queries must agree on one provider identity.
-        var matches = attempts.Select(x => ChooseTypo(all, x.Item)).OfType<MetadataMatch>().DistinctBy(x => (x.Type, x.Id)).ToArray();
+        var matches = attempts.Select(x => ChooseTypo(all, x.Item)).OfType<MetadataMatch>().DistinctBy(x => (x.Provider, x.Type, x.Id)).ToArray();
         return matches.Length == 1 ? matches[0] : null;
     }
     internal static MetadataMatch? ChooseTypo(IEnumerable<MetadataMatch> results, MediaItem item)
     {
         var expectedType = item.MetadataType ?? (item.Series is not null ? "tv" : HasMovieEvidence(item) ? "movie" : null);
         if (item.Year is null || expectedType is null) return null;
-        var candidates = results.Where(x => Compatible(item, x)).DistinctBy(x => (x.Type, x.Id)).ToArray();
+        var candidates = results.Where(x => Compatible(item, x)).DistinctBy(x => (x.Provider, x.Type, x.Id)).ToArray();
         if (candidates.Any(x => CandidateScore(x, item.DisplayTitle, item.Year) >= 6)) return null;
         // Include near names with unknown/adjacent years as competitors, even
         // though only an exact-year winner can be accepted.

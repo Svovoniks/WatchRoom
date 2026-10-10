@@ -25,6 +25,33 @@
           "SQLitePCLRaw.core": "2.1.12"
         }
       },
+      "SkiaSharp": {
+        "type": "Transitive",
+        "resolved": "2.88.9",
+        "contentHash": "3MD5VHjXXieSHCleRLuaTXmL2pD0mB7CcOB1x2kA1I4bhptf4e3R27iM93264ZYuAq6mkUyX5XbcxnZvMJYc1Q==",
+        "dependencies": {
+          "SkiaSharp.NativeAssets.Win32": "2.88.9",
+          "SkiaSharp.NativeAssets.macOS": "2.88.9"
+        }
+      },
+      "SkiaSharp.NativeAssets.Linux.NoDependencies": {
+        "type": "Transitive",
+        "resolved": "2.88.9",
+        "contentHash": "ZA9syMvIuoqxPhyFTgde/bNV6VMdeYT9gRdNQT5O+ZjPK+a/nVkKRrqBbn7EVA7XQiW+xIycyT4gW/sea9eh+w==",
+        "dependencies": {
+          "SkiaSharp": "2.88.9"
+        }
+      },
+      "SkiaSharp.NativeAssets.macOS": {
+        "type": "Transitive",
+        "resolved": "2.88.9",
+        "contentHash": "Nv5spmKc4505Ep7oUoJ5vp3KweFpeNqxpyGDWyeEPTX2uR6S6syXIm3gj75dM0YJz7NPvcix48mR5laqs8dPuA=="
+      },
+      "SkiaSharp.NativeAssets.Win32": {
+        "type": "Transitive",
+        "resolved": "2.88.9",
+        "contentHash": "wb2kYgU7iy84nQLYZwMeJXixvK++GoIuECjU4ECaUKNuflyRlJKyiRhN1MAHswvlvzuvkrjRWlK0Za6+kYQK7w=="
+      },
       "SQLite": {
         "type": "Transitive",
         "resolved": "3.53.4",
@@ -65,7 +92,9 @@
         "dependencies": {
           "DataChannelDotnet": "[1.3.1, )",
           "Microsoft.Data.Sqlite": "[10.0.12, )",
-          "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )"
+          "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )",
+          "SkiaSharp": "[2.88.9, )",
+          "SkiaSharp.NativeAssets.Linux.NoDependencies": "[2.88.9, )"
         }
       }
     }

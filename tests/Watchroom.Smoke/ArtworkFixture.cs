@@ -49,6 +49,7 @@ internal sealed class TmdbFixture(bool anime = false, bool movie = false, bool a
         {
             json = """{"id":1,"name":"Example Show","title":"Example Movie","first_air_date":"2020-01-01","release_date":"2020-01-01","overview":"Details plot","poster_path":"/details.jpg","genres":[{"id":GENRE}],"original_language":"LANGUAGE"}""".Replace("GENRE", anime ? "16" : "18").Replace("LANGUAGE", anime ? "ja" : "en");
         }
+        if (uri.AbsolutePath.EndsWith("/alternative_titles")) json = """{"results":[],"titles":[]}""";
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
     }
 }

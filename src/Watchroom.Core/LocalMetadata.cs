@@ -63,6 +63,7 @@ public static class LocalMetadata
                 EpisodeOverview = episode ? Value("EpisodeOverview", item.EpisodeOverview, "plot", "review") : item.EpisodeOverview,
                 Season = episode ? Number("season") ?? item.Season : season ? Number("seasonnumber") ?? item.Season : item.Season,
                 Episode = episode ? Number("episode") ?? item.Episode : item.Episode,
+                IsBonus = item.IsBonus && !(episode && Number("episode") is not null),
                 EpisodeEnd = episode ? Number("episodeend") ?? item.EpisodeEnd : item.EpisodeEnd,
                 AbsoluteEpisode = episode ? Number("absoluteepisode") ?? item.AbsoluteEpisode : item.AbsoluteEpisode,
                 AbsoluteEpisodeEnd = episode ? Number("absoluteepisodeend") ?? item.AbsoluteEpisodeEnd : item.AbsoluteEpisodeEnd,

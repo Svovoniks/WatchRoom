@@ -7,10 +7,10 @@ namespace Watchroom.Core;
 // Search aliases do not change stored show membership or file IDs.
 public static class MetadataTitles
 {
-    public static string Normalize(string value)
+    public static string Normalize(string value, bool removeArticle = true)
     {
         value = value.Replace("×", "x").Replace("&", " and ").Replace("½", "1 2").Replace("⅓", "1 3");
-        value = Regex.Replace(value, @"^the\s+", "", RegexOptions.IgnoreCase);
+        if (removeArticle) value = Regex.Replace(value, @"^the\s+", "", RegexOptions.IgnoreCase);
         value = Regex.Replace(value, @"\bneighbours\b", "neighbors", RegexOptions.IgnoreCase);
         value = value.Replace("ь", "", StringComparison.OrdinalIgnoreCase).Replace("ъ", "", StringComparison.OrdinalIgnoreCase);
         value = new string(value.Normalize(NormalizationForm.FormD).Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray());
@@ -41,7 +41,7 @@ public static class MetadataTitles
     }
     public static string[] Queries(MediaItem item, IEnumerable<MediaItem>? entries = null)
     {
-        var titles = new List<string> { item.DisplayTitle };
+        var titles = new List<string>();
         void Add(string? title)
         {
             if (string.IsNullOrWhiteSpace(title)) return;
@@ -50,7 +50,7 @@ public static class MetadataTitles
             title = Regex.Replace(title, @"(?i)\b(?:collection|dvdrip|hddvdrip|hdtvrip|webrip|web.dl|bluray|bdrip)\b.*$", "");
             title = Regex.Replace(title, @"[._]+", " ");
             title = Regex.Replace(title, @"\s+", " ").Trim(' ', '-');
-            if (title.Length >= 3 && !titles.Contains(title, StringComparer.OrdinalIgnoreCase)) titles.Add(title);
+            if ((title.Length >= 3 || titles.Count == 0 && title.Length > 0) && !titles.Contains(title, StringComparer.OrdinalIgnoreCase)) titles.Add(title);
         }
         Add(item.DisplayTitle);
         Add(Regex.Replace(item.DisplayTitle, @"\b(\d+)\s+1\s+([23])\b", "$1 1/$2"));
@@ -99,12 +99,15 @@ public static class MetadataTitles
     }
     public static string? RussianSearchAlias(string value)
     {
-        if (Regex.IsMatch(value, @"\p{IsCyrillic}") || !Regex.IsMatch(value, @"(?i)zh|sh|kh|ya|yu|ch|ts|skaia")) return null;
+        // English ch/sh are not evidence of a romanized Russian title. Require
+        // distinctive Russian word endings or consonant combinations instead.
+        if (Regex.IsMatch(value, @"\p{IsCyrillic}") || !Regex.IsMatch(value,
+            @"(?i)dzh|shch|\b\w*(?:skiy|skaya|skaia|ovaya|vaya|niya|eniya|iya|ya|yu|evich|ovich|kh|tsiya|ev|ov|ksi)\b")) return null;
         value = value.ToLowerInvariant();
-        value = Regex.Replace(value, @"(?<=[aeiou])y|y(?=\b)", "й");
         value = value.Replace("skaia", "ская").Replace("liant", "лиант");
         foreach (var (latin, russian) in new[] { ("shch", "щ"), ("sch", "щ"), ("zh", "ж"), ("kh", "х"), ("ts", "ц"), ("ch", "ч"), ("sh", "ш"), ("ya", "я"), ("yu", "ю"), ("ia", "я"), ("iu", "ию") })
             value = value.Replace(latin, russian);
+        value = Regex.Replace(value, @"(?<=[aeiou])y|(?<=i)y(?=\b)", "й");
         const string latinLetters = "abvgdezijklmnoprstufhcy";
         const string russianLetters = "абвгдезийклмнопрстуфхцы";
         return new string(value.Select(c => latinLetters.IndexOf(c) is var index && index >= 0 ? russianLetters[index] : c).ToArray());

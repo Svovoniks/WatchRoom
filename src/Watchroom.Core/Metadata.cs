@@ -5,9 +5,10 @@ namespace Watchroom.Core;
 
 public record MetadataMatch(int Id, string Type, string Title, string? Year, string? Poster, string Overview, string? Kind = null,
     string? OriginalTitle = null, Dictionary<string, string>? ProviderIds = null, string[]? Genres = null, string[]? Cast = null, double? Rating = null, bool? Animated = null,
-    string[]? Aliases = null)
+    string[]? Aliases = null, string Provider = "tmdb", string? Source = null, string? Evidence = null)
 {
-    public override string ToString() => $"{Title} ({Year ?? "Unknown year"}) · {Type}";
+    public string Description => $"{Year ?? "Unknown year"} · {(Animated == true ? "Animation" : Type == "tv" && Animated == false ? "Live action" : Type == "tv" ? "Series" : "Film")} · {Provider}";
+    public override string ToString() => $"{Title} · {Description}";
 }
 public record MetadataEpisode(int Number, string? Title, string? Overview, string? Image, string? AirDate, int? Runtime);
 public record MetadataSeason(int Number, string? Title, string? Overview, string? Image, string? AirDate, MetadataEpisode[] Episodes);
@@ -93,7 +94,7 @@ public sealed class MetadataClient : IDisposable
         if (knownId is null && LibraryIdentity.ProviderId(item, "imdb") is null && LibraryIdentity.ProviderId(item, "tvdb") is null && LibraryIdentity.ProviderId(item, "tvmaze") is { } mazeId)
         {
             // This independent client must never forward TMDB credentials to TVmaze.
-            using var bridge = imageHandler is null ? new HttpClient() : new HttpClient(imageHandler, false);
+            using var bridge = imageHandler is null ? MetadataHttp.CreateClient() : new HttpClient(imageHandler, false);
             bridge.Timeout = TimeSpan.FromSeconds(20);
             try
             {
@@ -129,20 +130,28 @@ public sealed class MetadataClient : IDisposable
             }
         }
         var movieEvidence = !item.Matched && !item.MetadataLocked && MetadataMatching.HasMovieEvidence(item);
+        var searchQueries = queries ?? MetadataTitles.Queries(item);
+        var titleQuery = searchQueries.FirstOrDefault() ?? item.DisplayTitle;
+        var queryItem = item with { Title = titleQuery, Series = item.Series is null ? null : titleQuery };
         var typoSearches = new List<(MediaItem Item, MetadataMatch[]? Candidates)>();
-        Task<MetadataMatch?> ChooseSearch(IEnumerable<MetadataMatch> candidates, MediaItem source) =>
-            MetadataMatching.ChooseWithAliasesAsync(candidates, source, AlternativeTitlesAsync, ct, rows => typoSearches.Add((source, rows)));
-        var tv = movieEvidence ? [] : await SearchAsync(item.DisplayTitle, true, ct, item.Year);
-        var movies = item.Episode is not null || item.MetadataType == "tv" ? [] : await SearchAsync(item.DisplayTitle, false, ct, item.Year);
-        var best = await ChooseSearch(tv.Concat(movies), item);
+        Exception? aliasFailure = null;
+        async Task<MetadataMatch?> ChooseSearch(IEnumerable<MetadataMatch> candidates, MediaItem source)
+        {
+            try { return await MetadataMatching.ChooseWithAliasesAsync(candidates, source, AlternativeTitlesAsync, ct, rows => typoSearches.Add((source, rows))); }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException)
+            { aliasFailure = ex; typoSearches.Add((source, null)); return null; }
+        }
+        var tv = movieEvidence ? [] : await SearchAsync(titleQuery, true, ct, item.Year);
+        var movies = item.Episode is not null || item.MetadataType == "tv" ? [] : await SearchAsync(titleQuery, false, ct, item.Year);
+        var best = await ChooseSearch(tv.Concat(movies), queryItem);
         // A region's release year can differ; broaden the query without accepting tied matches.
         if (best is null && item.Year is not null)
         {
-            tv = movieEvidence ? [] : await SearchAsync(item.DisplayTitle, true, ct);
-            movies = item.Episode is not null || item.MetadataType == "tv" ? [] : await SearchAsync(item.DisplayTitle, false, ct);
-            best = await ChooseSearch(tv.Concat(movies), item);
+            tv = movieEvidence ? [] : await SearchAsync(titleQuery, true, ct);
+            movies = item.Episode is not null || item.MetadataType == "tv" ? [] : await SearchAsync(titleQuery, false, ct);
+            best = await ChooseSearch(tv.Concat(movies), queryItem);
         }
-        if (best is null) foreach (var query in (queries ?? MetadataTitles.Queries(item)).Skip(1))
+        if (best is null) foreach (var query in searchQueries.Skip(1))
         {
             tv = movieEvidence ? [] : await SearchAsync(query, true, ct);
             movies = item.Episode is not null || item.MetadataType == "tv" ? [] : await SearchAsync(query, false, ct);
@@ -163,7 +172,11 @@ public sealed class MetadataClient : IDisposable
         }
         var typoFallback = best is null;
         best ??= MetadataMatching.ChooseTypoFallback(typoSearches);
-        if (best is null) return null;
+        if (best is null)
+        {
+            if (aliasFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(aliasFailure).Throw();
+            return null;
+        }
         var selected = await DetailsAsync(best, ct);
         return MetadataMatching.Compatible(item, selected) && (!typoFallback || selected.Year == best.Year) ? selected : null;
     }
@@ -187,7 +200,7 @@ public sealed class MetadataClient : IDisposable
         if (replace || !ArtworkCache.IsUsable(path))
         {
             // Separate client: never send the API authorization token to the image CDN.
-            using var images = imageHandler is null ? new HttpClient() : new HttpClient(imageHandler, false);
+            using var images = imageHandler is null ? MetadataHttp.CreateClient() : new HttpClient(imageHandler, false);
             images.Timeout = TimeSpan.FromSeconds(20);
             var bytes = await MetadataHttp.GetImage(images, "https://image.tmdb.org/t/p/" + imageSize + image, ct);
             var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";

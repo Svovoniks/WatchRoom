@@ -153,6 +153,7 @@ static class MetadataEfficiencyFixture
                 if (tied && result.Length > 0) result += "," + result.Replace("77", "78");
                 json = uri.Host == "api.tvmaze.com" ? "[" + result + "]" : "{\"results\":[" + result + "]}";
             }
+            else if (uri.AbsolutePath.EndsWith("/alternative_titles")) json = "{\"results\":[],\"titles\":[]}";
             else if (uri.AbsolutePath.Contains("/season/")) json = """{"episodes":[{"episode_number":1,"name":"Episode 1"},{"episode_number":2,"name":"Episode 2"}]}""";
             else if (uri.AbsolutePath.EndsWith("/seasons")) json = """[{"number":1,"name":"Season 1"}]""";
             else if (uri.AbsolutePath.EndsWith("/episodes")) json = """[{"season":1,"number":1,"name":"Episode 1"},{"season":1,"number":2,"name":"Episode 2"}]""";

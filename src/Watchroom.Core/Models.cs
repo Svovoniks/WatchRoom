@@ -19,9 +19,9 @@ public record MediaItem(string Id, string Path, string Title, string Kind, int? 
     int? AirsBeforeEpisode = null, int? AirsAfterSeason = null, string? NumberingConflict = null, long ArtworkFetchedAt = 0,
     string? LocalPosterUrl = null, string? LocalSeasonPosterUrl = null, string? LocalEpisodePosterUrl = null, int? AbsoluteEpisodeEnd = null,
     int? SourcePart = null, int? SourcePartEpisode = null, int? SourcePartEpisodeEnd = null,
-    string? NumberingSource = null, string? SourceLibraryKind = null, bool IsExtra = false, string? GeneratedEpisodePoster = null, string? EpisodePosterQualityPath = null)
+    string? NumberingSource = null, string? SourceLibraryKind = null, bool IsExtra = false, string? GeneratedEpisodePoster = null, string? EpisodePosterQualityPath = null, bool IsBonus = false)
 {
-    public string Caption => Series is not null ? $"{Series} · {(Season is null ? "Season unknown" : $"S{Season:00}")} {(Episode is null ? "Episode unknown" : $"E{Episode:00}" + (EpisodeEnd > Episode ? $"–E{EpisodeEnd:00}" : ""))}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";
+    public string Caption => IsBonus ? $"{Series} · Bonus content" : Series is not null ? $"{Series} · {(Season is null ? "Season unknown" : $"S{Season:00}")} {(Episode is null ? "Episode unknown" : $"E{Episode:00}" + (EpisodeEnd > Episode ? $"–E{EpisodeEnd:00}" : ""))}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";
     public string DisplayTitle => Series ?? Title;
     public string QueueTitle => Episode is null ? Title : Caption;
     public string EpisodeDisplayTitle => Episode is { } ep ? $"Episode {ep}" + (EpisodeEnd > ep ? $"–{EpisodeEnd}" : "") + (string.IsNullOrWhiteSpace(EpisodeTitle) ? "" : " · " + EpisodeTitle) : Title;

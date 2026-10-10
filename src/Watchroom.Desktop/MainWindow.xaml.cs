@@ -707,33 +707,29 @@ public partial class MainWindow : Window
     private async void MatchClick(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (selected is null) return;
-        if (savedMetadataToken.Length == 0) { ShowPage("Settings"); ShowPreferenceSection("Metadata"); MetadataToken.BringIntoView(); SetStatus("Enter and save your TMDB key, then return to Find artwork."); return; }
+        if (selected.MetadataLocked) { SetStatus("Metadata is locked for this title. Unlock it before choosing a match."); return; }
         var item = selected; var query = Dialogs.Prompt(this, "Find artwork", "Search by movie or series title", item.DisplayTitle); if (query is null) return;
-        using var metadata = new MetadataClient(savedMetadataToken, options: MetadataOptions.Load(library));
-        var results = (await metadata.SearchAsync(query, true, lifetime.Token)).Concat(await metadata.SearchAsync(query, false, lifetime.Token)).ToList();
-        if (results.Count == 0) { SetStatus("No matches. Try a different title or use a local poster."); return; }
-        var match = Dialogs.Choose(this, results); if (match is null) return;
-        await ApplyMatch(metadata, item, match); RefreshLibrary(); Select(items.First(x => x.Id == item.Id));
-    });
-    private async Task ApplyMatch(MetadataClient metadata, MediaItem item, MetadataMatch match)
-    {
-        match = await metadata.DetailsAsync(match, lifetime.Token);
-        var poster = await metadata.CachePosterAsync(match, Path.Combine(App.DataDirectory, "posters"), lifetime.Token);
-        foreach (var entry in items.Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item)).ToArray())
-            library.Save(AutomaticArtwork.MergeDetails(LibraryIdentity.WithProvider(entry with { ProviderIds = null, MetadataProvider = null, MetadataId = null }, "tmdb", match.Id), match) with { Title = match.Title, Series = match.Type == "tv" ? match.Title : null, Kind = match.Kind ?? (match.Type == "tv" ? "Show" : "Movie"),
-                MetadataKind = match.Kind ?? (match.Type == "tv" ? "Show" : "Movie"), MetadataType = match.Type,
-                Season = match.Type == "tv" ? entry.Season : null, Episode = match.Type == "tv" ? entry.Episode : null,
-                Poster = poster ?? entry.Poster, Overview = match.Overview, Year = int.TryParse(match.Year, out var year) ? year : entry.Year, Matched = true, PosterSource = $"https://www.themoviedb.org/{match.Type}/{match.Id}",
-                MetadataProvider = "tmdb", MetadataId = match.Id, MetadataFetchedAt = 0,
-                SeasonTitle = null, SeasonOverview = null, EpisodeTitle = null, EpisodeOverview = null, EpisodePoster = null, AirDate = null, RuntimeMinutes = null,
-                SeasonPoster = entry.SeasonSource is not null && entry.SeasonPoster is not null && LibraryStore.IsWithin(entry.SeasonPoster, Path.Combine(App.DataDirectory, "posters")) ? null : entry.SeasonPoster, SeasonSource = null, EpisodeSource = null });
-        if (item.Series is not null && LibraryIdentity.InShow(item, browseSeries, browseKind)) { browseSeries = match.Type == "tv" ? LibraryIdentity.ShowKey(item) : null; browseKind = match.Kind; if (browseSeries is null) browseSeason = null; }
+        var result = await MetadataIdentification.SearchAsync(library, item, query, savedMetadataToken, lifetime.Token);
+        if (result.Matches.Count == 0) { SetStatus("No matches. " + string.Join(" ", result.Warnings)); return; }
+        var match = Dialogs.Choose(this, result.Matches, candidate => MetadataIdentification.PosterAsync(candidate, App.DataDirectory, savedMetadataToken, lifetime.Token), string.Join(" ", result.Warnings));
+        if (match is null) return;
+        match = await MetadataIdentification.DetailsAsync(library, match, savedMetadataToken, lifetime.Token);
+        string? poster = null;
+        try { poster = await MetadataIdentification.PosterAsync(match, App.DataDirectory, savedMetadataToken, lifetime.Token); }
+        catch (Exception ex) when (!lifetime.IsCancellationRequested && ex is IOException or HttpRequestException or TaskCanceledException)
+        { PlaybackDiagnostics.Record("metadata-manual-artwork-failure", new { item.Id, item.Title, match.Provider, Error = ex.GetType().Name }); }
+        foreach (var entry in library.All().Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item)))
+            library.Save(MetadataIdentification.Apply(entry, match, poster));
+        if (item.Series is not null && LibraryIdentity.InShow(item, browseSeries, browseKind))
+        { browseSeries = match.Type == "tv" ? LibraryIdentity.ShowKey(item) : null; browseKind = match.Kind; if (browseSeries is null) browseSeason = null; }
         if (match.Type == "tv")
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            SetStatus(await SeriesMetadata.FetchAsync(library, App.DataDirectory, savedMetadataToken, new Progress<string>(SetStatus), lifetime.Token, http, true));
+            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(20) };
+            await SeriesMetadata.FetchAsync(library, App.DataDirectory, savedMetadataToken, new Progress<string>(SetStatus), lifetime.Token, http, true);
         }
-    }
+        RefreshLibrary(); Select(items.First(x => x.Id == item.Id));
+        SetStatus(poster is null ? "Title matched. Poster unavailable; use Retry missing artwork to try again." : "Title matched with " + match.Provider + ".");
+    });
     private void EditTitle(object sender, RoutedEventArgs e)
     {
         if (selected is null) return;

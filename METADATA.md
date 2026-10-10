@@ -10,6 +10,8 @@ In structured TV/anime folders, the show folder owns membership, so different fi
 
 Seasons use the show identity and season number. Unknown seasons have their own group. An explicit `S02E03` filename takes precedence over a conflicting season folder and reports the conflict in Details. Specials use season 0. Extras/trailers/sample folders and conventional trailer/sample filenames are excluded from scans.
 
+NCOP/NCED, CM collections, promos, previews and pilot films inside confirmed show folders remain accessible as bonus clips under **Specials**. They inherit show membership without guessed episode numbers and are excluded from automatic matching and ordinary episode counts. Explicit numbered specials retain precedence. Rescan repairs old range and bonus records while preserving manual identities and numbering locks.
+
 Numbering provenance distinguishes explicit filename numbering, season-relative folders, absolute anime numbering, and restarted parts. Season-relative numbers do not map through an absolute provider list. Unresolved/conflicting identities are not collapsed into versions. An anime/TV root or franchise folder alone does not create a show for an unnumbered film. Movie-root evidence prevents an automatic TV-only provider from claiming a standalone movie; explicit numbered episodes and manual matches retain precedence.
 
 Filename scanning and metadata search aliases share the same episode extraction rules. Dots, underscores, ordinary/Unicode dashes, release versions and technical tags are accepted. Episode subtitles stay separate from show titles, so `Azumanga Daioh - 01 - Miss Yukari [KM-Dual-DVDRIP]` searches for **Azumanga Daioh** and retains **Miss Yukari** as its episode title.
@@ -20,7 +22,7 @@ Filename scanning and metadata search aliases share the same episode extraction 
 | `Show Season 2 Episode 3`, `Show Сезон 2 Серия 3` | Explicit season and episode; French, Spanish, German and Italian labels are also accepted |
 | `Show EP03`, `Show E03v2`, `Show - 03 - Pilot` | Episode 3, with an optional subtitle |
 | `Show [03] Pilot`, `Show (03) Pilot`, `Show 03 Pilot`, `Show-03-Pilot` | Episode 3 in a TV/anime context |
-| `03 - Pilot`, `003 Pilot`, `E03`, `S02E03` | Show identity comes from the containing show/season folder |
+| `03 - Pilot`, `003 Pilot`, `079-080. Subtitle`, `E03`, `S02E03` | Show identity comes from the containing show/season folder |
 | `Show S01E02-E04`, `Show S01E02E03`, `Show 1x02-1x04`, `Show EP02-EP04` | Contiguous multi-episode ranges |
 | `Show 203` or `Show 0203` inside `Season 02` | Season 2, episode 3; without a confirming season folder this stays absolute numbering |
 | `Show 2021.01.01`, `Show 2021-01-01`, `Show 01.01.2021` | TV-folder air date; provider numbering is applied only when exactly one episode has that date |
@@ -39,15 +41,21 @@ Settings controls provider order (`tmdb, tvmaze, wikipedia`), language, country,
 
 TMDB searches consider localized and original titles, exact/prefix title similarity, and exact/adjacent release years. Weak and tied candidates require a manual match. IMDb/TVDB IDs can identify a TMDB show or movie; TVmaze can identify shows through IMDb/TVDB IDs. Anime alias lookup is available to both TMDB and TVmaze through the locally cached AniDB title index. Movie/show ambiguity remains unresolved.
 
-Unresolved TMDB and TVmaze searches check provider aliases for at most four compatible candidates. Crowded results are left unresolved rather than truncating away possible competitors. Alias lookups run concurrently within each provider's request limit. If a lookup fails, incomplete alias evidence cannot produce an automatic winner. Canonical provider titles remain the displayed result.
+Unresolved TMDB and TVmaze searches check provider aliases for at most four compatible candidates. Crowded results are left unresolved rather than truncating away possible competitors. Alias lookups run concurrently within each provider's request limit. If a lookup fails, incomplete alias evidence cannot produce an automatic winner. Independent title queries can continue after an alias request fails; if none verifies a winner, the failed request is reported as a provider failure. Canonical provider titles remain the displayed result.
 
 After exact title, original-title, filename/folder and provider-alias searches, a typo fallback permits one insertion, deletion, substitution or adjacent-letter transposition. It requires at least five normalized characters, an exact release year, known movie/show type, unchanged numeric title components and no competing title within two edits. Anime needs positive animation evidence. Candidates found by earlier searches remain competitors when later queries broaden the search. Missing years, ties, contradictory evidence and incomplete candidate checks stay unresolved.
+
+Wikipedia movies use edition-qualified provider IDs, cheap exact-page lookup and up to eight search candidates when exact lookup fails. A title without a local year also checks search competitors before accepting an exact page. Film categories, title or verified aliases, release year and media type determine confidence; search rank alone never selects a film. Russian title queries use Russian Wikipedia and verified language links supply English text when requested. Russian page IDs use `wikipedia:ru`, separately from English `wikipedia`. Release tags are removed before searching. Russian transliteration processes digraphs before individual letters and requires Russian spelling evidence rather than English `ch`/`sh` alone.
+
+Literal exact titles score above article-stripped equivalents, so **One Piece** outranks **The One Piece** while same-name remakes still require identification. Dated release folders can corroborate a missing year.
+
+**Find artwork** works with enabled TVmaze and Wikipedia providers without TMDB credentials. The picker displays poster preview, year, animation/live action and provider, and can suggest an already identified local release. Choosing a result saves its provider ID for the current show without automatically merging separate folders. Existing title, artwork and numbering locks remain authoritative.
 
 Series searches also use up to four distinct titles extracted directly from numbered filenames across the same show. This preserves an original-language filename alias when a localized folder supplies the displayed title, including when the first episode has only an episode number. Aliases are fallback search evidence: they do not change folder membership or file IDs, and candidates still need to pass the existing confidence and ambiguity checks.
 
 Successful JSON responses are shared across clients within a fetch and saved under the library's `metadata-http-cache` directory. Ordinary responses expire after one hour; provider aliases expire after seven days. Cache keys separate provider URLs, language, region, provider configuration and credentials, using hashed filenames without saving request credentials. Empty searches, HTTP errors and provider-error JSON are not cached. Corrupt/unwritable cache files fall back to the provider. All explicit metadata refresh modes bypass saved responses while sharing fresh responses within that run. Duplicate concurrent requests reuse one successful response; cancelling a waiter does not cancel another caller's work.
 
-The blanket 550 ms delay after every title is replaced by provider request pacing: TMDB requests start at least 100 ms apart, TVmaze 550 ms, and Wikipedia 200 ms. TMDB/TVmaze allow at most two active requests each; Wikipedia allows one. HTTP 429 backs off the whole provider, respecting Retry-After (or a short increasing delay if absent); 5xx responses also retry, up to twice. These are conservative client settings, not promises about provider capacity. Cancellation stops queued requests and backoff waits. Downloaded images remain size-limited, validated, and saved atomically; API authorization is never attached to image CDN requests. Updated image paths avoid stale desktop thumbnail caches.
+The blanket 550 ms delay after every title is replaced by provider request pacing: TMDB requests start at least 100 ms apart, TVmaze 550 ms, and Wikipedia 350 ms across language editions. TMDB/TVmaze allow at most two active requests each; Wikipedia allows one. HTTP 429 increases provider pacing by 100 ms up to 1.5 seconds and backs off the whole provider, respecting Retry-After (or a short increasing delay if absent); 5xx responses also retry, up to twice. These are conservative client settings, not promises about provider capacity. Cancellation stops queued requests and backoff waits. JSON responses are limited to 10 MB; artwork is limited to 20 MB, 8192 pixels per axis and 32 million pixels. TVmaze medium images are preferred over oversized originals. WebP is decoded to PNG; JPEG/PNG are checked before atomic storage. Artwork redirects allow up to five hops, validating every hop against permitted HTTPS image hosts; API authorization is never attached to image CDN requests. Updated image paths avoid stale desktop thumbnail caches.
 
 Provider references: [TMDB TV aliases](https://developer.themoviedb.org/reference/tv-series-alternative-titles), [movie aliases](https://developer.themoviedb.org/reference/movie-alternative-titles), [TMDB rate limits](https://developer.themoviedb.org/docs/rate-limiting), and [TVmaze aliases and rate limits](https://www.tvmaze.com/api).
 
@@ -55,11 +63,12 @@ AniDB dumps are parsed once per cached file version into an in-memory title inde
 
 ## Refreshing and locks
 
+- **Retry missing artwork** retries images for existing identities, preserving text and numbering and bypassing automatic retry cooldowns.
 - **Fill missing metadata** preserves existing text and artwork.
 - **Refresh text metadata** updates unlocked text while keeping images.
 - **Refresh text and replace downloaded artwork** also fetches fresh provider images. Local/NFO artwork and locked fields retain precedence.
 
-Automatic fetching checks the configured freshness interval (seven days by default). Set it to 0 to disable periodic refresh; newly scanned episodes still fetch metadata. Text is saved before artwork so image failures do not discard it. Failed providers do not erase existing metadata.
+Automatic fetching checks the configured freshness interval (seven days by default). Set it to 0 to disable periodic refresh; newly scanned episodes still fetch metadata. Text and identity are saved before artwork. Each failed season/episode image is isolated so later episodes still receive text and artwork. Failed providers do not erase existing metadata.
 
 Windows card context menus offer **Lock metadata**, episode numbering, version selection, and NFO export. **Correct title** and local poster selection protect those fields against later remote refreshes. Settings on both desktop clients exposes provider, refresh, and placeholder controls.
 
@@ -83,9 +92,9 @@ NFO fields take precedence over remote fields, including during explicit refresh
 
 On Windows, metadata diagnostics are written to `%LOCALAPPDATA%\Watchroom\logs\diagnostics.jsonl` by default. `WATCHROOM_DATA` changes the app data directory, and `WATCHROOM_DIAGNOSTICS` overrides the log directory. The log rotates at 5 MB and retains four files, including the current file.
 
-Metadata events include fetch start/completion, title search aliases, missing fields, request endpoints, HTTP status, response content type/length, elapsed time, retry decisions, and exception types, messages, stacks, and inner exceptions. Request context identifies the title, media ID, stage, season, and episode. Provider fallback, season/episode, unsupported image, and cache read/write failures are recorded even when the app handles them and continues. URL credentials, query strings, and fragments are omitted; authorization headers and response bodies are never logged.
+Metadata events include fetch start/completion, title search aliases, missing fields, request endpoints, HTTP status, response content type/length, elapsed time, retry decisions, candidate IDs/names/years/scores/rejection reasons, deferred counts and retry times, redirect destinations/hops, conversions, and exception types, messages, stacks, and inner exceptions. Request context identifies the title, media ID, stage, season, and episode. Provider fallback, season/episode, unsupported image, and cache read/write failures are recorded even when the app handles them and continues. URL credentials, query strings, and fragments are omitted; authorization headers and response bodies are never logged.
 
-`metadata-fetch-report.json` in the app data directory still summarizes the latest completed fetch. Failed title entries now include detailed exception information. Season/episode and intermediate provider failures are available in the rotating diagnostic log.
+`metadata-fetch-report.json` in the app data directory summarizes the latest completed fetch and retains unresolved issues across cooldown-only runs. Its `issues` include title/episode identity outcomes, missing fields, provider failures and separate artwork failures with retry times. `currentIssues` covers only the current title run; `deferredTitles` counts skipped title groups. Outstanding issues are persisted in SQLite and discarded when resolved, removed or invalidated by identity changes. Unmatched titles normally retry after 24 hours, failed requests after one hour; explicit refresh bypasses these cooldowns. Season/episode and intermediate provider failures also appear in the rotating diagnostic log.
 
 ## Verification
 
@@ -96,3 +105,5 @@ Metadata events include fetch start/completion, title search aliases, missing fi
 `dotnet run --project tests/Watchroom.Smoke -- --metadata-discovery` runs the labeled alias/typo corpus and response-cache/pacing checks in isolation. It writes a synthetic accuracy report under `artifacts/metadata-discovery`; these results do not estimate accuracy on a personal library.
 
 `dotnet run --project tests/Watchroom.Smoke -- --grouping-audit` reproduces the audited failures against fresh and historical records, including repeated rescans, backups, repair logs, queue IDs, manual matches, locks, extras, and movie/TV ambiguity.
+
+`dotnet run --project tests/Watchroom.Smoke -c Release -- --metadata-fixes` replays punctuation, Russian language links, remakes, ranges, bonus content, WebP, image budgets/dimensions, redirects, isolated asset failures, image-only retry, keyless identification and retained cooldown issues. `dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --metadata-picker` verifies the Windows picker layout, explicit selection and asynchronous preview behavior.

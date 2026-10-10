@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.IO;
+using System.Net.Http;
 using Watchroom.Core;
 
 namespace Watchroom.Desktop;
@@ -121,13 +123,62 @@ public static class Dialogs
         win.Loaded += (_, _) => { input.Focus(); input.SelectAll(); };
         return win.ShowDialog() == true ? input.Text.Trim() : null;
     }
-    public static MetadataMatch? Choose(Window owner, List<MetadataMatch> matches)
+    public static MetadataMatch? Choose(Window owner, List<MetadataMatch> matches, Func<MetadataMatch, Task<string?>>? loadPoster = null, string? message = null)
     {
-        var win = new Window { Owner = owner, Title = "Choose the correct title", Width = 620, Height = 450, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-        var panel = new DockPanel { Margin = new Thickness(20) }; var button = new Button { Content = "Use this match", IsDefault = true, Margin = new Thickness(0,15,0,0) };
-        DockPanel.SetDock(button, Dock.Bottom); panel.Children.Add(button);
-        var list = new ListBox { ItemsSource = matches }; panel.Children.Add(list);
+        var win = MetadataPicker(owner, matches, loadPoster, message);
+        return win.ShowDialog() == true ? ((ListBox)win.FindName("MetadataChoices")).SelectedItem as MetadataMatch : null;
+    }
+    internal static Window MetadataPicker(Window owner, List<MetadataMatch> matches, Func<MetadataMatch, Task<string?>>? loadPoster, string? message)
+    {
+        var win = new Window { Owner = owner, Title = "Choose the correct title", Width = 760, Height = 520, MinWidth = 600, MinHeight = 360,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        NameScope.SetNameScope(win, new NameScope());
+        var panel = new DockPanel { Margin = new Thickness(20) };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = new Button { Content = "Cancel", IsCancel = true };
+        var button = new Button { Content = "Use this match", IsDefault = true, IsEnabled = false };
+        button.SetResourceReference(FrameworkElement.StyleProperty, "Primary");
+        actions.Children.Add(cancel); actions.Children.Add(button); DockPanel.SetDock(actions, Dock.Bottom); panel.Children.Add(actions);
+        var explanation = new TextBlock { Text = "Choose by year and animation type. Similar names can refer to different adaptations." +
+            (string.IsNullOrWhiteSpace(message) ? "" : "\n" + message), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) };
+        DockPanel.SetDock(explanation, Dock.Top); panel.Children.Add(explanation);
+        var preview = new StackPanel { Width = 150, Margin = new Thickness(16, 0, 0, 0) };
+        var image = new Image { Width = 130, Height = 195, Stretch = System.Windows.Media.Stretch.Uniform };
+        var posterStatus = new TextBlock { Text = "Select a title to preview its poster.", TextWrapping = TextWrapping.Wrap };
+        preview.Children.Add(image); preview.Children.Add(posterStatus); DockPanel.SetDock(preview, Dock.Right); panel.Children.Add(preview);
+        var template = new DataTemplate(typeof(MetadataMatch));
+        var row = new FrameworkElementFactory(typeof(StackPanel)); row.SetValue(FrameworkElement.MarginProperty, new Thickness(4, 8, 4, 8));
+        foreach (var (property, size) in new[] { (nameof(MetadataMatch.Title), 16.0), (nameof(MetadataMatch.Description), 12.0), (nameof(MetadataMatch.Evidence), 12.0) })
+        {
+            var text = new FrameworkElementFactory(typeof(TextBlock)); text.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding(property));
+            text.SetValue(TextBlock.FontSizeProperty, size); text.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap); row.AppendChild(text);
+        }
+        template.VisualTree = row;
+        var list = new ListBox { ItemsSource = matches, ItemTemplate = template, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        System.Windows.Automation.AutomationProperties.SetName(list, "Matching titles with year, animation type and provider");
+        win.RegisterName("MetadataChoices", list); win.RegisterName("MetadataPreview", image); win.RegisterName("UseMetadataMatch", button);
+        panel.Children.Add(list);
+        var closed = false; win.Closed += (_, _) => closed = true;
+        list.SelectionChanged += async (_, _) =>
+        {
+            button.IsEnabled = list.SelectedItem is MetadataMatch;
+            image.Source = null;
+            if (list.SelectedItem is not MetadataMatch chosen) return;
+            posterStatus.Text = loadPoster is null || chosen.Poster is null ? "No poster available." : "Loading poster…";
+            if (loadPoster is null || chosen.Poster is null) return;
+            try
+            {
+                var path = await loadPoster(chosen);
+                if (closed || !ReferenceEquals(list.SelectedItem, chosen)) return;
+                if (path is null) { posterStatus.Text = "No poster available."; return; }
+                using var file = File.OpenRead(path);
+                var bitmap = new System.Windows.Media.Imaging.BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                bitmap.DecodePixelWidth = 150; bitmap.StreamSource = file; bitmap.EndInit(); bitmap.Freeze(); image.Source = bitmap; posterStatus.Text = chosen.Description;
+            }
+            catch (Exception ex) when (ex is IOException or HttpRequestException or ArgumentException or InvalidOperationException or OperationCanceledException)
+            { if (!closed && ReferenceEquals(list.SelectedItem, chosen)) posterStatus.Text = "Poster unavailable. You can still choose this title."; }
+        };
         button.Click += (_, _) => { if (list.SelectedItem is not null) win.DialogResult = true; };
-        win.Content = panel; return win.ShowDialog() == true ? list.SelectedItem as MetadataMatch : null;
+        win.Content = panel; return win;
     }
 }

@@ -89,7 +89,7 @@ internal static class FilenameEpisodes
         if (!seriesContext) return null;
         var middle = Match(name, @"\s+(?<n>0\d{1,3}|\d{2})(?:v\d+)?\s+(?=\p{L})");
         if (middle.Success) return Finish(name, middle, 1, false);
-        var prefix = Match(name, @"^" + Number + @"(?=\s|$)");
+        var prefix = Match(name, @"^" + Number + @"(?=\s|$|-\d{1,4}\b)");
         if (prefix.Success && !Year(int.Parse(prefix.Groups["n"].Value)) && !Resolution(int.Parse(prefix.Groups["n"].Value)))
             return Finish(name, prefix, 1, false) with { Series = "" };
         var suffix = Match(name, @"\s+" + Number + @"\s*$");

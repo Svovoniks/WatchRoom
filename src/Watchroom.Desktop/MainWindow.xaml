@@ -175,7 +175,7 @@
       <TextBlock x:Name="MetadataKeyStatus" Style="{StaticResource MutedText}" AutomationProperties.LiveSetting="Polite" Margin="0,0,0,8"/>
       <TextBlock Text="Save changes stores the key in Windows Credential Manager. Clear it and save to remove it." Style="{StaticResource MutedText}"/>
       <TextBlock Text="Manual refresh" Style="{StaticResource SectionHeading}"/><TextBlock Text="Uses saved preferences." Style="{StaticResource MutedText}"/>
-      <ComboBox x:Name="MetadataRefreshMode" SelectedIndex="0" AutomationProperties.Name="Metadata refresh action"><ComboBoxItem Content="Fill missing metadata"/><ComboBoxItem Content="Refresh text metadata"/><ComboBoxItem Content="Refresh text and replace downloaded artwork"/></ComboBox>
+      <ComboBox x:Name="MetadataRefreshMode" SelectedIndex="0" AutomationProperties.Name="Metadata refresh action"><ComboBoxItem Content="Fill missing metadata"/><ComboBoxItem Content="Refresh text metadata"/><ComboBoxItem Content="Refresh text and replace downloaded artwork"/><ComboBoxItem Content="Retry missing artwork"/></ComboBox>
       <Button Content="Fetch artwork and metadata" Click="FetchArtworkClick" HorizontalAlignment="Left"/>
      </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="PlaybackPreferences" Tag="Playback" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="760" Margin="0,0,18,12" HorizontalAlignment="Stretch">

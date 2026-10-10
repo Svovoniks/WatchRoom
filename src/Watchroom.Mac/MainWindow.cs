@@ -48,7 +48,7 @@ public sealed class MainWindow : Window
     private readonly CheckBox saveNfo = new() { Content = "Save NFO metadata beside videos" };
     private readonly CheckBox displaySpecials = new() { Content = "Show specials within aired seasons" };
     private readonly CheckBox groupShows = new() { Content = "Combine show folders with matching provider IDs" };
-    private readonly ComboBox metadataRefreshMode = new() { ItemsSource = new[] { "Fill missing metadata", "Refresh text", "Refresh text and replace downloaded artwork" }, SelectedIndex = 0 };
+    private readonly ComboBox metadataRefreshMode = new() { ItemsSource = new[] { "Fill missing metadata", "Refresh text", "Refresh text and replace downloaded artwork", "Retry missing artwork" }, SelectedIndex = 0 };
     private readonly TextBox invitation = new() { Watermark = "Invitation link or room code" };
     private readonly TextBox chatInput = new() { Watermark = "Message your room", MaxLength = 1000 };
     private readonly StackPanel people = new() { Spacing = 6 };
@@ -288,19 +288,56 @@ public sealed class MainWindow : Window
     }
     private async Task MatchArtwork()
     {
-        if (selected is null) return; if (string.IsNullOrWhiteSpace(token.Text)) { tabs.SelectedIndex = 3; status.Text = "Enter your TMDB read access token, or use a local poster."; return; }
-        using var metadata = new MetadataClient(token.Text, options: MetadataOptions.Load(library)); var item = selected;
-        var matches = (await metadata.SearchAsync(item.Series ?? item.Title, true, lifetime.Token)).Concat(await metadata.SearchAsync(item.Series ?? item.Title, false, lifetime.Token)).ToList();
-        if (matches.Count == 0) { status.Text = "No metadata matches. Try a local poster."; return; }
-        var picker = new Window { Title = "Choose the matching title", Width = 520, Height = 420 };
-        var list = new ListBox { ItemsSource = matches, SelectedIndex = 0, Height = 280 };
-        MetadataMatch? match = null; var use = new Button { Content = "Use selected match" }; use.Click += (_, _) => { match = list.SelectedItem as MetadataMatch; picker.Close(); };
-        picker.Content = Pane(Column(list, use)); await picker.ShowDialog(this); if (match is null) return;
-        match = await metadata.DetailsAsync(match, lifetime.Token);
-        var poster = await metadata.CachePosterAsync(match, Path.Combine(App.DataDirectory, "posters"), lifetime.Token);
-        foreach (var episode in items.Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item))) library.Save(AutomaticArtwork.MergeDetails(LibraryIdentity.WithProvider(MetadataClassification.Apply(episode with { ProviderIds = null, MetadataProvider = null, MetadataId = null }, match.Kind ?? (match.Type == "tv" ? "Show" : "Movie"), match.Type, match.Title), "tmdb", match.Id), match) with { Poster = poster, SeriesPoster = match.Type == "tv" ? poster : null, Overview = match.Overview, Matched = true, MetadataFetchedAt = 0,
-            SeasonTitle = null, SeasonOverview = null, EpisodeTitle = null, EpisodeOverview = null, EpisodePoster = null, SeasonPoster = null });
-        RefreshLibrary();
+        if (selected is null) return;
+        if (selected.MetadataLocked) { status.Text = "Metadata is locked. Unlock it before choosing a match."; return; }
+        var item = selected;
+        var result = await MetadataIdentification.SearchAsync(library, item, item.DisplayTitle, token.Text, lifetime.Token);
+        if (result.Matches.Count == 0) { status.Text = "No metadata matches. " + string.Join(" ", result.Warnings); return; }
+        var picker = new Window { Title = "Choose the correct title", Width = 760, Height = 520, MinWidth = 600, MinHeight = 360 };
+        var list = new ListBox { ItemsSource = result.Matches,
+            ItemTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<MetadataMatch>((candidate, _) =>
+                Column(Text(candidate?.Title ?? "", 16), Text(candidate?.Description ?? "", 12), Text(candidate?.Evidence ?? "", 12))) };
+        var preview = new Image { Width = 130, Height = 195, Stretch = Stretch.Uniform };
+        var previewStatus = Text("Select a title to preview its poster.", 12); previewStatus.TextWrapping = TextWrapping.Wrap;
+        var explanation = Text("Choose by year and animation type. Similar names can refer to different adaptations.\n" + string.Join(" ", result.Warnings), 14);
+        explanation.TextWrapping = TextWrapping.Wrap;
+        MetadataMatch? match = null; Bitmap? previewBitmap = null; var closed = false;
+        var use = new Button { Content = "Use this match", IsEnabled = false };
+        var cancel = new Button { Content = "Cancel" }; cancel.Click += (_, _) => picker.Close();
+        use.Click += (_, _) => { match = list.SelectedItem as MetadataMatch; if (match is not null) picker.Close(); };
+        picker.Closed += (_, _) => { closed = true; previewBitmap?.Dispose(); };
+        list.SelectionChanged += async (_, _) =>
+        {
+            use.IsEnabled = list.SelectedItem is MetadataMatch;
+            preview.Source = null; previewBitmap?.Dispose(); previewBitmap = null;
+            if (list.SelectedItem is not MetadataMatch candidate) return;
+            previewStatus.Text = candidate.Poster is null ? "No poster available." : "Loading poster…";
+            if (candidate.Poster is null) return;
+            try
+            {
+                var path = await MetadataIdentification.PosterAsync(candidate, App.DataDirectory, token.Text, lifetime.Token);
+                if (closed || !ReferenceEquals(list.SelectedItem, candidate)) return;
+                if (path is null) { previewStatus.Text = "No poster available."; return; }
+                using var stream = File.OpenRead(path); previewBitmap = Bitmap.DecodeToWidth(stream, 150);
+                preview.Source = previewBitmap; previewStatus.Text = candidate.Description;
+            }
+            catch (Exception ex) when (ex is IOException or HttpRequestException or ArgumentException or InvalidOperationException or OperationCanceledException)
+            { if (!closed && ReferenceEquals(list.SelectedItem, candidate)) previewStatus.Text = "Poster unavailable. You can still choose this title."; }
+        };
+        var body = new DockPanel();
+        var buttons = Row(cancel, use); DockPanel.SetDock(buttons, Dock.Bottom); body.Children.Add(buttons);
+        DockPanel.SetDock(explanation, Dock.Top); body.Children.Add(explanation);
+        var side = Column(preview, previewStatus); side.Width = 150; side.Margin = new Thickness(16, 0, 0, 0);
+        DockPanel.SetDock(side, Dock.Right); body.Children.Add(side); body.Children.Add(list);
+        picker.Content = Pane(body); await picker.ShowDialog(this); if (match is null) return;
+        match = await MetadataIdentification.DetailsAsync(library, match, token.Text, lifetime.Token);
+        string? poster = null;
+        try { poster = await MetadataIdentification.PosterAsync(match, App.DataDirectory, token.Text, lifetime.Token); }
+        catch (Exception ex) when (!lifetime.IsCancellationRequested && ex is IOException or HttpRequestException or TaskCanceledException)
+        { PlaybackDiagnostics.Record("metadata-manual-artwork-failure", new { item.Id, item.Title, match.Provider, Error = ex.GetType().Name }); }
+        foreach (var entry in library.All().Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item)))
+            library.Save(MetadataIdentification.Apply(entry, match, poster));
+        RefreshLibrary(); status.Text = poster is null ? "Title matched. Poster unavailable; use Retry missing artwork to try again." : "Title matched with " + match.Provider + ".";
     }
     private async Task LocalPoster()
     {

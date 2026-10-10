@@ -46,7 +46,7 @@ public sealed class EpisodeArtwork
                     var url = await mazeImages.GetOrAdd($"{maze.Groups[1].Value}:{mazeSeason}:{mazeEpisode}", _ => new(() => MazeImage(maze.Groups[1].Value, mazeSeason, mazeEpisode, ct))).Value;
                     if (url is not null)
                     {
-                        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+                        using var http = MetadataHttp.CreateClient();
                         var path = await AutomaticArtwork.Download(http, url, directory, ct);
                         if (ArtworkCache.IsUsable(path)) return item with { EpisodePoster = path, EpisodePosterQualityPath = path };
                     }
@@ -62,7 +62,7 @@ public sealed class EpisodeArtwork
 
     private static async Task<string?> MazeImage(string show, int season, int episode, CancellationToken ct)
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        using var http = MetadataHttp.CreateClient();
         using var json = System.Text.Json.JsonDocument.Parse(await MetadataHttp.GetString(http, $"https://api.tvmaze.com/shows/{show}/episodebynumber?season={season}&number={episode}", ct));
         return json.RootElement.TryGetProperty("image", out var image) && image.ValueKind == System.Text.Json.JsonValueKind.Object &&
             image.TryGetProperty("original", out var original) ? original.GetString() : null;

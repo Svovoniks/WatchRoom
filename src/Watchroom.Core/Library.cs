@@ -471,6 +471,8 @@ public sealed class LibraryStore
                     if (sourceNumbering && previous is not null && CanRepairGrouping(previous) && previous.NumberingOrder != "dvd")
                         item = item with { Season = parsed.Season, Episode = parsed.Episode, EpisodeEnd = parsed.EpisodeEnd,
                             AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, NumberingOrder = "aired" };
+                    if (parsed.AbsoluteEpisodeEnd is not null && previous is not null && CanRepairGrouping(previous) && previous.AbsoluteEpisode is null && previous.NumberingOrder != "dvd")
+                        item = item with { NumberingOrder = parsed.NumberingOrder };
                     if (parsed.Series is null && parsed.Episode is null && previous is not null && CanRepairGrouping(previous) && previous.MetadataType is null &&
                         (previous.Kind == "Movie" || parsed.Year is >= 1900 && previous.Episode == parsed.Year))
                         item = item with { Title = parsed.Title, Series = null, ShowId = null, SeasonId = null, SeriesPath = null,
@@ -483,7 +485,7 @@ public sealed class LibraryStore
                         if (LibraryIdentity.Locked(previous, "Title")) item = item with { Title = previous.Title, Series = previous.Series };
                         if (LibraryIdentity.Locked(previous, "Kind")) item = item with { Kind = previous.Kind };
                     }
-                    item = LocalMetadata.Apply(item with { NumberingSource = parsed.NumberingSource,
+                    item = LocalMetadata.Apply(item with { IsBonus = previous?.Matched == true || previous is not null && LibraryIdentity.Locked(previous, "Episode") ? previous.IsBonus : parsed.IsBonus, NumberingSource = parsed.NumberingSource,
                         SourceLibraryKind = parsed.SourceLibraryKind, IsExtra = false });
                     Save(item); progress?.Report($"Found {seen.Count} videos · {item.Title}");
                 }
@@ -513,6 +515,8 @@ public static partial class FileNames
         var dir = System.IO.Path.GetDirectoryName(path)!;
         var seriesContext = kind is "Show" or "Anime" || kind == "Mixed" && path.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar)
             .Any(part => Regex.IsMatch(part, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы)$")) || File.Exists(System.IO.Path.Combine(dir, "tvshow.nfo"));
+        var bonus = seriesContext && Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path),
+            @"(?i)(?:^|[ ._-])(?:NC(?:OP|ED)\d*|(?:BD[ -]?Box|DVD(?:[ -](?:Memorial|Remaster))?|LD)?[ -]*CM(?:[ -]Collection)?|Promo|Preview|Pilot[ -]Film)(?=$|[ ._(-])");
         var seasonFolderName = System.IO.Path.GetFileName(dir);
         var seasonFolder = Regex.Match(Regex.Replace(seasonFolderName, @"[._]+", " "), @"(?i)(?:^|\s)(?:Season\s*|S)(\d{1,2})(?!\d|E\d)\b|^(\d+)\s*(?:сезон|sezon)\b|^Specials$");
         var folderSeason = seasonFolder.Success ? seasonFolder.Groups[1].Success ? int.Parse(seasonFolder.Groups[1].Value) : seasonFolder.Groups[2].Success ? int.Parse(seasonFolder.Groups[2].Value) : 0 : (int?)null;
@@ -556,7 +560,7 @@ public static partial class FileNames
             EpisodeEnd: numbering?.End, NumberingConflict: numbering?.Conflict);
         // Structured show folders own membership, regardless of aliases in individual filenames.
         var parentName = System.IO.Path.GetFileName(seriesDir);
-        var structured = File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) || numbering is not null && (seasonFolder.Success || seriesContext || seriesDir != dir) &&
+        var structured = File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) || (numbering is not null || bonus) && (seasonFolder.Success || seriesContext || seriesDir != dir) &&
             (libraryRoot is null || !string.Equals(System.IO.Path.GetFullPath(libraryRoot), seriesDir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) &&
             !Regex.IsMatch(parentName, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы)$");
         if (structured)
@@ -571,6 +575,9 @@ public static partial class FileNames
         }
         if (filenameSeason is not null && folderSeason is not null && filenameSeason != folderSeason)
             result = result with { NumberingConflict = $"Filename season {filenameSeason} differs from folder season {folderSeason}; using filename." };
+        if (bonus && structured && numbering is null)
+            result = result with { IsBonus = true, Kind = sourceKind == "Anime" || path.Split(System.IO.Path.DirectorySeparatorChar).Any(p => p.Equals("Anime", StringComparison.OrdinalIgnoreCase)) ? "Anime" : "Show",
+                Season = 0, Episode = null, EpisodeTitle = name, NumberingOrder = "aired" };
         var absoluteFolder = Regex.IsMatch(seasonFolderName, @"(?i)\bEP\s*\d{3,4}\b");
         if (number is not null && filenameSeason is null && result.Kind == "Anime" && (!seasonFolder.Success || absoluteFolder))
             result = result with { AbsoluteEpisode = number, AbsoluteEpisodeEnd = numbering?.End, NumberingOrder = "absolute" };

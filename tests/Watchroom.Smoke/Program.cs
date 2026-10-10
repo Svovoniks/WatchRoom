@@ -6,6 +6,14 @@ using Watchroom.Core;
 using LibVLCSharp.Shared;
 using System.Diagnostics;
 
+if (args.FirstOrDefault() == "--metadata-fixes")
+{
+    var checks = 0;
+    await MetadataFixesFixture.Run(Path.GetFullPath("artifacts/metadata-fixes-" + Guid.NewGuid().ToString("N")), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} metadata fix checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--filename-schemas")
 {
     var checks = 0;
@@ -255,6 +263,7 @@ PlaybackDiagnostics.Initialize(Path.Combine(root, "session-logs"));
 int passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
 await MetadataDiagnosticsFixture.Run(Path.Combine(root, "metadata-diagnostics"), Check);
+await MetadataFixesFixture.Run(Path.Combine(root, "metadata-fixes"), Check);
 TrackLanguageFixture.Run(Check);
 EpisodePlaybackFixture.Run(Check);
 RoomLibraryChecks.Run(Check);

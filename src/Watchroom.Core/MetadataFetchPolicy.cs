@@ -8,6 +8,7 @@ internal static class MetadataFetchPolicy
     private static string Key(string stage, MediaItem item) => "metadata-retry:" + stage + ":" + item.Id;
     private static string Fingerprint(MediaItem item, MetadataOptions options, string? token) => LibraryIdentity.Hash(Wire.Serialize(new
     {
+        MatcherVersion = 2,
         item.Path, item.Title, item.Series, item.Kind, item.Year, item.ShowId, item.Season, item.Episode, item.EpisodeEnd,
         item.AbsoluteEpisode, item.NumberingOrder, item.SourcePart, item.SourcePartEpisode, item.SourcePartEpisodeEnd,
         item.AirDate, item.NumberingSource,
@@ -37,5 +38,10 @@ internal static class MetadataFetchPolicy
         var delay = failed ? TimeSpan.FromHours(1) : unmatched ? TimeSpan.FromDays(1) : TimeSpan.FromDays(options.RefreshDays > 0 ? options.RefreshDays : 7);
         foreach (var item in entries)
             library.Setting(Key(stage, item), Wire.Serialize(new Attempt(Fingerprint(item, options, token), Wire.Now + (long)delay.TotalMilliseconds)));
+    }
+    internal static long? RetryAt(LibraryStore library, string stage, string id)
+    {
+        try { return library.Setting("metadata-retry:" + stage + ":" + id) is { } json ? Wire.Read<Attempt>(json).RetryAt : null; }
+        catch (System.Text.Json.JsonException) { return null; }
     }
 }

@@ -34,6 +34,17 @@ static class Program
         foreach (var element in resourceRoot.Descendants().Where(element => element.Name.NamespaceName == "clr-namespace:Watchroom.Desktop"))
             element.Name = System.Xml.Linq.XName.Get(element.Name.LocalName, "clr-namespace:Watchroom.Desktop;assembly=Watchroom");
         app.Resources = (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(resourceRoot.ToString());
+        if (args.FirstOrDefault() == "--metadata-picker")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                try { await MetadataPickerChecks.Run(directory); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
+        }
         if (args.FirstOrDefault() == "--guest-recovery")
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;

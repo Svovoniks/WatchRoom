@@ -367,7 +367,7 @@ public partial class MainWindow
         }
         if (card.Level is "movie" or "episode")
         {
-            if (card.Level == "episode")
+            if (card.Level == "episode" && card.Media.Episode is not null)
             {
                 var versions = items.Where(x => LibraryIdentity.SameShow(x, card.Media) && x.Season == card.Media.Season && x.Episode == card.Media.Episode && x.EpisodeEnd == card.Media.EpisodeEnd && !x.IsVirtual).ToArray();
                 if (versions.Length > 1)

@@ -4,8 +4,10 @@ namespace Watchroom.Core;
 
 internal static class MetadataDiagnostics
 {
-    private sealed record Context(string Stage, string MediaId, string Title, int? Season, int? Episode);
+    private sealed record Context(string Stage, string MediaId, string Title, int? Season, int? Episode) { internal string? Outcome { get; set; } }
     private static readonly AsyncLocal<Context?> current = new();
+    internal static string? MatchOutcome => current.Value?.Outcome;
+    internal static void Outcome(string value) { if (current.Value is { } context && (context.Outcome != "ambiguous-candidates" || value == "matched")) context.Outcome = value; }
     internal static IDisposable BeginItem(string stage, MediaItem item)
     {
         var previous = current.Value;

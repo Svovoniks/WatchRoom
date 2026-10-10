@@ -71,9 +71,14 @@ static class MetadataDiscoveryFixture
         var crowded = await MetadataMatching.ChooseWithAliasesAsync(Enumerable.Range(1, 5).Select(i => Match(i, "Port " + i)), Show("Local Harbor"),
             (_, _) => { aliasRequests++; return Task.FromResult(new[] { "Local Harbor" }); }, default);
         check(crowded is null && aliasRequests == 0, "crowded alias searches stay unresolved without a truncated shortlist");
-        var partial = await MetadataMatching.ChooseWithAliasesAsync([Match(1, "Port One"), Match(2, "Port Two")], Show("Local Harbor"),
-            (x, _) => x.Id == 1 ? Task.FromResult(new[] { "Local Harbor" }) : Task.FromException<string[]>(new HttpRequestException("Unavailable")), default);
-        check(partial is null, "failed alias lookup cannot turn a partially checked shortlist into a winner");
+        var aliasFailed = false;
+        try
+        {
+            await MetadataMatching.ChooseWithAliasesAsync([Match(1, "Port One"), Match(2, "Port Two")], Show("Local Harbor"),
+                (x, _) => x.Id == 1 ? Task.FromResult(new[] { "Local Harbor" }) : Task.FromException<string[]>(new HttpRequestException("Unavailable")), default);
+        }
+        catch (HttpRequestException) { aliasFailed = true; }
+        check(aliasFailed, "failed alias lookup reports a provider failure instead of accepting partial evidence or an empty search");
         check(MetadataMatching.ChooseTypoFallback([(Show("Harbr"), new[] { Match(1, "Harbor") }), (Show("Valey"), new[] { Match(2, "Valley") })]) is null,
             "conflicting typo matches across filename and folder evidence remain unresolved");
         check(MetadataMatching.ChooseTypoFallback([(Show("Harbr"), new[] { Match(1, "Harbor") }), (Show("Harbr"), new[] { Match(1, "Harbor"), Match(2, "Harber", "2021") })]) is null,

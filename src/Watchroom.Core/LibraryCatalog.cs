@@ -71,7 +71,7 @@ public static class LibraryCatalog
             }).OrderBy(x => x.DisplayTitle).ToList();
         var episodes = items.Where(x => LibraryIdentity.InShow(x, series, kind));
         if (season is null)
-            return episodes.GroupBy(x => x.Season ?? -1).OrderBy(g => g.Key < 0 ? int.MaxValue : g.Key).Select(g => new LibraryCard(g.Key < 0 ? "Season unknown" : g.Key == 0 ? "Specials" : $"Season {g.Key}", $"{LibraryIdentity.EpisodeCount(g)} episodes",
+            return episodes.GroupBy(x => x.Season ?? -1).OrderBy(g => g.Key < 0 ? int.MaxValue : g.Key).Select(g => new LibraryCard(g.Key < 0 ? "Season unknown" : g.Key == 0 ? "Specials" : $"Season {g.Key}", $"{LibraryIdentity.EpisodeCount(g)} episodes" + (g.Any(x => x.IsBonus) ? $" · {g.Count(x => x.IsBonus)} bonus clips" : ""),
                 Existing(g.Select(x => x.SeasonPoster).Concat(g.Select(x => x.SeriesPoster)).Concat(g.Select(x => x.Poster)), cancellation), g.First(), "season", g.Key)).ToList();
         var seasonItems = episodes.Where(x => (x.Season ?? -1) == season || displaySpecials && season > 0 && x.Season == 0 && (x.AirsBeforeSeason == season || x.AirsAfterSeason == season)).ToArray();
         return PreferredFiles(seasonItems).OrderBy(x => x.Season == 0 && season > 0 ? x.AirsBeforeSeason == season ? (x.AirsBeforeEpisode ?? 1) - 0.5 : double.MaxValue : x.Episode ?? int.MaxValue)
