@@ -65,7 +65,7 @@ public static class SeriesMetadata
                     if (provider == "tmdb")
                     {
                         if (item.NumberingOrder == "dvd") details = await tmdb!.DvdSeasonsAsync(id.Value, ct);
-                        else if (entries.Any(x => x.NumberingOrder == "absolute" || x.AbsoluteEpisode is not null) || options.ImportMissing || options.ImportUpcoming)
+                        else if (entries.Any(x => x.NumberingOrder == "absolute" || x.AbsoluteEpisode is not null || x.NumberingSource == "date") || options.ImportMissing || options.ImportUpcoming)
                             details = await tmdb!.SeasonsAsync(id.Value, ct);
                         else
                         {
@@ -94,9 +94,24 @@ public static class SeriesMetadata
                     {
                         ct.ThrowIfCancellationRequested();
                         var current = LibraryIdentity.WithProvider(entry, provider, id, !entry.Matched || entry.MetadataProvider == provider);
-                        var absoluteNumber = entry.AbsoluteEpisode ?? (entry.NumberingOrder == "absolute" ? entry.Episode : null);
+                        if (entry.NumberingConflict is FilenameEpisodes.InvalidRange or FilenameEpisodes.CrossSeasonRange)
+                        { library.Save(current); continue; }
+                        var dateNumbering = entry.NumberingSource == "date" && entry.AirDate is not null;
+                        if (dateNumbering && !LibraryIdentity.Locked(current, "Season") && !LibraryIdentity.Locked(current, "Episode"))
+                        {
+                            current = current with { Season = null, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null,
+                                SourcePart = null, SourcePartEpisode = null, SourcePartEpisodeEnd = null, NumberingOrder = "aired" };
+                            var dated = details.SelectMany(s => s.Episodes.Where(e => e.AirDate == entry.AirDate).Select(e => (Season: s.Number, Episode: e.Number))).ToArray();
+                            if (dated.Length != 1)
+                            {
+                                library.Save(current with { NumberingConflict = "The filename air date does not identify exactly one provider episode; correct its numbering manually." });
+                                continue;
+                            }
+                            current = current with { Season = dated[0].Season, Episode = dated[0].Episode, NumberingConflict = null };
+                        }
+                        var absoluteNumber = dateNumbering ? null : entry.AbsoluteEpisode ?? (entry.NumberingOrder == "absolute" ? entry.Episode : null);
                         int? mappedPartEnd = null;
-                        if (entry.SourcePart is > 1 && entry.SourcePartEpisode is { } localNumber)
+                        if (!dateNumbering && entry.SourcePart is > 1 && entry.SourcePartEpisode is { } localNumber)
                         {
                             var part = entry.SourcePart.Value;
                             var expectedParts = entries.Select(x => x.SourcePart ?? 1).Max();

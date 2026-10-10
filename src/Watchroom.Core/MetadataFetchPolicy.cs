@@ -10,6 +10,7 @@ internal static class MetadataFetchPolicy
     {
         item.Path, item.Title, item.Series, item.Kind, item.Year, item.ShowId, item.Season, item.Episode, item.EpisodeEnd,
         item.AbsoluteEpisode, item.NumberingOrder, item.SourcePart, item.SourcePartEpisode, item.SourcePartEpisodeEnd,
+        item.AirDate, item.NumberingSource,
         item.MetadataProvider, item.MetadataId, item.MetadataKind, item.MetadataType, item.Matched, item.MetadataLocked,
         LockedFields = (item.LockedFields ?? []).Order(), ProviderIds = (item.ProviderIds ?? []).OrderBy(x => x.Key), item.Overview, item.EpisodeTitle,
         item.Poster, item.SeriesPoster, item.SeasonPoster, item.EpisodePoster,

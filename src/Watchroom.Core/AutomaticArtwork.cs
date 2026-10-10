@@ -183,6 +183,7 @@ public static class AutomaticArtwork
         left.Title == right.Title && left.Series == right.Series && left.Year == right.Year && left.ShowId == right.ShowId &&
         left.Season == right.Season && left.Episode == right.Episode && left.EpisodeEnd == right.EpisodeEnd &&
         left.NumberingOrder == right.NumberingOrder && left.AbsoluteEpisode == right.AbsoluteEpisode && left.SourcePart == right.SourcePart &&
+        left.AirDate == right.AirDate && left.NumberingSource == right.NumberingSource &&
         left.MetadataType == right.MetadataType && left.MetadataProvider == right.MetadataProvider && left.MetadataId == right.MetadataId &&
         left.Matched == right.Matched && left.MetadataLocked == right.MetadataLocked &&
         (left.LockedFields ?? []).Order().SequenceEqual((right.LockedFields ?? []).Order()) &&

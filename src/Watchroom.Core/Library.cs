@@ -458,12 +458,16 @@ public sealed class LibraryStore
                     var parsed = FileNames.Parse(path, folder.Kind, folder.Path); seen.Add(parsed.Id);
                     var item = old.TryGetValue(parsed.Id, out var previous) ? previous with { Available = true, Year = previous.Matched || previous.MetadataType is not null ? previous.Year : parsed.Year, Kind = previous.MetadataKind ?? parsed.Kind, Series = previous.MetadataType == "movie" ? null : previous.MetadataType == "tv" || previous.Matched ? previous.Series : parsed.Series ?? previous.Series, Season = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Season : parsed.Season ?? previous.Season, Episode = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Episode : parsed.Episode ?? previous.Episode, SeriesPoster = parsed.SeriesPoster ?? previous.SeriesPoster, SeasonPoster = parsed.SeasonPoster ?? previous.SeasonPoster, Poster = previous.Matched && File.Exists(previous.Poster) ? previous.Poster : parsed.Poster ?? (File.Exists(previous.Poster) ? previous.Poster : null) } : parsed;
                     item = item with { ShowId = previous?.ShowId ?? parsed.ShowId, SeriesPath = parsed.SeriesPath ?? previous?.SeriesPath,
+                        EpisodeTitle = LibraryIdentity.Locked(item, "EpisodeTitle") ? item.EpisodeTitle : item.EpisodeTitle ?? parsed.EpisodeTitle,
+                        AirDate = LibraryIdentity.Locked(item, "AirDate") ? item.AirDate : parsed.AirDate ?? item.AirDate,
                         EpisodeEnd = previous?.AbsoluteEpisode is not null ? previous.EpisodeEnd : parsed.EpisodeEnd ?? previous?.EpisodeEnd,
                         AbsoluteEpisode = parsed.AbsoluteEpisode ?? previous?.AbsoluteEpisode, AbsoluteEpisodeEnd = parsed.AbsoluteEpisodeEnd ?? previous?.AbsoluteEpisodeEnd,
                         SourcePart = parsed.SourcePart ?? previous?.SourcePart, SourcePartEpisode = parsed.SourcePartEpisode ?? previous?.SourcePartEpisode,
                         SourcePartEpisodeEnd = parsed.SourcePartEpisodeEnd ?? previous?.SourcePartEpisodeEnd,
                         NumberingConflict = parsed.NumberingConflict, NumberingOrder = previous?.NumberingOrder ?? parsed.NumberingOrder };
                     var sourceNumbering = parsed.NumberingSource is "filename" or "season-folder";
+                    if (previous is not null && CanRepairGrouping(previous) && previous.MetadataType is null && parsed.Series is not null && !LibraryIdentity.Locked(previous, "Title"))
+                        item = item with { Title = parsed.Title };
                     if (sourceNumbering && previous is not null && CanRepairGrouping(previous) && previous.NumberingOrder != "dvd")
                         item = item with { Season = parsed.Season, Episode = parsed.Episode, EpisodeEnd = parsed.EpisodeEnd,
                             AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, NumberingOrder = "aired" };
@@ -496,68 +500,36 @@ public sealed class LibraryStore
 public static partial class FileNames
 {
     public static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase) { ".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".mpeg", ".mpg", ".ts", ".m2ts", ".wmv", ".flv", ".ogv" };
-    public static bool IsExtra(string path) => !Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path), @"(?i)\bS00[._ ]*E\d+\b|\b0x\d+\b") && (path.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar)
+    public static bool IsExtra(string path) => (path.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar)
         .SkipLast(1).Any(part => Regex.IsMatch(part, @"(?i)^(?:extras|trailers|featurettes|behind the scenes|samples)$")) ||
-        Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path), @"(?i)(?:^|[-._ ])(?:trailer|sample|featurette)\d*$"));
+        Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path), @"(?i)(?:^|[-._ ])(?:trailer|sample|featurette)\d*$")) &&
+        FilenameEpisodes.Read(path, false) is not { ExplicitSeason: true, Season: 0 };
     public static MediaItem Parse(string path, string kind = "Mixed", string? libraryRoot = null)
     {
         path = System.IO.Path.GetFullPath(path);
         var sourceKind = kind;
         var identityPath = OperatingSystem.IsWindows() ? path.ToUpperInvariant() : path;
         var id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identityPath)))[..32];
-        var name = Regex.Replace(System.IO.Path.GetFileNameWithoutExtension(path), @"\[[^\]]*\]", " ");
-        name = Regex.Replace(name, @"[._]+", " ").Trim();
-        // Release details can contain audio layouts such as 2.0x3. They are not episodes.
-        var episodeName = Regex.Split(name, @"(?i)\b(?:BDRip|BRRip|2160p|1080p|720p|480p|\d{3,4}x\d{3,4}p?|WEB-DL|WEBRip|BluRay|x264|x265|HEVC)\b")[0].TrimEnd(' ', '(');
-        var episode = Regex.Match(episodeName, @"(?i)\bS(\d{1,2})\s*E(\d{1,3})(?:v\d+)?\b|\b(\d{1,2})x(\d{1,3})(?:v\d+)?\b");
-        var localized = Regex.Match(episodeName, @"(?i)\b(\d{1,2})\s*сезон\s*(\d{1,4})\s*сери(?:я|и|й)\b");
         var dir = System.IO.Path.GetDirectoryName(path)!;
         var seriesContext = kind is "Show" or "Anime" || kind == "Mixed" && path.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar)
-            .Any(part => Regex.IsMatch(part, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы)$"));
-        int? season = null, number = null; string? series = null;
-        if (localized.Success)
-        {
-            season = int.Parse(localized.Groups[1].Value); number = int.Parse(localized.Groups[2].Value);
-            series = episodeName[..localized.Index].Trim(' ', '-');
-        }
-        else if (episode.Success)
-        {
-            season = int.Parse(episode.Groups[1].Success ? episode.Groups[1].Value : episode.Groups[3].Value);
-            number = int.Parse(episode.Groups[2].Success ? episode.Groups[2].Value : episode.Groups[4].Value);
-            series = episodeName[..episode.Index].Trim(' ', '-');
-        }
-        else
-        {
-            var numbered = Regex.Match(episodeName, @"(?i)(?:(?:^|\s)-\s(?:E(?:P(?:ISODE)?)?\s*)?|\sE(?:P(?:ISODE)?)?\s*)(\d{1,4})(?:\s*v\d+)?(?:\s+END)?\s*$");
-            // A dotted acronym ending in E immediately before a film year is not an episode token.
-            var acronymYear = Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path), @"(?i)(?:[a-z]\.){2,}E[. _-]*(?:19|20)\d{2}\b");
-            if (numbered.Success && !acronymYear)
-            {
-                series = episodeName[..numbered.Index].Trim(' ', '-'); season = 1; number = int.Parse(numbered.Groups[1].Value);
-                if (kind == "Mixed" && Regex.IsMatch(System.IO.Path.GetFileName(path), @"^\[[^\]]+\]")) kind = "Anime";
-            }
-            else
-            {
-                var single = Regex.Match(episodeName, @"(?i)\b(\d{1,4})\s*(?:серия|эпизод)\b");
-                var prefix = Regex.Match(episodeName, @"^\s*(\d{2,4})\s+\S");
-                var suffix = Regex.Match(episodeName, @"\s+(\d{2,4})\s*$");
-                if (single.Success) { series = episodeName[..single.Index].Trim(' ', '-'); season = 1; number = int.Parse(single.Groups[1].Value); }
-                else if (seriesContext && prefix.Success && int.Parse(prefix.Groups[1].Value) < 1900)
-                { series = System.IO.Path.GetFileName(dir); season = 1; number = int.Parse(prefix.Groups[1].Value); }
-                else if (seriesContext && suffix.Success && int.Parse(suffix.Groups[1].Value) < 1900)
-                { series = episodeName[..suffix.Index].Trim(); season = 1; number = int.Parse(suffix.Groups[1].Value); }
-            }
-        }
-        var filenameSeason = episode.Success || localized.Success ? season : null;
+            .Any(part => Regex.IsMatch(part, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы)$")) || File.Exists(System.IO.Path.Combine(dir, "tvshow.nfo"));
         var seasonFolderName = System.IO.Path.GetFileName(dir);
         var seasonFolder = Regex.Match(Regex.Replace(seasonFolderName, @"[._]+", " "), @"(?i)(?:^|\s)(?:Season\s*|S)(\d{1,2})(?!\d|E\d)\b|^(\d+)\s*(?:сезон|sezon)\b|^Specials$");
+        var folderSeason = seasonFolder.Success ? seasonFolder.Groups[1].Success ? int.Parse(seasonFolder.Groups[1].Value) : seasonFolder.Groups[2].Success ? int.Parse(seasonFolder.Groups[2].Value) : 0 : (int?)null;
+        var name = FilenameEpisodes.Clean(path, seriesContext || seasonFolder.Success);
+        var episodeName = name;
+        var numbering = FilenameEpisodes.Read(path, seriesContext || seasonFolder.Success, folderSeason, name);
+        var season = numbering?.Season; var number = numbering?.Episode;
+        string? series = numbering?.Series;
+        if (numbering is not null && !numbering.ExplicitSeason && number is not null && kind == "Mixed" && Regex.IsMatch(System.IO.Path.GetFileName(path), @"^\[[^\]]+\]")) kind = "Anime";
+        var filenameSeason = numbering?.ExplicitSeason == true ? season : null;
         if (seasonFolder.Success)
         {
             season = filenameSeason ?? (seasonFolder.Groups[1].Success ? int.Parse(seasonFolder.Groups[1].Value) : seasonFolder.Groups[2].Success ? int.Parse(seasonFolder.Groups[2].Value) : 0);
             if (string.IsNullOrWhiteSpace(series) || series == seasonFolderName)
                 series = seasonFolder.Index > 0 ? seasonFolderName[..seasonFolder.Index].Trim() : System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(dir)!);
         }
-        if (number is not null && string.IsNullOrWhiteSpace(series)) series = System.IO.Path.GetFileName(dir);
+        if (numbering is not null && string.IsNullOrWhiteSpace(series)) series = System.IO.Path.GetFileName(dir);
         // Dates in an episode title are not the premiere year of the entire series.
         var years = Regex.Matches(series ?? episodeName, @"\b(19\d{2}|20\d{2})\b");
         var year = series is null && years.Count > 1 ? years[^1] : years.Count > 0 ? years[0] : Match.Empty;
@@ -580,10 +552,11 @@ public static partial class FileNames
         var seasonPoster = series is null ? null : Artwork(dir, "poster", "folder", "cover") ?? Artwork(seriesDir, $"season{season ?? 1:00}-poster", $"season{season ?? 1}-poster");
         var result = new MediaItem(id, path, title, kind == "Mixed" ? (series is null ? "Movie" : "Show") : kind,
             year.Success ? int.Parse(year.Value) : null, series, season, number, localPoster ?? seriesPoster,
-            SeriesPoster: seriesPoster, SeasonPoster: seasonPoster);
+            SeriesPoster: seriesPoster, SeasonPoster: seasonPoster, EpisodeTitle: numbering?.Subtitle, AirDate: numbering?.AirDate,
+            EpisodeEnd: numbering?.End, NumberingConflict: numbering?.Conflict);
         // Structured show folders own membership, regardless of aliases in individual filenames.
         var parentName = System.IO.Path.GetFileName(seriesDir);
-        var structured = File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) || number is not null && (seasonFolder.Success || seriesContext || seriesDir != dir) &&
+        var structured = File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) || numbering is not null && (seasonFolder.Success || seriesContext || seriesDir != dir) &&
             (libraryRoot is null || !string.Equals(System.IO.Path.GetFullPath(libraryRoot), seriesDir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) &&
             !Regex.IsMatch(parentName, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы)$");
         if (structured)
@@ -596,25 +569,21 @@ public static partial class FileNames
                 Year = folderYear.Success ? int.Parse(folderYear.Groups[1].Value) : result.Year,
                 ShowId = "show-" + LibraryIdentity.Hash(OperatingSystem.IsWindows() ? seriesDir.ToUpperInvariant() : seriesDir) };
         }
-        var range = Regex.Match(episodeName, @"(?i)\bS\d{1,2}\s*E(\d{1,3})(?:\s*[-]?\s*E|\s*-\s*)(\d{1,3})\b");
-        if (range.Success && int.TryParse(range.Groups[2].Value, out var end) && end >= number && end - number < 100) result = result with { EpisodeEnd = end };
-        var folderSeason = seasonFolder.Success ? seasonFolder.Groups[1].Success ? int.Parse(seasonFolder.Groups[1].Value) : seasonFolder.Groups[2].Success ? int.Parse(seasonFolder.Groups[2].Value) : 0 : (int?)null;
-        if (filenameSeason is not null && folderSeason is not null && filenameSeason != folderSeason && episode.Success)
+        if (filenameSeason is not null && folderSeason is not null && filenameSeason != folderSeason)
             result = result with { NumberingConflict = $"Filename season {filenameSeason} differs from folder season {folderSeason}; using filename." };
         var absoluteFolder = Regex.IsMatch(seasonFolderName, @"(?i)\bEP\s*\d{3,4}\b");
-        if (number is not null && !episode.Success && !localized.Success && result.Kind == "Anime" && (!seasonFolder.Success || absoluteFolder))
-            result = result with { AbsoluteEpisode = number, NumberingOrder = "absolute" };
-        var absoluteRange = Regex.Match(episodeName, @"(?i)^(.*?)\s+-\s+(\d{1,4})\s*-\s*(\d{1,4})\s*$");
-        if (absoluteRange.Success && int.TryParse(absoluteRange.Groups[2].Value, out var start) && int.TryParse(absoluteRange.Groups[3].Value, out var finish) && start < 1900 && finish >= start && finish - start < 100)
-            result = result with { Series = result.Series ?? absoluteRange.Groups[1].Value.Trim(), Title = result.Series ?? absoluteRange.Groups[1].Value.Trim(),
-                Kind = kind == "Mixed" ? Regex.IsMatch(System.IO.Path.GetFileName(path), @"^\[[^\]]+\]") ? "Anime" : "Show" : kind, Season = result.Season ?? 1, Episode = start, EpisodeEnd = finish, AbsoluteEpisode = start, AbsoluteEpisodeEnd = finish, NumberingOrder = "absolute" };
+        if (number is not null && filenameSeason is null && result.Kind == "Anime" && (!seasonFolder.Success || absoluteFolder))
+            result = result with { AbsoluteEpisode = number, AbsoluteEpisodeEnd = numbering?.End, NumberingOrder = "absolute" };
+        // Unlabelled ranges retain absolute ordering unless a season folder confirms relative numbering.
+        if (numbering?.End is not null && filenameSeason is null && (!seasonFolder.Success || absoluteFolder))
+            result = result with { AbsoluteEpisode = number, AbsoluteEpisodeEnd = numbering.End, NumberingOrder = "absolute" };
         if (sourcePart is not null && filenameSeason is null && result.Episode is not null)
             result = result with { SourcePart = sourcePart, SourcePartEpisode = result.Episode, SourcePartEpisodeEnd = result.EpisodeEnd,
                 Season = sourcePart > 1 ? null : result.Season, Episode = sourcePart > 1 ? null : result.Episode,
                 EpisodeEnd = sourcePart > 1 ? null : result.EpisodeEnd, NumberingOrder = "absolute",
                 AbsoluteEpisode = sourcePart > 1 ? null : result.AbsoluteEpisode };
         return LocalMetadata.Apply(LibraryIdentity.Ensure(result with { SourceLibraryKind = sourceKind, IsExtra = IsExtra(path),
-            NumberingSource = sourcePart is not null ? "part" : filenameSeason is not null ? "filename" :
+            NumberingSource = sourcePart is not null ? "part" : numbering?.AirDate is not null ? "date" : filenameSeason is not null ? "filename" :
                 seasonFolder.Success && number is not null && !absoluteFolder ? "season-folder" : result.AbsoluteEpisode is not null ? "absolute" : null }));
     }
     private static bool IsReleaseDirectory(string directory) => Regex.IsMatch(

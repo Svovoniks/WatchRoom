@@ -6,6 +6,14 @@ using Watchroom.Core;
 using LibVLCSharp.Shared;
 using System.Diagnostics;
 
+if (args.FirstOrDefault() == "--filename-schemas")
+{
+    var checks = 0;
+    await FilenameSchemaFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/filename-schemas-" + Guid.NewGuid().ToString("N")), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} filename schema checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--track-languages")
 {
     TrackLanguageFixture.Run((condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); }); return;
@@ -250,6 +258,7 @@ await MetadataPipelineFixture.Run(Path.Combine(root, "metadata-pipeline"), Check
 await MetadataRecoveryFixture.Run(Path.Combine(root, "metadata-recovery"), Check);
 await MetadataCacheFixture.Run(Path.Combine(root, "metadata-cache"), Check);
 await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
+await FilenameSchemaFixture.Run(Path.Combine(root, "filename-schemas"), Check);
 await GroupingAuditFixture.Run(Path.Combine(root, "grouping-audit"), Check);
 HostRoomFixture.Run(Check);
 RoomTrackFixture.Run(Check);

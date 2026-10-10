@@ -24,18 +24,18 @@ public static class MetadataTitles
         !Regex.IsMatch(Path.GetFileNameWithoutExtension(item.Path), @"(?i)\bS\d{1,2}[ ._-]*E\d{1,3}\b|\b\d{1,2}x\d{1,3}\b");
     // Read only the filename: using FileNames.Parse here would apply folder/NFO
     // titles again and erase the independent alias we are trying to recover.
-    internal static string? FilenameAlias(string path)
+    internal static string? FilenameAlias(string path, bool seriesContext = false)
     {
-        var name = Regex.Replace(Path.GetFileNameWithoutExtension(path), @"\[[^\]]*\]", " ");
-        name = Regex.Replace(name, @"[._]+", " ").Trim();
-        name = Regex.Split(name, @"(?i)\b(?:BDRip|BRRip|DVDRip|HDTVRip|2160p|1080p|720p|480p|\d{3,4}x\d{3,4}p?|WEB[ -]DL|WEBRip|BluRay|x264|x265|HEVC)\b")[0].TrimEnd(' ', '(');
-        var numbering = Regex.Match(name, @"(?i)\bS\d{1,2}[ -]*E\d{1,3}(?:v\d+)?\b|\b\d{1,2}x\d{1,3}(?:v\d+)?\b|\b\d{1,2}\s*сезон\s*\d{1,4}\s*сери(?:я|и|й)\b");
-        if (!numbering.Success)
-            numbering = Regex.Match(name, @"(?i)(?:(?:^|\s)-\s(?:E(?:P(?:ISODE)?)?\s*)?|\sE(?:P(?:ISODE)?)?\s*)(\d{1,4})(?:\s*-\s*\d{1,4})?(?:\s*v\d+)?(?:\s+END)?\s*$|\b(\d{1,4})\s*(?:серия|эпизод)\b|\s+(\d{2,4})\s*$");
-        if (!numbering.Success || numbering.Groups.Cast<Group>().Skip(1).Any(g => g.Success && int.TryParse(g.Value, out var number) && number >= 1900)) return null;
-        var title = name[..numbering.Index].Trim(' ', '-');
-        // A numeric prefix with an episode subtitle is not a series alias.
-        if (Regex.IsMatch(title, @"^\d{2,4}\s+[-–]\s+")) return null;
+        var parsed = FilenameEpisodes.Read(path, seriesContext: true);
+        var seriesFolder = seriesContext || path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Any(part => Regex.IsMatch(part, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы|Season\s*\d+|S\d+)$"));
+        if (parsed?.AirDate is not null && !seriesFolder) return null;
+        // A one-digit unlabelled sequel with a subtitle needs actual TV folder
+        // context; alias extraction alone must not turn it into a show query.
+        if (parsed?.Episode is < 10 && parsed.Subtitle is not null && FilenameEpisodes.Read(path, seriesContext: false) is null &&
+            !seriesFolder) return null;
+        var title = parsed?.Series;
+        if (string.IsNullOrWhiteSpace(title)) return null;
         title = Regex.Replace(title, @"\s+\(?(?:19|20)\d{2}\)?\s*$", "").Trim();
         return title.Length >= 3 ? title : null;
     }
@@ -57,7 +57,7 @@ public static class MetadataTitles
         if (item.Series is not null)
         {
             foreach (var alias in new[] { item }.Concat(entries ?? []).Where(x => !x.IsVirtual && !x.IsExtra && LibraryIdentity.SameShow(item, x))
-                .Select(x => FilenameAlias(x.Path)).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Take(4)) Add(alias);
+                .Select(x => FilenameAlias(x.Path, seriesContext: true)).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Take(4)) Add(alias);
         }
         if (item.Series is null)
         {

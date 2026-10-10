@@ -12,6 +12,21 @@ Seasons use the show identity and season number. Unknown seasons have their own 
 
 Numbering provenance distinguishes explicit filename numbering, season-relative folders, absolute anime numbering, and restarted parts. Season-relative numbers do not map through an absolute provider list. Unresolved/conflicting identities are not collapsed into versions. An anime/TV root or franchise folder alone does not create a show for an unnumbered film. Movie-root evidence prevents an automatic TV-only provider from claiming a standalone movie; explicit numbered episodes and manual matches retain precedence.
 
+Filename scanning and metadata search aliases share the same episode extraction rules. Dots, underscores, ordinary/Unicode dashes, release versions and technical tags are accepted. Episode subtitles stay separate from show titles, so `Azumanga Daioh - 01 - Miss Yukari [KM-Dual-DVDRIP]` searches for **Azumanga Daioh** and retains **Miss Yukari** as its episode title.
+
+| Filename example | Interpretation |
+| --- | --- |
+| `Show S02E03`, `Show S02-E03`, `Show S02.E03`, `Show 2x03` | Season 2, episode 3 |
+| `Show Season 2 Episode 3`, `Show Сезон 2 Серия 3` | Explicit season and episode; French, Spanish, German and Italian labels are also accepted |
+| `Show EP03`, `Show E03v2`, `Show - 03 - Pilot` | Episode 3, with an optional subtitle |
+| `Show [03] Pilot`, `Show (03) Pilot`, `Show 03 Pilot`, `Show-03-Pilot` | Episode 3 in a TV/anime context |
+| `03 - Pilot`, `003 Pilot`, `E03`, `S02E03` | Show identity comes from the containing show/season folder |
+| `Show S01E02-E04`, `Show S01E02E03`, `Show 1x02-1x04`, `Show EP02-EP04` | Contiguous multi-episode ranges |
+| `Show 203` or `Show 0203` inside `Season 02` | Season 2, episode 3; without a confirming season folder this stays absolute numbering |
+| `Show 2021.01.01`, `Show 2021-01-01`, `Show 01.01.2021` | TV-folder air date; provider numbering is applied only when exactly one episode has that date |
+
+Bare movie years, resolution/audio numbers and one-digit movie sequels with subtitles are not enough to infer TV identity. Non-contiguous lists such as `S01E02E04` and cross-season files retain a correction warning instead of inventing included episodes. Rescanning reparses previously unrecognized entries without renaming files or changing queue IDs; NFO metadata, manual matches and locked fields retain precedence.
+
 The grouping audit repair runs once on startup. It repairs automatic season collisions, acronym/year episode mistakes, film hierarchies, and TV matches conflicting with movie-root evidence. SQLite creates `library-before-grouping-repair-v1.db` before these repairs, and `grouping-repair-v1.json` records changed identities. Manual matches and identity/numbering locks are retained. Previously indexed excluded extras remain stored with their IDs and disk availability, but are hidden from the main catalog and remote metadata fetching; numbered S00 specials remain visible.
 
 Season packs (`Show.S02.1080p`) and individual episode release folders (`Show.S02E03.1080p`) belong to their enclosing show folder. Loose releases can join one unambiguous existing show through matching provider IDs or title/year; conflicting IDs or multiple candidate show folders prevent that attachment. Existing split release-folder identities repair automatically on startup while preserving file IDs and metadata.
@@ -66,7 +81,7 @@ NFO fields take precedence over remote fields, including during explicit refresh
 
 ## Verification
 
-`dotnet run --project tests/Watchroom.Smoke -- --metadata-pipeline` runs isolated metadata, migration, identity, provider, refresh, numbering, and placeholder checks without live provider credentials. The regular smoke suite also runs these checks. `tests/Watchroom.DesktopChecks` verifies incremental library updates and dispatcher responsiveness. Native macOS UI behavior requires testing on a Mac; the Mac client can be compiled on Windows.
+`dotnet run --project tests/Watchroom.Smoke -- --filename-schemas` verifies filename formats, movie safeguards, rescan repair and date/range mapping against fixture providers. `--metadata-pipeline` runs isolated metadata, migration, identity, provider, refresh, numbering, and placeholder checks without live provider credentials. The regular smoke suite also runs these checks. `tests/Watchroom.DesktopChecks` verifies incremental library updates and dispatcher responsiveness. Native macOS UI behavior requires testing on a Mac; the Mac client can be compiled on Windows.
 
 `dotnet run --project tests/Watchroom.Smoke -- --metadata-discovery` runs the labeled alias/typo corpus and response-cache/pacing checks in isolation. It writes a synthetic accuracy report under `artifacts/metadata-discovery`; these results do not estimate accuracy on a personal library.
 
