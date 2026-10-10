@@ -67,7 +67,7 @@ static class PreferenceNavigationChecks
             Control<TextBlock>("DisplayNameError").Text.Length > 0 && store.Setting("name") == "Saved on navigation",
             "failed validation stays in settings and identifies the invalid field");
         Call("LoadPreferences");
-        Control<TextBox>("PreferredAudioLanguages").Text = "English";
+        Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text = "English";
         Answer("Save changes", () => ClickSection("Metadata"));
         check(store.Setting("audioLanguages") == "en" && Control<FrameworkElement>("MetadataPreferences").Visibility == Visibility.Visible,
             "saving on a settings section switch applies drafts before changing section");
@@ -76,7 +76,7 @@ static class PreferenceNavigationChecks
         check(Control<PasswordBox>("MetadataToken").Password == "" && MetadataCredential.Load(App.DataDirectory) == "" &&
             Control<FrameworkElement>("PlaybackPreferences").Visibility == Visibility.Visible,
             "credential-only drafts prompt and discard without writing the vault");
-        name.Text = originalName; Control<TextBox>("PreferredAudioLanguages").Text = "";
+        name.Text = originalName; Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text = "";
         check((bool)Call("TrySavePreferences")!, "navigation fixtures restore the original settings");
         Call("ShowPage", "Queues");
         check((string)Field("currentPage") == "Queues", "saved settings allow navigation without a prompt");

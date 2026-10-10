@@ -33,6 +33,20 @@ static class UiFindingsChecks
         var root = (FrameworkElement)window.Content;
         void Layout(int width = 900, int height = 600)
         { root.Measure(new Size(width, height)); root.Arrange(new Rect(0, 0, width, height)); root.UpdateLayout(); }
+        IEnumerable<T> Descendants<T>(DependencyObject parent) where T : DependencyObject
+        {
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T matching) yield return matching;
+                foreach (var nested in Descendants<T>(child)) yield return nested;
+            }
+        }
+        void AddLanguage(LanguagePriorityPicker priority, string code)
+        {
+            ((ComboBox)priority.FindName("LanguageOptions")).SelectedValue = code;
+            ((Button)priority.FindName("AddLanguageButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        }
         void Capture(string name)
         {
             var bitmap = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(root);
@@ -114,16 +128,45 @@ static class UiFindingsChecks
             Check(Control<Button>("SavePreferencesButton").IsEnabled && MetadataCredential.Load(App.DataDirectory) == "", "key edits enable Save without writing the credential vault");
             Call("CancelPreferences", window, new RoutedEventArgs());
             Check(Control<PasswordBox>("MetadataToken").Password == "" && !Control<Button>("SavePreferencesButton").IsEnabled, "Cancel discards an unsaved key and clears dirty state");
+            Call("ShowPreferenceSection", "Playback"); Layout();
+            var audioPriority = Control<LanguagePriorityPicker>("PreferredAudioLanguages");
+            var subtitlePriority = Control<LanguagePriorityPicker>("PreferredSubtitleLanguages");
+            var audioOptions = (ComboBox)audioPriority.FindName("LanguageOptions");
+            Check(!audioOptions.IsEditable && new[] { "en", "ru", "ja" }.All(code => audioOptions.Items.Cast<LanguagePriorityPicker.LanguageOption>().Any(option => option.Code == code)) &&
+                !audioOptions.Items.Cast<LanguagePriorityPicker.LanguageOption>().Any(option => option.Code == "off"), "audio priority offers named language choices without an audio Off option");
+            AddLanguage(audioPriority, "ru"); AddLanguage(audioPriority, "en"); Layout();
+            Check(audioPriority.Text == "ru, en" && !audioOptions.Items.Cast<LanguagePriorityPicker.LanguageOption>().Any(option => option.Code == "ru"),
+                "adding languages preserves priority and excludes duplicate choices");
+            var audioRows = (ItemsControl)audioPriority.FindName("Priorities");
+            Descendants<Button>(audioPriority).First(button => Equals(button.Tag, "Down") && ReferenceEquals(button.DataContext, audioRows.Items[0]))
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
+            Check(audioPriority.Text == "en, ru", "priority arrows change the language order");
+            Descendants<Button>(audioPriority).First(button => Equals(button.Content, "×") && ReferenceEquals(button.DataContext, audioRows.Items[0]))
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Check(audioPriority.Text == "ru" && Control<Button>("SavePreferencesButton").IsEnabled && store.Setting("audioLanguages") is null,
+                "removing a language updates only the settings draft");
+            AddLanguage(subtitlePriority, "off");
+            Check(subtitlePriority.Text == "off", "subtitle priority offers an explicit Off choice");
+            Call("CancelPreferences", window, new RoutedEventArgs());
+            Call("AddSubtitleRule", window, new RoutedEventArgs()); Layout();
+            var ruleControls = Control<ItemsControl>("SubtitleLanguageRules");
+            Descendants<ComboBox>(ruleControls).First(picker => System.Windows.Automation.AutomationProperties.GetName(picker) == "Audio language for subtitle rule").SelectedValue = "ja";
+            var rulePriority = Descendants<LanguagePriorityPicker>(ruleControls).Single();
+            AddLanguage(rulePriority, "en"); AddLanguage(rulePriority, "off");
+            Check((string)subtitleRules[0]!.GetType().GetProperty("AudioLanguage")!.GetValue(subtitleRules[0])! == "ja" &&
+                (string)subtitleRules[0]!.GetType().GetProperty("SubtitleLanguages")!.GetValue(subtitleRules[0])! == "en, off",
+                "audio-specific subtitle rules can be configured entirely with language pickers");
+            Call("CancelPreferences", window, new RoutedEventArgs());
             AddRule("Japanese", "Russian, English, off");
             Check(Control<Button>("SavePreferencesButton").IsEnabled && store.Setting("subtitleLanguageRules") is null, "audio-specific subtitle drafts enable Save without writing settings");
             Call("CancelPreferences", window, new RoutedEventArgs());
             Check(subtitleRules.Count == 0 && !Control<Button>("SavePreferencesButton").IsEnabled, "Cancel discards added subtitle rules");
-            Control<TextBox>("PreferredAudioLanguages").Text = "Russian, English";
-            Control<TextBox>("PreferredSubtitleLanguages").Text = "English, off";
+            Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text = "Russian, English";
+            Control<LanguagePriorityPicker>("PreferredSubtitleLanguages").Text = "English, off";
             Check(Control<Button>("SavePreferencesButton").IsEnabled && ((string[])Field("audioLanguages")).Length == 0,
                 "track language drafts enable Save without changing active preferences");
             Call("CancelPreferences", window, new RoutedEventArgs());
-            Check(Control<TextBox>("PreferredAudioLanguages").Text == "" && Control<TextBox>("PreferredSubtitleLanguages").Text == "",
+            Check(Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text == "" && Control<LanguagePriorityPicker>("PreferredSubtitleLanguages").Text == "",
                 "Cancel restores both track language preferences");
             Control<TextBox>("DisplayNameBox").Text = " ";
             Check((bool)Call("TrySavePreferences")! == false && Control<TextBlock>("DisplayNameError").Text.Length > 0, "empty name gets field-specific validation");
@@ -139,12 +182,12 @@ static class UiFindingsChecks
             Control<TextBox>("MetadataRefreshDays").Text = "365";
             Call("ChangeRefreshDays", Control<Button>("RefreshMore"), new RoutedEventArgs());
             Check(Control<TextBox>("MetadataRefreshDays").Text == "365", "refresh stepper clamps to the upper limit");
-            Control<TextBox>("PreferredAudioLanguages").Text = "Not a language";
+            Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text = "Not a language";
             Check(!(bool)Call("TrySavePreferences")! && Control<TextBlock>("TrackPreferencesError").Text.Length > 0 &&
                 Control<FrameworkElement>("PlaybackPreferences").Visibility == Visibility.Visible && store.Setting("name") != "Saved name",
                 "invalid track preferences identify Playback and do not partially save settings");
-            Control<TextBox>("PreferredAudioLanguages").Text = "Russian, English";
-            Control<TextBox>("PreferredSubtitleLanguages").Text = "English, off";
+            Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text = "Russian, English";
+            Control<LanguagePriorityPicker>("PreferredSubtitleLanguages").Text = "English, off";
             AddRule("Japanese", "Russian, English, off"); AddRule("ja-JP", "off");
             Check(!(bool)Call("TrySavePreferences")! && Control<TextBlock>("TrackPreferencesError").Text.Contains("already") && store.Setting("subtitleLanguageRules") is null,
                 "duplicate audio rules reject the whole draft with an actionable error");
@@ -178,7 +221,7 @@ static class UiFindingsChecks
             Check(options.ProviderOrder.Length == 0 && options.RefreshDays == 0 && options.Language == "fr-FR" && options.Country == "FR", "local-only providers, Never and locale selections round-trip");
             Call("CancelPreferences", window, new RoutedEventArgs());
             Check(Control<CheckBox>("NeverRefresh").IsChecked == true && !Control<TextBox>("MetadataRefreshDays").IsEnabled, "Never restores with its numeric field disabled");
-            Check(Control<TextBox>("PreferredAudioLanguages").Text == "ru, en" && !Control<Button>("SavePreferencesButton").IsEnabled,
+            Check(Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text == "ru, en" && !Control<Button>("SavePreferencesButton").IsEnabled,
                 "saved track preferences reload without leaving a dirty draft");
             Check(subtitleRules.Count == 2 && (string)subtitleRules[0]!.GetType().GetProperty("AudioLanguage")!.GetValue(subtitleRules[0])! == "ja",
                 "saved subtitle rules reload with normalized audio languages");
@@ -201,7 +244,7 @@ static class UiFindingsChecks
                 var bounds = save.TransformToAncestor(root).TransformBounds(new Rect(new Point(), save.RenderSize));
                 Check(bounds.Bottom <= root.ActualHeight && bounds.Left >= 0 && bounds.Right <= root.ActualWidth && save.ActualHeight >= 40,
                     $"Save stays visible in {section} at {size}");
-                if (section == "Playback") Capture("playback-" + size.Item1);
+                if (section == "Playback") { Control<ScrollViewer>("PlaybackPreferences").ScrollToHome(); Layout(size.Item1, size.Item2); Capture("playback-" + size.Item1); }
                 if (section == "Metadata")
                 {
                     Control<ScrollViewer>("MetadataPreferences").ScrollToEnd(); Layout(size.Item1, size.Item2);

@@ -29,11 +29,13 @@ static class QueuePlaybackChecks
         await WaitFor(() => Field<MediaPlayer?>("player") is not null);
         // Earlier UI fixtures create files inside the watched test profile. A
         // delayed rescan would remove the synthetic IDs injected below. Drain
-        // those notifications and finish any scan before checking queue actions.
+        // those notifications and cancel any fixture scan before checking queue
+        // actions; these checks inject their own library entries below.
         var watched = Field<List<FileSystemWatcher>>("watchers").Where(w => w.EnableRaisingEvents).ToArray();
         foreach (var watcher in watched) watcher.EnableRaisingEvents = false;
         await Dispatcher.Yield(DispatcherPriority.Background);
         Field<DispatcherTimer>("scanDelay").Stop();
+        Call("CancelScan", window, new RoutedEventArgs());
         await WaitFor(() => !Field<bool>("scanning"));
         // Keep synthetic queue IDs out of the watched library: discovering these
         // files during the fixture replaces them with scanner-generated IDs.

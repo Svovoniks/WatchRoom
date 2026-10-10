@@ -14,6 +14,14 @@ if (args.FirstOrDefault() == "--filename-schemas")
     Console.WriteLine($"{checks} filename schema checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--metadata-diagnostics")
+{
+    var checks = 0;
+    await MetadataDiagnosticsFixture.Run(Path.GetFullPath("artifacts/metadata-diagnostics-" + Guid.NewGuid().ToString("N")), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} metadata diagnostic checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--track-languages")
 {
     TrackLanguageFixture.Run((condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); }); return;
@@ -246,6 +254,7 @@ Directory.CreateDirectory(root);
 PlaybackDiagnostics.Initialize(Path.Combine(root, "session-logs"));
 int passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
+await MetadataDiagnosticsFixture.Run(Path.Combine(root, "metadata-diagnostics"), Check);
 TrackLanguageFixture.Run(Check);
 EpisodePlaybackFixture.Run(Check);
 RoomLibraryChecks.Run(Check);

@@ -25,8 +25,8 @@ static class TrackPreferenceChecks
             while (!condition() && DateTime.UtcNow < until) Thread.Sleep(25);
             if (!condition()) throw new Exception("Native track selection timed out");
         }
-        var audioInput = (TextBox)window.FindName("PreferredAudioLanguages");
-        var subtitlesInput = (TextBox)window.FindName("PreferredSubtitleLanguages");
+        var audioInput = (LanguagePriorityPicker)window.FindName("PreferredAudioLanguages");
+        var subtitlesInput = (LanguagePriorityPicker)window.FindName("PreferredSubtitleLanguages");
         var rules = (IList)typeof(MainWindow).GetField("subtitleRuleDrafts", flags)!.GetValue(window)!;
         void AddRule(string audio, string subtitles)
         {

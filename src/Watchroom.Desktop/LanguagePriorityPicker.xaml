@@ -1,0 +1,31 @@
+<UserControl x:Class="Watchroom.Desktop.LanguagePriorityPicker"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <StackPanel>
+  <TextBlock Text="Video defaults" Foreground="{DynamicResource Muted}" Margin="0,8,0,10">
+   <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Items.Count, ElementName=Priorities}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+  </TextBlock>
+  <ItemsControl x:Name="Priorities"><ItemsControl.ItemTemplate><DataTemplate>
+   <Grid Margin="0,0,0,6">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <TextBlock Text="{Binding Rank}" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
+    <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip="{Binding Name}" Margin="0,0,4,0"/>
+    <StackPanel Grid.Column="2" Orientation="Horizontal">
+     <Button Content="↑" Tag="Up" Click="MoveLanguage" IsEnabled="{Binding CanMoveUp}" ToolTip="Move language up" AutomationProperties.Name="Move language up" Padding="7,3" Margin="0,0,3,0"/>
+     <Button Content="↓" Tag="Down" Click="MoveLanguage" IsEnabled="{Binding CanMoveDown}" ToolTip="Move language down" AutomationProperties.Name="Move language down" Padding="7,3" Margin="0,0,3,0"/>
+     <Button Content="×" Click="RemoveLanguage" ToolTip="Remove language" AutomationProperties.Name="Remove language" Padding="7,3" Margin="0"/>
+    </StackPanel>
+   </Grid>
+  </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+  <Grid Margin="0,0,0,12">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <ComboBox x:Name="LanguageOptions" DisplayMemberPath="Name" SelectedValuePath="Code" IsTextSearchEnabled="True" TextSearch.TextPath="Name" MaxDropDownHeight="280" AutomationProperties.Name="Language to add to priority" Margin="0,0,6,0"/>
+   <TextBlock Text="Choose a language…" Margin="12,0,24,0" VerticalAlignment="Center" Foreground="{DynamicResource Muted}" IsHitTestVisible="False">
+    <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding SelectedItem, ElementName=LanguageOptions}" Value="{x:Null}"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+   </TextBlock>
+   <Button x:Name="AddLanguageButton" Grid.Column="1" Content="Add" Click="AddLanguage" AutomationProperties.Name="Add language to priority" Padding="12,6" Margin="0">
+    <Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Style.Triggers><DataTrigger Binding="{Binding SelectedItem, ElementName=LanguageOptions}" Value="{x:Null}"><Setter Property="IsEnabled" Value="False"/></DataTrigger></Style.Triggers></Style></Button.Style>
+   </Button>
+  </Grid>
+ </StackPanel>
+</UserControl>

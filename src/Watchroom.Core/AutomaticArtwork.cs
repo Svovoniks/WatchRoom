@@ -19,8 +19,10 @@ public static class AutomaticArtwork
         using var requests = MetadataHttp.BeginScope(library, force || refresh is not null, options);
         using var ownedTmdb = metadata is null && !string.IsNullOrWhiteSpace(token) ? new MetadataClient(token, options: options) : null;
         var tmdb = metadata ?? ownedTmdb;
+        PlaybackDiagnostics.Record("metadata-fetch-start", new { Mode = mode.ToString(), Providers = options.ProviderOrder, TmdbAvailable = tmdb is not null });
         foreach (var entry in library.All().Where(x => x.Available && !x.IsVirtual && !x.IsExtra))
         {
+            using var context = MetadataDiagnostics.BeginItem("nfo-artwork", entry);
             var local = LocalMetadata.Apply(entry);
             try
             {
@@ -29,7 +31,7 @@ public static class AutomaticArtwork
                 if (!File.Exists(local.EpisodePoster) && local.LocalEpisodePosterUrl is { } episodeImage) local = local with { EpisodePoster = await Download(http, episodeImage, directory, ct) };
             }
             catch (Exception ex) when (ex is IOException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
-            { progress?.Report("NFO artwork unavailable · " + entry.DisplayTitle); }
+            { MetadataDiagnostics.Failure("nfo-artwork", entry.DisplayTitle, null, ex); progress?.Report("NFO artwork unavailable · " + entry.DisplayTitle); }
             if (Wire.Serialize(local) != Wire.Serialize(entry)) library.Save(local);
         }
         var snapshot = library.All();
@@ -79,6 +81,8 @@ public static class AutomaticArtwork
             if (!needsOverview && !needsPoster && !needsClassification) continue;
             if (!force && refresh is null && MetadataFetchPolicy.Deferred(library, "title", entries, options, token)) continue;
             var item = entries[0]; progress?.Report("Finding metadata · " + item.DisplayTitle);
+            using var context = MetadataDiagnostics.BeginItem("title", item);
+            MetadataDiagnostics.Record("metadata-title-start", new { Queries = MetadataTitles.Queries(item).ToArray(), needsOverview, needsPoster, needsClassification });
             var attemptFailed = false; var attemptUnmatched = false;
             try
             {
@@ -143,8 +147,9 @@ public static class AutomaticArtwork
                 if (needsPoster && poster is null || needsOverview && string.IsNullOrWhiteSpace(overview))
                 {
                     missing++;
-                    issues.Add(new { Title = item.DisplayTitle, Code = resolved is null ? "no-confident-match" : "provider-missing-fields",
-                        PosterMissing = needsPoster && poster is null, OverviewMissing = needsOverview && string.IsNullOrWhiteSpace(overview) });
+                    var issue = new { Title = item.DisplayTitle, Code = resolved is null ? "no-confident-match" : "provider-missing-fields",
+                        PosterMissing = needsPoster && poster is null, OverviewMissing = needsOverview && string.IsNullOrWhiteSpace(overview) };
+                    issues.Add(issue); MetadataDiagnostics.Record("metadata-title-incomplete", issue);
                 }
                 if (resolved is not null) foreach (var entry in library.ByIds(entries.Select(x => x.Id)))
                 {
@@ -153,7 +158,12 @@ public static class AutomaticArtwork
                 }
             }
             catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or XmlException or InvalidOperationException or KeyNotFoundException or TaskCanceledException && !ct.IsCancellationRequested)
-            { attemptFailed = true; failed++; error = FailureReason(ex); issues.Add(new { Title = item.DisplayTitle, Code = "provider-failure", Detail = error }); progress?.Report("Metadata unavailable · " + item.DisplayTitle + " · " + error); }
+            {
+                attemptFailed = true; failed++; error = FailureReason(ex);
+                issues.Add(new { Title = item.DisplayTitle, Code = "provider-failure", Detail = error, Error = MetadataDiagnostics.Error(ex) });
+                MetadataDiagnostics.Failure("title", item.DisplayTitle, null, ex);
+                progress?.Report("Metadata unavailable · " + item.DisplayTitle + " · " + error);
+            }
             MetadataFetchPolicy.Record(library, "title", library.ByIds(ids), options, token, attemptFailed, attemptUnmatched);
         }
         library.GroupShowsByProvider();
@@ -162,6 +172,7 @@ public static class AutomaticArtwork
         Directory.CreateDirectory(directory);
         await File.WriteAllTextAsync(Path.Combine(directory, "metadata-fetch-report.json"), Wire.Serialize(new { FetchedAt = Wire.Now,
             TmdbAvailable = tmdb is not null, Providers = options.ProviderOrder, Summary = summary, Issues = issues }), ct);
+        PlaybackDiagnostics.Record("metadata-fetch-complete", new { Summary = summary });
         return summary + (tmdb is null && options.ProviderOrder.Contains("tmdb") ? " TMDB is unavailable without a token; movie coverage is limited to Wikipedia." : "");
     }
     private static MediaItem ResetIdentity(MediaItem item) => item with
@@ -262,7 +273,7 @@ public static class AutomaticArtwork
                     if (Accept(movie)) return best;
             }
             catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or XmlException or InvalidOperationException or KeyNotFoundException or TaskCanceledException && !ct.IsCancellationRequested)
-            { failure = ex; }
+            { MetadataDiagnostics.Failure("provider-match", item.DisplayTitle, provider, ex); failure = ex; }
         }
         if (best is not null) return best;
         if (failure is not null) throw failure;

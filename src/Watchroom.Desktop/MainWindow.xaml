@@ -180,8 +180,8 @@
      </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="PlaybackPreferences" Tag="Playback" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="760" Margin="0,0,18,12" HorizontalAlignment="Stretch">
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-       <StackPanel Margin="0,0,12,0"><TextBlock Text="Audio priority"/><TextBox x:Name="PreferredAudioLanguages" AutomationProperties.Name="Preferred audio languages in priority order" ToolTip="en, ja or English, Japanese"/></StackPanel>
-       <StackPanel Grid.Column="1"><TextBlock Text="Default subtitle priority"/><TextBox x:Name="PreferredSubtitleLanguages" AutomationProperties.Name="Default subtitle languages in priority order" ToolTip="en, ja, off or English, Japanese, off"/></StackPanel>
+       <StackPanel Margin="0,0,12,0"><TextBlock Text="Audio priority"/><local:LanguagePriorityPicker x:Name="PreferredAudioLanguages" AutomationProperties.Name="Preferred audio languages in priority order"/></StackPanel>
+       <StackPanel Grid.Column="1"><TextBlock Text="Default subtitle priority"/><local:LanguagePriorityPicker x:Name="PreferredSubtitleLanguages" AllowOff="True" AutomationProperties.Name="Default subtitle languages in priority order"/></StackPanel>
       </Grid>
       <TextBlock Text="Default subtitles apply to audio languages without a rule." Style="{StaticResource MutedText}" Margin="0,0,0,12"/>
       <Grid><Grid.Style><Style TargetType="Grid"><Style.Triggers><DataTrigger Binding="{Binding Items.Count, ElementName=SubtitleLanguageRules}" Value="0"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Grid.Style>
@@ -189,13 +189,13 @@
       </Grid>
       <ItemsControl x:Name="SubtitleLanguageRules"><ItemsControl.ItemTemplate><DataTemplate>
        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="3*"/><ColumnDefinition Width="40"/></Grid.ColumnDefinitions>
-        <TextBox Text="{Binding AudioLanguage, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Audio language for subtitle rule" ToolTip="Japanese or ja" Margin="0,4,12,12"/>
-        <TextBox Grid.Column="1" Text="{Binding SubtitleLanguages, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Subtitle languages for audio language in priority order" ToolTip="English, Russian, off" Margin="0,4,12,12"/>
-        <Button Grid.Column="2" Content="×" Click="RemoveSubtitleRule" ToolTip="Remove language rule" AutomationProperties.Name="Remove subtitle language rule" Margin="0,4,0,12" Padding="8"/>
+        <ComboBox ItemsSource="{x:Static local:LanguagePriorityPicker.AudioOptions}" DisplayMemberPath="Name" SelectedValuePath="Code" SelectedValue="{Binding AudioLanguage, UpdateSourceTrigger=PropertyChanged}" IsTextSearchEnabled="True" TextSearch.TextPath="Name" AutomationProperties.Name="Audio language for subtitle rule" ToolTip="Choose the audio language for this rule" VerticalAlignment="Top" Margin="0,4,12,12"/>
+        <local:LanguagePriorityPicker Grid.Column="1" Text="{Binding SubtitleLanguages, UpdateSourceTrigger=PropertyChanged}" AllowOff="True" AutomationProperties.Name="Subtitle languages for audio language in priority order" Margin="0,4,12,0"/>
+        <Button Grid.Column="2" Content="×" Click="RemoveSubtitleRule" ToolTip="Remove language rule" AutomationProperties.Name="Remove subtitle language rule" VerticalAlignment="Top" Margin="0,4,0,12" Padding="8"/>
        </Grid>
       </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
       <Button x:Name="AddSubtitleRuleButton" Content="+ Add audio rule" Click="AddSubtitleRule" HorizontalAlignment="Left" Margin="0,0,0,12"/>
-      <TextBlock Text="List names or codes in order, separated by commas (English, Russian or en, ru). Use off to disable subtitles; leave blank for video defaults." Style="{StaticResource MutedText}"/>
+      <TextBlock Text="Choose languages and add them in priority order. Use the arrows to reorder them, or remove all choices to use video defaults." Style="{StaticResource MutedText}"/>
       <Expander Header="Language preference help" Foreground="{DynamicResource Muted}" Margin="0,8,0,12"><TextBlock Text="Rules follow the selected audio language. Add off last to disable subtitles if no language matches. Manual subtitle choices last until the next video. Saved preferences apply to the next video; guests follow the host’s tracks." Style="{StaticResource MutedText}" Margin="0,8,0,0"/></Expander>
       <TextBlock x:Name="TrackPreferencesError" Style="{StaticResource FieldError}"/>
       <TextBlock Text="FFmpeg executable (optional)"/><TextBox x:Name="FfmpegBox" AutomationProperties.Name="FFmpeg executable path" ToolTip="Used to prepare smaller copies of your videos"/>

@@ -34,7 +34,8 @@ internal sealed class MetadataResponseCache(string? directory = null, bool fresh
                         { Remember(key, entry); return entry.Body; }
                     }
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+                { MetadataDiagnostics.Record("metadata-cache-failure", new { Operation = "read", Request = MetadataDiagnostics.Request(url), Error = MetadataDiagnostics.Error(ex) }); }
             }
             var body = System.Text.Encoding.UTF8.GetString(await MetadataHttp.GetBytes(http, url, ct));
             // Parse before storing: malformed and provider-error responses must
@@ -52,7 +53,8 @@ internal sealed class MetadataResponseCache(string? directory = null, bool fresh
                     File.Move(temp, path, true);
                     if (Interlocked.Increment(ref writes) % 64 == 1) Prune();
                 }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                { MetadataDiagnostics.Record("metadata-cache-failure", new { Operation = "write", Request = MetadataDiagnostics.Request(url), Error = MetadataDiagnostics.Error(ex) }); }
                 finally { try { if (File.Exists(temp)) File.Delete(temp); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } }
             }
             return body;

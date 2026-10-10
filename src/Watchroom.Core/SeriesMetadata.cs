@@ -43,6 +43,8 @@ public static class SeriesMetadata
             var replaceText = mode != MetadataRefresh.FillMissing || refresh is null && options.RefreshDays > 0 && entries.Any(x =>
                 x.MetadataFetchedAt > 0 && x.MetadataFetchedAt < Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds);
             progress?.Report("Fetching seasons and episodes · " + item.DisplayTitle);
+            using var context = MetadataDiagnostics.BeginItem("season-episode", item);
+            MetadataDiagnostics.Record("metadata-episodes-start", new { item.NumberingOrder, Entries = entries.Length });
             var matched = false; var attemptFailed = false; var superseded = false;
             foreach (var provider in options.ProviderOrder.Where(p => p is "tmdb" or "tvmaze"))
             {
@@ -172,7 +174,7 @@ public static class SeriesMetadata
                     break;
                 }
                 catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidOperationException or KeyNotFoundException or TaskCanceledException && !ct.IsCancellationRequested)
-                { attemptFailed = true; failed++; progress?.Report(provider + " season/episode metadata unavailable · " + item.DisplayTitle); }
+                { MetadataDiagnostics.Failure("season-episode", item.DisplayTitle, provider, ex); attemptFailed = true; failed++; progress?.Report(provider + " season/episode metadata unavailable · " + item.DisplayTitle); }
             }
             if (!matched) unmatched++;
             if (!superseded)

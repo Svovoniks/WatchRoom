@@ -79,9 +79,19 @@ The scanner reads `tvshow.nfo`, `season.nfo`, `movie.nfo`, and video-name `.nfo`
 
 NFO fields take precedence over remote fields, including during explicit refresh. Edit the NFO to change its authoritative values. **Save metadata beside videos as NFO files** is opt-in. Export preserves unknown tags belonging to other tools and saves atomically. It writes episode/movie sidecars, show metadata in known show folders, and season metadata in separate season folders.
 
+## Fetch diagnostics
+
+On Windows, metadata diagnostics are written to `%LOCALAPPDATA%\Watchroom\logs\diagnostics.jsonl` by default. `WATCHROOM_DATA` changes the app data directory, and `WATCHROOM_DIAGNOSTICS` overrides the log directory. The log rotates at 5 MB and retains four files, including the current file.
+
+Metadata events include fetch start/completion, title search aliases, missing fields, request endpoints, HTTP status, response content type/length, elapsed time, retry decisions, and exception types, messages, stacks, and inner exceptions. Request context identifies the title, media ID, stage, season, and episode. Provider fallback, season/episode, unsupported image, and cache read/write failures are recorded even when the app handles them and continues. URL credentials, query strings, and fragments are omitted; authorization headers and response bodies are never logged.
+
+`metadata-fetch-report.json` in the app data directory still summarizes the latest completed fetch. Failed title entries now include detailed exception information. Season/episode and intermediate provider failures are available in the rotating diagnostic log.
+
 ## Verification
 
 `dotnet run --project tests/Watchroom.Smoke -- --filename-schemas` verifies filename formats, movie safeguards, rescan repair and date/range mapping against fixture providers. `--metadata-pipeline` runs isolated metadata, migration, identity, provider, refresh, numbering, and placeholder checks without live provider credentials. The regular smoke suite also runs these checks. `tests/Watchroom.DesktopChecks` verifies incremental library updates and dispatcher responsiveness. Native macOS UI behavior requires testing on a Mac; the Mac client can be compiled on Windows.
+
+`dotnet run --project tests/Watchroom.Smoke -- --metadata-diagnostics` checks request context, retries, HTTP/image/cache failures, fallback and season/episode errors, report details, and URL credential redaction with synthetic providers.
 
 `dotnet run --project tests/Watchroom.Smoke -- --metadata-discovery` runs the labeled alias/typo corpus and response-cache/pacing checks in isolation. It writes a synthetic accuracy report under `artifacts/metadata-discovery`; these results do not estimate accuracy on a personal library.
 

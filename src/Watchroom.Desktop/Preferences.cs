@@ -48,7 +48,9 @@ public partial class MainWindow
         MetadataProviders.ItemsSource = providerChoices;
         SubtitleLanguageRules.ItemsSource = subtitleRuleDrafts;
         LoadPreferences();
-        foreach (var box in new[] { DisplayNameBox, ServerBox, FfmpegBox, MetadataRefreshDays, PreferredAudioLanguages, PreferredSubtitleLanguages }) box.TextChanged += PreferencesChanged;
+        foreach (var box in new[] { DisplayNameBox, ServerBox, FfmpegBox, MetadataRefreshDays }) box.TextChanged += PreferencesChanged;
+        PreferredAudioLanguages.TextChanged += PreferencesChanged;
+        PreferredSubtitleLanguages.TextChanged += PreferencesChanged;
         foreach (var box in new[] { AutoArtwork, ImportMissing, ImportUpcoming, SaveNfo, DisplaySpecials, GroupShows, NeverRefresh })
         { box.Checked += PreferencesChanged; box.Unchecked += PreferencesChanged; }
         MetadataLanguage.SelectionChanged += PreferencesChanged;

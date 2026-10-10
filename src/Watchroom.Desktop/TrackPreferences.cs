@@ -12,8 +12,8 @@ public partial class MainWindow
 {
     private sealed class SubtitleRuleDraft(string audio, string subtitles) : INotifyPropertyChanged
     {
-        private string audioLanguage = audio, subtitleLanguages = subtitles;
-        public string AudioLanguage { get => audioLanguage; set { audioLanguage = value; PropertyChanged?.Invoke(this, new(nameof(AudioLanguage))); } }
+        private string audioLanguage = TrackLanguages.Normalize(audio) ?? audio, subtitleLanguages = subtitles;
+        public string AudioLanguage { get => audioLanguage; set { audioLanguage = TrackLanguages.Normalize(value) ?? value ?? ""; PropertyChanged?.Invoke(this, new(nameof(AudioLanguage))); } }
         public string SubtitleLanguages { get => subtitleLanguages; set { subtitleLanguages = value; PropertyChanged?.Invoke(this, new(nameof(SubtitleLanguages))); } }
         public event PropertyChangedEventHandler? PropertyChanged;
     }

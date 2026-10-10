@@ -65,11 +65,11 @@ static class RoomTrackChecks
                     Set(tuple.Item1, "player", tuple.Item2); Set(tuple.Item1, "vlc", tuple.Item3); Set(tuple.Item1, "room", tuple.Item4);
                     Set(tuple.Item1, "loadGeneration", 1); Set(tuple.Item1, "loadedMedia", host.Snapshot!.Media!.Id);
                 }
-                ((TextBox)hostWindow.FindName("PreferredAudioLanguages")).Text = "Russian, English";
-                ((TextBox)hostWindow.FindName("PreferredSubtitleLanguages")).Text = "English, off";
+                ((LanguagePriorityPicker)hostWindow.FindName("PreferredAudioLanguages")).Text = "Russian, English";
+                ((LanguagePriorityPicker)hostWindow.FindName("PreferredSubtitleLanguages")).Text = "English, off";
                 AddRule(hostWindow, "Russian", "off"); AddRule(hostWindow, "English", "Russian, English, off"); Call(hostWindow, "SaveTrackPreferences");
-                ((TextBox)guestWindow.FindName("PreferredAudioLanguages")).Text = "English, Russian";
-                ((TextBox)guestWindow.FindName("PreferredSubtitleLanguages")).Text = "English, off";
+                ((LanguagePriorityPicker)guestWindow.FindName("PreferredAudioLanguages")).Text = "English, Russian";
+                ((LanguagePriorityPicker)guestWindow.FindName("PreferredSubtitleLanguages")).Text = "English, off";
                 AddRule(guestWindow, "English", "off"); Call(guestWindow, "SaveTrackPreferences");
                 hostPlayer.Play(hostMedia); guestPlayer.Play(guestMedia);
                 await Wait(() => hostPlayer.AudioTrackDescription.Count(t => t.Id >= 0) == 2 && guestPlayer.AudioTrackDescription.Count(t => t.Id >= 0) == 2);
