@@ -45,6 +45,8 @@ public partial class MainWindow
         SavedRoomHeading.Text = saved?.Name ?? "Choose a room";
         SavedRoomStatus.Text = saved is null ? "Create a room or save an invitation to get started." : connected ? (host ? "Connected · You are the host" : "Connected · Guest") : (host ? "Your room · Offline" : "Saved invitation · Offline");
         ConnectSavedRoomButton.Content = connected ? "Open player" : "Connect";
+        DisconnectSavedRoomButton.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
+        DisconnectSavedRoomButton.IsEnabled = connected && !roomBusy;
         SavedRoomLibraryButton.IsEnabled = connected;
         SavedRoomLibraryButton.Content = host ? "Room library" : "Browse host library";
         SavedRoomSharedControls.IsEnabled = host;

@@ -137,17 +137,33 @@ static class PlayerLayoutChecks
             "movies expose a Finish action in the player bar");
         var transport = (Border)window.FindName("PlaybackControls");
         var docked = (Grid)window.FindName("DockedControlsHost"); var fullscreenHost = (Grid)window.FindName("FullscreenControlsHost");
+        var dockedHeader = (Grid)window.FindName("DockedHeaderHost"); var fullscreenHeader = (Grid)window.FindName("FullscreenHeaderHost");
+        dockedHeader.Children.Remove(header); fullscreenHeader.Children.Add(header);
         docked.Children.Remove(transport); fullscreenHost.Children.Add(transport);
         window.WindowStyle = WindowStyle.None;
         typeof(MainWindow).GetField("fullscreen", flags)!.SetValue(window, true);
+        Invoke(window, "ApplyPlayerLayout"); Invoke(window, "ShowPlayerControls"); Layout(900, 600);
+        var fullscreenOverlay = (Grid)window.FindName("PlayerOverlay");
+        fullscreenOverlay.Measure(new Size(video.ActualWidth, video.ActualHeight));
+        fullscreenOverlay.Arrange(new Rect(0, 0, video.ActualWidth, video.ActualHeight)); fullscreenOverlay.UpdateLayout();
+        var headerBounds = header.TransformToAncestor(fullscreenOverlay).TransformBounds(new Rect(new Point(), header.RenderSize));
+        Check(header.Visibility == Visibility.Visible && headerBounds.Top == 0 && header.ActualWidth == fullscreenOverlay.ActualWidth,
+            "fullscreen shows the original top bar across the video overlay");
+        Save(fullscreenOverlay, "player-fullscreen-bars.png");
+        transport.Visibility = Visibility.Collapsed; Layout(900, 600);
+        Check(header.Visibility == Visibility.Collapsed, "fullscreen header follows bottom controls after moving into the overlay");
+        Invoke(window, "ShowPlayerControls");
         var disconnect = (Task)typeof(MainWindow).GetMethod("Disconnect", flags)!.Invoke(window, [true, false])!;
         Check(disconnect.IsCompletedSuccessfully && (bool)typeof(MainWindow).GetField("fullscreen", flags)!.GetValue(window)! &&
-            window.WindowStyle == WindowStyle.None && fullscreenHost.Children.Contains(transport),
-            "local media cleanup preserves fullscreen and its transport controls during episode changes");
+            window.WindowStyle == WindowStyle.None && fullscreenHost.Children.Contains(transport) && fullscreenHeader.Children.Contains(header),
+            "local media cleanup preserves fullscreen and both player bars during episode changes");
         typeof(MainWindow).GetField("fullscreen", flags)!.SetValue(window, false);
+        fullscreenHeader.Children.Remove(header); dockedHeader.Children.Add(header);
         fullscreenHost.Children.Remove(transport); docked.Children.Add(transport); window.WindowStyle = WindowStyle.SingleBorderWindow;
+        Invoke(window, "ApplyPlayerLayout"); Layout(900, 600);
+        Check(header.Visibility == Visibility.Visible && header.ActualHeight > 0, "leaving fullscreen restores the docked top bar");
         window.Close();
-        Console.WriteLine("38 player layout and control checks passed.");
+        Console.WriteLine("41 player layout and control checks passed.");
     }
     static bool IsDescendant(DependencyObject child, DependencyObject parent)
     {

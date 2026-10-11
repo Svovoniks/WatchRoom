@@ -1064,10 +1064,10 @@ public partial class MainWindow : Window
     {
         roomLibrary?.ExpireViews(Wire.Now);
         if (fullscreen && PlaybackControls.Visibility == Visibility.Visible &&
-            Environment.TickCount64 - lastPlayerInteraction > 2600 && !PlaybackControls.IsMouseOver &&
+            Environment.TickCount64 - lastPlayerInteraction > 2600 && !PlaybackControls.IsMouseOver && !RoomHeader.IsMouseOver &&
             !seeking && PlayerOptions.Visibility != Visibility.Visible)
         {
-            if (PlaybackControls.IsKeyboardFocusWithin) PlayerOverlay.Focus();
+            if (PlaybackControls.IsKeyboardFocusWithin || RoomHeader.IsKeyboardFocusWithin) PlayerOverlay.Focus();
             PlaybackControls.Visibility = FullscreenHint.Visibility = Visibility.Collapsed;
             PlayerOverlay.Cursor = Cursors.None;
         }
@@ -1422,7 +1422,7 @@ public partial class MainWindow : Window
         var prepared = RoomClient.PrepareHostedFile(item.Path, PlaybackTitle(item));
         room!.PublishHostedFile(prepared, true); playingItem = item;
     }
-    private async void LeaveRoom(object sender, RoutedEventArgs e) => await Guard(async () => { var wasRoom = room is not null; ShowPage(wasRoom ? "Rooms" : "Library"); await Disconnect(); RoomHeading.Text = "Your watch room"; RoomSubtitle.Text = "Room closed"; });
+    private async void LeaveRoom(object sender, RoutedEventArgs e) => await Guard(async () => { var wasRoom = room is not null; ShowPage(wasRoom ? "Rooms" : "Library"); await Disconnect(); RoomHeading.Text = "Your watch room"; RoomSubtitle.Text = "Room closed"; RefreshSavedRooms(); });
     private async Task Disconnect(bool preserveFullscreen = false, bool reconnecting = false)
     {
         CancelPeerNotices();
@@ -1509,9 +1509,6 @@ public partial class MainWindow : Window
         SharedControls.IsEnabled = connectedRoom && room!.Identity?.Host == true;
         NowPlayingStrip.Visibility = ready || room is not null ? Visibility.Visible : Visibility.Collapsed;
         NowPlayingLabel.Text = "Now watching · " + RoomHeading.Text;
-        PlaybackTitleLabel.Text = room is null
-            ? (playingItem is null ? "" : PlaybackTitle(playingItem))
-            : room.Snapshot?.Media?.Title ?? "";
         var canControl = room is null || connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
         InviteButton.Visibility = RoomToggle.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
         RoomLibraryButton.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
@@ -1550,7 +1547,6 @@ public partial class MainWindow : Window
         ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(24, 20, 24, 16);
         AppStatusBar.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
         StatusRow.Height = new GridLength(inPlayer ? 0 : 34);
-        RoomHeader.Visibility = fullscreen ? Visibility.Collapsed : Visibility.Visible;
         RoomSide.Visibility = roomPanelVisible && !fullscreen ? Visibility.Visible : Visibility.Collapsed;
         var showRoomPanel = roomPanelVisible && !fullscreen;
         RoomSplitter.Visibility = showRoomPanel ? Visibility.Visible : Visibility.Collapsed;
@@ -1580,6 +1576,8 @@ public partial class MainWindow : Window
             WindowState = WindowState.Normal;
             WindowStyle = WindowStyle.None;
             ResizeMode = ResizeMode.NoResize;
+            DockedHeaderHost.Children.Remove(RoomHeader);
+            FullscreenHeaderHost.Children.Add(RoomHeader);
             DockedControlsHost.Children.Remove(PlaybackControls);
             FullscreenControlsHost.Children.Add(PlaybackControls);
             ApplyPlayerLayout();
@@ -1589,6 +1587,8 @@ public partial class MainWindow : Window
         else
         {
             fullscreen = false;
+            FullscreenHeaderHost.Children.Remove(RoomHeader);
+            DockedHeaderHost.Children.Add(RoomHeader);
             FullscreenControlsHost.Children.Remove(PlaybackControls);
             DockedControlsHost.Children.Add(PlaybackControls);
             WindowStyle = WindowStyle.SingleBorderWindow;

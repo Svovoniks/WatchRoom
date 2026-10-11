@@ -224,7 +224,7 @@
       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel>
        <TextBlock x:Name="SavedRoomHeading" Text="Choose a room" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap"/>
        <TextBlock x:Name="SavedRoomStatus" Text="Create a room or save an invitation to get started." Style="{StaticResource MutedText}" Margin="0,8,0,16"/>
-       <WrapPanel><Button x:Name="ConnectSavedRoomButton" Content="Connect" Click="ConnectSavedRoom" Style="{StaticResource Primary}"/><Button x:Name="CopySavedInviteButton" Content="Copy invitation" Click="CopySavedInvitation"/></WrapPanel>
+       <WrapPanel><Button x:Name="ConnectSavedRoomButton" Content="Connect" Click="ConnectSavedRoom" Style="{StaticResource Primary}"/><Button x:Name="DisconnectSavedRoomButton" Content="Disconnect" Click="LeaveRoom" Visibility="Collapsed" AutomationProperties.Name="Disconnect from room"/><Button x:Name="CopySavedInviteButton" Content="Copy invitation" Click="CopySavedInvitation"/></WrapPanel>
        <StackPanel x:Name="SavedRoomHostControls"><TextBlock Text="Permissions" Style="{StaticResource SectionHeading}"/>
        <ToggleButton x:Name="SavedRoomSharedControls" Content="Guest playback controls" ToolTip="Guests can play, pause and seek. Changes save immediately." Click="SavedRoomControlsChanged" AutomationProperties.Name="Saved room shared controls" Style="{StaticResource Switch}"/>
        <CheckBox x:Name="SavedRoomLibraryBrowsing" Content="Allow guests to browse my library" ToolTip="One admitted guest can browse at a time. Turning this off ends the active session." Checked="SavedRoomLibraryChanged" Unchecked="SavedRoomLibraryChanged"/>
@@ -244,21 +244,25 @@
      <SolidColorBrush x:Key="Surface" Color="#222426"/><SolidColorBrush x:Key="Elevated" Color="#303236"/><SolidColorBrush x:Key="Ink" Color="#F3F3F3"/><SolidColorBrush x:Key="Muted" Color="#AFB2B8"/><SolidColorBrush x:Key="Line" Color="#42454A"/><SolidColorBrush x:Key="Accent" Color="#F3A44B"/>
     </Grid.Resources>
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <Border x:Name="RoomHeader" Background="#222426" BorderBrush="#3C3E42" BorderThickness="0,0,0,1" Padding="12,8">
+    <Grid x:Name="DockedHeaderHost">
+    <Border x:Name="RoomHeader" Visibility="{Binding Visibility, ElementName=PlaybackControls}" Background="#222426" BorderBrush="#3C3E42" BorderThickness="0,0,0,1" Padding="12,8" PreviewMouseMove="ControlsMouseMoved" PreviewKeyDown="ControlsKeyPressed">
      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <Button Content="←  Library" Tag="Library" Click="Navigate" Style="{StaticResource PlayerButton}" Margin="0,0,16,0"/>
       <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock x:Name="RoomHeading" Text="Watchroom player" Foreground="#F3F3F3" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="RoomSubtitle" Text="Choose a video from your library to start watching." Foreground="#AFB2B8" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/></StackPanel>
       <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="16,0,0,0"><Button x:Name="RoomLibraryButton" Content="Room library" Click="OpenRoomLibrary" Style="{StaticResource PlayerButton}" Visibility="Collapsed" ToolTip="Browse the host library, manage the room queue and guest access"/><Button x:Name="RoomToggle" Content="Room &amp; chat" Click="ToggleRoomPanel" Style="{StaticResource PlayerButton}" ToolTip="Show or hide participants and chat"/><Button x:Name="InviteButton" Content="Copy invite" Click="CopyInvite" Style="{StaticResource PlayerButton}"/><Button x:Name="LeaveButton" Content="Leave" Click="LeaveRoom" Style="{StaticResource PlayerButton}"/></StackPanel>
      </Grid>
     </Border>
+    </Grid>
     <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*" MinWidth="320"/><ColumnDefinition Width="0" x:Name="RoomSplitterWidth"/><ColumnDefinition Width="0" x:Name="RoomSideWidth" MaxWidth="600"/></Grid.ColumnDefinitions>
      <Border x:Name="VideoFrame" Background="Black">
       <vlc:VideoView x:Name="Video">
        <!-- A nonzero alpha keeps the native overlay hit-testable over the video. -->
        <Grid x:Name="PlayerOverlay" Background="#01000000" Focusable="True" MouseMove="PlayerMouseMoved" MouseLeftButtonDown="VideoClicked" MouseWheel="VideoWheel" PreviewKeyDown="KeyPressed">
         <Border x:Name="PlayerEmpty" Background="Black"><Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="16"><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock Text="▶" FontSize="52" Foreground="#F3A44B" HorizontalAlignment="Center"/><TextBlock Text="Choose a video to play" FontSize="22" Foreground="#EEEEEE" HorizontalAlignment="Center" Margin="0,16,0,20"/><Button Content="Browse library" Tag="Library" Click="Navigate" Style="{StaticResource PlayerButton}" HorizontalAlignment="Center"/></StackPanel></Viewbox></Border>
-        <Border x:Name="PlaybackTitleOverlay" VerticalAlignment="Top" Background="#CC222426" Padding="18,12" IsHitTestVisible="False"><Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="{Binding Visibility, ElementName=PlaybackControls}"/><Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=PlaybackTitleLabel}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock x:Name="PlaybackTitleLabel" Foreground="#F3F3F3" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" AutomationProperties.Name="Currently playing"/></Border>
-        <Border x:Name="FullscreenHint" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,62,0,0" Background="#DC222426" CornerRadius="6" Padding="18,10"><TextBlock Text="Fullscreen · Esc to exit · Move the mouse for controls" Foreground="#EEEEEE" FontSize="13"/></Border>
+        <StackPanel VerticalAlignment="Top">
+         <Grid x:Name="FullscreenHeaderHost"/>
+         <Border x:Name="FullscreenHint" Visibility="Collapsed" HorizontalAlignment="Center" Margin="0,12,0,0" Background="#DC222426" CornerRadius="6" Padding="18,10"><TextBlock Text="Fullscreen · Esc to exit · Move the mouse for controls" Foreground="#EEEEEE" FontSize="13"/></Border>
+        </StackPanel>
         <Grid x:Name="FullscreenControlsHost" VerticalAlignment="Bottom"/>
        </Grid>
       </vlc:VideoView>
