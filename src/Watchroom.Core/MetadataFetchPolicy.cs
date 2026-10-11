@@ -8,7 +8,7 @@ internal static class MetadataFetchPolicy
     private static string Key(string stage, MediaItem item) => "metadata-retry:" + stage + ":" + item.Id;
     private static string Fingerprint(MediaItem item, MetadataOptions options, string? token) => LibraryIdentity.Hash(Wire.Serialize(new
     {
-        MatcherVersion = 2,
+        MatcherVersion = 3,
         item.Path, item.Title, item.Series, item.Kind, item.Year, item.ShowId, item.Season, item.Episode, item.EpisodeEnd,
         item.AbsoluteEpisode, item.NumberingOrder, item.SourcePart, item.SourcePartEpisode, item.SourcePartEpisodeEnd,
         item.AirDate, item.NumberingSource,

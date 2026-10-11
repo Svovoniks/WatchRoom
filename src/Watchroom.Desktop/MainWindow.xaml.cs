@@ -675,7 +675,11 @@ public partial class MainWindow : Window
         await Guard(() => FetchArtwork(lifetime.Token, refresh: (MetadataRefresh)MetadataRefreshMode.SelectedIndex));
     }
     private void OpenTmdbAttribution(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
-    { Process.Start(new ProcessStartInfo("https://www.themoviedb.org") { UseShellExecute = true }); e.Handled = true; }
+    {
+        if (e.Uri.AbsoluteUri is "https://www.themoviedb.org/" or "https://www.justwatch.com/")
+            Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+        e.Handled = true;
+    }
     private bool SaveMetadataToken()
     {
         if (MetadataToken.Password == savedMetadataToken) return true;

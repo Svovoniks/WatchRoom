@@ -44,7 +44,14 @@ public static class AutomaticArtwork
             // Deferred until WithSplitIdentity actually needs sibling evidence.
             foreach (var sibling in library.ByIds(folderIds[Path.GetDirectoryName(item.Path) ?? ""])) yield return sibling;
         }
-        var groups = snapshot.Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && !x.MetadataLocked).GroupBy(LibraryIdentity.ShowKey, StringComparer.OrdinalIgnoreCase)
+        var numberedGroups = new Dictionary<string, string>();
+        foreach (var folder in snapshot.GroupBy(x => Path.GetDirectoryName(x.Path)))
+        {
+            foreach (var title in folder.GroupBy(x => (MetadataTitles.Normalize(x.Title), x.Year)))
+                foreach (var part in MetadataTitles.NumberedMovieGroup(title.First(), title))
+                    numberedGroups[part.Id] = "numbered:" + LibraryIdentity.Hash((folder.Key ?? "") + title.Key);
+        }
+        var groups = snapshot.Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && !x.MetadataLocked).GroupBy(x => numberedGroups.GetValueOrDefault(x.Id) ?? LibraryIdentity.ShowKey(x), StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(group => group.First().Series is not null).ToArray();
         int fetched = 0, overviews = 0, missing = 0, failed = 0, artworkFailed = 0, deferred = 0; string? error = null;
         var issues = new List<object>();
@@ -58,7 +65,8 @@ public static class AutomaticArtwork
                 (options.RefreshDays <= 0 || x.ArtworkFetchedAt >= Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds))) continue;
             var ids = group.Select(x => x.Id).ToHashSet();
             var entries = library.ByIds(ids).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && !x.MetadataLocked).ToArray();
-            if (entries.Length == 0 || entries.Select(LibraryIdentity.ShowKey).Distinct().Count() != 1) continue;
+            if (entries.Length == 0 || entries.Select(LibraryIdentity.ShowKey).Distinct().Count() != 1 &&
+                MetadataTitles.NumberedMovieGroup(entries[0], entries).Length != entries.Length) continue;
             var existingOverview = entries.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Overview))?.Overview;
             if (mode != MetadataRefresh.RetryArtwork && existingOverview is not null)
                 entries = entries.Select(entry =>
@@ -112,7 +120,7 @@ public static class AutomaticArtwork
                         needsPoster = true;
                         entries = entries.Select(entry => ResetIdentity(entry)).ToArray();
                     }
-                    if (mode != MetadataRefresh.RetryArtwork) Classify(found.Kind, found.Type, found.Provider, found.Id, found.Title, found.Year);
+                    if (mode != MetadataRefresh.RetryArtwork) Classify(found.Kind, found.Type, found.Provider, found.Id, found.Title, found.Year, found.Details?.NumberedSeries == true);
                     overview = found.Overview; source = found.ImageSource ?? found.Source;
                     if (mode != MetadataRefresh.RetryArtwork && found.Details is { } details)
                         entries = entries.Select(entry => MergeDetails(entry, details)).ToArray();
@@ -136,14 +144,19 @@ public static class AutomaticArtwork
                         }
                     }
                 }
-                void Classify(string kind, string type, string provider, int? id, string? title, int? year)
+                void Classify(string kind, string type, string provider, int? id, string? title, int? year, bool numberedSeries = false)
                 {
                     entries = entries.Select(entry =>
                     {
                         var updated = entry.Matched && provider != entry.MetadataProvider ? entry : MetadataClassification.Apply(entry, kind, type, type == "tv" ? title : null);
+                        if (numberedSeries && MetadataTitles.NumberedMoviePart(entry) is { } part)
+                            updated = updated with { Season = LibraryIdentity.Locked(entry, "Season") ? entry.Season : 1,
+                                Episode = LibraryIdentity.Locked(entry, "Episode") ? entry.Episode : part,
+                                SeriesPath = Path.GetDirectoryName(entry.Path), NumberingSource = "filename" };
                         if (year is not null && !LibraryIdentity.Locked(entry, "Year")) updated = updated with { Year = year };
                         if (LibraryIdentity.Locked(entry, "Title")) updated = updated with { Title = entry.Title, Series = type == "tv" ? entry.Series ?? entry.Title : null };
-                        return TmdbRetention.Record(entry, LibraryIdentity.WithProvider(updated, provider, id, !entry.Matched || entry.MetadataProvider == provider), provider, TmdbRetention.TitleFields);
+                        return TmdbRetention.Record(entry, LibraryIdentity.WithProvider(updated, provider, id, !entry.Matched || entry.MetadataProvider == provider), provider,
+                            TmdbRetention.TitleFields.Concat(new[] { "season", "episode", "seriesPath", "numberingSource" }).ToArray());
                     }).ToArray();
                 }
                 void SaveOverview()
@@ -273,7 +286,7 @@ public static class AutomaticArtwork
             {
                 if (provider == "tmdb" && tmdb is not null)
                 {
-                    var match = await tmdb.MatchAsync(item, ct, queries);
+                    var match = await tmdb.MatchAsync(item, ct, queries, entries);
                     if (match is null && MetadataTitles.IsAnimeSource(item))
                         foreach (var alias in await AnimeTitles.AliasesAsync(http, directory, item.DisplayTitle, ct))
                         { match = await tmdb.MatchAsync(item with { Title = alias, Series = item.Series is null ? null : alias }, ct); if (match is not null) break; }

@@ -14,6 +14,7 @@ public static class TmdbCredentials
         return Validate(reader.ReadToEnd());
     });
     public const string Attribution = "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.";
+    public const string StreamingAttribution = "Streaming-provider data supplied by JustWatch via TMDB.";
     public static string DefaultStatus => HasBundledKey ? "Using the bundled WatchRoom key." : "This build needs a TMDB key.";
     public static bool HasBundledKey => Bundled.Value is not null;
     public static string? Resolve(string? userKey) => Select(userKey, Bundled.Value);

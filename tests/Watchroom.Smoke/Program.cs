@@ -126,6 +126,14 @@ if (args.FirstOrDefault() == "--metadata-recovery")
     Console.WriteLine($"{checks} metadata recovery checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--metadata-evidence")
+{
+    var checks = 0;
+    await MetadataEvidenceFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/metadata-evidence-" + Guid.NewGuid().ToString("N")), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} metadata evidence checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--episode-artwork")
 {
     var checks = 0;
@@ -292,6 +300,7 @@ await BridgeShutdownFixture.Run(Check);
 await LibrarySearchFixture.Run(Check);
 await MetadataPipelineFixture.Run(Path.Combine(root, "metadata-pipeline"), Check);
 await MetadataRecoveryFixture.Run(Path.Combine(root, "metadata-recovery"), Check);
+await MetadataEvidenceFixture.Run(Path.Combine(root, "metadata-evidence"), Check);
 await MetadataCacheFixture.Run(Path.Combine(root, "metadata-cache"), Check);
 await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
 await FilenameSchemaFixture.Run(Path.Combine(root, "filename-schemas"), Check);

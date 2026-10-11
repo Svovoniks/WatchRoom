@@ -5,14 +5,15 @@ namespace Watchroom.Core;
 
 public record MetadataMatch(int Id, string Type, string Title, string? Year, string? Poster, string Overview, string? Kind = null,
     string? OriginalTitle = null, Dictionary<string, string>? ProviderIds = null, string[]? Genres = null, string[]? Cast = null, double? Rating = null, bool? Animated = null,
-    string[]? Aliases = null, string Provider = "tmdb", string? Source = null, string? Evidence = null)
+    string[]? Aliases = null, string Provider = "tmdb", string? Source = null, string? Evidence = null,
+    int? RuntimeMinutes = null, int? EpisodeCount = null, int? SeasonCount = null, bool NumberedSeries = false)
 {
     public string Description => $"{Year ?? "Unknown year"} · {(Animated == true ? "Animation" : Type == "tv" && Animated == false ? "Live action" : Type == "tv" ? "Series" : "Film")} · {Provider}";
     public override string ToString() => $"{Title} · {Description}";
 }
 public record MetadataEpisode(int Number, string? Title, string? Overview, string? Image, string? AirDate, int? Runtime);
 public record MetadataSeason(int Number, string? Title, string? Overview, string? Image, string? AirDate, MetadataEpisode[] Episodes);
-public sealed class MetadataClient : IDisposable
+public sealed partial class MetadataClient : IDisposable
 {
     private readonly HttpClient http;
     private readonly HttpMessageHandler? imageHandler;
@@ -83,9 +84,12 @@ public sealed class MetadataClient : IDisposable
             Genres = root.TryGetProperty("genres", out var genres) ? genres.EnumerateArray().Select(g => g.TryGetProperty("name", out var name) ? name.GetString() : null).OfType<string>().ToArray() : null,
             Cast = root.TryGetProperty("credits", out var credits) && credits.TryGetProperty("cast", out var cast) ? cast.EnumerateArray().Take(20).Select(g => g.GetProperty("name").GetString()).OfType<string>().ToArray() : null,
             Rating = root.TryGetProperty("vote_average", out var rating) && rating.ValueKind == JsonValueKind.Number && rating.TryGetDouble(out var value) ? value : null,
-            Poster = Text("poster_path") ?? match.Poster, Overview = overview ?? match.Overview, Year = date?.Length >= 4 ? date[..4] : match.Year };
+            Poster = Text("poster_path") ?? match.Poster, Overview = overview ?? match.Overview, Year = date?.Length >= 4 ? date[..4] : match.Year,
+            RuntimeMinutes = root.TryGetProperty("runtime", out var runtime) && runtime.ValueKind == JsonValueKind.Number && runtime.TryGetInt32(out var minutes) && minutes > 0 ? minutes : null,
+            EpisodeCount = root.TryGetProperty("number_of_episodes", out var episodes) && episodes.ValueKind == JsonValueKind.Number && episodes.TryGetInt32(out var count) ? count : null,
+            SeasonCount = root.TryGetProperty("number_of_seasons", out var seasons) && seasons.ValueKind == JsonValueKind.Number && seasons.TryGetInt32(out var seasonCount) ? seasonCount : null };
     }
-    public async Task<MetadataMatch?> MatchAsync(MediaItem item, CancellationToken ct = default, IReadOnlyList<string>? queries = null)
+    public async Task<MetadataMatch?> MatchAsync(MediaItem item, CancellationToken ct = default, IReadOnlyList<string>? queries = null, IEnumerable<MediaItem>? entries = null)
     {
         if (item.Year is null && !LibraryIdentity.Locked(item, "Year") && MetadataTitles.FolderYear(item) is { } folderYear) item = item with { Year = folderYear };
         var known = System.Text.RegularExpressions.Regex.Match(item.PosterSource ?? "", @"^https://www\.themoviedb\.org/(tv|movie)/(\d+)");
@@ -135,10 +139,24 @@ public sealed class MetadataClient : IDisposable
         var titleQuery = searchQueries.FirstOrDefault() ?? item.DisplayTitle;
         var queryItem = item with { Title = titleQuery, Series = item.Series is null ? null : titleQuery };
         var typoSearches = new List<(MediaItem Item, MetadataMatch[]? Candidates)>();
+        var evidenceSearches = new List<(MediaItem Item, MetadataMatch[] Candidates)>();
         Exception? aliasFailure = null;
         async Task<MetadataMatch?> ChooseSearch(IEnumerable<MetadataMatch> candidates, MediaItem source)
         {
-            try { return await MetadataMatching.ChooseWithAliasesAsync(candidates, source, AlternativeTitlesAsync, ct, rows => typoSearches.Add((source, rows))); }
+            var rows = candidates.ToArray(); evidenceSearches.Add((source, rows));
+            try
+            {
+                var chosen = await MetadataMatching.ChooseWithAliasesAsync(rows, source, AlternativeTitlesAsync, ct, rows => typoSearches.Add((source, rows)));
+                // A dated local movie cannot be identified by an undated placeholder
+                // solely because all dated adaptations have a different year.
+                if (source.Year is not null && chosen is { Type: "movie", Year: null })
+                {
+                    MetadataDiagnostics.Outcome("missing-release-year");
+                    MetadataDiagnostics.Record("metadata-candidate-rejected", new { chosen.Id, chosen.Title, Reason = "missing-release-year" });
+                    return null;
+                }
+                return chosen;
+            }
             catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException)
             { aliasFailure = ex; typoSearches.Add((source, null)); return null; }
         }
@@ -167,12 +185,15 @@ public sealed class MetadataClient : IDisposable
             {
                 tv = movieEvidence ? [] : await SearchAsync(word, true, ct, item.Year);
                 movies = item.Episode is not null || item.MetadataType == "tv" ? [] : await SearchAsync(word, false, ct, item.Year);
-                best = MetadataMatching.Choose(tv.Concat(movies), item);
+                var source = item with { Title = russian, Series = item.Series is null ? null : russian };
+                best = await ChooseSearch(tv.Concat(movies), source);
                 if (best is not null) break;
             }
         }
         var typoFallback = best is null;
         best ??= MetadataMatching.ChooseTypoFallback(typoSearches);
+        if (best is null) best = await MatchMovieEvidenceAsync(item, evidenceSearches, ct);
+        if (best is null) best = await MatchNumberedSeriesAsync(item, searchQueries, entries, ct);
         if (best is null)
         {
             if (aliasFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(aliasFailure).Throw();

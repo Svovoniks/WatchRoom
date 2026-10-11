@@ -91,11 +91,39 @@ public static class MetadataTitles
                 // A numbered sequel can borrow a franchise folder spelling, keeping its number.
                 var sequel = Regex.Match(item.Title, @"^\S+\s+(\d+)$");
                 if (sequel.Success && Regex.IsMatch(name, @"^[\p{L}]{3,30}$")) Add(name + " " + sequel.Groups[1].Value);
+                // Native title folders can recover an inconsistent romanized filename.
+                // Require a multiword title, excluding broad library categories.
+                if (RussianSearchAlias(item.Title) is not null && Regex.IsMatch(name, @"\p{IsCyrillic}") &&
+                    name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= 2 &&
+                    !Regex.IsMatch(name, @"(?i)фильмы|сериалы|советские|комедии|мультфильмы|классика|сезон")) Add(name);
             }
         }
         foreach (var title in titles.ToArray())
-            if (RussianSearchAlias(title) is { } alias) Add(alias);
+            if (RussianSearchAlias(title) is { } alias)
+            {
+                Add(alias);
+                // Informal romanization also uses ch for Russian щ (normally shch).
+                if (title.Contains("ch", StringComparison.OrdinalIgnoreCase) && !Regex.IsMatch(title, "(?i)shch|sch"))
+                    Add(RussianSearchAlias(Regex.Replace(title, "ch", "shch", RegexOptions.IgnoreCase)));
+            }
         return titles.Take(12).ToArray();
+    }
+    public static int? NumberedMoviePart(MediaItem item)
+    {
+        if (item.Series is not null || item.Episode is not null || item.IsExtra || item.IsBonus || item.IsVirtual) return null;
+        var match = Regex.Match(Path.GetFileNameWithoutExtension(item.Path), @"\((?:19|20)\d{2}\)\s+(\d{1,2})$");
+        return match.Success && int.Parse(match.Groups[1].Value) is > 0 and <= 12 ? int.Parse(match.Groups[1].Value) : null;
+    }
+    internal static MediaItem[] NumberedMovieGroup(MediaItem item, IEnumerable<MediaItem>? entries)
+    {
+        if (NumberedMoviePart(item) is null || item.Year is null || item.Matched || item.MetadataLocked || item.MetadataType is not null) return [];
+        var folder = Path.GetDirectoryName(item.Path);
+        var siblings = (entries ?? []).Append(item).DistinctBy(x => x.Id).Where(x =>
+            Path.GetDirectoryName(x.Path) == folder && x.Year == item.Year && !x.Matched && !x.MetadataLocked &&
+            x.MetadataType is null && Normalize(x.Title) == Normalize(item.Title) && NumberedMoviePart(x) is not null).ToArray();
+        var numbers = siblings.Select(x => NumberedMoviePart(x)!.Value).Order().ToArray();
+        if (siblings.Any(x => new[] { "Kind", "Episode", "Season" }.Any(field => LibraryIdentity.Locked(x, field)))) return [];
+        return numbers.Length is >= 2 and <= 12 && numbers.SequenceEqual(Enumerable.Range(1, numbers.Length)) ? siblings : [];
     }
     public static string? RussianSearchAlias(string value)
     {
