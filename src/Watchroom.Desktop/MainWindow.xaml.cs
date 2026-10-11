@@ -971,6 +971,7 @@ public partial class MainWindow : Window
                 chat.Add(message.Text ?? ""); if (chat.Count > 150) chat.RemoveAt(0); ChatList.ScrollIntoView(chat.Last()); break;
             case "error": ShowRoomFeedback(message.Text ?? "Room error"); SetStatus(message.Text ?? "Room error"); break;
         }
+        UpdateRoomPlaybackStatus();
     }
     private void AcceptState(PlaybackState state)
     {
@@ -1097,6 +1098,7 @@ public partial class MainWindow : Window
             PlaybackControls.Visibility = FullscreenHint.Visibility = Visibility.Collapsed;
             PlayerOverlay.Cursor = Cursors.None;
         }
+        UpdateRoomPlaybackStatus();
         if (player is null || nativeStopCount > 0) return;
         buffering.Recover(Environment.TickCount64);
         if (room is not null && ready && buffering.Poll(target?.WantsPlayback == true, Environment.TickCount64))
@@ -1116,12 +1118,6 @@ public partial class MainWindow : Window
         var wantsPlayback = room is null ? player.IsPlaying : playbackIntent.Playing(target, player.IsPlaying);
         PlayButton.Content = wantsPlayback ? "Ⅱ" : "▶";
         PlayButton.ToolTip = wantsPlayback ? "Pause (Space)" : "Play (Space)";
-        if (room?.IsPeerRecovering == true)
-            RoomSubtitle.Text = "Connection interrupted · Reconnecting…";
-        else if (target is { WantsPlayback: true, Playing: false } && room?.Snapshot is { } snapshot)
-            RoomSubtitle.Text = "Waiting for " + string.Join(", ", snapshot.People.Where(p => p.Approved && !p.Ready).Select(p => p.Name)) + " to buffer";
-        else if (room?.Snapshot?.Media is { } movie)
-            RoomSubtitle.Text = movie.Title + " · " + (room.Identity?.Host == true ? "You are hosting" : "Streaming from host");
         if (++tick % 8 == 0 && ready) RefreshTracks();
         if (tick % 20 == 0 && ready) SavePlaybackPosition();
         if (PlaybackDiagnostics.Enabled)
@@ -1199,13 +1195,23 @@ public partial class MainWindow : Window
         readyGeneration = target.Generation;
         SendReadiness("ready");
     }
-    private void SendPlayback(bool playing, long position, bool seek = false)
+    private void UpdateRoomPlaybackStatus()
+    {
+        var snapshot = room?.Snapshot;
+        var explanation = RoomPlaybackStatus.Describe(snapshot, room?.IsPeerRecovering == true);
+        RoomPlaybackNoticeText.Text = explanation ?? "";
+        RoomPlaybackNotice.Visibility = explanation is null || PlayerEmpty.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        if (explanation is not null) RoomSubtitle.Text = explanation;
+        else if (snapshot?.Media is { } movie)
+            RoomSubtitle.Text = movie.Title + " · " + (room!.Identity?.Host == true ? "You are hosting" : "Streaming from host");
+    }
+    private void SendPlayback(bool playing, long position, bool seek = false, string? stopReason = null)
     {
         if (room?.Snapshot?.Media is not { } media) return;
         if (room.Identity?.Host != true && room.Snapshot.SharedControls != true) { SetStatus("The host controls playback."); return; }
         if (!seek && target is { } current && player?.State != VLCState.Ended)
             position = playbackIntent.Position(current, Math.Max(0, player?.Time ?? 0), room.ServerNowMs);
-        var command = new PlaybackState(0, media.Id, playing, position, 0, Guid.NewGuid().ToString("N"), Seek: seek);
+        var command = new PlaybackState(0, media.Id, playing, position, 0, Guid.NewGuid().ToString("N"), Seek: seek, Stop: stopReason is null ? null : new(stopReason));
         room.Send(new("playback", Data: Wire.Serialize(command)));
         playbackPause.Request(command, target?.Revision ?? -1);
         playbackIntent.Request(command, target?.Revision ?? -1);
@@ -1265,7 +1271,7 @@ public partial class MainWindow : Window
     private async void StopPlayback(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (player is null || nativeStopCount > 0) return;
-        if (room is not null) { SendPlayback(false, 0, seek: true); return; }
+        if (room is not null) { SendPlayback(false, 0, seek: true, stopReason: "stopped"); return; }
         ready = false;
         await loading.WaitAsync();
         try { await StopNativePlayback(); }
@@ -1458,6 +1464,8 @@ public partial class MainWindow : Window
         SavePlaybackPosition(); localResume = 0;
         if (fullscreen && !preserveFullscreen) SetFullscreen(false);
         PlayerEmpty.Visibility = Visibility.Visible;
+        RoomPlaybackNotice.Visibility = Visibility.Collapsed;
+        RoomPlaybackNoticeText.Text = "";
         pendingSeek = null; seeking = false; playbackPause.Clear(); playbackIntent.Clear(); appliedGeneration = readyGeneration = -1; ++loadGeneration; var old = room; room = null; target = null; loadedMedia = null; ready = false;
         mediaLoadCancellation?.Cancel();
         bridge?.CancelPendingReads();

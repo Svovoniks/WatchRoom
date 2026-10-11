@@ -98,7 +98,7 @@ public partial class MainWindow
             library.Setting("position:" + endedItem.Id, "0");
             SetWatched(endedItem, true);
         }
-        if (room?.Identity?.Host == true) SendPlayback(false, Math.Max(0, player!.Length));
+        if (room?.Identity?.Host == true) SendPlayback(false, Math.Max(0, player!.Length), stopReason: "ended");
         if (HasPlaybackQueue)
         {
             if (room is null || room.Identity?.Host == true)

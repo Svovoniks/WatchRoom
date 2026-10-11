@@ -95,7 +95,7 @@ internal sealed class HostRoomCoordinator(string host)
                 if (!ValidMedia(media)) throw new InvalidDataException("Invalid shared media");
                 Media = media; Tracks = null; resumeWhenReady = false; generation++;
                 foreach (var p in people.Values.ToArray()) people[p.Id] = p with { Ready = false };
-                Playback = new(++revision, media.Id, false, 0, now, RequestedPlaying: false, Generation: generation);
+                Playback = new(++revision, media.Id, false, 0, now, RequestedPlaying: false, Generation: generation, Stop: new("loading"));
                 return true;
             case "subtitle" when sender == host:
                 var attachment = Wire.Read<SubtitleAttachment>(message.Data!);
@@ -128,7 +128,13 @@ internal sealed class HostRoomCoordinator(string host)
                     foreach (var p in people.Values.Where(p => scopedReadiness.Contains(p.Id)).ToArray()) people[p.Id] = p with { Ready = false };
                 }
                 resumeWhenReady = desired.Playing && people.Values.Any(p => p.Approved && !p.Ready);
-                Playback = desired with { RequestedPlaying = desired.Playing, Generation = generation, Revision = ++revision, Playing = desired.Playing && !resumeWhenReady, AtUnixMs = now + (desired.Playing && !resumeWhenReady ? 200 : 0) };
+                // Attribute actions to the authenticated peer, never client-supplied names.
+                var stop = desired.Playing ? (resumeWhenReady ? new PlaybackStop("buffering") : null)
+                    : desired.Stop?.Reason == "ended" && sender == host ? new PlaybackStop("ended")
+                    : desired.Stop?.Reason == "stopped" ? new PlaybackStop("stopped", sender, people[sender].Name)
+                    : desired.Seek && Playback is { Playing: false, WantsPlayback: false, Stop: { Reason: "paused" or "stopped" or "ended" } previousStop }
+                        ? previousStop : new PlaybackStop("paused", sender, people[sender].Name);
+                Playback = desired with { Stop = stop, RequestedPlaying = desired.Playing, Generation = generation, Revision = ++revision, Playing = desired.Playing && !resumeWhenReady, AtUnixMs = now + (desired.Playing && !resumeWhenReady ? 200 : 0) };
                 return true;
             case "ready":
                 if (!CurrentReadiness(sender, message)) return true;
@@ -139,7 +145,7 @@ internal sealed class HostRoomCoordinator(string host)
                 if (Playback is { Playing: true } current)
                 {
                     resumeWhenReady = true;
-                    Playback = current with { Revision = ++revision, Playing = false, PositionMs = SyncMath.TargetPosition(current, now), AtUnixMs = now };
+                    Playback = current with { Stop = new("buffering", sender, people[sender].Name), Revision = ++revision, Playing = false, PositionMs = SyncMath.TargetPosition(current, now), AtUnixMs = now };
                     announcement = new("notice", Text: $"{people[sender].Name} is buffering. Playback resumes when everyone is ready.");
                 }
                 return true;
@@ -164,7 +170,7 @@ internal sealed class HostRoomCoordinator(string host)
     {
         if (!resumeWhenReady || Playback is null || people.Values.Any(p => p.Approved && !p.Ready)) return;
         resumeWhenReady = false;
-        Playback = Playback with { Revision = ++revision, Playing = true, AtUnixMs = now + 200 };
+        Playback = Playback with { Stop = null, Revision = ++revision, Playing = true, AtUnixMs = now + 200 };
     }
     private static bool ValidMedia(SharedMedia m, bool sidecar = false) =>
         m.Id is { Length: > 0 and <= 128 } && m.Title is { Length: <= 300 } && m.Length > 0 && m.Extension is { Length: <= 16 } &&

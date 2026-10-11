@@ -24,6 +24,16 @@ if (args.FirstOrDefault() == "--tmdb-live-probe")
     Console.WriteLine("PASS: bundled WatchRoom credential authenticates a live TMDB title search without a personal key."); return;
 }
 
+if (args.FirstOrDefault() == "--room-playback-status")
+{
+    var checks = 0;
+    HostRoomFixture.Run((condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    RoomPlaybackStatusFixture.Run((condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} room playback status checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--metadata-fixes")
 {
     var checks = 0;
@@ -306,6 +316,7 @@ await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
 await FilenameSchemaFixture.Run(Path.Combine(root, "filename-schemas"), Check);
 await GroupingAuditFixture.Run(Path.Combine(root, "grouping-audit"), Check);
 HostRoomFixture.Run(Check);
+RoomPlaybackStatusFixture.Run(Check);
 RoomTrackFixture.Run(Check);
 SharedLibraryFixture.Run(Check);
 await StreamingAudioFixture.Run(Path.Combine(root, "streaming-audio"), Check);

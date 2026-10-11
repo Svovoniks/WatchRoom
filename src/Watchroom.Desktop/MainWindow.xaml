@@ -295,6 +295,9 @@
          <Grid x:Name="FullscreenHeaderHost"/>
          <Border x:Name="FullscreenHint" Visibility="Collapsed" HorizontalAlignment="Center" Margin="0,12,0,0" Background="#DC222426" CornerRadius="6" Padding="18,10"><TextBlock Text="Fullscreen · Esc to exit · Move the mouse for controls" Foreground="#EEEEEE" FontSize="13"/></Border>
         </StackPanel>
+        <Border x:Name="RoomPlaybackNotice" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24,112,24,112" Background="#DC222426" CornerRadius="8" Padding="20,14" IsHitTestVisible="False">
+         <TextBlock x:Name="RoomPlaybackNoticeText" Foreground="#F3F3F3" FontSize="16" TextWrapping="Wrap" TextAlignment="Center" AutomationProperties.Name="Room playback status" AutomationProperties.LiveSetting="Polite"/>
+        </Border>
         <Grid x:Name="FullscreenControlsHost" VerticalAlignment="Bottom"/>
        </Grid>
       </vlc:VideoView>

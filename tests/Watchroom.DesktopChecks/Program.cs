@@ -67,6 +67,11 @@ static class Program
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             PlayerLayoutChecks.Run(); app.Shutdown(); return;
         }
+        if (args.FirstOrDefault() == "--room-playback-status")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            RoomPlaybackStatusChecks.Run(args.Contains("--screenshots")); app.Shutdown(); return;
+        }
         if (args.FirstOrDefault() == "--room-tracks")
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
