@@ -34,7 +34,9 @@ public sealed partial class RoomClient
             {
                 var item = source.FirstOrDefault(x => x.Id == message.Target && x.Available && !x.IsVirtual && !x.IsExtra)
                     ?? throw new InvalidDataException("This video is no longer available.");
-                PublishHostedFile(PrepareHostedFile(item.Path, item.EpisodeDisplayTitle), true);
+                var resume = message.Text == "resume" && settings?.Setting("watched:" + item.Id) != "true" &&
+                    long.TryParse(settings?.Setting("position:" + item.Id), out var saved) ? Math.Max(0, saved) : 0;
+                PublishHostedFile(PrepareHostedFile(item.Path, item.EpisodeDisplayTitle), true, resume);
                 Message?.Invoke(new("catalog-started", Target: item.Id));
                 SendPeer(sender, new("catalog-started", Target: item.Id));
             }

@@ -93,6 +93,17 @@ static class Program
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             HostLibraryBrowseChecks.Run(directory); app.Shutdown(); return;
         }
+        if (args.FirstOrDefault() == "--home")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                try { await HomeChecks.Run(directory); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
+        }
         var startupGaps = new List<double>(); var startupClock = Stopwatch.StartNew(); var startupPrior = startupClock.Elapsed.TotalMilliseconds;
         var startupHeartbeat = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(10) };
         startupHeartbeat.Tick += (_, _) => { var now = startupClock.Elapsed.TotalMilliseconds; startupGaps.Add(now - startupPrior); startupPrior = now; };

@@ -33,8 +33,10 @@ public partial class MainWindow
     {
         if (GuestLibrary) { guestHoveredId = null; ScheduleGuestView(); }
     }
-    private async void OpenGuestVideo(LibraryCard card)
+    private bool guestHomeResume;
+    private async void OpenGuestVideo(LibraryCard card, bool resume = false)
     {
+        guestHomeResume = resume;
         selected = card.Media; ShowPage("Details"); UpdateHostBreadcrumbs();
         DetailTitle.Text = card.DisplayTitle; DetailMeta.Text = card.Caption; DetailContext.Text = HostLibraryName;
         DetailSummary.Text = card.Media.Overview ?? ""; DetailFile.Text = "";
@@ -48,7 +50,7 @@ public partial class MainWindow
     private void WatchGuestVideo()
     {
         if (!OwnsLibrary || selected is null) return;
-        TryLibraryCommand(new("catalog-watch", Target: selected.Id, Number: ++guestBrowseRequest));
+        TryLibraryCommand(new("catalog-watch", Target: selected.Id, Number: ++guestBrowseRequest, Text: guestHomeResume ? "resume" : null));
         SetStatus("Starting " + selected.Title + " in the room…");
     }
     private long hostArtworkSequence;
@@ -130,6 +132,7 @@ public partial class MainWindow
     {
         if (applyingGuestMirror || !FollowingGuest || currentPage is not ("Library" or "Details")) return;
         var view = room!.Snapshot!.LibraryActivity!.View!;
+        if (view.Browse.Home) return;
         applyingGuestMirror = true;
         try
         {

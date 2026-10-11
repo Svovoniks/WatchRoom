@@ -14,7 +14,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     private readonly CancellationTokenSource lifetime = new();
     private readonly CancellationTokenSource discoveryLifetime = new();
     private readonly Channel<WireMessage> outgoing = Channel.CreateBounded<WireMessage>(128);
-    private sealed record RoomEvent(string Kind, string? Peer = null, WireMessage? Message = null, PeerTransport? Transport = null, HostedFileSelection? Selection = null, bool Play = false, IMediaSource? Subtitle = null, string? MediaId = null);
+    private sealed record RoomEvent(string Kind, string? Peer = null, WireMessage? Message = null, PeerTransport? Transport = null, HostedFileSelection? Selection = null, bool Play = false, IMediaSource? Subtitle = null, string? MediaId = null, long PositionMs = 0);
     private readonly Channel<RoomEvent> events = Channel.CreateBounded<RoomEvent>(256);
     private readonly ConcurrentDictionary<string, PeerTransport> peers = new();
     private readonly ConcurrentDictionary<string, byte> negotiated = new();
@@ -80,9 +80,9 @@ public sealed partial class RoomClient : IAsyncDisposable
         assets.Clear(); foreach (var pair in selection.Assets) assets[pair.Key] = pair.Value;
         HostedMedia = selection.Media;
     }
-    public void PublishHostedFile(HostedFileSelection selection, bool play)
+    public void PublishHostedFile(HostedFileSelection selection, bool play, long positionMs = 0)
     {
-        if (!IsConnected || Identity?.Host != true || !events.Writer.TryWrite(new("selection", Selection: selection, Play: play)))
+        if (!IsConnected || Identity?.Host != true || !events.Writer.TryWrite(new("selection", Selection: selection, Play: play, PositionMs: Math.Max(0, positionMs))))
             throw new IOException("Host room connection is busy or closed");
     }
     private readonly ServerClock clock = new();
@@ -284,7 +284,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                         case "selection":
                             ApplyHostedFile(item.Selection!);
                             ApplyHostCommand(Identity!.Peer, new("media", Data: Wire.Serialize(item.Selection!.Media.Media)));
-                            ApplyHostCommand(Identity.Peer, new("playback", Data: Wire.Serialize(new PlaybackState(0, item.Selection.Media.Media.Id, item.Play, 0, 0))));
+                            ApplyHostCommand(Identity.Peer, new("playback", Data: Wire.Serialize(new PlaybackState(0, item.Selection.Media.Media.Id, item.Play, item.PositionMs, 0))));
                             break;
                         case "library-opened": LibraryPeerReady?.Invoke(item.Peer!); break;
                         case "opened": SendPeer(item.Peer!, new("control-hello", Number: 2)); break;
@@ -488,7 +488,7 @@ public sealed partial class RoomClient : IAsyncDisposable
         {
             try
             {
-                var page = SharedLibrary.Browse(Volatile.Read(ref hostedLibrary), browse, LibraryThumbnail);
+                var page = SharedLibrary.Browse(Volatile.Read(ref hostedLibrary), browse, LibraryThumbnail, browse.Home ? settings?.PlaybackSettings() : null);
                 coordinator.DescribeLibrary(page.Location, browse.Query, clock.Now);
                 PublishHostState();
                 SendPeer(sender, new("catalog-page", Number: message.Number, Data: Wire.Serialize(page)));

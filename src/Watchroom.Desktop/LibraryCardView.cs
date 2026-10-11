@@ -41,6 +41,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     public string Caption => Card.Caption;
     public bool IsEpisode => Card.Level == "episode";
     public bool IsRemote { get; private set; }
+    public string? HomeSection { get; set; }
     public string EpisodeMeta => (Card.Media.Season is { } season ? $"S{season:00} · " : "") +
         (Card.Media.Episode is { } episode ? $"E{episode:00}" + (Card.Media.EpisodeEnd > episode ? $"–{Card.Media.EpisodeEnd:00}" : "") : "Episode unknown") +
         (Card.Media.RuntimeMinutes is > 0 ? $" · {Card.Media.RuntimeMinutes} min" : "") + (Card.Media.IsVirtual ? " · Missing" : Card.Media.Available ? "" : " · Unavailable");
@@ -59,6 +60,9 @@ public sealed class LibraryCardView : INotifyPropertyChanged
             Overview: entry.Overview, RuntimeMinutes: entry.RuntimeMinutes), entry.Level, entry.Season))
     {
         IsRemote = true;
+        HomeSection = entry.HomeSection;
+        SetPlayback(entry.PositionMs, false);
+        if (entry.HomeSection == "continue" && entry.PositionMs < 10000) SetPlaybackLabel("Next episode");
         remoteThumbnail = entry.Thumbnail is { Length: > 0 and <= 5400 } data ? data : null;
     }
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -85,6 +89,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         if (Progress != progress) { Progress = progress; Changed(nameof(Progress)); }
         if (PlaybackLabel != label) { PlaybackLabel = label; Changed(nameof(PlaybackLabel)); }
     }
+    public void SetPlaybackLabel(string label) { PlaybackLabel = label; Changed(nameof(PlaybackLabel)); }
     public Task LoadPosterAsync()
     {
         if (IsRemote)

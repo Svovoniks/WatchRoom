@@ -62,7 +62,7 @@ static class HostLibraryBrowseChecks
                 SeriesPoster: path, SeasonPoster: path, EpisodePoster: path, RuntimeMinutes: 24);
             foreach (var browse in new[] { new LibraryBrowseRequest(), new(ParentId: "episode"), new(ParentId: "episode", Season: 1) })
                 Check(SharedLibrary.Browse([show], browse, _ => thumbnail).Entries.Single().Thumbnail == thumbnail, "show, season, and episode artwork uses regular catalog selection");
-            Call("RefreshSharedLibrary"); Call("FilterHostLibrary");
+            Call("ShowPage", "Library"); Call("RefreshSharedLibrary"); Call("FilterHostLibrary");
             void Receive(LibraryBrowsePage page, long? sequence = null) => Call("ReceiveHostLibrary", new WireMessage("catalog-page", Number: sequence ?? Field<long>("guestBrowseRequest"), Data: Wire.Serialize(page)));
             Receive(first);
             var cards = Field<LibraryCardCollection>("guestLibraryCards");

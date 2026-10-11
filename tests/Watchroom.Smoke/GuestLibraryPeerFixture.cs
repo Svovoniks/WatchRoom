@@ -28,7 +28,9 @@ static class GuestLibraryPeerFixture
     }
     public static async Task Run(string server, string video, Action<bool, string> check)
     {
-        await using var host = new RoomClient(); await using var guest = new RoomClient();
+        var homeStore = new LibraryStore(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(video))!, "guest-home-" + Guid.NewGuid().ToString("N")));
+        homeStore.Setting("position:direct-video", "15000");
+        await using var host = new RoomClient(homeStore); await using var guest = new RoomClient();
         var hostReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var guestReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         host.LibraryPeerReady += _ => hostReady.TrySetResult(); guest.LibraryPeerReady += _ => guestReady.TrySetResult();
@@ -39,10 +41,13 @@ static class GuestLibraryPeerFixture
         var artworkBytes = Convert.ToBase64String(Enumerable.Range(0, 60000).Select(index => (byte)(index % 251)).ToArray());
         host.LibraryArtwork = _ => artworkBytes;
         LibraryBrowsePage? directPage = null; bool directStarted = false;
+        LibraryBrowsePage? homePage = null; bool homeDenied = false;
         var artworkParts = new ConcurrentDictionary<int, string>();
         guest.Message += message =>
         {
             if (message.Type == "catalog-page" && message.Number == 1001) directPage = Wire.Read<LibraryBrowsePage>(message.Data!);
+            if (message.Type == "catalog-page" && message.Number == 1002) homePage = Wire.Read<LibraryBrowsePage>(message.Data!);
+            if (message.Type == "catalog-error" && message.Number == 1006) homeDenied = true;
             if (message.Type == "catalog-started") directStarted = true;
             if (message.Type == "catalog-artwork-chunk" && message.Number == 1003)
             { var part = Wire.Read<LibraryArtworkChunk>(message.Data!); artworkParts[part.Index] = part.Data; }
@@ -58,6 +63,9 @@ static class GuestLibraryPeerFixture
         guest.Send(new("catalog-browse", Number: 1001, Data: Wire.Serialize(new LibraryBrowseRequest())));
         await AwaitDirect(() => directPage?.Entries.Length == 1 && host.Snapshot?.LibraryActivity?.Peer == guest.Identity.Peer,
             "integrated guest browsing acquires the host-authoritative lock");
+        guest.Send(new("catalog-browse", Number: 1002, Data: Wire.Serialize(new LibraryBrowseRequest(Home: true, Seed: 5))));
+        await AwaitDirect(() => homePage?.Entries.Any(entry => entry.HomeSection == "continue" && entry.PositionMs == 15000) == true &&
+            homePage.Entries.Any(entry => entry.HomeSection == "mystery"), "guest Home receives host resume progress and a mystery pick over the peer connection");
         var directView = new LibraryBrowseView(new(), 1, .25, "direct-video", "direct-video");
         guest.Send(new("catalog-follow", Data: Wire.Serialize(directView)));
         await AwaitDirect(() => host.Snapshot?.LibraryActivity?.View == directView, "guest scroll, hover, and selected video reach the host mirror");
@@ -66,8 +74,14 @@ static class GuestLibraryPeerFixture
         check(string.Concat(artworkParts.OrderBy(pair => pair.Key).Select(pair => pair.Value)) == artworkBytes, "artwork chunks reconstruct the original bytes without loss");
         guest.Send(new("catalog-watch", Number: 1004, Target: "direct-video"));
         await AwaitDirect(() => directStarted && guest.Snapshot?.Media?.Title == "Direct browsing fixture", "guest detail playback publishes the host video into the room");
+        guest.Send(new("catalog-watch", Number: 1005, Target: "direct-video", Text: "resume"));
+        await AwaitDirect(() => guest.Snapshot?.Playback?.PositionMs == 15000, "guest continue watching starts room playback at the host's saved position");
         guest.Send(new("catalog-release"));
         await AwaitDirect(() => host.Snapshot?.LibraryActivity is null, "leaving guest browsing releases its lock after playback starts");
+        host.Send(new("catalog-permission", Number: 0));
+        await AwaitDirect(() => guest.Snapshot?.LibraryBrowsing == false, "host revokes guest Home browsing over the peer connection");
+        guest.Send(new("catalog-browse", Number: 1006, Data: Wire.Serialize(new LibraryBrowseRequest(Home: true))));
+        await AwaitDirect(() => homeDenied, "guest Home requests are denied after host revocation");
         var owned = new RoomLibrary(true, host.Identity.Peer); var remote = new RoomLibrary(false, guest.Identity.Peer);
         var traffic = new ConcurrentQueue<Action>();
         host.LibraryMessage += (id, message) => traffic.Enqueue(() => owned.Receive(id, message));

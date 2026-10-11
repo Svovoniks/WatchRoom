@@ -4,6 +4,7 @@ static class SharedLibraryFixture
 {
     public static void Run(Action<bool, string> check)
     {
+        HomeLibraryFixture.Run(check);
         var room = new HostRoomCoordinator("host");
         Participant[] members = [new("host", "Host", true, true), new("a", "Alice", false, true), new("b", "Bob", false, true), new("pending", "Pending", false, false)];
         room.Discover(members, 1000);

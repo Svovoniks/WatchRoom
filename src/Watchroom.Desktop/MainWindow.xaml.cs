@@ -124,7 +124,7 @@ public partial class MainWindow : Window
         InitializeUpdates();
         light = library.Setting("theme") == "light";
         ApplyTheme();
-        ShowPage("Library");
+        ShowPage("Home");
         foreach (var f in Wire.Read<List<LibraryFolder>>(library.Setting("folders") ?? "[]")) folders.Add(f);
         FolderList.ItemsSource = folders; ChatList.ItemsSource = chat;
         ScanButton.IsEnabled = folders.Count > 0;
@@ -214,7 +214,7 @@ public partial class MainWindow : Window
                     Dispatcher.BeginInvoke(async () => await Guard(() => PlaybackEnded(endedItem, endedRoom, generation)));
                 };
             });
-            if (folders.Count == 0 && savedRooms.Count == 0 && currentPage == "Library") ShowPage("Welcome");
+            if (folders.Count == 0 && savedRooms.Count == 0 && currentPage is "Home" or "Library") ShowPage("Welcome");
             else if (SavedAutoArtwork) await FetchArtwork();
         };
     }
@@ -233,7 +233,19 @@ public partial class MainWindow : Window
     private void ShowPage(string name)
     {
         if (!ConfirmPageNavigation(name)) return;
-        if (GuestLibrary && currentPage is "Library" or "Details" && name is not ("Library" or "Details")) ReleaseHostLibrary();
+        if (name == "Home" && ready) SavePlaybackPosition();
+        if (name == "Home" && currentPage != "Home") homeSeed = Random.Shared.Next();
+        if (GuestLibrary && currentPage is "Home" or "Library" or "Details" && name is not ("Home" or "Library" or "Details")) ReleaseHostLibrary();
+        if (GuestLibrary && name == "Home" && currentPage != "Home")
+        {
+            guestBrowse = new(Home: true, Seed: homeSeed); guestLibraryNotice = null;
+            guestCurrentBrowse = null; guestLibraryCards.Clear(); guestBrowsePending = false; ++guestBrowseRequest;
+        }
+        else if (GuestLibrary && name == "Library" && guestBrowse.Home)
+        {
+            guestBrowse = new(Category: libraryCategory); guestCurrentBrowse = null;
+            guestLibraryCards.Clear(); guestBrowsePending = false; ++guestBrowseRequest;
+        }
         if (name != currentPage)
         {
             RememberLocation();
@@ -254,6 +266,7 @@ public partial class MainWindow : Window
         PlayerOverlay.Visibility = playerVisibility;
         Video.Visibility = playerVisibility;
         WelcomePage.Visibility = name == "Welcome" ? Visibility.Visible : Visibility.Collapsed;
+        HomePage.Visibility = name == "Home" ? Visibility.Visible : Visibility.Collapsed;
         LibraryPage.Visibility = name == "Library" ? Visibility.Visible : Visibility.Collapsed;
         Details.Visibility = name == "Details" ? Visibility.Visible : Visibility.Collapsed;
         FoldersPage.Visibility = name == "Folders" ? Visibility.Visible : Visibility.Collapsed;
@@ -265,10 +278,11 @@ public partial class MainWindow : Window
         UpdateSessionControls();
         RefreshSharedLibrary();
         if (name == "Library") FilterLibrary();
+        if (name == "Home") RefreshHome();
         if (name == "Rooms") RefreshSavedRooms();
         if (name == "Queues") RefreshSavedItems();
         UpdateLibraryCategorySelection(name is "Library" or "Details");
-        foreach (var button in new[] { LibraryNav, QueuesNav, RoomNav, FoldersNav, SettingsNav })
+        foreach (var button in new[] { HomeNav, LibraryNav, QueuesNav, RoomNav, FoldersNav, SettingsNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button,
                 (string)button.Tag == (name == "Details" ? "Library" : name == "Room" ? "Rooms" : name) ? "Selected" : "");
     }
@@ -350,6 +364,7 @@ public partial class MainWindow : Window
     {
         room?.SetHostedLibrary(refreshedItems);
         items = refreshedItems;
+        RefreshHome();
         UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
         if (browseSeries is not null && !items.Any(x => LibraryIdentity.InShow(x, browseSeries, browseKind)))
         {
@@ -390,6 +405,7 @@ public partial class MainWindow : Window
         var browsedId = items.FirstOrDefault(item => LibraryIdentity.InShow(item, browseSeries, browseKind))?.Id;
         items = updated.Values.ToList();
         room?.SetHostedLibrary(items);
+        RefreshHome();
         UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
         if (browseSeries is not null && !items.Any(item => LibraryIdentity.InShow(item, browseSeries, browseKind)))
         {
@@ -792,7 +808,7 @@ public partial class MainWindow : Window
     }
     private void SavePlaybackPosition()
     {
-        if (nativeStopCount == 0 && room is null && playingItem is not null && player is not null && player.Time >= 0)
+        if (nativeStopCount == 0 && (room is null || room.Identity?.Host == true) && playingItem is not null && player is not null && player.Time >= 0)
         {
             library.Setting("position:" + playingItem.Id, WasWatched(playingItem.Id) || player.Length > 0 && player.Time >= player.Length - 2000 ? "0" : Math.Max(0, player.Time).ToString());
             foreach (var card in libraryCards.Where(x => x.Card.Media.Id == playingItem.Id)) UpdateCardPlayback(card);

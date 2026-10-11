@@ -6,6 +6,7 @@
      <StackPanel Orientation="Horizontal" Margin="6,0,0,8"><Image Source="Assets/Watchroom.png" Width="28" Height="28"/><TextBlock Text="watchroom" FontSize="19" FontWeight="SemiBold" Margin="9,0,0,0" VerticalAlignment="Center"/></StackPanel>
 
 
+     <Button x:Name="HomeNav" Content="⌂   Home" Tag="Home" Click="Navigate" Style="{StaticResource Navigation}"/>
      <Button x:Name="LibraryNav" Tag="Library" Click="LibraryMenuClick" Style="{StaticResource Navigation}" AutomationProperties.Name="Library" AutomationProperties.HelpText="Expand or collapse library categories">
       <Grid Width="126"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="▦   Library"/><TextBlock x:Name="LibraryChevron" Grid.Column="1" Text="▾"/></Grid>
      </Button>
@@ -27,6 +28,37 @@
    </DockPanel>
   </Border>
   <Grid Grid.Column="1" Margin="24,20,24,16" x:Name="ContentArea">
+   <ScrollViewer x:Name="HomePage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <ScrollViewer.Resources>
+     <DataTemplate x:Key="HomePoster">
+      <Button Click="OpenHomeCard" Tag="{Binding Card}" Width="180" Height="300" Margin="0,0,14,12" Padding="6" VerticalContentAlignment="Top" HorizontalContentAlignment="Stretch" Background="Transparent" BorderBrush="Transparent" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}">
+       <StackPanel>
+        <Border Height="210" Background="{DynamicResource Elevated}" CornerRadius="9" ClipToBounds="True">
+         <Grid><TextBlock Text="{Binding DisplayTitle}" Margin="14" FontSize="18" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/><Image Source="{Binding Poster}" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/></Grid>
+        </Border>
+        <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,9,0,4"/>
+        <TextBlock Text="{Binding Caption}" FontSize="12" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis"/>
+        <ProgressBar Height="3" Value="{Binding Progress, Mode=OneWay}" Maximum="100" Foreground="{DynamicResource Accent}" Background="{DynamicResource Elevated}" BorderThickness="0" Margin="0,7,0,0"/>
+        <TextBlock Text="{Binding PlaybackLabel}" FontSize="11" Foreground="{DynamicResource Muted}" Margin="0,4,0,0"/>
+       </StackPanel>
+      </Button>
+     </DataTemplate>
+     <Style x:Key="HomeRow" TargetType="ItemsControl"><Setter Property="ItemTemplate" Value="{StaticResource HomePoster}"/><Setter Property="ItemsPanel"><Setter.Value><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></Setter.Value></Setter></Style>
+    </ScrollViewer.Resources>
+    <StackPanel>
+     <DockPanel Margin="0,0,0,20"><Button DockPanel.Dock="Right" Content="Refresh picks" Click="RefreshHomePicks" Padding="14,7"/><TextBlock Text="Home" FontSize="28" FontWeight="SemiBold"/></DockPanel>
+     <TextBlock x:Name="HomeStatus" TextWrapping="Wrap" Margin="0,0,0,14" AutomationProperties.LiveSetting="Polite"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+     <TextBlock Text="Continue watching" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,10"/>
+     <TextBlock x:Name="HomeContinueEmpty" Text="Your unfinished movies and shows will appear here once you start watching." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,22"/>
+     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"><ItemsControl x:Name="HomeContinue" Style="{StaticResource HomeRow}"/></ScrollViewer>
+     <Button x:Name="HomeMystery" Click="PickMystery" HorizontalContentAlignment="Stretch" Padding="22,18" Margin="0,12,0,24" Background="{DynamicResource Surface}" AutomationProperties.Name="Mystery pick: choose a random movie, show, or anime">
+      <DockPanel><TextBlock DockPanel.Dock="Right" Text="Surprise me →" Foreground="{DynamicResource Accent}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="18,0,0,0"/><TextBlock DockPanel.Dock="Left" Text="?" FontSize="38" Foreground="{DynamicResource Accent}" Margin="0,0,22,0" VerticalAlignment="Center"/><TextBlock Text="Mystery pick" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
+     </Button>
+     <TextBlock Text="Suggestions" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,10"/>
+     <TextBlock x:Name="HomeSuggestionsEmpty" Text="No new titles to suggest. Try a mystery pick or browse your library." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+     <ItemsControl x:Name="HomeSuggestions" ItemTemplate="{StaticResource HomePoster}" AutomationProperties.Name="Suggestions"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel></ItemsControl>
+    </StackPanel>
+   </ScrollViewer>
    <Grid x:Name="LibraryPage"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <StackPanel x:Name="LocalLibraryHeader"><TextBlock x:Name="GuestLibraryStatus" Visibility="Collapsed" Style="{StaticResource MutedText}" Margin="0,0,0,12" AutomationProperties.LiveSetting="Polite"/>
 

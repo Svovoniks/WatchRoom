@@ -25,6 +25,8 @@ Run `dotnet run --project tests/Watchroom.Smoke -c Release -- --direct-controls`
 
 The app includes a default HTTPS room-service address. Its availability and public-network playback must be validated separately before release. An HTTP localhost address supports testing on this computer. See [server deployment](deploy/README.md).
 
+The Windows **Home** tab opens with **Continue watching**, suggestions for unstarted movies, shows, and anime, and a **Mystery pick** from available titles. Continue watching resumes paused movies or opens the next unwatched episode of a started show. **Refresh picks** reshuffles suggestions and the mystery card. Guests see the same Home sections for the host's library and saved progress while the host permits library browsing; their playback starts in the room.
+
 Local playback remembers your position and volume. Details offer **Resume** and **Start over**; a **Return to player** strip keeps playback reachable while browsing. Playback options include an editable, persistent queue with episode labels, reordering, removal, and automatic advancement. Room invitation and chat actions appear when connected to a room.
 
 Search covers the whole library, including when browsing a season. Missing files have an **Unavailable** filter and disabled playback actions. **Correct title** works without a metadata token and survives rescanning. Folder categories can be edited in place; folder changes trigger scanning, and an active scan can be cancelled while keeping videos already indexed.

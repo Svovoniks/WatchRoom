@@ -20,6 +20,7 @@ public partial class MainWindow
     private void SetWatched(MediaItem item, bool watched)
     {
         library.Setting("watched:" + item.Id, watched ? "true" : "false"); watchedState[item.Id] = watched;
+        RefreshHome();
         foreach (var card in libraryCards.Where(card => card.Card.Media.Id == item.Id || LibraryIdentity.SameShow(card.Card.Media, item)))
             UpdateCardPlayback(card);
     }
@@ -84,6 +85,7 @@ public partial class MainWindow
         foreach (var card in libraryCards.Where(card => card.Card.Media.Id == item.Id || LibraryIdentity.SameShow(card.Card.Media, item)))
             UpdateCardPlayback(card);
         SetStatus(watched ? "Marked as watched." : "Marked as unwatched.");
+        RefreshHome();
     }
 
     private async Task PlaybackEnded(MediaItem? endedItem, RoomClient? endedRoom, int generation)
