@@ -25,6 +25,7 @@ public sealed class MainWindow : Window
     private readonly CancellationTokenSource lifetime = new();
     private readonly SemaphoreSlim loading = new(1);
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private readonly DispatcherTimer metadataRetentionTimer = new() { Interval = TimeSpan.FromHours(1) };
     private readonly DispatcherTimer scanDelay = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly TabControl tabs = new();
     private readonly WrapPanel posterGrid = new() { ItemWidth = 165, ItemHeight = 280 };
@@ -38,7 +39,7 @@ public sealed class MainWindow : Window
     private readonly ComboBox folderKind = new() { ItemsSource = new[] { "Mixed", "Movie", "Show", "Anime" }, SelectedIndex = 0, Width = 160 };
     private readonly TextBox server = new() { Watermark = "HTTPS room server" };
     private readonly TextBox name = new() { Watermark = "Your display name" };
-    private readonly TextBox token = new() { PasswordChar = '●', Watermark = "TMDB API read access token (this session only)" };
+    private readonly TextBox token = new() { PasswordChar = '●', Watermark = "Optional personal TMDB key (this session only)" };
     private readonly TextBox metadataProviders = new() { Watermark = "Providers: tmdb, tvmaze, wikipedia" };
     private readonly TextBox metadataLanguage = new() { Watermark = "Language, e.g. en-US" };
     private readonly TextBox metadataCountry = new() { Watermark = "Country, e.g. US" };
@@ -108,6 +109,9 @@ public sealed class MainWindow : Window
         search.TextChanged += (_, _) => FilterLibrary(); category.SelectionChanged += (_, _) => { browseSeries = browseKind = null; browseSeason = null; FilterLibrary(); };
         episodes.SelectionChanged += (_, _) => { if (episodes.SelectedItem is MediaItem item) { selected = item; summary.Text = item.DetailOverview ?? item.Caption; } };
         timer.Tick += (_, _) => Tick(); timer.Start();
+        metadataRetentionTimer.Tick += async (_, _) => await Guard(async () =>
+        { if (await Task.Run(() => library.ExpireTmdbContent())) RefreshLibrary(); });
+        metadataRetentionTimer.Start();
         scanDelay.Tick += async (_, _) => { scanDelay.Stop(); if (!scanning) await Guard(Scan); };
         Opened += async (_, _) =>
         {
@@ -143,7 +147,7 @@ public sealed class MainWindow : Window
         Closing += async (_, e) =>
         {
             if (allowClose) return; e.Cancel = true; if (closing) return; closing = true;
-            await Task.Yield(); timer.Stop(); scanDelay.Stop(); lifetime.Cancel();
+            await Task.Yield(); timer.Stop(); scanDelay.Stop(); metadataRetentionTimer.Stop(); lifetime.Cancel();
             foreach (var watcher in watchers) watcher.Dispose();
             try { await Disconnect(); } catch { }
             video.MediaPlayer = null; player?.Dispose(); vlc?.Dispose();
@@ -209,7 +213,7 @@ public sealed class MainWindow : Window
             new TabItem { Header = "Library", Content = Pane(libraryPage) },
             new TabItem { Header = "Watch room", Content = Pane(roomPage) },
             new TabItem { Header = "Folders", Content = Pane(Column(Text("Your movie folders",24),Text("Add the folders Watchroom should scan. You can skip this when joining a friend."), Row(folderKind, Button("Add folders", AddFolders)), folderList, Row(Button("Remove selected", RemoveFolder),Button("Scan library", Scan)))) },
-            new TabItem { Header = "Settings", Content = Pane(new ScrollViewer { Content = Column(Text("Room connection",24),Text("Display name",14),name,Text("Server address",14),server,Button("Save settings",SaveSettings),Text("Join a friend",22),invitation,Button("Join room",Join),Text("Artwork and metadata",22),token,automaticArtwork,Text("Providers in priority order",14),metadataProviders,Text("Language / country / refresh days",14),metadataLanguage,metadataCountry,refreshDays,importMissing,importUpcoming,displaySpecials,groupShows,saveNfo,metadataRefreshMode,Button("Fetch metadata",RefreshMetadata),Text("Without a token, show titles are searched on TVmaze and movie titles on Wikipedia. Some titles need a manual match. Video files stay local. TVmaze: https://www.tvmaze.com (CC BY-SA). Artwork source pages appear in title details.",14),Text("Use a TMDB read access token to match posters, or choose local artwork from the library. Token stays in this app session.",14),Text("This product uses the TMDB API but is not endorsed or certified by TMDB.",14),Text("Playback requirements",22),Text("On Mac, install VLC in /Applications. WebRTC requires a matching libdatachannel library; follow MAC-CLIENT.md to build it and set WATCHROOM_DATACHANNEL_NATIVE. Use the same reachable room server on both clients.",14)) }) }
+            new TabItem { Header = "Settings", Content = Pane(new ScrollViewer { Content = Column(Text("Room connection",24),Text("Display name",14),name,Text("Server address",14),server,Button("Save settings",SaveSettings),Text("Join a friend",22),invitation,Button("Join room",Join),Text("Artwork and metadata",22),token,automaticArtwork,Text("Providers in priority order",14),metadataProviders,Text("Language / country / refresh days",14),metadataLanguage,metadataCountry,refreshDays,importMissing,importUpcoming,displaySpecials,groupShows,saveNfo,metadataRefreshMode,Button("Fetch metadata",RefreshMetadata),Text("WatchRoom uses its bundled TMDB key by default, with TVmaze and Wikipedia as fallbacks. Some titles need a manual match. Video files stay local. TVmaze: https://www.tvmaze.com (CC BY-SA). Artwork source pages appear in title details.",14),Text("Leave the key blank to use WatchRoom’s bundled key. An optional personal key overrides it for this session.",14),new Image { Source = new Avalonia.Media.Imaging.Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://Watchroom.Mac/Assets/Tmdb.png"))), Width = 220, Stretch = Avalonia.Media.Stretch.Uniform, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left }, Text("The Movie Database · https://www.themoviedb.org",14), Text(TmdbCredentials.Attribution,14),Text("Playback requirements",22),Text("On Mac, install VLC in /Applications. WebRTC requires a matching libdatachannel library; follow MAC-CLIENT.md to build it and set WATCHROOM_DATACHANNEL_NATIVE. Use the same reachable room server on both clients.",14)) }) }
         };
     }
     private async Task Guard(Func<Task> action)

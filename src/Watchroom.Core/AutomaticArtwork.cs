@@ -19,7 +19,7 @@ public static class AutomaticArtwork
         var options = MetadataOptions.Load(library); var mode = refresh ?? (force ? MetadataRefresh.RefreshText : MetadataRefresh.FillMissing);
         using var issueScope = MetadataIssues.Begin(library); var outstanding = issueScope.State;
         using var requests = MetadataHttp.BeginScope(library, force || refresh is not null, options);
-        using var ownedTmdb = metadata is null && !string.IsNullOrWhiteSpace(token) ? new MetadataClient(token, options: options) : null;
+        using var ownedTmdb = metadata is null && TmdbCredentials.Resolve(token) is not null ? new MetadataClient(token, options: options) : null;
         var tmdb = metadata ?? ownedTmdb;
         PlaybackDiagnostics.Record("metadata-fetch-start", new { Mode = mode.ToString(), Providers = options.ProviderOrder, TmdbAvailable = tmdb is not null });
         foreach (var entry in library.All().Where(x => mode != MetadataRefresh.RetryArtwork && x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus))
@@ -143,14 +143,14 @@ public static class AutomaticArtwork
                         var updated = entry.Matched && provider != entry.MetadataProvider ? entry : MetadataClassification.Apply(entry, kind, type, type == "tv" ? title : null);
                         if (year is not null && !LibraryIdentity.Locked(entry, "Year")) updated = updated with { Year = year };
                         if (LibraryIdentity.Locked(entry, "Title")) updated = updated with { Title = entry.Title, Series = type == "tv" ? entry.Series ?? entry.Title : null };
-                        return LibraryIdentity.WithProvider(updated, provider, id, !entry.Matched || entry.MetadataProvider == provider);
+                        return TmdbRetention.Record(entry, LibraryIdentity.WithProvider(updated, provider, id, !entry.Matched || entry.MetadataProvider == provider), provider, TmdbRetention.TitleFields);
                     }).ToArray();
                 }
                 void SaveOverview()
                 {
                     if (!needsOverview || string.IsNullOrWhiteSpace(overview)) return;
                     entries = entries.Select(entry => LibraryIdentity.Locked(entry, "Overview") || mode == MetadataRefresh.FillMissing && !string.IsNullOrWhiteSpace(entry.Overview)
-                        ? entry : entry with { Overview = overview }).ToArray();
+                        ? entry : TmdbRetention.Record(entry, entry with { Overview = overview }, resolved?.Provider ?? "", "overview")).ToArray();
                     overviews++;
                 }
                 if (poster is not null)
@@ -159,7 +159,7 @@ public static class AutomaticArtwork
                     var installed = false;
                     foreach (var entry in library.ByIds(ids).Where(x => !LibraryIdentity.Locked(x, "Poster")))
                         if (expected.TryGetValue(entry.Id, out var previous) && SameFetchIdentity(previous, entry))
-                        { library.Save(entry with { Poster = poster, SeriesPoster = entry.Series is null ? null : poster, PosterSource = source }); installed = true; }
+                        { library.Save(TmdbRetention.Record(entry, entry with { Poster = poster, SeriesPoster = entry.Series is null ? null : poster, PosterSource = source }, resolved?.ImageProvider ?? resolved?.Provider ?? "", TmdbRetention.PosterFields)); installed = true; }
                     if (installed) fetched++;
                 }
                 if (needsPoster && poster is null || needsOverview && string.IsNullOrWhiteSpace(overview))
@@ -241,11 +241,11 @@ public static class AutomaticArtwork
     {
         var ids = new Dictionary<string, string>(item.ProviderIds ?? [], StringComparer.OrdinalIgnoreCase);
         foreach (var id in match.ProviderIds ?? []) ids[id.Key] = id.Value;
-        return item with { ProviderIds = ids, OriginalTitle = LibraryIdentity.Locked(item, "OriginalTitle") ? item.OriginalTitle : match.OriginalTitle ?? item.OriginalTitle,
+        return TmdbRetention.Record(item, item with { ProviderIds = ids, OriginalTitle = LibraryIdentity.Locked(item, "OriginalTitle") ? item.OriginalTitle : match.OriginalTitle ?? item.OriginalTitle,
             Genres = LibraryIdentity.Locked(item, "Genres") ? item.Genres : match.Genres ?? item.Genres,
             Cast = LibraryIdentity.Locked(item, "Cast") ? item.Cast : match.Cast ?? item.Cast,
             Rating = LibraryIdentity.Locked(item, "Rating") ? item.Rating : match.Rating ?? item.Rating,
-            Year = LibraryIdentity.Locked(item, "Year") ? item.Year : int.TryParse(match.Year, out var year) ? year : item.Year };
+            Year = LibraryIdentity.Locked(item, "Year") ? item.Year : int.TryParse(match.Year, out var year) ? year : item.Year }, match.Provider, TmdbRetention.TitleFields);
     }
     internal static async Task<Resolved?> ResolveAsync(HttpClient http, MetadataClient? tmdb, MediaItem item, MetadataOptions options, string directory, CancellationToken ct, MediaItem[]? entries = null)
     {
@@ -399,8 +399,10 @@ public static class AutomaticArtwork
     {
         var uri = new Uri(url); if (!MetadataHttp.ArtworkHost(uri)) throw new IOException("Unsupported artwork host.");
         var folder = Path.Combine(directory, "posters");
-        var stem = Path.Combine(folder, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url))) + (replace ? "-" + Guid.NewGuid().ToString("N") : ""));
-        foreach (var extension in new[] { ".jpg", ".png" }) if (!replace && ArtworkCache.IsUsable(stem + extension)) return stem + extension;
+        var tmdbImage = uri.Host == "image.tmdb.org";
+        var stem = Path.Combine(folder, (tmdbImage ? "tmdb-url-" : "") + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url))) + (replace ? "-" + Guid.NewGuid().ToString("N") : ""));
+        foreach (var extension in new[] { ".jpg", ".png" }) if (!replace && ArtworkCache.IsUsable(stem + extension) &&
+            (!tmdbImage || File.GetLastWriteTimeUtc(stem + extension) > DateTime.UtcNow - TmdbRetention.MaximumAge)) return stem + extension;
         var bytes = await MetadataHttp.GetImage(http, url, ct); var jpeg = bytes[0] == 255 && bytes[1] == 216;
         Directory.CreateDirectory(folder);
         var path = stem + (jpeg ? ".jpg" : ".png");

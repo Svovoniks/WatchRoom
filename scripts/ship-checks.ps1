@@ -24,7 +24,11 @@ try {
         Expect-Rejected { Get-ShipVersion $version '0.3.17' '0.3.17' } "unsafe version $version is rejected"
     }
     Check ((Assert-ShipPath $testRoot 'src/app.cs') -eq 'src/app.cs') 'explicit source file is accepted'
-    foreach ($path in @('../outside.cs','artifacts/report.html','sites/src/app.ts','.tools/helper.ps1','src/credentials/token.json','src/.env','src/library.db')) {
+    $logoPath = 'src/Watchroom.Desktop/Assets/Tmdb.png'
+    New-Item -ItemType Directory -Path (Split-Path -Parent (Join-Path $testRoot $logoPath)) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) $logoPath) -Destination (Join-Path $testRoot $logoPath)
+    Check ((Assert-ShipPath $testRoot $logoPath) -eq $logoPath) 'approved TMDB attribution logo is accepted'
+    foreach ($path in @('../outside.cs','artifacts/report.html','sites/src/app.ts','.tools/helper.ps1','src/credentials/token.json','src/.env','src/library.db','src/personal.png','src/Watchroom.Desktop/Assets/snapshot.png')) {
         Expect-Rejected { Assert-ShipPath $testRoot $path } "excluded path $path cannot enter a release"
     }
     Expect-Rejected { Assert-ShipPath $testRoot 'src' } 'directory selection cannot stage unrelated files'

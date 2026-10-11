@@ -18,7 +18,7 @@ public static class SeriesMetadata
         var options = MetadataOptions.Load(library); var mode = refresh ?? (force ? MetadataRefresh.RefreshText : MetadataRefresh.FillMissing);
         using var issueScope = MetadataIssues.Begin(library); var outstanding = issueScope.State;
         using var requests = MetadataHttp.BeginScope(library, force || refresh is not null, options);
-        using var owned = metadata is null && !string.IsNullOrWhiteSpace(token) ? new MetadataClient(token, options: options) : null;
+        using var owned = metadata is null && TmdbCredentials.Resolve(token) is not null ? new MetadataClient(token, options: options) : null;
         var tmdb = metadata ?? owned;
         foreach (var compilation in library.All().Where(x => mode != MetadataRefresh.RetryArtwork && x.Series is not null && MetadataTitles.IsUnverifiedCompilation(x)))
             library.Save(compilation with { EpisodeTitle = LibraryIdentity.Locked(compilation, "EpisodeTitle") ? compilation.EpisodeTitle : null,
@@ -113,8 +113,9 @@ public static class SeriesMetadata
                             partStarts.Add(index);
                     foreach (var entry in entries)
                     {
+                        var beforeDetails = latest[entry.Id];
                         ct.ThrowIfCancellationRequested();
-                        var current = LibraryIdentity.WithProvider(entry, provider, id, !entry.Matched || entry.MetadataProvider == provider);
+                        var current = TmdbRetention.Record(entry, LibraryIdentity.WithProvider(entry, provider, id, !entry.Matched || entry.MetadataProvider == provider), provider, "metadataProvider", "metadataId");
                         if (entry.NumberingConflict is FilenameEpisodes.InvalidRange or FilenameEpisodes.CrossSeasonRange)
                         { library.Save(current); continue; }
                         var dateNumbering = entry.NumberingSource == "date" && entry.AirDate is not null;
@@ -174,6 +175,7 @@ public static class SeriesMetadata
                             SeasonSource = provider == "tmdb" ? $"https://www.themoviedb.org/tv/{id}/season/{season.Number}" : $"https://www.tvmaze.com/shows/{id}",
                             EpisodeSource = first is null ? current.EpisodeSource : provider == "tmdb" ? $"https://www.themoviedb.org/tv/{id}/season/{season.Number}/episode/{first.Number}" : $"https://www.tvmaze.com/shows/{id}"
                         };
+                        current = TmdbRetention.Record(beforeDetails, current, provider, TmdbRetention.EpisodeFields);
                         library.Save(current);
                         var replace = mode == MetadataRefresh.ReplaceArtwork;
                         var entryArtworkFailed = false;
@@ -184,7 +186,7 @@ public static class SeriesMetadata
                             var afterImage = library.ByIds([current.Id]).FirstOrDefault();
                             if (afterImage is null || !AutomaticArtwork.SameFetchIdentity(current, afterImage)) { superseded = true; continue; }
                             current = afterImage;
-                            current = current with { SeasonPoster = result.Path ?? current.SeasonPoster }; entryArtworkFailed |= result.Failed;
+                            current = TmdbRetention.Record(current, current with { SeasonPoster = result.Path ?? current.SeasonPoster }, provider, "seasonPoster"); entryArtworkFailed |= result.Failed;
                         }
                         library.Save(current);
                         if (!LibraryIdentity.Locked(current, "EpisodePoster") && (replace || !ArtworkCache.IsUsable(current.EpisodePoster)) && first?.Image is { } episodeImage)
@@ -194,7 +196,7 @@ public static class SeriesMetadata
                             var afterImage = library.ByIds([current.Id]).FirstOrDefault();
                             if (afterImage is null || !AutomaticArtwork.SameFetchIdentity(current, afterImage)) { superseded = true; continue; }
                             current = afterImage;
-                            current = current with { EpisodePoster = result.Path ?? current.EpisodePoster }; entryArtworkFailed |= result.Failed;
+                            current = TmdbRetention.Record(current, current with { EpisodePoster = result.Path ?? current.EpisodePoster }, provider, "episodePoster"); entryArtworkFailed |= result.Failed;
                         }
                         groupArtworkFailed |= entryArtworkFailed;
                         library.Save(current with { MetadataFetchedAt = entryArtworkFailed ? 0 : Wire.Now });
@@ -249,7 +251,7 @@ public static class SeriesMetadata
                 Season = season.Number, Episode = episode.Number, EpisodeEnd = null, AbsoluteEpisode = null, EpisodeTitle = episode.Title,
                 EpisodeOverview = episode.Overview, SeasonTitle = season.Title, SeasonOverview = season.Overview, EpisodePoster = null,
                 AirDate = episode.AirDate, RuntimeMinutes = episode.Runtime, MetadataFetchedAt = Wire.Now }, provider, id, false);
-            library.Save(placeholder);
+            library.Save(TmdbRetention.Record(show, placeholder, provider, TmdbRetention.EpisodeFields));
         }
         library.RemoveVirtual(existing.Where(x => x.IsVirtual && !wanted.Contains(x.Id)).Select(x => x.Id));
     }

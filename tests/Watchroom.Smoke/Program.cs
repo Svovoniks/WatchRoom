@@ -6,6 +6,24 @@ using Watchroom.Core;
 using LibVLCSharp.Shared;
 using System.Diagnostics;
 
+if (args.FirstOrDefault() == "--tmdb-access")
+{
+    var checks = 0;
+    await TmdbAccessFixture.Run(Path.GetFullPath("artifacts/tmdb-access-" + Guid.NewGuid().ToString("N")), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} TMDB access and retention checks passed."); return;
+}
+
+if (args.FirstOrDefault() == "--tmdb-live-probe")
+{
+    if (!TmdbCredentials.HasBundledKey) throw new Exception("This build has no bundled credential.");
+    using var metadata = new MetadataClient(null);
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+    var matches = await metadata.SearchAsync("Azumanga Daioh", true, timeout.Token);
+    if (matches.Count == 0) throw new Exception("Bundled credential probe returned no matching titles.");
+    Console.WriteLine("PASS: bundled WatchRoom credential authenticates a live TMDB title search without a personal key."); return;
+}
+
 if (args.FirstOrDefault() == "--metadata-fixes")
 {
     var checks = 0;

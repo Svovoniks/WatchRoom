@@ -18,7 +18,7 @@ internal static class MetadataFetchPolicy
         PosterUsable = ArtworkCache.IsUsable(item.Poster), SeriesPosterUsable = ArtworkCache.IsUsable(item.SeriesPoster),
         SeasonPosterUsable = ArtworkCache.IsUsable(item.SeasonPoster), EpisodePosterUsable = ArtworkCache.IsUsable(item.EpisodePoster),
         options.ProviderOrder, options.Language, options.Country, options.RefreshDays,
-        Credential = LibraryIdentity.Hash(token?.Trim() ?? "")
+        Credential = LibraryIdentity.Hash(TmdbCredentials.Resolve(token) ?? "")
     }));
     public static bool Deferred(LibraryStore library, string stage, MediaItem[] entries, MetadataOptions options, string? token)
     {

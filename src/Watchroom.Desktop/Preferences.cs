@@ -85,7 +85,7 @@ public partial class MainWindow
             SavePreferencesButton.IsEnabled = CancelPreferencesButton.IsEnabled = false;
             PreferencesStatus.Text = "Changes apply when you save.";
             ClearPreferenceErrors();
-            MetadataKeyStatus.Text = savedMetadataToken.Length > 0 ? "Key saved securely." : "";
+            MetadataKeyStatus.Text = savedMetadataToken.Length > 0 ? "Personal key saved securely." : TmdbCredentials.DefaultStatus;
         }
         finally { loadingPreferences = false; }
     }
@@ -197,7 +197,7 @@ public partial class MainWindow
         preferencesBaseline = PreferenceSnapshot();
         SavePreferencesButton.IsEnabled = CancelPreferencesButton.IsEnabled = false;
         PreferencesStatus.Text = "Settings saved.";
-        MetadataKeyStatus.Text = savedMetadataToken.Length > 0 ? "Key saved securely." : "";
+        MetadataKeyStatus.Text = savedMetadataToken.Length > 0 ? "Personal key saved securely." : TmdbCredentials.DefaultStatus;
         return true;
     }
     private void SaveSettings(object sender, RoutedEventArgs e) => TrySavePreferences();

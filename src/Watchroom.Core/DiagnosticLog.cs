@@ -45,9 +45,15 @@ public sealed class DiagnosticLog : IAsyncDisposable
             Directory.CreateDirectory(DirectoryPath);
             var path = Path.Combine(DirectoryPath, "diagnostics.jsonl");
             FileStream Open() => new(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
+            PruneOldMetadata();
+            var retentionCheckedAt = Wire.Now;
             stream = Open();
             await foreach (var entry in entries.Reader.ReadAllAsync())
             {
+                if (Wire.Now - retentionCheckedAt > (long)TimeSpan.FromHours(1).TotalMilliseconds)
+                {
+                    await stream.DisposeAsync(); PruneOldMetadata(); stream = Open(); retentionCheckedAt = Wire.Now;
+                }
                 if (entry.Json is null)
                 {
                     try { await stream.FlushAsync(); }
@@ -74,6 +80,29 @@ public sealed class DiagnosticLog : IAsyncDisposable
         {
             if (stream is not null) { try { await stream.DisposeAsync(); } catch { } }
             while (entries.Reader.TryRead(out var entry)) entry.Flushed?.TrySetResult();
+        }
+    }
+    private void PruneOldMetadata()
+    {
+        var cutoff = Wire.Now - (long)TmdbRetention.MaximumAge.TotalMilliseconds;
+        foreach (var file in new DirectoryInfo(DirectoryPath).EnumerateFiles("diagnostics*.jsonl"))
+        {
+            var lines = File.ReadAllLines(file.FullName); var kept = new List<string>();
+            foreach (var line in lines)
+            {
+                try
+                {
+                    using var json = JsonDocument.Parse(line); var root = json.RootElement;
+                    if (root.TryGetProperty("kind", out var kind) && kind.GetString()?.StartsWith("metadata-", StringComparison.Ordinal) == true &&
+                        root.TryGetProperty("utcMs", out var at) && at.TryGetInt64(out var timestamp) && timestamp <= cutoff) continue;
+                }
+                catch (JsonException) { }
+                kept.Add(line);
+            }
+            if (kept.Count == lines.Length) continue;
+            var temporary = file.FullName + ".retention.tmp";
+            try { File.WriteAllLines(temporary, kept); File.Move(temporary, file.FullName, true); }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
     }
     public async ValueTask DisposeAsync() { entries.Writer.TryComplete(); await writer; }

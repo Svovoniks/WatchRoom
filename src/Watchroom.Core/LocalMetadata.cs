@@ -124,6 +124,7 @@ public static class LocalMetadata
     public static void Export(MediaItem item)
     {
         if (item.IsVirtual) return;
+        item = Wire.Read<MediaItem>(TmdbRetention.Expire(Wire.Serialize(item), long.MaxValue, out _));
         var episode = item.Series is not null;
         var root = new XElement(episode ? "episodedetails" : "movie");
         void Add(string key, object? value) { if (value is not null) root.Add(new XElement(key, value)); }

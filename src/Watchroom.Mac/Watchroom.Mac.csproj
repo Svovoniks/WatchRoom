@@ -7,6 +7,7 @@
     <RuntimeIdentifiers>osx-x64;osx-arm64;win-x64</RuntimeIdentifiers>
   </PropertyGroup>
   <ItemGroup>
+    <AvaloniaResource Include="../Watchroom.Desktop/Assets/Tmdb.png" Link="Assets/Tmdb.png"/>
     <ProjectReference Include="../Watchroom.Core/Watchroom.Core.csproj"/>
     <PackageReference Include="Avalonia.Desktop" Version="11.3.13"/>
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.13"/>

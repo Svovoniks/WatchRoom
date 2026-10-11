@@ -21,18 +21,18 @@ public sealed class EpisodeArtwork
         {
             // The exact matched episode URL also handles DVD/absolute numbering without guessing.
             var source = Regex.Match(item.EpisodeSource ?? "", @"^https://www\.themoviedb\.org/tv/(\d+)/season/(\d+)/episode/(\d+)$");
-            if (source.Success && options.ProviderOrder.Contains("tmdb") && !MetadataTitles.IsUnverifiedCompilation(item) && !string.IsNullOrWhiteSpace(token) &&
+            if (source.Success && options.ProviderOrder.Contains("tmdb") && !MetadataTitles.IsUnverifiedCompilation(item) && TmdbCredentials.Resolve(token) is not null &&
                 (!ArtworkCache.IsUsable(item.EpisodePoster) || item.EpisodePosterQualityPath != item.EpisodePoster))
             {
                 try
                 {
                     using var metadata = new MetadataClient(token, options: options);
                     var show = int.Parse(source.Groups[1].Value); var season = int.Parse(source.Groups[2].Value); var episode = int.Parse(source.Groups[3].Value);
-                    var details = await seasons.GetOrAdd($"{LibraryIdentity.Hash(token)}:{show}:{season}", _ => new(() => metadata.SeasonAsync(show, season, ct))).Value;
+                    var details = await seasons.GetOrAdd($"{LibraryIdentity.Hash(TmdbCredentials.Resolve(token)!)}:{show}:{season}", _ => new(() => metadata.SeasonAsync(show, season, ct))).Value;
                     if (details?.Episodes.FirstOrDefault(x => x.Number == episode)?.Image is { } image)
                     {
                         var path = await metadata.CacheImageAsync(image, $"tv-{show}-s{season}-e{episode}", Path.Combine(directory, "posters"), ct, imageSize: "w780");
-                        if (ArtworkCache.IsUsable(path)) return item with { EpisodePoster = path, EpisodePosterQualityPath = path };
+                        if (ArtworkCache.IsUsable(path)) return TmdbRetention.Record(item, item with { EpisodePoster = path, EpisodePosterQualityPath = path }, "tmdb", "episodePoster", "episodePosterQualityPath");
                     }
                 }
                 catch (Exception ex) when (ex is HttpRequestException or IOException or System.Text.Json.JsonException or OperationCanceledException && !ct.IsCancellationRequested) { }
@@ -48,7 +48,7 @@ public sealed class EpisodeArtwork
                     {
                         using var http = MetadataHttp.CreateClient();
                         var path = await AutomaticArtwork.Download(http, url, directory, ct);
-                        if (ArtworkCache.IsUsable(path)) return item with { EpisodePoster = path, EpisodePosterQualityPath = path };
+                        if (ArtworkCache.IsUsable(path)) return TmdbRetention.Record(item, item with { EpisodePoster = path, EpisodePosterQualityPath = path }, "tvmaze", "episodePoster", "episodePosterQualityPath");
                     }
                 }
                 catch (Exception ex) when (ex is HttpRequestException or IOException or System.Text.Json.JsonException or OperationCanceledException && !ct.IsCancellationRequested) { }

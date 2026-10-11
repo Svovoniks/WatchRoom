@@ -17,7 +17,7 @@ public static class MetadataIdentification
         using var scope = MetadataHttp.BeginScope(library, false, options);
         using var context = MetadataDiagnostics.BeginItem("identify", item);
         using var owned = client is null ? MetadataHttp.CreateClient() : null; var http = client ?? owned!;
-        using var ownedTmdb = metadata is null && !string.IsNullOrWhiteSpace(token) ? new MetadataClient(token, options: options) : null;
+        using var ownedTmdb = metadata is null && TmdbCredentials.Resolve(token) is not null ? new MetadataClient(token, options: options) : null;
         var tmdb = metadata ?? ownedTmdb;
         var matches = new List<MetadataMatch>(); var warnings = new List<string>();
         foreach (var provider in options.ProviderOrder)
@@ -112,7 +112,7 @@ public static class MetadataIdentification
                 SeasonSource = null, EpisodeSource = null
             };
         classified = AutomaticArtwork.MergeDetails(LibraryIdentity.WithProvider(classified with { ProviderIds = null, MetadataProvider = null, MetadataId = null }, match.Provider, match.Id), match);
-        return classified with
+        var result = classified with
         {
             Title = LibraryIdentity.Locked(item, "Title") ? item.Title : match.Title,
             Series = LibraryIdentity.Locked(item, "Title") && match.Type == "tv" ? item.Series ?? item.Title : classified.Series,
@@ -127,5 +127,6 @@ public static class MetadataIdentification
             Matched = true, ArtworkFetchedAt = poster is not null || keepArtwork && ArtworkCache.IsUsable(item.Poster) ? Wire.Now : 0,
             MetadataFetchedAt = 0
         };
+        return TmdbRetention.Record(item, result, match.Provider, TmdbRetention.TitleFields.Concat(TmdbRetention.PosterFields).ToArray());
     }
 }

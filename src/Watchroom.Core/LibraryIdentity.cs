@@ -5,8 +5,8 @@ using System.Text.RegularExpressions;
 namespace Watchroom.Core;
 
 public record LibraryShow(string Id, string Title, string Kind, int? Year, string? Poster, string? Overview,
-    Dictionary<string, string> ProviderIds, string NumberingOrder);
-public record LibrarySeason(string Id, string ShowId, int? Number, string? Title, string? Overview, string? Poster);
+    Dictionary<string, string> ProviderIds, string NumberingOrder, Dictionary<string, TmdbField>? TmdbFields = null);
+public record LibrarySeason(string Id, string ShowId, int? Number, string? Title, string? Overview, string? Poster, Dictionary<string, TmdbField>? TmdbFields = null);
 
 public static class LibraryIdentity
 {

@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace Watchroom.Core;
 
-public sealed class LibraryStore
+public sealed partial class LibraryStore
 {
     public event Action<MediaItem>? MediaSaved;
     private readonly string connection;
@@ -68,6 +68,12 @@ public sealed class LibraryStore
                 Save(item with { ArtworkFetchedAt = 0, MetadataFetchedAt = 0 });
             Setting("adaptation-confidence-version", "1");
         }
+        if (Setting("tmdb-retention-version") != "1")
+        {
+            foreach (var item in All()) Save(TmdbRetention.TrackLegacy(item));
+            Setting("tmdb-retention-version", "1");
+        }
+        ExpireTmdbContent(force: true);
     }
     private void RepairMetadataIdentity(string directory)
     {
@@ -234,6 +240,7 @@ public sealed class LibraryStore
     }
     public List<MediaItem> All()
     {
+        ExpireTmdbContent();
         using var db = Open(); using var c = db.CreateCommand(); c.CommandText = "SELECT json FROM media";
         using var rows = c.ExecuteReader(); var items = new List<MediaItem>();
         while (rows.Read()) items.Add(Wire.Read<MediaItem>(rows.GetString(0)));
@@ -249,6 +256,7 @@ public sealed class LibraryStore
         "LEFT JOIN seasons se ON se.id=json_extract(m.json, '$.seasonId') ";
     internal List<MediaItem> ByIds(IEnumerable<string> ids)
     {
+        ExpireTmdbContent();
         using var db = Open(); var result = new List<MediaItem>();
         foreach (var batch in ids.Distinct(StringComparer.Ordinal).Chunk(500))
         {
@@ -262,6 +270,7 @@ public sealed class LibraryStore
     }
     internal List<MediaItem> InShow(MediaItem show)
     {
+        ExpireTmdbContent();
         if (show.Series is null) return ByIds([show.Id]);
         using var db = Open(); using var command = db.CreateCommand();
         command.CommandText = MediaWithHierarchy + "WHERE json_extract(m.json, '$.showId')=$show";
@@ -295,19 +304,21 @@ public sealed class LibraryStore
             item = item with { Series = LibraryIdentity.Locked(item, "Title") ? item.Series : show.Title, Kind = show.Kind,
                 Year = LibraryIdentity.Locked(item, "Year") ? item.Year : show.Year, SeriesPoster = show.Poster ?? item.SeriesPoster,
                 Overview = LibraryIdentity.Locked(item, "Overview") ? item.Overview : show.Overview ?? item.Overview,
-                ProviderIds = ids, NumberingOrder = show.NumberingOrder };
+                ProviderIds = ids, NumberingOrder = show.NumberingOrder, TmdbFields = TmdbRetention.Merge(item.TmdbFields,
+                    TmdbRetention.Transfer(show.TmdbFields, ("title", "series"), ("kind", "kind"), ("year", "year"), ("poster", "seriesPoster"), ("overview", "overview"))) };
         }
         if (season is not null) item = item with
         {
             SeasonTitle = LibraryIdentity.Locked(item, "SeasonTitle") ? item.SeasonTitle : season.Title ?? item.SeasonTitle,
             SeasonOverview = LibraryIdentity.Locked(item, "SeasonOverview") ? item.SeasonOverview : season.Overview ?? item.SeasonOverview,
-            SeasonPoster = season.Poster ?? item.SeasonPoster
+            SeasonPoster = season.Poster ?? item.SeasonPoster, TmdbFields = TmdbRetention.Merge(item.TmdbFields,
+                TmdbRetention.Transfer(season.TmdbFields, ("title", "seasonTitle"), ("overview", "seasonOverview"), ("poster", "seasonPoster")))
         };
         return item;
     }
     public void Save(MediaItem item)
     {
-        item = LibraryIdentity.Ensure(item);
+        item = LibraryIdentity.Ensure(TmdbRetention.TrackLegacy(item));
         using var db = Open(); using var c = db.CreateCommand();
         using var transaction = db.BeginTransaction(); c.Transaction = transaction;
         using var prior = db.CreateCommand(); prior.Transaction = transaction;
@@ -321,8 +332,10 @@ public sealed class LibraryStore
         if (item.ShowId is { } showId && item.SeasonId is { } seasonId)
         {
             var show = new LibraryShow(showId, item.Series!, item.Kind, item.Year, item.SeriesPoster ?? item.Poster, item.Overview,
-                new Dictionary<string, string>(item.ProviderIds ?? []), item.NumberingOrder);
-            var season = new LibrarySeason(seasonId, showId, item.Season, item.SeasonTitle, item.SeasonOverview, item.SeasonPoster);
+                new Dictionary<string, string>(item.ProviderIds ?? []), item.NumberingOrder,
+                TmdbRetention.Transfer(item.TmdbFields, ("series", "title"), ("kind", "kind"), ("year", "year"), ("seriesPoster", "poster"), ("overview", "overview")));
+            var season = new LibrarySeason(seasonId, showId, item.Season, item.SeasonTitle, item.SeasonOverview, item.SeasonPoster,
+                TmdbRetention.Transfer(item.TmdbFields, ("seasonTitle", "title"), ("seasonOverview", "overview"), ("seasonPoster", "poster")));
             using var read = db.CreateCommand(); read.Transaction = transaction;
             read.CommandText = "SELECT json FROM shows WHERE id=$id"; read.Parameters.AddWithValue("$id", showId);
             if (read.ExecuteScalar() is string showJson && !identityChanged)
@@ -336,7 +349,8 @@ public sealed class LibraryStore
                     Year = previous is null || item.Year == previous.Year ? current.Year ?? show.Year : show.Year,
                     Overview = item.Overview is null || previous is not null && item.Overview == previous.Overview ? current.Overview ?? show.Overview : show.Overview,
                     Poster = show.Poster is null || previous is not null && show.Poster == (previous.SeriesPoster ?? previous.Poster) ? current.Poster ?? show.Poster : show.Poster,
-                    NumberingOrder = previous is null || item.NumberingOrder == previous.NumberingOrder ? current.NumberingOrder : show.NumberingOrder, ProviderIds = ids };
+                    NumberingOrder = previous is null || item.NumberingOrder == previous.NumberingOrder ? current.NumberingOrder : show.NumberingOrder, ProviderIds = ids,
+                    TmdbFields = TmdbRetention.Merge(current.TmdbFields, show.TmdbFields) };
             }
             read.CommandText = "SELECT json FROM seasons WHERE id=$id"; read.Parameters["$id"].Value = seasonId;
             if (read.ExecuteScalar() is string seasonJson && !identityChanged)
@@ -344,7 +358,7 @@ public sealed class LibraryStore
                 var current = Wire.Read<LibrarySeason>(seasonJson);
                 season = season with { Title = item.SeasonTitle is null || previous is not null && item.SeasonTitle == previous.SeasonTitle ? current.Title ?? season.Title : season.Title,
                     Overview = item.SeasonOverview is null || previous is not null && item.SeasonOverview == previous.SeasonOverview ? current.Overview ?? season.Overview : season.Overview,
-                    Poster = item.SeasonPoster is null || previous is not null && item.SeasonPoster == previous.SeasonPoster ? current.Poster ?? season.Poster : season.Poster };
+                    Poster = item.SeasonPoster is null || previous is not null && item.SeasonPoster == previous.SeasonPoster ? current.Poster ?? season.Poster : season.Poster, TmdbFields = TmdbRetention.Merge(current.TmdbFields, season.TmdbFields) };
             }
             using var hierarchy = db.CreateCommand(); hierarchy.Transaction = transaction;
             hierarchy.CommandText = "INSERT INTO shows VALUES($id,$json) ON CONFLICT(id) DO UPDATE SET json=$json; INSERT INTO seasons VALUES($season,$id,$seasonJson) ON CONFLICT(id) DO UPDATE SET json=$seasonJson;";
@@ -354,8 +368,8 @@ public sealed class LibraryStore
         transaction.Commit();
         MediaSaved?.Invoke(item);
     }
-    public List<LibraryShow> Shows() => ReadHierarchy<LibraryShow>("shows");
-    public List<LibrarySeason> Seasons() => ReadHierarchy<LibrarySeason>("seasons");
+    public List<LibraryShow> Shows() { ExpireTmdbContent(); return ReadHierarchy<LibraryShow>("shows"); }
+    public List<LibrarySeason> Seasons() { ExpireTmdbContent(); return ReadHierarchy<LibrarySeason>("seasons"); }
     public void RemoveVirtual(IEnumerable<string> ids)
     {
         using var db = Open(); using var transaction = db.BeginTransaction();

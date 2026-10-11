@@ -53,6 +53,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private readonly DispatcherTimer videoClickDelay = new();
     private int videoClickGeneration;
+    private readonly DispatcherTimer metadataRetentionTimer = new() { Interval = TimeSpan.FromHours(1) };
     private readonly DispatcherTimer scanDelay = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly SemaphoreSlim loading = new(1);
     private readonly SemaphoreSlim librarySearchGate = new(1);
@@ -156,6 +157,9 @@ public partial class MainWindow : Window
         LoadSavedRooms(); RefreshQueuePickers();
         if (int.TryParse(library.Setting("volume"), out var savedVolume)) Volume.Value = Math.Clamp(savedVolume, 0, 100);
         timer.Tick += (_, _) => PlaybackTick(); timer.Start();
+        metadataRetentionTimer.Tick += async (_, _) => await Guard(async () =>
+        { if (await Task.Run(() => library.ExpireTmdbContent())) RefreshLibrary(); });
+        metadataRetentionTimer.Start();
         scanDelay.Tick += async (_, _) => { scanDelay.Stop(); if (!scanning) await Guard(Scan); };
         Loaded += async (_, _) =>
         {
@@ -670,6 +674,8 @@ public partial class MainWindow : Window
     {
         await Guard(() => FetchArtwork(lifetime.Token, refresh: (MetadataRefresh)MetadataRefreshMode.SelectedIndex));
     }
+    private void OpenTmdbAttribution(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+    { Process.Start(new ProcessStartInfo("https://www.themoviedb.org") { UseShellExecute = true }); e.Handled = true; }
     private bool SaveMetadataToken()
     {
         if (MetadataToken.Password == savedMetadataToken) return true;
@@ -685,7 +691,7 @@ public partial class MainWindow : Window
     private void MetadataKeyChanged(object sender, RoutedEventArgs e)
     {
         PreferencesChanged(sender, e);
-        MetadataKeyStatus.Text = MetadataToken.Password != savedMetadataToken ? "Unsaved key." : savedMetadataToken.Length > 0 ? "Key saved securely." : "";
+        MetadataKeyStatus.Text = MetadataToken.Password != savedMetadataToken ? "Unsaved key." : savedMetadataToken.Length > 0 ? "Personal key saved securely." : TmdbCredentials.DefaultStatus;
     }
     private Task FetchArtwork() => FetchArtwork(lifetime.Token);
     private async Task FetchArtwork(CancellationToken cancellation, bool force = false, MetadataRefresh? refresh = null)
@@ -1719,7 +1725,7 @@ public partial class MainWindow : Window
     {
         if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop(); videoClickDelay.Stop();
         disconnectToast?.Close();
-        guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
+        guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); metadataRetentionTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
         library.Setting("volume", ((int)Volume.Value).ToString());
         await Task.Yield(); // Let WPF finish the first Closing event before calling Close again.
         foreach (var watcher in watchers) watcher.Dispose();

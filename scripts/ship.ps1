@@ -34,9 +34,12 @@ function Assert-ShipPath {
     param([string]$Root, [string]$Path)
     $absolute = [IO.Path]::GetFullPath($Path, $Root)
     $relative = [IO.Path]::GetRelativePath($Root, $absolute).Replace('\', '/')
+    # This approved attribution asset belongs to the app, unlike local reports
+    # and generated media. Keep the exception to this one exact source path.
+    $attributionLogo = $relative -ceq 'src/Watchroom.Desktop/Assets/Tmdb.png'
     if ($relative -match '^\.\.(?:/|$)' -or [IO.Path]::IsPathRooted($relative) -or
         $relative -match '(^|/)(sites|artifacts|\.tools|\.nuget|bin|obj|node_modules|data|logs|credentials)(/|$)' -or
-        $relative -match '(?i)(^|/)(\.env[^/]*|.*\.(html?|png|jpe?g|mp4|mkv|sqlite|db|pfx|pem|key))$' -or
+        ($relative -match '(?i)(^|/)(\.env[^/]*|.*\.(html?|png|jpe?g|mp4|mkv|sqlite|db|pfx|pem|key))$' -and !$attributionLogo) -or
         $relative -notmatch '^(src/|tests/|scripts/|packaging/|\.github/workflows/|[^/]+\.(md|props|targets|slnx|ps1)|NuGet\.Config$|global\.json$)') {
         throw "Not a release source path: $Path"
     }
@@ -203,7 +206,7 @@ try {
             Invoke-Native $Sdk @('restore', 'Watchroom.slnx', '--locked-mode', "-p:RestorePackagesPath=$packagePath")
             Invoke-Native $Sdk @('build', 'Watchroom.slnx', '-c', 'Release', '--no-restore', "-p:RestorePackagesPath=$packagePath")
             Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.UpdateChecks', '-c', 'Release', '--no-build')
-            foreach ($check in @('--metadata-cache', '--shared-library')) {
+            foreach ($check in @('--metadata-cache', '--tmdb-access', '--shared-library')) {
                 Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', $check)
             }
             Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build')

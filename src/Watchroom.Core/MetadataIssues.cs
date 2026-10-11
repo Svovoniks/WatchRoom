@@ -28,7 +28,8 @@ internal static class MetadataIssues
         internal State(LibraryStore library)
         {
             Library = library;
-            try { issues = (library.Setting("metadata-outstanding-v2") is { } json ? Wire.Read<Issue[]>(json) : []).ToDictionary(i => i.Key); }
+            try { issues = (library.Setting("metadata-outstanding-v2") is { } json ? Wire.Read<Issue[]>(json) : [])
+                .Where(i => i.At > Wire.Now - (long)TmdbRetention.MaximumAge.TotalMilliseconds).ToDictionary(i => i.Key); }
             catch (JsonException) { issues = []; }
         }
         private static string Key(string stage, MediaItem item) => stage + ":" + (stage.EndsWith("artwork") ? item.Id : LibraryIdentity.ShowKey(item));

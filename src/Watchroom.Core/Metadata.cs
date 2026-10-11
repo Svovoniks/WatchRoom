@@ -18,11 +18,12 @@ public sealed class MetadataClient : IDisposable
     private readonly HttpMessageHandler? imageHandler;
     private readonly MetadataOptions options;
     private readonly string? apiKey;
-    public MetadataClient(string token, HttpMessageHandler? handler = null, MetadataOptions? options = null)
+    public MetadataClient(string? token, HttpMessageHandler? handler = null, MetadataOptions? options = null)
     {
         http = handler is null ? new HttpClient() : new HttpClient(handler, false);
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("Watchroom/0.3 (+https://github.com/Svovoniks/WatchRoom; metadata)");
         http.BaseAddress = new Uri("https://api.themoviedb.org/3/"); http.Timeout = TimeSpan.FromSeconds(20);
-        token = token.Trim();
+        token = TmdbCredentials.Resolve(token) ?? throw new InvalidOperationException("TMDB is unavailable in this build without a user key.");
         if (System.Text.RegularExpressions.Regex.IsMatch(token, "^[a-fA-F0-9]{32}$")) apiKey = token;
         else if (token.Length > 0) http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         imageHandler = handler;
@@ -197,7 +198,7 @@ public sealed class MetadataClient : IDisposable
         if (key.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || key.Contains("..")) throw new ArgumentException("Invalid image cache key.");
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, key + "-" + imageSize + "-" + LibraryIdentity.Hash(image)[..12] + (replace ? "-" + Guid.NewGuid().ToString("N") : "") + ".jpg");
-        if (replace || !ArtworkCache.IsUsable(path))
+        if (replace || !ArtworkCache.IsUsable(path) || File.GetLastWriteTimeUtc(path) <= DateTime.UtcNow - TmdbRetention.MaximumAge)
         {
             // Separate client: never send the API authorization token to the image CDN.
             using var images = imageHandler is null ? MetadataHttp.CreateClient() : new HttpClient(imageHandler, false);

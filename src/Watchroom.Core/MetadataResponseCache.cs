@@ -12,9 +12,17 @@ internal sealed class MetadataResponseCache(string? directory = null, bool fresh
     private readonly ConcurrentDictionary<string, SemaphoreSlim> pending = new();
     private readonly TimeProvider time = clock ?? TimeProvider.System;
     private int writes;
+    private bool pruned;
     public async Task<string> Get(HttpClient http, string url, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        if (!pruned && directory is not null && Directory.Exists(directory))
+        {
+            try { Prune(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            { MetadataDiagnostics.Record("metadata-cache-failure", new { Operation = "prune", Error = MetadataDiagnostics.Error(ex) }); }
+            pruned = true;
+        }
         var aliasResponse = url.Contains("/alternative_titles", StringComparison.Ordinal) || new Uri(url).AbsolutePath.EndsWith("/akas");
         var key = LibraryIdentity.Hash(url + "\n" + http.DefaultRequestHeaders.Authorization + "\n" + variant);
         var gate = pending.GetOrAdd(key, _ => new(1));

@@ -37,7 +37,7 @@ Multi-episode files such as `S01E03-E04` store a range and combine episode title
 
 ## Matching and providers
 
-Settings controls provider order (`tmdb, tvmaze, wikipedia`), language, country, and the refresh interval. Empty provider order disables remote metadata. TMDB requires the user's API read access token, kept for the session. A failure or unresolved match allows the next enabled provider to run. Fallback retains other provider IDs and a manually selected primary identity.
+Settings controls provider order (`tmdb, tvmaze, wikipedia`), language, country, and the refresh interval. Empty provider order disables remote metadata. Packaged builds include WatchRoom’s application credential. An optional personal key overrides it; Windows stores that override in Credential Manager, while Mac keeps it for the session. Developers can build without the bundled credential and supply their own key. Bundled credentials are extractable from binaries. A failure or unresolved match allows the next enabled provider to run. Fallback retains other provider IDs and a manually selected primary identity.
 
 TMDB searches consider localized and original titles, exact/prefix title similarity, and exact/adjacent release years. Weak and tied candidates require a manual match. IMDb/TVDB IDs can identify a TMDB show or movie; TVmaze can identify shows through IMDb/TVDB IDs. Anime alias lookup is available to both TMDB and TVmaze through the locally cached AniDB title index. Movie/show ambiguity remains unresolved.
 
@@ -107,3 +107,11 @@ Metadata events include fetch start/completion, title search aliases, missing fi
 `dotnet run --project tests/Watchroom.Smoke -- --grouping-audit` reproduces the audited failures against fresh and historical records, including repeated rescans, backups, repair logs, queue IDs, manual matches, locks, extras, and movie/TV ambiguity.
 
 `dotnet run --project tests/Watchroom.Smoke -c Release -- --metadata-fixes` replays punctuation, Russian language links, remakes, ranges, bonus content, WebP, image budgets/dimensions, redirects, isolated asset failures, image-only retry, keyless identification and retained cooldown issues. `dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --metadata-picker` verifies the Windows picker layout, explicit selection and asynchronous preview behavior.
+
+## TMDB attribution, builds and retention
+
+Windows About and Mac Settings include the official TMDB logo, source link and non-endorsement notice. Builds embed a key from an external UTF-8 file specified by `WATCHROOM_TMDB_KEY_FILE` (or MSBuild `WatchroomTmdbKeyFile`); never commit that file. GitHub packaging uses the `WATCHROOM_TMDB_API_KEY` repository secret, only in trusted non-PR publish steps. A missing packaging secret fails the build rather than producing an installer without default metadata access.
+
+TMDB-derived fields retain provenance and their previous local values. After 175 days they revert to those local values; independently changed fields and other providers are preserved. Downloaded TMDB artwork expires by file age and is fetched again when needed. Cleanup runs at startup, during library reads and hourly while either desktop client is running, even with fetching disabled or offline. Locks do not extend retention. Older library records acquire conservative provenance from their provider/source and original filename; unknown fetch dates expire immediately. The short-lived HTTP response cache is pruned locally without requiring a fetch. Repair backups keep local records while expiring their TMDB fields. Old generated reports, outstanding issues and metadata diagnostic entries also expire.
+
+NFO export excludes tracked TMDB content so exported snapshots do not become permanent local copies. Existing user-supplied NFOs remain authoritative. TMDB’s classification of this project and approval of its application credential remain separate from these implementation checks.
