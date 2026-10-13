@@ -66,6 +66,118 @@ function Stage-ShipSources {
     $existing = @($Selected | Where-Object { Test-Path -LiteralPath (Join-Path $Root $_) -PathType Leaf })
     if ($existing.Count) { Invoke-Native git (@('-C', $Root, 'add', '--') + $existing) }
 }
+function Get-SyncTree {
+    param([string]$Root, [string]$Base, [string]$Master, [string]$Local)
+    $merge = @(Invoke-Native git @('-C', $Root, 'merge-tree', '--write-tree', '--no-messages', "--merge-base=$Base", $Master, $Local))
+    if (!$merge.Count -or $merge[0] -notmatch '^[a-f0-9]{40,64}$') { throw 'Git did not return a merged tree for local work.' }
+    return $merge[0]
+}
+function Assert-SyncUntracked {
+    param([string]$Root, [string]$Head, [string]$Backup, [string[]]$Paths, [string[]]$Selected)
+    foreach ($path in $Paths) {
+        & git -C $Root cat-file -e "${Head}:$path" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $Selected -notcontains $path) {
+            $saved = Join-Path (Join-Path $Backup 'untracked') $path
+            $savedHash = (Invoke-Native git @('-C', $Root, 'hash-object', "--path=$path", '--', $saved)).Trim()
+            $remoteHash = (Invoke-Native git @('-C', $Root, 'rev-parse', "${Head}:$path")).Trim()
+            if ($savedHash -cne $remoteHash) { throw "Untracked file conflicts with master: $path" }
+        }
+    }
+}
+function Sync-ShippedMaster {
+    param([string]$Root, [string]$PublishedCommit, [string]$Destination, [string[]]$Selected = @())
+    Invoke-Native git @('-C', $Root, 'fetch', '--no-recurse-submodules', 'origin', 'master') | Out-Null
+    $remoteHead = (Invoke-Native git @('-C', $Root, 'rev-parse', 'origin/master')).Trim()
+    Invoke-Native git @('-C', $Root, 'merge-base', '--is-ancestor', $PublishedCommit, $remoteHead) | Out-Null
+    # A ship command can run in a detached/feature checkout. Update the checkout
+    # that actually owns master, without switching or rewriting another branch.
+    $masterRoot = $null; $candidate = $null
+    foreach ($line in @(Invoke-Native git @('-C', $Root, 'worktree', 'list', '--porcelain'))) {
+        if ($line.StartsWith('worktree ')) { $candidate = $line.Substring(9) }
+        elseif ($line -ceq 'branch refs/heads/master') { $masterRoot = $candidate }
+    }
+    if (!$masterRoot) {
+        & git -C $Root show-ref --verify --quiet refs/heads/master
+        if ($LASTEXITCODE -eq 0) {
+            Invoke-Native git @('-C', $Root, 'merge-base', '--is-ancestor', 'master', $remoteHead) | Out-Null
+        }
+        elseif ($LASTEXITCODE -ne 1) { throw 'Could not inspect local master.' }
+        Invoke-Native git @('-C', $Root, 'fetch', '--no-recurse-submodules', 'origin', 'master:master') | Out-Null
+        $syncedHead = (Invoke-Native git @('-C', $Root, 'rev-parse', 'master')).Trim()
+        Invoke-Native git @('-C', $Root, 'merge-base', '--is-ancestor', $PublishedCommit, $syncedHead) | Out-Null
+        return @{ Commit = $syncedHead; Checkout = $null; RecoveryStash = $null }
+    }
+    $masterRoot = [IO.Path]::GetFullPath($masterRoot)
+    $base = (Invoke-Native git @('-C', $masterRoot, 'rev-parse', 'HEAD')).Trim()
+    Invoke-Native git @('-C', $masterRoot, 'merge-base', '--is-ancestor', $base, $remoteHead) | Out-Null
+    $dirty = @(Invoke-Native git @('-C', $masterRoot, 'status', '--porcelain', '--ignore-submodules=all'))
+    $staged = @(Invoke-Native git @('-C', $masterRoot, 'diff', '--cached', '--name-only', '--ignore-submodules=none'))
+    $stash = $null; $restored = $false
+    $untracked = @(); $backup = Join-Path $Destination 'local-master-sync'
+    try {
+        if ($dirty.Count -or $staged.Count) {
+            New-Item -ItemType Directory -Path $backup -Force | Out-Null
+            # Save raw untracked bytes as well as Git's recovery snapshot. This
+            # also handles new release files that already exist after the pull.
+            $names = (Invoke-Native git @('-C', $masterRoot, 'ls-files', '--others', '--exclude-standard', '-z')) -join "`n"
+            $untracked = @($names.Split([char]0, [StringSplitOptions]::RemoveEmptyEntries))
+            foreach ($path in $untracked) {
+                $source = [IO.Path]::GetFullPath($path, $masterRoot)
+                if (!$source.StartsWith($masterRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Untracked path is outside the master checkout.' }
+                $item = Get-Item -LiteralPath $source
+                if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Cannot safely snapshot untracked link: $path" }
+                $saved = Join-Path (Join-Path $backup 'untracked') $path
+                New-Item -ItemType Directory -Path (Split-Path -Parent $saved) -Force | Out-Null
+                Copy-Item -LiteralPath $source -Destination $saved
+            }
+            Invoke-Native git @('-C', $masterRoot, 'stash', 'push', '--include-untracked', '-m', "Before syncing verified release $PublishedCommit") | Out-Null
+            $stash = (Invoke-Native git @('-C', $masterRoot, 'rev-parse', 'stash@{0}')).Trim()
+            $stash | Set-Content -LiteralPath (Join-Path $backup 'recovery-stash.txt')
+            # Merge worktree and index independently: unrelated staged edits stay
+            # staged, and already-shipped edits disappear instead of reappearing.
+            $workTree = Get-SyncTree $masterRoot $base $remoteHead $stash
+            $indexTree = Get-SyncTree $masterRoot $base $remoteHead "$stash^2"
+            Assert-SyncUntracked $masterRoot $remoteHead $backup $untracked $Selected
+        }
+        Invoke-Native git @('-C', $masterRoot, 'pull', '--ff-only', '--no-recurse-submodules', 'origin', 'master') | Out-Null
+        $syncedHead = (Invoke-Native git @('-C', $masterRoot, 'rev-parse', 'HEAD')).Trim()
+        if ($stash) {
+            # Account for master advancing again between preflight and the pull.
+            if ($syncedHead -cne $remoteHead) {
+                $workTree = Get-SyncTree $masterRoot $base $syncedHead $stash
+                $indexTree = Get-SyncTree $masterRoot $base $syncedHead "$stash^2"
+                Assert-SyncUntracked $masterRoot $syncedHead $backup $untracked $Selected
+            }
+            Invoke-Native git @('-C', $masterRoot, 'restore', "--source=$workTree", '--staged', '--worktree', '--', '.') | Out-Null
+            Invoke-Native git @('-C', $masterRoot, 'read-tree', $indexTree) | Out-Null
+            foreach ($path in $untracked) {
+                $saved = Join-Path (Join-Path $backup 'untracked') $path
+                $target = Join-Path $masterRoot $path
+                # For selected new source files, retain any edits made while the
+                # release was building as a worktree diff against the new master.
+                if (!(Test-Path -LiteralPath $target) -or $Selected -contains $path) {
+                    New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+                    Copy-Item -LiteralPath $saved -Destination $target
+                }
+            }
+            $restored = $true
+        }
+        Invoke-Native git @('-C', $masterRoot, 'merge-base', '--is-ancestor', $PublishedCommit, 'HEAD') | Out-Null
+        return @{ Commit = $syncedHead; Checkout = $masterRoot; RecoveryStash = $stash }
+    }
+    catch {
+        $failure = $_
+        # Preflight/network failures before advancing master can restore the exact
+        # original index and worktree. Keep the stash even after a successful sync.
+        $restoreFailure = ''
+        if ($stash -and !$restored -and (Invoke-Native git @('-C', $masterRoot, 'rev-parse', 'HEAD')).Trim() -ceq $base) {
+            try { Invoke-Native git @('-C', $masterRoot, 'stash', 'apply', '--index', $stash) | Out-Null }
+            catch { $restoreFailure = " Automatic restoration also failed: $_" }
+        }
+        $recovery = if ($stash) { " Local work is saved in stash $stash and $backup." } else { '' }
+        throw "Local master synchronization failed: $failure$recovery$restoreFailure"
+    }
+}
 function Assert-ReleaseMetadata {
     param($Release, [string]$ExpectedVersion)
     if ($Release.tag_name -cne "v$ExpectedVersion" -or $Release.draft -or $Release.prerelease) {
@@ -217,7 +329,7 @@ try {
                 Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', $check)
             }
             Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build')
-            foreach ($check in @('--home', '--ui-findings', '--guest-library-layout', '--host-library-browse', '--player-layout')) {
+            foreach ($check in @('--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout')) {
                 Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build', '--', $check)
             }
             # Some nested metadata fixtures also create long SQLite backup filenames.
@@ -240,12 +352,16 @@ try {
     $result.Actions = $run.html_url
     $result.Commit = $commit
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $record 'verified.json')
+    try { $result.LocalMaster = Sync-ShippedMaster $root $commit $record $selected }
+    catch { throw "Release v$Version is publicly verified, but local master was not synchronized. $_" }
+    $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $record 'verified.json')
     if ($checkout) { Invoke-Native git @('worktree', 'remove', $checkout) }
     $outcome = if ($VerifyOnly) { 'Verified existing release' } else { 'Shipped' }
     Write-Host "$outcome Watchroom ${Version}: $($result.Release)"
     Write-Host "Actions: $($run.html_url)"
     Write-Host "Verified SHA-256: $($result.Sha256)"
     Write-Host "Verification record: $record"
+    Write-Host "Local master synchronized: $($result.LocalMaster.Commit)"
 }
 catch {
     if ($checkout) { Write-Warning "Release checkout retained at $checkout. If the tag was pushed, recheck with -VerifyOnly -Version $Version. Never move a published tag." }

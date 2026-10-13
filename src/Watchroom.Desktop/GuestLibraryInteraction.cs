@@ -40,6 +40,7 @@ public partial class MainWindow
         selected = card.Media; ShowPage("Details"); UpdateHostBreadcrumbs();
         DetailTitle.Text = card.DisplayTitle; DetailMeta.Text = card.Caption; DetailContext.Text = HostLibraryName;
         DetailSummary.Text = card.Media.Overview ?? ""; DetailFile.Text = "";
+        DetailAvailability.Visibility = Visibility.Collapsed;
         DetailPlay.Content = "Play in room"; DetailPlay.IsEnabled = OwnsLibrary;
         DetailHost.Visibility = DetailQueue.Visibility = RestartButton.Visibility = DetailRemove.Visibility = Visibility.Collapsed;
         Episodes.Visibility = Visibility.Collapsed; DetailPoster.Source = null;

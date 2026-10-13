@@ -37,7 +37,8 @@ public sealed class RoomLibraryWindow : Window
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(120) };
     private readonly Dictionary<string, ImageSource?> posters = new();
     private readonly List<Button> authorizedQueueButtons = [];
-    private Button play = null!, add = null!, next = null!;
+    private Button play = null!, add = null!, next = null!, previousPage = null!, nextPage = null!;
+    private Button? applyPermissions;
     private int page, columns = 1, rows = 1;
     private long sequence;
     private long lastViewAt;
@@ -70,15 +71,21 @@ public sealed class RoomLibraryWindow : Window
         }
         search.ToolTip = "Search shared titles";
         System.Windows.Automation.AutomationProperties.SetName(search, "Search shared titles");
+        System.Windows.Automation.AutomationProperties.SetName(category, "Shared library category");
+        System.Windows.Automation.AutomationProperties.SetName(season, "Shared library season");
         var filters = new WrapPanel(); filters.Children.Add(search); filters.Children.Add(category); filters.Children.Add(season); top.Children.Add(filters);
         foreach (var value in new[] { "All titles", "Movie", "Show", "Anime" }) category.Items.Add(value); category.SelectedIndex = 0;
         season.Items.Add("All seasons"); season.SelectedIndex = 0;
         var bottom = new StackPanel(); DockPanel.SetDock(bottom, Dock.Bottom); browser.Children.Add(bottom);
-        var paging = new WrapPanel(); paging.Children.Add(Button("Previous page", () => { page = Math.Max(0, page - 1); dirty = true; })); paging.Children.Add(pageLabel);
-        paging.Children.Add(Button("Next page", () => { page++; dirty = true; })); bottom.Children.Add(paging);
+        previousPage = Button("Previous page", () => { page = Math.Max(0, page - 1); dirty = true; });
+        nextPage = Button("Next page", () => { page++; dirty = true; });
+        pageLabel.VerticalAlignment = VerticalAlignment.Center; pageLabel.Margin = new Thickness(8, 0, 8, 0);
+        var paging = new WrapPanel(); paging.Children.Add(previousPage); paging.Children.Add(pageLabel);
+        paging.Children.Add(nextPage); bottom.Children.Add(paging);
         bottom.Children.Add(detail);
         var actions = new WrapPanel(); add = Button("Add to queue", () => Command("add", selected)); play = Button("Play now", PlayNow);
         actions.Children.Add(add); actions.Children.Add(play); bottom.Children.Add(actions);
+        play.SetResourceReference(StyleProperty, "Primary");
         viewport.Children.Add(grid); browser.Children.Add(viewport);
         tabs.Items.Add(new TabItem { Header = "Host library", Content = browser });
         search.TextChanged += (_, _) => { page = 0; dirty = true; };
@@ -93,11 +100,13 @@ public sealed class RoomLibraryWindow : Window
         next = Button("Start next", () => Command("next")); queueActions.Children.Add(next);
         if (host) queueActions.Children.Add(Button("Undo queue edit", () => Command("undo")));
         queuePanel.Children.Add(queue); tabs.Items.Add(new TabItem { Header = "Queue", Content = queuePanel });
+        queue.SelectionChanged += (_, _) => RefreshActions();
         if (host)
         {
             var hostPanel = new DockPanel(); var settings = new StackPanel(); DockPanel.SetDock(settings, Dock.Top); hostPanel.Children.Add(settings);
-            settings.Children.Add(Button("Choose shared collections", ChooseCollections));
-            guests.ToolTip = "Choose an admitted guest. Permission changes apply immediately.";
+            var collections = Button("Choose shared collections", ChooseCollections); collections.HorizontalAlignment = HorizontalAlignment.Left;
+            settings.Children.Add(collections);
+            guests.ToolTip = "Choose an admitted guest, then choose Apply permissions to save.";
             System.Windows.Automation.AutomationProperties.SetName(guests, "Guest permissions");
             var permissions = new WrapPanel(); permissions.Children.Add(guests);
             foreach (var permission in new[] { browse, edit, start })
@@ -105,10 +114,10 @@ public sealed class RoomLibraryWindow : Window
                 permission.Margin = new Thickness(0, 4, 12, 4);
                 permissions.Children.Add(permission);
             }
-            permissions.Children.Add(Button("Apply permissions", () =>
+            applyPermissions = Button("Apply permissions", () =>
             {
                 if (guests.SelectedItem is GuestChoice guest) session.SetAccess(guest.Id, new(browse.IsChecked == true, edit.IsChecked == true, start.IsChecked == true));
-            })); settings.Children.Add(permissions);
+            }); permissions.Children.Add(applyPermissions); settings.Children.Add(permissions);
             guests.SelectionChanged += (_, _) => LoadAccess();
             previewScroll.Content = previews; hostPanel.Children.Add(previewScroll);
             tabs.Items.Add(new TabItem { Header = "Guest views & access", Content = hostPanel });
@@ -144,8 +153,6 @@ public sealed class RoomLibraryWindow : Window
     {
         var selectedEntry = (queue.SelectedItem as RoomQueueEntry)?.Id;
         queue.ItemsSource = session.Queue.Entries; queue.SelectedItem = session.Queue.Entries.FirstOrDefault(e => e.Id == selectedEntry);
-        add.IsEnabled = host || session.OwnAccess.Queue; play.IsEnabled = host || session.OwnAccess.Start; next.IsEnabled = play.IsEnabled;
-        foreach (var button in authorizedQueueButtons) button.IsEnabled = add.IsEnabled;
         if (!host && !session.OwnAccess.Browse) { selected = hovered = null; detail.Text = "Waiting for the host to share collections and grant browsing access."; }
         if (host)
         {
@@ -155,9 +162,29 @@ public sealed class RoomLibraryWindow : Window
             { guests.ItemsSource = admitted; guests.SelectedItem = admitted.FirstOrDefault(p => p.Id == current) ?? admitted.FirstOrDefault(); }
             LoadAccess();
         }
+        RefreshActions();
+    }
+    private void RefreshActions()
+    {
+        if (add is null || next is null) return;
+        var canEdit = host || session.OwnAccess.Queue;
+        var canStart = host || session.OwnAccess.Start;
+        add.IsEnabled = canEdit && selected is not null && session.Catalog.ContainsKey(selected);
+        play.IsEnabled = canStart && selected is not null && session.Catalog.ContainsKey(selected);
+        next.IsEnabled = canStart && session.Queue.Entries.Length > 0;
+        foreach (var button in authorizedQueueButtons)
+            button.IsEnabled = canEdit && button.Content?.ToString() switch
+            {
+                "Clear" => session.Queue.Entries.Length > 0,
+                "Move up" => queue.SelectedIndex > 0,
+                "Move down" => queue.SelectedIndex >= 0 && queue.SelectedIndex < session.Queue.Entries.Length - 1,
+                _ => queue.SelectedIndex >= 0
+            };
     }
     private void LoadAccess()
     {
+        browse.IsEnabled = edit.IsEnabled = start.IsEnabled = guests.SelectedItem is GuestChoice;
+        if (applyPermissions is not null) applyPermissions.IsEnabled = browse.IsEnabled;
         var access = guests.SelectedItem is GuestChoice p ? session.Access.GetValueOrDefault(p.Id, new()) : new();
         var key = (guests.SelectedItem as GuestChoice)?.Id + Wire.Serialize(access);
         if (key == accessSignature) return; accessSignature = key;
@@ -213,6 +240,8 @@ public sealed class RoomLibraryWindow : Window
             (category.SelectedIndex == 0 || i.Kind == category.SelectedItem?.ToString()) &&
             (selectedSeason == "All seasons" || selectedSeason == "Season " + i.Season)).ToArray();
         var count = columns * rows; var pages = Math.Max(1, (filtered.Length + count - 1) / count); page = Math.Clamp(page, 0, pages - 1);
+        previousPage.IsEnabled = page > 0; nextPage.IsEnabled = page < pages - 1;
+        RefreshActions();
         var entries = filtered.Skip(page * count).Take(count).ToArray(); visible = entries.Select(i => i.Id).ToArray();
         pageLabel.Text = $"Page {page + 1} / {pages} · {filtered.Length} titles · {columns} × {rows}";
         var key = Wire.Serialize(new { session.Generation, columns, rows, visible, Width = Math.Round(viewport.ActualWidth), Height = Math.Round(viewport.ActualHeight) });
@@ -222,7 +251,7 @@ public sealed class RoomLibraryWindow : Window
         {
             var card = Card(item, false); var button = new Button { Tag = item.Id, Content = card, Padding = new Thickness(0), Margin = new Thickness(3), BorderThickness = new Thickness(0), Background = Brushes.Transparent, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
             card.Height = Math.Max(70, viewport.ActualHeight / rows - 18);
-            button.Click += (_, _) => { selected = item.Id; detail.Text = item.Title + " · " + item.Caption + "\n" + item.Overview; dirty = true; };
+            button.Click += (_, _) => { selected = item.Id; detail.Text = item.Title + " · " + item.Caption + "\n" + item.Overview; dirty = true; RefreshActions(); };
             button.MouseEnter += (_, _) => { hovered = item.Id; card.BorderBrush = Brushes.Gold; card.BorderThickness = new Thickness(3); };
             button.MouseLeave += (_, _) => { if (hovered == item.Id) hovered = null; card.BorderBrush = selected == item.Id ? Brushes.DeepSkyBlue : Brushes.Transparent; card.BorderThickness = new Thickness(3); };
             grid.Children.Add(button);
@@ -234,7 +263,7 @@ public sealed class RoomLibraryWindow : Window
         var panel = new Grid(); panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var poster = Poster(item);
         if (poster is not null) panel.Children.Add(new Image { Source = poster, Stretch = Stretch.Uniform });
-        else panel.Children.Add(new TextBlock { Text = "◉", FontSize = 35, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+        else panel.Children.Add(new TextBlock { Text = "\uE714", FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 30, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
         var title = new TextBlock { Text = item.Title + "\n" + item.Caption, TextWrapping = TextWrapping.Wrap, MaxHeight = 65, Margin = new Thickness(4), FontSize = preview ? 12 : 13 }; Grid.SetRow(title, 1); panel.Children.Add(title);
         var card = new Border { Child = panel, Padding = new Thickness(3), Margin = new Thickness(2), BorderThickness = new Thickness(3), BorderBrush = hover ? Brushes.Gold : chosen || selected == item.Id && !preview ? Brushes.DeepSkyBlue : Brushes.Transparent };
         card.SetResourceReference(BackgroundProperty, "Elevated"); return card;

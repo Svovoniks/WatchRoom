@@ -66,6 +66,9 @@ public partial class MainWindow
         var playable = saved is not null && ResolveQueue(saved).Any(x => x.Available && File.Exists(x.Path));
         PlaySavedQueueButton.IsEnabled = canEdit && playable;
         PlaySelectedSavedQueueButton.IsEnabled = canEdit && SavedQueueItems.SelectedItem is QueueEntry { Media: { } selectedItem } && QueueItemAvailable(selectedItem);
+        var hasEntries = saved?.MediaIds.Length > 0;
+        PlaySavedQueueButton.Visibility = PlaySelectedSavedQueueButton.Visibility =
+            SavedQueueEarlier.Visibility = SavedQueueLater.Visibility = hasEntries ? Visibility.Visible : Visibility.Collapsed;
         PlaySavedQueueButton.Style = (Style)FindResource(playable ? "Primary" : typeof(Button));
         AddQueueVideosButton.Style = (Style)FindResource(playable ? typeof(Button) : "Primary");
         AddQueueVideosButton.IsEnabled = canEdit && saved is not null;
@@ -73,7 +76,7 @@ public partial class MainWindow
         SavedQueueEarlier.IsEnabled = canEdit && index > 0;
         SavedQueueLater.IsEnabled = canEdit && index >= 0 && index < (saved?.MediaIds.Length ?? 0) - 1;
         SavedQueueFeedback.Text = !canEdit ? "The host controls the queue."
-            : saved?.MediaIds.Length == 0 ? "Add videos to enable playback."
+            : saved?.MediaIds.Length == 0 ? ""
             : !playable ? "No available videos. Reconnect their drive or add videos from your library." : "";
     }
     private void SavedQueueChanged(object sender, SelectionChangedEventArgs e) { if (!updatingQueues && SavedQueueItems is not null) RefreshSavedItems(); }
@@ -99,7 +102,7 @@ public partial class MainWindow
     }
     private void CreateQueue(object sender, RoutedEventArgs e)
     {
-        var name = Dialogs.Prompt(this, "Create queue", "Queue name");
+        var name = Dialogs.Prompt(this, "Create queue", "Queue name", action: "Create queue");
         if (name is null) return;
         var saved = new SavedQueue(Guid.NewGuid().ToString("N"), name, []);
         savedQueues.Add(saved); SaveQueues(); RefreshQueuePickers(saved.Id);
@@ -107,7 +110,7 @@ public partial class MainWindow
     private void RenameQueue(object sender, RoutedEventArgs e)
     {
         if (QueuePicker.SelectedItem is not SavedQueue saved) return;
-        var name = Dialogs.Prompt(this, "Rename queue", "Queue name", saved.Name);
+        var name = Dialogs.Prompt(this, "Rename queue", "Queue name", saved.Name, action: "Save name");
         if (name is null) return;
         savedQueues[savedQueues.IndexOf(saved)] = saved with { Name = name };
         SaveQueues(); RefreshQueuePickers(saved.Id);
@@ -315,7 +318,7 @@ public partial class MainWindow
         var create = new MenuItem { Header = "New queue…" };
         create.Click += (_, _) =>
         {
-            var name = Dialogs.Prompt(this, "Create queue", "Queue name"); if (name is null) return;
+            var name = Dialogs.Prompt(this, "Create queue", "Queue name", action: "Create queue"); if (name is null) return;
             var saved = new SavedQueue(Guid.NewGuid().ToString("N"), name, []); savedQueues.Add(saved); AddToSavedQueue(saved, videos);
         };
         menu.Items.Add(new Separator()); menu.Items.Add(create); return menu;

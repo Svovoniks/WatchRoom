@@ -62,6 +62,11 @@ static class Program
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             UiFindingsChecks.Run(); app.Shutdown(); return;
         }
+        if (args.FirstOrDefault() == "--ui-experience")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            UiExperienceChecks.Run(); app.Shutdown(); return;
+        }
         if (args.FirstOrDefault() == "--player-layout")
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -282,7 +287,8 @@ static class Program
         check(cards[0].Card.Poster is null, "artwork status combines with the sidebar category");
         Navigate(2); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
         status.SelectedIndex = 1; await Wait(() => cards.Count == 1);
-        check(status.Items.Count == 2, "availability is a separate tab rather than a status filter");
+        check(!status.Items.OfType<System.Windows.Controls.ComboBoxItem>().Any(item => Equals(item.Content, "Unavailable")),
+            "availability is a separate tab rather than a status filter");
         Navigate(2, LibraryIdentity.ShowKey(show), "Show"); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
         check(Crumbs().Select(x => x.Label).SequenceEqual(["All", "Shows", "Navigation Show"]), "show breadcrumb points to the season grid");
         Navigate(2, LibraryIdentity.ShowKey(show), "Show", 0); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == special.Id);

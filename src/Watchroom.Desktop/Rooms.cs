@@ -21,6 +21,7 @@ public partial class MainWindow
     private void RefreshSavedRooms()
     {
         if (SavedRoomsList is null) return;
+        CreateSavedRoomButton.IsEnabled = AddSavedInvitationButton.IsEnabled = !roomBusy;
         ReturnToRoomButton.IsEnabled = ready || room is not null;
         ReturnToRoomButton.Visibility = ReturnToRoomButton.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
         RoomsEmptyState.Visibility = savedRooms.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -115,7 +116,8 @@ public partial class MainWindow
     private async void CreatePersistentRoom(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (roomBusy) return;
-        var name = Dialogs.Prompt(this, "Create room", "Room name", validate: ValidateRoomName); if (name is null) return;
+        var name = Dialogs.Prompt(this, "Create room", "Room name", validate: ValidateRoomName, action: "Create room",
+            help: "Invite friends after creating the room. Choose a video from your library when you're ready."); if (name is null) return;
         pendingRoomName = name; roomBusy = true; RefreshSavedRooms();
         try
         {
@@ -157,7 +159,7 @@ public partial class MainWindow
     private async void RenameSavedRoom(object sender, RoutedEventArgs e) => await Guard(() =>
     {
         if (SavedRoomsList.SelectedItem is not SavedRoom saved || !RenameSavedRoomButton.IsEnabled) return Task.CompletedTask;
-        var name = Dialogs.Prompt(this, "Rename room", "Room name", saved.Name, ValidateRoomName); if (name is null) return Task.CompletedTask;
+        var name = Dialogs.Prompt(this, "Rename room", "Room name", saved.Name, ValidateRoomName, action: "Save name"); if (name is null) return Task.CompletedTask;
         RenameHostRoom(saved, name);
         return Task.CompletedTask;
     });

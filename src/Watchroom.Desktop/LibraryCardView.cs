@@ -40,6 +40,8 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     public string DisplayTitle => Card.DisplayTitle;
     public string Caption => Card.Caption;
     public bool IsEpisode => Card.Level == "episode";
+    public bool IsMovie => Card.Level == "movie";
+    public bool HasPlaybackProgress => !IsRemote && PlaybackLabel.Length > 0;
     public bool IsRemote { get; private set; }
     public string? HomeSection { get; set; }
     public string EpisodeMeta => (Card.Media.Season is { } season ? $"S{season:00} · " : "") +
@@ -87,7 +89,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         var progress = watched ? 100 : Card.Media.RuntimeMinutes is > 0 ? Math.Clamp(positionMs / (Card.Media.RuntimeMinutes.Value * 600d), 0, 100) : 0;
         var label = watched ? "Watched" : positionMs >= 10000 ? $"Resume · {(int)(positionMs / 60000)}:{positionMs / 1000 % 60:00}" : "";
         if (Progress != progress) { Progress = progress; Changed(nameof(Progress)); }
-        if (PlaybackLabel != label) { PlaybackLabel = label; Changed(nameof(PlaybackLabel)); }
+        if (PlaybackLabel != label) { PlaybackLabel = label; Changed(nameof(PlaybackLabel)); Changed(nameof(HasPlaybackProgress)); }
     }
     public void SetPlaybackLabel(string label) { PlaybackLabel = label; Changed(nameof(PlaybackLabel)); }
     public Task LoadPosterAsync()

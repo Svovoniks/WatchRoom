@@ -24,6 +24,7 @@ public partial class MainWindow
         backLocations.Add(CaptureLocation());
         if (backLocations.Count > 100) backLocations.RemoveAt(0);
         forwardLocations.Clear(); navigationGeneration++;
+        CommandManager.InvalidateRequerySuggested();
     }
     private bool BrowseHistory(bool back)
     {
@@ -43,6 +44,7 @@ public partial class MainWindow
         }
         finally { restoringNavigation = false; }
         RestoreBrowseOffset(location, ++navigationGeneration);
+        CommandManager.InvalidateRequerySuggested();
         return true;
     }
     private async void RestoreBrowseOffset(BrowseLocation location, int generation)

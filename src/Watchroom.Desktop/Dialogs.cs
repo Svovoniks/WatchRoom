@@ -99,12 +99,19 @@ public static class Dialogs
 
     private sealed record WatchRoomOption(string Label, SavedRoom? Room);
 
-    public static string? Prompt(Window owner, string title, string label, string initial = "", Func<string, string?>? validate = null)
+    public static string? Prompt(Window owner, string title, string label, string initial = "", Func<string, string?>? validate = null, string action = "Continue", string? help = null)
     {
         var win = new Window { Owner = owner, Title = title, Width = 530, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
         var panel = new StackPanel { Margin = new Thickness(24) };
+        panel.Children.Add(new TextBlock { Text = title, FontSize = 24, FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) });
         panel.Children.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap });
         var input = new TextBox { Text = initial, MinWidth = 400 }; panel.Children.Add(input);
+        if (help is not null)
+        {
+            var hint = new TextBlock { Text = help, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) };
+            hint.SetResourceReference(TextBlock.ForegroundProperty, "Muted"); panel.Children.Add(hint);
+        }
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,0,0,12), FontWeight = FontWeights.SemiBold };
         error.SetResourceReference(TextBlock.ForegroundProperty, "Accent");
         System.Windows.Automation.AutomationProperties.SetLiveSetting(error, System.Windows.Automation.AutomationLiveSetting.Polite);
@@ -112,7 +119,8 @@ public static class Dialogs
         System.Windows.Automation.AutomationProperties.SetName(input, label);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
-        var button = new Button { Content = "Continue", IsDefault = true, IsEnabled = !string.IsNullOrWhiteSpace(initial) };
+        var button = new Button { Content = action, IsDefault = true, IsEnabled = !string.IsNullOrWhiteSpace(initial) };
+        button.SetResourceReference(FrameworkElement.StyleProperty, "Primary");
         void Validate()
         {
             error.Text = string.IsNullOrWhiteSpace(input.Text) ? "" : validate?.Invoke(input.Text.Trim()) ?? "";

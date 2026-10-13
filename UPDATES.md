@@ -17,7 +17,8 @@ and reserve manual commands for exception handling, inspection, or recovery. The
 script already performs the work that would otherwise be repeated across many
 steps: it selects the intended paths, runs in an isolated worktree, bumps the
 version, executes the release checks and smoke suite, commits, pushes, tags, waits
-for the tag workflow, and verifies the public release and installer checksums.
+for the tag workflow, verifies the public release and installer checksums, then
+pulls `origin/master` into the local master checkout.
 
 If you must fall back to the manual path, keep it brief and explicit:
 
@@ -45,8 +46,11 @@ If you must fall back to the manual path, keep it brief and explicit:
    the installer and verify its SHA-256 against the API digest and SHA256SUMS.txt.
    This step matters: a private or incomplete release cannot update users' apps.
 7. Check that the public GitHub release page is available and links to the
-   installer and checksums. Report the version, release URL, Actions result, and
-   any validation limitations. Leave the user's installed app unchanged.
+   installer and checksums.
+8. Synchronize local `master` with `origin/master` and confirm it contains the
+   published commit. Preserve unrelated staged/unstaged edits, untracked files,
+   and `sites` work. Report the version, release URL, Actions result, local sync
+   result, and any validation limitations. Leave the user's installed app unchanged.
 
 Use the scripted flow by default. The goal is to let the automation do the bulk
 of the work while agents stay focused on explicit file selection, failure
@@ -106,7 +110,20 @@ preserved. The script applies only those files to an isolated Git worktree, bump
 the version, runs the release checks plus the full smoke suite in a fresh test
 directory, commits, pushes `master`, and pushes an annotated version tag. It waits
 for the tag workflow and verifies the public release, updater feed, installer size,
-and SHA-256 against both GitHub and `SHA256SUMS.txt`.
+and SHA-256 against both GitHub and `SHA256SUMS.txt`. After public verification,
+it pulls master into the checkout that owns that branch, even when shipping was
+started from another worktree. If master has no checkout, it fast-forwards the
+local branch without switching the current checkout.
+
+Local work is saved in a recovery stash and under the ignored verification
+directory before synchronizing a dirty master. The script merges the worktree
+and index separately to preserve staged and unstaged edits, retains untracked
+files, and leaves unrelated `sites` contents alone. Already-shipped changes do
+not remain as duplicate local edits. Divergence or conflicting local work stops
+the sync without resetting commits or overwriting files. The recovery stash is
+retained, and the error explicitly distinguishes a verified public release from
+an incomplete local sync. `-VerifyOnly` also runs this final synchronization step
+so it can complete a previously interrupted ship.
 
 ```powershell
 # Preview the selected paths and next patch version without changing files or publishing.
@@ -116,7 +133,7 @@ and SHA-256 against both GitHub and `SHA256SUMS.txt`.
 ./scripts/ship.ps1 -Paths src/Watchroom.Desktop/MainWindow.xaml -Version 0.3.18 -Message 'Clarify playback language preferences'
 
 # For multiple files, use a comma-separated PowerShell array.
-./scripts/ship.ps1 -Paths 'src/Watchroom.Desktop/MainWindow.xaml','scripts/ship.ps1','scripts/ship-checks.ps1','UPDATES.md' -Plan
+./scripts/ship.ps1 -Paths 'src/Watchroom.Desktop/MainWindow.xaml','scripts/ship.ps1','scripts/ship-checks.ps1','scripts/ship-sync-checks.ps1','UPDATES.md' -Plan
 
 # Recheck an already pushed tag after a timeout or network interruption.
 ./scripts/ship.ps1 -VerifyOnly -Version 0.3.18

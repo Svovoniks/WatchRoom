@@ -2,6 +2,17 @@ namespace Watchroom.Core;
 
 public static class LibraryWatchProgress
 {
+    public static bool CanContinue(IEnumerable<MediaItem> source, LibraryCard card, IReadOnlyDictionary<string, string> settings)
+    {
+        var candidates = card.Level is "series" or "season"
+            ? source.Where(item => LibraryIdentity.SameShow(item, card.Media) &&
+                (card.Level == "series" || (item.Season ?? -1) == card.Season))
+            : [card.Media];
+        return candidates.Any(item => item.Available && !item.IsVirtual && !item.IsExtra &&
+            settings.GetValueOrDefault("watched:" + item.Id) != "true" &&
+            long.TryParse(settings.GetValueOrDefault("position:" + item.Id), out var position) && position >= 10000);
+    }
+
     public static bool IsWatched(IEnumerable<MediaItem> source, LibraryCard card, Func<string, bool> watched)
     {
         if (card.Media.Series is null) return watched(card.Media.Id);

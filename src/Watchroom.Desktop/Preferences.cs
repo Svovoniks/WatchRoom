@@ -215,6 +215,6 @@ public partial class MainWindow
     private void SaveSettings(object sender, RoutedEventArgs e) => TrySavePreferences();
     private void JoinFromWelcome(object sender, RoutedEventArgs e)
     {
-        ShowPage("Rooms"); SaveRoomInvitation(sender, e);
+        ShowPage("Rooms"); JoinClick(sender, e);
     }
 }

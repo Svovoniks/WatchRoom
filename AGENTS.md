@@ -1,5 +1,22 @@
 # Watchroom agent instructions
 
+## Start from current master
+
+Before changing repository files, inspect the working tree and fetch
+`origin/master` without recursing into submodules. Check whether the checkout
+contains the latest remote master; a new chat does not establish that the local
+files are current. If behind, integrate master before starting implementation.
+Preserve local commits, staged and unstaged edits, untracked files, and unrelated
+`sites` changes. Never reset or force-update divergent work to make it match.
+
+## Relaunch after app changes
+
+The user has requested automatic relaunches after local app changes. Once the
+latest development build and relevant checks succeed, gracefully close the old
+development instance if running and launch the new build with the user's usual
+library and settings. Do not ask for this authorization again. Use the actual
+latest build, including when it was built to a separate output directory.
+
 ## Shipping updates
 
 When the user asks to ship, publish, or release an app update, follow
@@ -29,3 +46,11 @@ Run the checks listed in UPDATES.md; fix failures before tagging. Prefer the
 scripted path for the whole release and reserve manual commands for exceptions,
 inspection, or recovery only. Do not add confirmation prompts for an already
 authorized release.
+
+After the public release and updater feed are verified, synchronize local
+`master` with `origin/master`, including the published commit. The ship script
+must perform this step even when the release was built in an isolated worktree.
+Preserve unrelated local work and `sites` changes; retain a recovery snapshot if
+synchronization fails. Report a verified release with failed local synchronization
+accurately, and complete the local synchronization before reporting the entire
+shipping workflow as finished.

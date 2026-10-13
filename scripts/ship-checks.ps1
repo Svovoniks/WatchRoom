@@ -87,6 +87,7 @@ try {
     Check ($run.id -eq 3) 'only the exact tag and commit workflow count as a release build'
     $script:mockConclusion = 'failure'
     Expect-Rejected { Wait-ReleaseBuild '0.3.18' 'fixture' ([datetime]::UtcNow.AddSeconds(5)) } 'failed tag workflow stops shipping'
+    . (Join-Path $PSScriptRoot 'ship-sync-checks.ps1') -TestRoot $testRoot
     Write-Host "$checks shipping safety checks passed. No releases were created."
 }
 finally {

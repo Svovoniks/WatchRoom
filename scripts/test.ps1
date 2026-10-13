@@ -11,6 +11,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Desktop layout tests failed' }
     & $sdk run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --ui-findings
     if ($LASTEXITCODE -ne 0) { throw 'UI findings regression tests failed' }
+    & $sdk run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --ui-experience
+    if ($LASTEXITCODE -ne 0) { throw 'UI experience regression tests failed' }
     & $sdk run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --guest-library-layout
     if ($LASTEXITCODE -ne 0) { throw 'Guest library layout tests failed' }
 } finally { Pop-Location }

@@ -475,12 +475,14 @@ public partial class MainWindow : Window
                 {
                     cancellation.ThrowIfCancellationRequested();
                     var members = card.Media.Series is null ? Array.Empty<MediaItem>() : shows.GetValueOrDefault(LibraryIdentity.ShowKey(card.Media)) ?? [];
-                    var position = card.Level == "episode" && long.TryParse(settings.GetValueOrDefault("position:" + card.Media.Id), out var saved) ? saved : 0;
-                    return (View: views.GetValueOrDefault(LibraryCardView.Identity(card)) ?? new LibraryCardView(card),
-                        Position: position, Watched: LibraryWatchProgress.IsWatched(members, card, id => settings.GetValueOrDefault("watched:" + id) == "true"));
-                }).ToArray();
+                    var position = card.Level is "episode" or "movie" && long.TryParse(settings.GetValueOrDefault("position:" + card.Media.Id), out var saved) ? saved : 0;
+                    return (Card: card, View: views.GetValueOrDefault(LibraryCardView.Identity(card)) ?? new LibraryCardView(card),
+                        Position: position, Watched: LibraryWatchProgress.IsWatched(members, card, id => settings.GetValueOrDefault("watched:" + id) == "true"),
+                        Continuing: status == 2 && LibraryWatchProgress.CanContinue(members, card, settings));
+                }).Where(state => status switch { 2 => state.Continuing, 3 => !state.Watched, 4 => state.Watched, _ => true }).ToArray();
             }, cancellation);
             if (cancellation.IsCancellationRequested || librarySearchCancellation != request) return;
+            cards = playback.Select(state => state.Card).ToList();
             if (PosterGrid.ItemsSource != libraryCards) PosterGrid.ItemsSource = libraryCards;
             var desiredKeys = cards.Select(LibraryCardView.Identity).ToHashSet();
             var slice = Stopwatch.StartNew();
@@ -575,6 +577,10 @@ public partial class MainWindow : Window
         ShowPage("Details"); UpdateBreadcrumbs(); DetailTitle.Text = item.EpisodeDisplayTitle;
         restoringNavigation = restoring;
         DetailPlay.IsEnabled = DetailHost.IsEnabled = DetailQueue.IsEnabled = item.Available && File.Exists(item.Path);
+        DetailAvailability.Text = DetailPlay.IsEnabled ? "" : item.IsVirtual
+            ? "This episode isn't in your folders yet. Add the video and rescan to watch it."
+            : "Video file unavailable. Reconnect its drive, then rescan your library.";
+        DetailAvailability.Visibility = DetailAvailability.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         DetailRemove.Visibility = item.Available ? Visibility.Collapsed : Visibility.Visible;
         DetailRemove.IsEnabled = !scanning;
         var resume = long.TryParse(library.Setting("position:" + item.Id), out var position) && position >= 10000 ? position : 0;
@@ -586,7 +592,7 @@ public partial class MainWindow : Window
         _ = UpdateDetailPosterAsync(item);
         DetailFile.Text = item.Path;
         var overviewSource = !string.IsNullOrWhiteSpace(item.EpisodeOverview) ? item.EpisodeSource : !string.IsNullOrWhiteSpace(item.SeasonOverview) ? item.SeasonSource : item.PosterSource;
-        DetailSummary.Text = (item.IsVirtual ? "This episode is not in your library. " : item.Available ? "" : "File unavailable — reconnect its drive. ") + (item.DetailOverview ?? "No overview available yet.") +
+        DetailSummary.Text = (item.DetailOverview ?? "No overview available yet.") +
             (item.Genres?.Length > 0 ? "\n\nGenres: " + string.Join(", ", item.Genres) : "") + (item.Cast?.Length > 0 ? "\nCast: " + string.Join(", ", item.Cast) : "") +
             (item.Rating is > 0 ? $"\nRating: {item.Rating:0.0}/10" : "") + (item.NumberingConflict is null ? "" : "\n\n" + item.NumberingConflict) + (overviewSource is null ? "" : "\n\nMetadata: " + overviewSource);
         Episodes.Visibility = Visibility.Collapsed;
@@ -734,7 +740,7 @@ public partial class MainWindow : Window
     {
         if (selected is null) return;
         if (selected.MetadataLocked) { SetStatus("Metadata is locked for this title. Unlock it before choosing a match."); return; }
-        var item = selected; var query = Dialogs.Prompt(this, "Find artwork", "Search by movie or series title", item.DisplayTitle); if (query is null) return;
+        var item = selected; var query = Dialogs.Prompt(this, "Find artwork", "Search by movie or series title", item.DisplayTitle, action: "Search"); if (query is null) return;
         var result = await MetadataIdentification.SearchAsync(library, item, query, savedMetadataToken, lifetime.Token);
         if (result.Matches.Count == 0) { SetStatus("No matches. " + string.Join(" ", result.Warnings)); return; }
         var match = Dialogs.Choose(this, result.Matches, candidate => MetadataIdentification.PosterAsync(candidate, App.DataDirectory, savedMetadataToken, lifetime.Token), string.Join(" ", result.Warnings));
@@ -761,7 +767,7 @@ public partial class MainWindow : Window
         if (selected is null) return;
         var item = selected;
         var title = Dialogs.Prompt(this, "Correct title", item.Series is null ? "Movie title" : "Series title (applies to every episode)", item.DisplayTitle,
-            text => text.Length > 300 ? "Use a title with at most 300 characters." : null);
+            text => text.Length > 300 ? "Use a title with at most 300 characters." : null, action: "Save title");
         if (title is null) return;
         foreach (var entry in items.Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item)))
             library.Save(entry with { Title = title, Series = entry.Series is null ? null : title, Matched = true, LockedFields = (entry.LockedFields ?? []).Append("Title").Distinct().ToArray() });
@@ -855,16 +861,18 @@ public partial class MainWindow : Window
     {
         if (roomBusy) return;
         var invitation = Dialogs.Prompt(this, "Join a watch room", "Paste the invitation link or room code", validate: text =>
-        { try { RoomAddress.Parse(text, SavedServerAddress); return null; } catch (ArgumentException ex) { return ex.Message; } }); if (string.IsNullOrWhiteSpace(invitation)) return;
+        { try { RoomAddress.Parse(text, SavedServerAddress); return null; } catch (ArgumentException ex) { return ex.Message; } },
+            action: "Join room", help: "Ask your friend for an invitation. You can join without any video files; the host approves your entry."); if (string.IsNullOrWhiteSpace(invitation)) return;
         var address = RoomAddress.Parse(invitation, SavedServerAddress);
         roomBusy = true;
+        RefreshSavedRooms();
         try {
             await Disconnect(); playingItem = null; var client = NewRoom(); SetStatus("Joining room…");
             try { await client.ConnectAsync(address.Server, SavedDisplayName, address.Code); }
             catch { await Disconnect(); throw; }
             roomPanelVisible = true; RoomHeading.Text = "Your watch room";
             RememberCurrentRoom(); RoomSubtitle.Text = "Waiting for host approval"; ShowPage("Room");
-        } finally { roomBusy = false; UpdateSessionControls(); }
+        } finally { roomBusy = false; RefreshSavedRooms(); UpdateSessionControls(); }
     });
     private RoomClient NewRoom()
     {
@@ -1546,7 +1554,7 @@ public partial class MainWindow : Window
         SharedControls.Visibility = connectedRoom && room!.Identity?.Host == true ? Visibility.Visible : Visibility.Collapsed;
         SharedControls.IsEnabled = connectedRoom && room!.Identity?.Host == true;
         NowPlayingStrip.Visibility = ready || room is not null ? Visibility.Visible : Visibility.Collapsed;
-        NowPlayingLabel.Text = "Now watching · " + RoomHeading.Text;
+        NowPlayingLabel.Text = playingItem is not null ? PlaybackTitle(playingItem) : room?.Snapshot?.Media?.Title ?? RoomHeading.Text;
         var canControl = room is null || connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
         InviteButton.Visibility = RoomToggle.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
         RoomLibraryButton.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;

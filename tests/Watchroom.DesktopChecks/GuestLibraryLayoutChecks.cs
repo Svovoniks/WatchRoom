@@ -35,7 +35,13 @@ static class GuestLibraryLayoutChecks
         Layout(guestWindow, 1300, 1220); Invoke(guestWindow, "RenderBrowser"); Layout(guestWindow, 1300, 1220); Invoke(guestWindow, "RenderBrowser"); Layout(guestWindow, 1300, 1220);
         var grid = Field<UniformGrid>(guestWindow, "grid");
         Check(grid.Columns == 8 && grid.Rows == 4 && grid.Children.Count == 32, "guest grid automatically sizes to 8 × 4");
+        Check(!Field<Button>(guestWindow, "add").IsEnabled && !Field<Button>(guestWindow, "play").IsEnabled && !Field<Button>(guestWindow, "next").IsEnabled,
+            "shared library requires a title selection and a nonempty queue for playback actions");
+        Check(!Field<Button>(guestWindow, "previousPage").IsEnabled && Field<Button>(guestWindow, "nextPage").IsEnabled,
+            "first shared page disables Previous and enables Next when more titles exist");
         grid.Children.OfType<Button>().First().RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(Field<Button>(guestWindow, "add").IsEnabled && Field<Button>(guestWindow, "play").IsEnabled,
+            "selecting a shared title enables its permitted actions");
         var hovered = grid.Children.OfType<Button>().ElementAt(20); hovered.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
         Invoke(guestWindow, "SendView", true); Pump();
         var view = host.Views["guest"];
@@ -65,7 +71,7 @@ static class GuestLibraryLayoutChecks
         host.SetAccess("guest", new()); Pump(); Invoke(guestWindow, "RenderBrowser");
         Check(grid.Children.OfType<Button>().Count() == 0, "revoked catalog disappears from guest grid");
         guestWindow.Shutdown(); hostWindow.Shutdown();
-        Console.WriteLine("12 desktop layout checks passed.");
+        Console.WriteLine("15 desktop layout checks passed.");
     }
     static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
     {
