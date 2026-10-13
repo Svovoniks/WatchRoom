@@ -892,7 +892,7 @@ public partial class MainWindow : Window
         {
             if (room != client) return; ConnectionStatus.Text = text;
             if (text.StartsWith("Host disconnected", StringComparison.Ordinal) || text.StartsWith("Host offline", StringComparison.Ordinal))
-            { player?.SetPause(true); target = null; loadedMedia = null; ready = false; ++loadGeneration; RoomSubtitle.Text = "Host offline · Waiting for the host to return"; SetStatus(text); UpdateSessionControls(); }
+            { playbackRecovery.Clear(); player?.SetPause(true); target = null; loadedMedia = null; ready = false; ++loadGeneration; RoomSubtitle.Text = "Host offline · Waiting for the host to return"; SetStatus(text); UpdateSessionControls(); }
             if (text.StartsWith("Disconnected", StringComparison.Ordinal) || text.StartsWith("Room discovery is offline", StringComparison.Ordinal))
             { SetStatus(text); _ = ReconnectRoomAsync(client); }
         });
@@ -906,13 +906,13 @@ public partial class MainWindow : Window
             case "peer-left": _ = NotifyPeerDeparture(room, message); break;
             case "peer-connected": CancelPeerNotice(message.Sender); break;
             case "peer-recovering":
-                // Keep VLC's current input and cached bytes. A small connection
-                // indicator replaces clearing the movie and sounding an alarm.
-                player?.SetPause(true); appliedRevision = readyGeneration = -1;
+                // Let the native forward buffer cover a temporary transport loss.
+                BeginBufferedRecovery();
                 RoomSubtitle.Text = "Connection interrupted · Reconnecting…";
                 UpdateSessionControls();
                 break;
             case "peer-recovered":
+                playbackRecovery.Clear();
                 CancelPeerNotice(message.Sender);
                 appliedRevision = readyGeneration = -1;
                 // A long outage can exhaust VLC's HTTP input. Reopen only that
@@ -1045,6 +1045,7 @@ public partial class MainWindow : Window
             await loading.WaitAsync(cancellation.Token); locked = true;
             if (client != room || generation != loadGeneration) return;
             ready = false; buffering = new(); appliedGeneration = readyGeneration = -1; bridge?.CancelPendingReads(); await StopNativePlayback();
+            playbackRecovery.Clear(); activeStreamingBufferSeconds = SavedStreamingBufferSeconds;
             cancellation.Token.ThrowIfCancellationRequested();
             if (target?.Playing == true) SendReadiness("buffering");
             if (bridge is not null) await bridge.DisposeAsync(); bridge = null;
@@ -1060,8 +1061,9 @@ public partial class MainWindow : Window
             using var vlcMedia = source is ILocalMediaSource local
                 ? new Media(vlc!, local.LocalPath, FromType.FromPath)
                 : new Media(vlc!, streamUri!);
-            if (streamUri is not null) vlcMedia.AddOption($":network-caching={MediaStreaming.NetworkCacheForRtt(client.RecentRttMs)}");
-            if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("media-input", new { local = source is ILocalMediaSource, media.Extension });
+            if (streamUri is not null) vlcMedia.AddOption($":network-caching={StreamingBufferOptions.CacheMs(activeStreamingBufferSeconds)}");
+            if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("media-input", new { local = source is ILocalMediaSource, media.Extension,
+                bufferSeconds = streamUri is not null ? activeStreamingBufferSeconds : (int?)null });
             // VLC's AVI demuxer reads slow-seekable HTTP inputs in 1.5-second
             // steps, exposing read-ahead time to the synchronization controller.
             // The avformat demuxer provides a regularly advancing timeline.
@@ -1100,8 +1102,9 @@ public partial class MainWindow : Window
         }
         UpdateRoomPlaybackStatus();
         if (player is null || nativeStopCount > 0) return;
+        PollBufferedRecovery();
         buffering.Recover(Environment.TickCount64);
-        if (room is not null && ready && buffering.Poll(target?.WantsPlayback == true, Environment.TickCount64))
+        if (room is not null && !room.IsPeerRecovering && ready && buffering.Poll(target?.WantsPlayback == true, Environment.TickCount64))
         { readyGeneration = -1; SendReadiness("buffering"); }
         ReportReady();
         UpdateSessionControls();
@@ -1458,6 +1461,7 @@ public partial class MainWindow : Window
     private async Task Disconnect(bool preserveFullscreen = false, bool reconnecting = false)
     {
         CancelPeerNotices();
+        playbackRecovery.Clear();
         if (!reconnecting) { roomReconnect?.Cancel(); roomReconnect = null; }
         libraryWindow?.Shutdown(); libraryWindow = null; roomLibrary = null; sharedItems.Clear(); sharedIds.Clear(); sharedKinds = [];
         videoClickDelay.Stop();

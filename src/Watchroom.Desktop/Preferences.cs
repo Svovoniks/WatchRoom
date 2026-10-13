@@ -35,6 +35,7 @@ public partial class MainWindow
     private string SavedDisplayName => library.Setting("name") ?? Environment.UserName;
     private string SavedFfmpeg => library.Setting("ffmpeg") ?? "";
     private bool SavedAutoArtwork => library.Setting("artwork") != "false";
+    private int SavedStreamingBufferSeconds => StreamingBufferOptions.Load(library);
 
     private void InitializePreferences()
     {
@@ -48,7 +49,7 @@ public partial class MainWindow
         MetadataProviders.ItemsSource = providerChoices;
         SubtitleLanguageRules.ItemsSource = subtitleRuleDrafts;
         LoadPreferences();
-        foreach (var box in new[] { DisplayNameBox, ServerBox, FfmpegBox, MetadataRefreshDays }) box.TextChanged += PreferencesChanged;
+        foreach (var box in new[] { DisplayNameBox, ServerBox, FfmpegBox, MetadataRefreshDays, StreamingBufferSeconds }) box.TextChanged += PreferencesChanged;
         PreferredAudioLanguages.TextChanged += PreferencesChanged;
         PreferredSubtitleLanguages.TextChanged += PreferencesChanged;
         foreach (var box in new[] { AutoArtwork, ImportMissing, ImportUpcoming, SaveNfo, DisplaySpecials, GroupShows, NeverRefresh })
@@ -65,6 +66,7 @@ public partial class MainWindow
         {
             DisplayNameBox.Text = SavedDisplayName; ServerBox.Text = SavedServerAddress; FfmpegBox.Text = SavedFfmpeg;
             AutoArtwork.IsChecked = SavedAutoArtwork;
+            StreamingBufferSeconds.Text = SavedStreamingBufferSeconds.ToString(CultureInfo.InvariantCulture);
             MetadataToken.Password = savedMetadataToken;
             LoadTrackPreferences();
             var options = MetadataOptions.Load(library);
@@ -97,7 +99,7 @@ public partial class MainWindow
     }
     private string PreferenceSnapshot() => Wire.Serialize(new
     {
-        audio = PreferredAudioLanguages.Text, subtitles = PreferredSubtitleLanguages.Text,
+        bufferSeconds = StreamingBufferSeconds.Text, audio = PreferredAudioLanguages.Text, subtitles = PreferredSubtitleLanguages.Text,
         subtitleRules = subtitleRuleDrafts.Select(rule => new { rule.AudioLanguage, rule.SubtitleLanguages }).ToArray(),
         name = DisplayNameBox.Text, server = ServerBox.Text, ffmpeg = FfmpegBox.Text, artwork = AutoArtwork.IsChecked,
         providers = providerChoices.Select(p => new { p.Id, p.Enabled }).ToArray(), language = MetadataLanguage.SelectedValue,
@@ -114,6 +116,13 @@ public partial class MainWindow
         PreferencesStatus.Text = dirty ? "Unsaved changes · Save or cancel when ready." : "Changes apply when you save.";
         ClearPreferenceErrors();
         ValidateRefreshDays();
+        ValidateStreamingBuffer();
+    }
+    private bool ValidateStreamingBuffer()
+    {
+        var valid = StreamingBufferOptions.TryParse(StreamingBufferSeconds.Text, out _);
+        StreamingBufferError.Text = valid ? "" : "Enter a whole number from 2 to 60 seconds.";
+        return valid;
     }
     private bool ValidateRefreshDays()
     {
@@ -168,7 +177,7 @@ public partial class MainWindow
     }
     private void ClearPreferenceErrors()
     {
-        DisplayNameError.Text = ServerError.Text = RefreshDaysError.Text = LocaleError.Text = TrackPreferencesError.Text = "";
+        DisplayNameError.Text = ServerError.Text = RefreshDaysError.Text = LocaleError.Text = TrackPreferencesError.Text = StreamingBufferError.Text = "";
         MetadataKeyStatus.Text = "";
     }
     private bool TrySavePreferences()
@@ -184,9 +193,12 @@ public partial class MainWindow
         { LocaleError.Text = "Choose a language and country."; ShowPreferenceSection("Metadata"); MetadataLanguage.BringIntoView(); MetadataLanguage.Focus(); return false; }
         if (!TryReadTrackPreferences(out var audio, out var subtitles, out var subtitleRules))
         { ShowPreferenceSection("Playback"); PreferredAudioLanguages.BringIntoView(); return false; }
+        if (!ValidateStreamingBuffer())
+        { ShowPreferenceSection("Playback"); StreamingBufferSeconds.BringIntoView(); StreamingBufferSeconds.Focus(); return false; }
         if (!SaveMetadataToken())
         { ShowPreferenceSection("Metadata"); MetadataToken.BringIntoView(); MetadataToken.Focus(); return false; }
         PersistTrackPreferences(audio, subtitles, subtitleRules);
+        library.Setting(StreamingBufferOptions.SettingKey, int.Parse(StreamingBufferSeconds.Text, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture));
         var days = NeverRefresh.IsChecked == true ? 0 : int.Parse(MetadataRefreshDays.Text, CultureInfo.InvariantCulture);
         new MetadataOptions(providerChoices.Where(p => p.Enabled).Select(p => p.Id).ToArray(), language, country, days,
             ImportMissing.IsChecked == true, ImportUpcoming.IsChecked == true, SaveNfo.IsChecked == true,

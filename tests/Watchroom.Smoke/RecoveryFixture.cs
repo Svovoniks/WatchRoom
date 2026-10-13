@@ -104,6 +104,26 @@ static class RecoveryFixture
         check(MediaStreaming.NetworkCacheForRtt(50) == 1500 && MediaStreaming.NetworkCacheForRtt(900) == 3600 &&
             MediaStreaming.NetworkCacheForRtt(long.MaxValue) == 5000, "guest buffer adapts to RTT within a fixed upper bound");
 
+        check(StreamingBufferOptions.TryParse("2", out _) && StreamingBufferOptions.TryParse("60", out _) &&
+            !StreamingBufferOptions.TryParse("0", out _) && !StreamingBufferOptions.TryParse("61", out _) &&
+            !StreamingBufferOptions.TryParse("2.5", out _) && !StreamingBufferOptions.TryParse("invalid", out _),
+            "streamed video buffer accepts whole seconds within the native player's supported range");
+        var recovery = new PlaybackRecovery();
+        check(!recovery.Begin(true, 10, 1000) && !recovery.ShouldPause(true, false, 10999),
+            "an already playing guest continues through a brief connection interruption");
+        recovery.Begin(true, 10, 9000);
+        check(recovery.ShouldPause(true, false, 11000), "repeated recovery notices cannot extend the buffer grace deadline");
+        recovery.Clear(); recovery.Begin(true, 30, 1000);
+        check(recovery.ShouldPause(true, true, 2000) && recovery.ShouldPause(true, false, 2001),
+            "exhausted native buffer pauses recovery and stays paused until reconnection");
+        recovery.Clear(); recovery.Begin(true, 30, 1000);
+        check(recovery.ShouldPause(false, false, 1001), "a pending Pause immediately overrides buffered recovery");
+        recovery.Clear();
+        check(recovery.Begin(false, 30, 1000) && recovery.ShouldPause(true, false, 1001),
+            "connection recovery never starts a video that was already paused");
+        recovery.Clear();
+        check(!recovery.ShouldPause(true, true, 100000), "successful reconnection clears the recovery hold");
+
         var cursors = new List<string>(); var gets = 0;
         using var handler = new Handler((request, ct) =>
         {

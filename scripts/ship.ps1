@@ -59,6 +59,13 @@ function Get-PublicJson {
     # Public verification deliberately does not use GH_TOKEN or a GitHub CLI session.
     Invoke-RestMethod -Uri $Url -Headers @{ 'User-Agent' = 'Watchroom-release-verification' } -TimeoutSec 60
 }
+function Stage-ShipSources {
+    param([string]$Root, [string[]]$Selected)
+    # git apply --index already stages tracked deletions. Adding their now
+    # absent pathspecs again fails; only new/modified files need this step.
+    $existing = @($Selected | Where-Object { Test-Path -LiteralPath (Join-Path $Root $_) -PathType Leaf })
+    if ($existing.Count) { Invoke-Native git (@('-C', $Root, 'add', '--') + $existing) }
+}
 function Assert-ReleaseMetadata {
     param($Release, [string]$ExpectedVersion)
     if ($Release.tag_name -cne "v$ExpectedVersion" -or $Release.draft -or $Release.prerelease) {
@@ -200,7 +207,7 @@ try {
             $props = Get-Content -LiteralPath $propsPath -Raw
             if ([regex]::Matches($props, '<Version>[^<]+</Version>').Count -ne 1) { throw 'Expected exactly one Version property.' }
             [IO.File]::WriteAllText($propsPath, [regex]::Replace($props, '<Version>[^<]+</Version>', "<Version>$Version</Version>"))
-            Invoke-Native git (@('add', '--') + $selected)
+            Stage-ShipSources $checkout $selected
             Invoke-Native git @('diff', '--cached', '--check')
             $packagePath = Join-Path $root '.nuget/packages'
             Invoke-Native $Sdk @('restore', 'Watchroom.slnx', '--locked-mode', "-p:RestorePackagesPath=$packagePath")

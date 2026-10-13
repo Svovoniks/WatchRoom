@@ -228,6 +228,7 @@ static class Program
                 await CheckLibraryNavigation(window, activeStore, cards, directory, posterPath, Check);
                 CheckRoomSettings(window, activeStore, Check);
                 CheckQueueEditing(window, activeStore, Check);
+                StreamingBufferChecks.Run(window, activeStore, directory, Check);
                 PreferenceNavigationChecks.Run(window, activeStore, Check);
                 await QueuePlaybackChecks.Run(window, activeStore, directory, Check);
                 await CheckBackNavigation(window, Check);

@@ -12,6 +12,25 @@ public partial class MainWindow
     private CancellationTokenSource? roomReconnect;
     private Window? disconnectToast;
     private readonly Dictionary<string, CancellationTokenSource> peerNotices = [];
+    private readonly PlaybackRecovery playbackRecovery = new();
+    private int activeStreamingBufferSeconds = StreamingBufferOptions.DefaultSeconds;
+
+    private void BeginBufferedRecovery()
+    {
+        var continuing = ready && player?.IsPlaying == true && target?.Playing == true &&
+            !playbackPause.Pending && !seeking && pendingSeek is null && !buffering.IsActive;
+        if (playbackRecovery.Begin(continuing, activeStreamingBufferSeconds, Environment.TickCount64)) player?.SetPause(true);
+        else ApplyPlaybackRate(1);
+        appliedRevision = readyGeneration = -1;
+    }
+
+    private void PollBufferedRecovery()
+    {
+        if (room?.IsPeerRecovering != true || player is null) return;
+        if (playbackRecovery.ShouldPause(target?.Playing == true && !playbackPause.Pending,
+            player.State is LibVLCSharp.Shared.VLCState.Buffering or LibVLCSharp.Shared.VLCState.Error or LibVLCSharp.Shared.VLCState.Ended,
+            Environment.TickCount64)) player.SetPause(true);
+    }
 
     private void CancelPeerNotice(string? id)
     {

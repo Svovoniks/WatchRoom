@@ -144,12 +144,22 @@ hold. Readiness messages from updated apps carry the movie ID and seek generatio
 late readiness for an earlier seek is ignored. Explicit seeks supersede buffering
 at the previous position. The guest bridge retains at most 16 MiB of recently read
 movie data; canceled seeks stop transfers that have no remaining consumers.
-Guest network caching is selected per movie from recent round-trip measurements,
-within 1.5–5 seconds. Buffering recovery requires 750 ms of stable full cache.
+Guest forward buffering is selected per movie from the saved **Settings →
+Playback → Video to buffer ahead (seconds)** setting. It defaults to 30 seconds
+and accepts whole seconds from 2 to 60. The native player owns this time-based
+buffer independently of the bridge's 16 MiB range cache. This is a buffering
+target, not a guarantee of outage coverage or a byte-exact download cap; bandwidth,
+bitrate and native input/decoder queues affect the data retained. Larger values
+use more memory and can lengthen startup and seeking. Saved changes apply to the
+next streamed video; local-file playback bypasses network buffering.
+Buffering recovery requires 750 ms of stable full cache.
 Temporary peer losses request a replacement immediately while room discovery is
 available. Six seconds without host control replies also starts recovery, checked
-every two seconds. The guest retains its video input and cache, pauses quietly,
-and retries interrupted media ranges for up to 45 seconds. Restored connections
+every two seconds. The guest retains its video input and cache, continues already
+running playback from buffered data for up to the active buffer setting after
+recovery starts, and retries interrupted media ranges for up to 45 seconds.
+Playback pauses sooner if the native input starves, fails or ends, or if Pause
+is pending; a paused input never starts merely because recovery begins. Restored connections
 resynchronize playback and report readiness again. A failed native player input
 is reopened when necessary; genuine host departure still clears unavailable media.
 Participant departure alerts wait 30 seconds and are canceled when that peer's

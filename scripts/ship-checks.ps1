@@ -32,6 +32,21 @@ try {
         Expect-Rejected { Assert-ShipPath $testRoot $path } "excluded path $path cannot enter a release"
     }
     Expect-Rejected { Assert-ShipPath $testRoot 'src' } 'directory selection cannot stage unrelated files'
+    # Reproduce the release checkout after git apply --index stages a deletion.
+    Invoke-Native git @('-C', $testRoot, 'init', '--quiet')
+    $removedSource = Join-Path $testRoot 'src/removed.cs'
+    [IO.File]::WriteAllText($removedSource, 'remove me')
+    Invoke-Native git @('-C', $testRoot, 'add', '--', 'src/app.cs', 'src/removed.cs')
+    Invoke-Native git @('-C', $testRoot, '-c', 'user.name=Shipping checks', '-c', 'user.email=checks@example.invalid', 'commit', '--quiet', '-m', 'Source fixture')
+    [IO.File]::Delete($removedSource)
+    Check ((Assert-ShipPath $testRoot 'src/removed.cs') -eq 'src/removed.cs') 'explicit tracked deletion is accepted'
+    Invoke-Native git @('-C', $testRoot, 'update-index', '--force-remove', 'src/removed.cs')
+    [IO.File]::WriteAllText((Join-Path $testRoot 'src/app.cs'), 'updated fixture')
+    [IO.File]::WriteAllText((Join-Path $testRoot 'src/new.cs'), 'new fixture')
+    Stage-ShipSources $testRoot @('src/app.cs', 'src/removed.cs', 'src/new.cs')
+    $staged = @(Invoke-Native git @('-C', $testRoot, 'diff', '--cached', '--name-status'))
+    Check ($staged -contains "D`tsrc/removed.cs") 'already staged deletion survives release source staging'
+    Check ($staged -contains "M`tsrc/app.cs" -and $staged -contains "A`tsrc/new.cs") 'release source staging includes modified and newly added files'
     $fileName = 'Watchroom-Setup-0.3.18-win-x64.exe'
     $filePath = Join-Path $testRoot $fileName
     [IO.File]::WriteAllBytes($filePath, [byte[]](1,2,3,4))

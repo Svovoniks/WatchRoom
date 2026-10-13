@@ -102,7 +102,7 @@ Metadata events include fetch start/completion, title search aliases, missing fi
 
 ## Verification
 
-`dotnet run --project tests/Watchroom.Smoke -- --filename-schemas` verifies filename formats, movie safeguards, rescan repair and date/range mapping against fixture providers. `--metadata-pipeline` runs isolated metadata, migration, identity, provider, refresh, numbering, and placeholder checks without live provider credentials. The regular smoke suite also runs these checks. `tests/Watchroom.DesktopChecks` verifies incremental library updates and dispatcher responsiveness. Native macOS UI behavior requires testing on a Mac; the Mac client can be compiled on Windows.
+`dotnet run --project tests/Watchroom.Smoke -- --filename-schemas` verifies filename formats, movie safeguards, rescan repair and date/range mapping against fixture providers. `--metadata-pipeline` runs isolated metadata, migration, identity, provider, refresh, numbering, and placeholder checks without live provider credentials. The regular smoke suite also runs these checks. `tests/Watchroom.DesktopChecks` verifies incremental library updates and dispatcher responsiveness.
 
 `dotnet run --project tests/Watchroom.Smoke -- --metadata-diagnostics` checks request context, retries, HTTP/image/cache failures, fallback and season/episode errors, report details, and URL credential redaction with synthetic providers.
 

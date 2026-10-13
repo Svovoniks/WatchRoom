@@ -9,9 +9,6 @@ Watchroom dynamically links the following components. Package versions and conte
 | Component | Version | Upstream |
 | --- | --- | --- |
 | LibVLCSharp / WPF | 3.10.1 | https://code.videolan.org/videolan/LibVLCSharp |
-| LibVLCSharp / Avalonia (Mac client) | 3.10.1 | https://github.com/videolan/libvlcsharp |
-| Avalonia (Mac client) | 11.3.13 | https://github.com/AvaloniaUI/Avalonia |
-| Tmds.DBus.Protocol (Mac client dependency) | 0.21.3 | https://github.com/tmds/Tmds.DBus |
 | VideoLAN LibVLC Windows | 3.0.23.1 | https://code.videolan.org/videolan/vlc |
 | DataChannelDotnet | 1.3.1 | https://www.nuget.org/packages/DataChannelDotnet |
 | libdatachannel and bundled OpenSSL | Included in DataChannelDotnet | https://github.com/paullouisageneau/libdatachannel |
@@ -25,8 +22,6 @@ Licenses supplied by downloaded packages are copied into `licenses/` by the pack
 
 The Windows publisher extracts app-local x64 runtime DLLs from Microsoft's signed redistributable, verifies their signatures, and records provenance in `native-runtime.json`. These files remain subject to Microsoft's Visual Studio redistribution terms; distribution of the Microsoft runtime requires the applicable Visual Studio license.
 
-FFmpeg is currently an optional user-supplied executable and is not bundled. TMDB supplies optional metadata and images. The official, unmodified blue full logo is displayed in About on Windows and Mac. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB. Logo source: https://www.themoviedb.org/assets/2/v4/logos/v2/blue_long_2-9665a76b1ae401a510ec1e0ca40ddcb3b0cfe45f1d51b77a308fea0845885648.svg . Terms: https://www.themoviedb.org/api-terms-of-use .
+FFmpeg is currently an optional user-supplied executable and is not bundled. TMDB supplies optional metadata and images. The official, unmodified blue full logo is displayed in About on Windows. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB. Logo source: https://www.themoviedb.org/assets/2/v4/logos/v2/blue_long_2-9665a76b1ae401a510ec1e0ca40ddcb3b0cfe45f1d51b77a308fea0845885648.svg . Terms: https://www.themoviedb.org/api-terms-of-use .
 
-The Mac preview uses a user-installed VLC and libdatachannel build. Apple Silicon has no bundled DataChannelDotnet native library; Intel includes the package's fallback dylib. The Mac bundle packaging copies available dependency license/provenance files, but signing, notarization and a complete native redistribution audit remain open.
-
-Streaming-provider data used to disambiguate release filenames is supplied by **JustWatch** through TMDB. The app credits JustWatch in About/Settings on Windows and Mac. Source: https://www.justwatch.com/ . API attribution requirements: https://developer.themoviedb.org/reference/movie-watch-providers .
+Streaming-provider data used to disambiguate release filenames is supplied by **JustWatch** through TMDB. The app credits JustWatch in About/Settings on Windows. Source: https://www.justwatch.com/ . API attribution requirements: https://developer.themoviedb.org/reference/movie-watch-providers .

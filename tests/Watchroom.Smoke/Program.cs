@@ -293,6 +293,15 @@ if (args.FirstOrDefault() == "--streaming-audio")
     Console.WriteLine($"{checks} streaming audio checks passed.");
     return;
 }
+if (args.FirstOrDefault() == "--forward-buffer")
+{
+    await ForwardBufferFixture.Run(args[1], (condition, name) =>
+    {
+        if (!condition) throw new Exception("FAIL: " + name);
+        Console.WriteLine("PASS: " + name);
+    });
+    return;
+}
 var root = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/smoke");
 Directory.CreateDirectory(root);
 PlaybackDiagnostics.Initialize(Path.Combine(root, "session-logs"));
@@ -320,6 +329,7 @@ RoomPlaybackStatusFixture.Run(Check);
 RoomTrackFixture.Run(Check);
 SharedLibraryFixture.Run(Check);
 await StreamingAudioFixture.Run(Path.Combine(root, "streaming-audio"), Check);
+await ForwardBufferFixture.Run(Path.Combine(root, "forward-buffer"), Check);
 await PeerMediaFixture.Run(Check);
 Check(MediaBridge.TryRange("bytes=-30", 100, out var s, out var e) && s == 70 && e == 99, "suffix byte ranges");
 Check(MediaBridge.TryRange("bytes=40-999", 100, out s, out e) && s == 40 && e == 99, "range end clamped");

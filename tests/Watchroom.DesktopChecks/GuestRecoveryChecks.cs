@@ -76,6 +76,7 @@ static class GuestRecoveryChecks
                             "guest interruption retains VLC media, input bridge and load generation");
                         Check(((Border)window.FindName("PlayerEmpty")).Visibility == Visibility.Collapsed && Field("disconnectToast") is null,
                             "brief interruption preserves the video surface and does not open a disconnect alert");
+                        Check(player.IsPlaying, "brief host connection loss continues playback from the forward buffer");
                         preserved.TrySetResult();
                     }
                     catch (Exception ex) { preserved.TrySetException(ex); }
