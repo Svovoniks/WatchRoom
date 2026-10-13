@@ -11,6 +11,12 @@ public sealed class VirtualizingLibraryPanel : VirtualizingPanel, IScrollInfo
     private Size extent, viewport;
     private double offset, cellWidth = 194, cellHeight = 330;
     private int columns = 1;
+    private int realizedFirst = -1, realizedLast = -1;
+    private double arrangedOffset;
+    private readonly TranslateTransform scrollTranslation = new();
+    private (int First, int Last) VisibleRange(double value, int count) =>
+        (Math.Max(0, ((int)(value / cellHeight) - 1) * columns),
+         Math.Min(count - 1, ((int)Math.Ceiling((value + viewport.Height) / cellHeight) + 1) * columns - 1));
     protected override Size MeasureOverride(Size available)
     {
         var owner = ItemsControl.GetItemsOwner(this);
@@ -23,8 +29,7 @@ public sealed class VirtualizingLibraryPanel : VirtualizingPanel, IScrollInfo
         extent = new(viewport.Width, Math.Ceiling(owner.Items.Count / (double)columns) * cellHeight);
         offset = Math.Clamp(offset, 0, Math.Max(0, extent.Height - viewport.Height));
         ScrollOwner?.InvalidateScrollInfo();
-        var first = Math.Max(0, ((int)(offset / cellHeight) - 1) * columns);
-        var last = Math.Min(owner.Items.Count - 1, ((int)Math.Ceiling((offset + viewport.Height) / cellHeight) + 1) * columns - 1);
+        var (first, last) = VisibleRange(offset, owner.Items.Count);
         // Accessing children attaches the generator when a hidden grid is shown again.
         _ = InternalChildren;
         var generator = ItemContainerGenerator;
@@ -35,7 +40,9 @@ public sealed class VirtualizingLibraryPanel : VirtualizingPanel, IScrollInfo
             var itemIndex = generator.IndexFromGeneratorPosition(new(index, 0));
             if (itemIndex < first || itemIndex > last)
             {
-                generator.Remove(new(index, 0), 1); RemoveInternalChildRange(index, 1);
+                if (generator is IRecyclingItemContainerGenerator recycling) recycling.Recycle(new(index, 0), 1);
+                else generator.Remove(new(index, 0), 1);
+                RemoveInternalChildRange(index, 1);
             }
         }
         if (last >= first)
@@ -46,17 +53,22 @@ public sealed class VirtualizingLibraryPanel : VirtualizingPanel, IScrollInfo
                 for (var index = first; index <= last; index++, childIndex++)
                 {
                     var child = (UIElement)generator.GenerateNext(out var created);
-                    if (created)
+                    // Recycled containers also need inserting and preparing for their new item.
+                    if (created || childIndex >= InternalChildren.Count || !ReferenceEquals(InternalChildren[childIndex], child))
                     {
                         InsertInternalChild(childIndex, child); generator.PrepareItemContainer(child);
                     }
+                    child.RenderTransform = scrollTranslation;
                     child.Measure(new(cellWidth, cellHeight));
                 }
         }
+        realizedFirst = first; realizedLast = last;
         return viewport;
     }
     protected override Size ArrangeOverride(Size finalSize)
     {
+        arrangedOffset = offset;
+        scrollTranslation.Y = 0;
         for (var index = 0; index < InternalChildren.Count; index++)
         {
             var item = ItemContainerGenerator.IndexFromGeneratorPosition(new(index, 0));
@@ -92,7 +104,17 @@ public sealed class VirtualizingLibraryPanel : VirtualizingPanel, IScrollInfo
     {
         var next = Math.Clamp(value, 0, Math.Max(0, extent.Height - viewport.Height));
         if (next == offset) return;
-        offset = next; InvalidateMeasure(); ScrollOwner?.InvalidateScrollInfo();
+        offset = next;
+        var owner = ItemsControl.GetItemsOwner(this);
+        if (IsMeasureValid && IsArrangeValid && owner is not null &&
+            VisibleRange(offset, owner.Items.Count) == (realizedFirst, realizedLast))
+        {
+            // Sub-row wheel/trackpad movement only translates the existing visuals.
+            // Layout and container generation run when a row enters or leaves the cache.
+            scrollTranslation.Y = arrangedOffset - offset;
+        }
+        else InvalidateMeasure();
+        ScrollOwner?.InvalidateScrollInfo();
     }
     public void LineUp() => SetVerticalOffset(offset - 24);
     public void LineDown() => SetVerticalOffset(offset + 24);

@@ -160,6 +160,7 @@ static class Program
                 Check(grid.ItemContainerGenerator.ContainerFromIndex(cards.Count - 1) is not null && Realized() < 50,
                     "resizing recalculates library rows and keeps the final card reachable");
                 window.Width = originalWidth; libraryScroll.ScrollToTop(); await Task.Delay(150);
+                await LibraryScrollingChecks.Run(grid, libraryScroll, Check);
                 var previous = cards.ToArray();
                 await CheckSearchLayout(window, Check);
                 var tracker = new LibraryCardView(new("Example", "Movie", null, entries[0], "movie"));
