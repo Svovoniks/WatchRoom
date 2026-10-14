@@ -1099,6 +1099,7 @@ public partial class MainWindow : Window
     }
     private void PlaybackTick()
     {
+        UpdateSystemMediaControls();
         roomLibrary?.ExpireViews(Wire.Now);
         if (fullscreen && PlaybackControls.Visibility == Visibility.Visible &&
             Environment.TickCount64 - lastPlayerInteraction > 2600 && !PlaybackControls.IsMouseOver && !RoomHeader.IsMouseOver &&
@@ -1235,10 +1236,14 @@ public partial class MainWindow : Window
     }
     private void TogglePlayback(object sender, RoutedEventArgs e)
     {
+        RequestPlayback(!WantsMediaPlayback);
+    }
+    private void RequestPlayback(bool playing)
+    {
         videoClickDelay.Stop();
-        if (player is null || PlayerEmpty.Visibility == Visibility.Visible) return;
-        if (room is not null) SendPlayback(!playbackIntent.Playing(target, player.IsPlaying), player.Length > 0 && player.Time >= player.Length - 250 ? 0 : Math.Max(0, player.Time));
-        else if (player.IsPlaying) player.SetPause(true); else { if (player.State == VLCState.Ended) player.Stop(); player.Play(); }
+        if (!HasMediaPlayback) return;
+        if (room is not null) SendPlayback(playing, player!.Length > 0 && player.Time >= player.Length - 250 ? 0 : Math.Max(0, player.Time));
+        else if (!playing) player!.SetPause(true); else { if (player!.State == VLCState.Ended) player.Stop(); player.Play(); }
     }
     private bool CanSeek() => player is not null && player.Length > 0 && (room is null || room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
     private void SeekStarted(object sender, MouseButtonEventArgs e)
@@ -1476,6 +1481,7 @@ public partial class MainWindow : Window
         SavePlaybackPosition(); localResume = 0;
         if (fullscreen && !preserveFullscreen) SetFullscreen(false);
         PlayerEmpty.Visibility = Visibility.Visible;
+        UpdateSystemMediaControls();
         RoomPlaybackNotice.Visibility = Visibility.Collapsed;
         RoomPlaybackNoticeText.Text = "";
         pendingSeek = null; seeking = false; playbackPause.Clear(); playbackIntent.Clear(); appliedGeneration = readyGeneration = -1; ++loadGeneration; var old = room; room = null; target = null; loadedMedia = null; ready = false;
@@ -1694,6 +1700,7 @@ public partial class MainWindow : Window
     private void KeyPressed(object sender, KeyEventArgs e)
     {
         if (e.Handled) return;
+        if (MediaKeyPressed(e)) return;
         if (e.Key is Key.BrowserBack or Key.BrowserForward || Keyboard.Modifiers == ModifierKeys.Alt && e.SystemKey is Key.Left or Key.Right)
         { BrowseHistory(e.Key == Key.BrowserBack || e.SystemKey == Key.Left); e.Handled = true; return; }
         if (e.Key == Key.Escape && fullscreen) { SetFullscreen(false); e.Handled = true; return; }
@@ -1736,6 +1743,7 @@ public partial class MainWindow : Window
     {
         base.OnSourceInitialized(e);
         HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(NavigationWindowMessage);
+        InitializeMediaControls();
         ApplyTitleBarTheme();
         Activated += (_, _) => ApplyTitleBarTheme();
         Deactivated += (_, _) => ApplyTitleBarTheme();
@@ -1764,6 +1772,7 @@ public partial class MainWindow : Window
     private async void WindowClosing(object? sender, CancelEventArgs e)
     {
         if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop(); videoClickDelay.Stop();
+        DisableSystemMediaControls();
         disconnectToast?.Close();
         guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); metadataRetentionTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
         library.Setting("volume", ((int)Volume.Value).ToString());

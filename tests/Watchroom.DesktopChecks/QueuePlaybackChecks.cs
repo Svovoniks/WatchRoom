@@ -114,6 +114,7 @@ static class QueuePlaybackChecks
             check(queues.Single(x => x.Id == saved.Id).MediaIds.SequenceEqual(saved.MediaIds),
                 "continuing after a direct jump skips unavailable files and preserves saved queue order");
 
+            await MediaControlsChecks.Run(window, check);
             await using var guest = new RoomClient();
             typeof(RoomClient).GetProperty("Identity")!.SetValue(guest, new Welcome("fixture", "guest", false, [], false));
             Set("room", guest);

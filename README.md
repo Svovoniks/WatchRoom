@@ -27,6 +27,8 @@ The Windows **Home** tab opens with **Continue watching**, suggestions for unsta
 
 Local playback remembers your position and volume. Details offer **Resume** and **Start over**; a **Return to player** strip keeps playback reachable while browsing. Playback options include an editable, persistent queue with episode labels, reordering, removal, and automatic advancement. Room invitation and chat actions appear when connected to a room.
 
+Headset and keyboard media buttons can play or pause the current video, including while Watchroom is minimized or another app has focus. Windows media controls show the current title and playback state. Room playback buttons follow the host's shared-controls setting.
+
 Search covers the whole library, including when browsing a season. Missing files have an **Unavailable** filter and disabled playback actions. **Correct title** works without a metadata token and survives rescanning. Folder categories can be edited in place; folder changes trigger scanning, and an active scan can be cancelled while keeping videos already indexed.
 
 ## Build and test
@@ -45,6 +47,8 @@ Publishing downloads and verifies Microsoft's signed Visual C++ runtime and rest
 Run the local coordination service with `./scripts/run-server.ps1`. Open two app instances using separate `WATCHROOM_DATA` directories to test host and guest independently. Tests generate their own media and never scan personal folders.
 
 The smoke executable validates SQLite scans, byte ranges and authorization, real native WebRTC transfers, remote LibVLC AVI playback and seeking, room admission, host-only playback, automatic buffering recovery, and revocation. It starts a temporary loopback server and shuts it down afterward.
+
+Desktop checks exercise media keyboard/app commands and room permissions with generated video. On an interactive Windows desktop, run `dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --system-media-controls` to also verify play, pause, and toggle through the Windows media service while the test app is minimized.
 
 ## Playback diagnostics and VM retesting
 
