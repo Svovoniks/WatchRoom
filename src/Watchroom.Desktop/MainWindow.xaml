@@ -34,9 +34,10 @@
   </Border>
 
   <!-- Blurred artwork behind title details: spans the whole content column and fades downward. -->
+  <!-- Pre-blurred artwork and a canvas-coloured fade keep this layer free of per-repaint effects and masks. -->
   <Grid Grid.Column="1" Height="560" VerticalAlignment="Top" ClipToBounds="True" IsHitTestVisible="False" Visibility="{Binding Visibility, ElementName=Details}">
-   <Image Source="{Binding Source, ElementName=DetailPoster}" Stretch="UniformToFill" Opacity="0.32" Margin="-90"><Image.Effect><BlurEffect Radius="90" RenderingBias="Performance"/></Image.Effect></Image>
-   <Grid.OpacityMask><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FF000000" Offset="0"/><GradientStop Color="#B0000000" Offset="0.45"/><GradientStop Color="#00000000" Offset="1"/></LinearGradientBrush></Grid.OpacityMask>
+   <Image Source="{Binding Source, ElementName=DetailPoster, Converter={StaticResource DetailBackdrop}}" Stretch="UniformToFill" Margin="-90" RenderOptions.BitmapScalingMode="Linear"/>
+   <Rectangle Fill="{DynamicResource BackdropFade}"/>
   </Grid>
   <Grid Grid.Column="1" Margin="28,22,28,16" x:Name="ContentArea">
 
@@ -131,11 +132,18 @@
     <StackPanel MaxWidth="1100" Margin="0,0,8,0">
      <DockPanel Margin="-8,0,0,24"><Button DockPanel.Dock="Right" Content="{Binding Content, ElementName=BrowseWithGuestButton}" Visibility="{Binding Visibility, ElementName=BrowseWithGuestButton}" Click="BrowseWithGuest" Margin="12,0,0,0"/><ItemsControl x:Name="DetailBreadcrumbs" Button.Click="BreadcrumbClick" Style="{StaticResource LibraryBreadcrumbs}" AutomationProperties.Name="Video location"/></DockPanel>
      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-      <Border Background="{DynamicResource Elevated}" CornerRadius="12" VerticalAlignment="Top" Effect="{StaticResource CardShadow}">
+      <!-- Layered translucent frames approximate CardShadow without re-running a blur effect while the page scrolls. -->
+      <Grid VerticalAlignment="Top">
+      <Border Margin="-9,-3,-9,-15" CornerRadius="21" Background="#0A000000" IsHitTestVisible="False"/>
+      <Border Margin="-6,-1,-6,-11" CornerRadius="18" Background="#0F000000" IsHitTestVisible="False"/>
+      <Border Margin="-3,1,-3,-7" CornerRadius="15" Background="#14000000" IsHitTestVisible="False"/>
+      <Border Margin="-1,3,-1,-4" CornerRadius="13" Background="#1A000000" IsHitTestVisible="False"/>
+      <Border Background="{DynamicResource Elevated}" CornerRadius="12">
        <Border CornerRadius="12" local:RoundedClip.Radius="12">
         <Grid><Grid Width="230" Height="340"><Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Source, ElementName=DetailPoster}" Value="{x:Null}"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Grid.Style><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="190" Margin="16"><TextBlock Text="&#xE714;" Style="{StaticResource EmptyStateIcon}" Foreground="{DynamicResource Muted}"/><TextBlock Text="{Binding Text, ElementName=DetailTitle}" FontSize="19" TextWrapping="Wrap" TextAlignment="Center" FontWeight="SemiBold"/></StackPanel></Grid><Image x:Name="DetailPoster" Stretch="Uniform" MaxWidth="400" MaxHeight="345"/></Grid>
        </Border>
       </Border>
+      </Grid>
       <StackPanel Grid.Column="1" Margin="32,6,0,0">
        <TextBlock x:Name="DetailContext" Foreground="{DynamicResource Accent}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,8"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
        <TextBlock x:Name="DetailTitle" FontSize="36" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,10"/>

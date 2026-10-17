@@ -476,8 +476,9 @@ public partial class MainWindow : Window
                     cancellation.ThrowIfCancellationRequested();
                     var members = card.Media.Series is null ? Array.Empty<MediaItem>() : shows.GetValueOrDefault(LibraryIdentity.ShowKey(card.Media)) ?? [];
                     var position = card.Level is "episode" or "movie" && long.TryParse(settings.GetValueOrDefault("position:" + card.Media.Id), out var saved) ? saved : 0;
-                    return (Card: card, View: views.GetValueOrDefault(LibraryCardView.Identity(card)) ?? new LibraryCardView(card),
-                        Position: position, Watched: LibraryWatchProgress.IsWatched(members, card, id => settings.GetValueOrDefault("watched:" + id) == "true"),
+                    var existing = views.GetValueOrDefault(LibraryCardView.Identity(card));
+                    return (Card: card, View: existing ?? new LibraryCardView(card),
+                        PosterFile: existing is null ? default : LibraryCardView.Version(card.Poster), Position: position, Watched: LibraryWatchProgress.IsWatched(members, card, id => settings.GetValueOrDefault("watched:" + id) == "true"),
                         Continuing: status == 2 && LibraryWatchProgress.CanContinue(members, card, settings));
                 }).Where(state => status switch { 2 => state.Continuing, 3 => !state.Watched, 4 => state.Watched, _ => true }).ToArray();
             }, cancellation);
@@ -507,7 +508,7 @@ public partial class MainWindow : Window
             {
                 cancellation.ThrowIfCancellationRequested();
                 var view = playback[index].View;
-                if (views.ContainsKey(view.Key)) view.Update(cards[index]);
+                if (views.ContainsKey(view.Key)) view.Update(cards[index], playback[index].PosterFile);
                 view.SetPlayback(playback[index].Position, playback[index].Watched);
                 if (initialBatch is not null) initialBatch.Add(view);
                 else if (index >= libraryCards.Count || libraryCards[index] != view)
@@ -1013,12 +1014,16 @@ public partial class MainWindow : Window
     }
     private async Task ImproveEpisodeArtwork(LibraryCardView view)
     {
-        if (view.IsRemote) return;
+        // Runs for every card realized while scrolling: return before any settings reads.
+        if (view.IsRemote || !view.IsEpisode) return;
         var item = view.Card.Media;
-        var token = savedMetadataToken; var ffmpeg = SavedFfmpeg;
-        var options = MetadataOptions.Load(library);
-        if (!SavedAutoArtwork) options = options with { Providers = [] };
-        if (!view.IsEpisode || !episodeArtworkRequests.Add(item.Id + ":" + item.EpisodeSource + ":" + LibraryIdentity.Hash(token) + ":" + string.Join(',', options.ProviderOrder))) return;
+        var token = savedMetadataToken;
+        var (ffmpeg, options) = await Task.Run(() =>
+        {
+            var options = MetadataOptions.Load(library);
+            return (SavedFfmpeg, SavedAutoArtwork ? options : options with { Providers = [] });
+        });
+        if (closing || !episodeArtworkRequests.Add(item.Id + ":" + item.EpisodeSource + ":" + LibraryIdentity.Hash(token) + ":" + string.Join(',', options.ProviderOrder))) return;
         try
         {
             var improved = await Task.Run(() => episodeArtwork.ImproveAsync(item, App.DataDirectory, token, ffmpeg, lifetime.Token, options));
@@ -1753,6 +1758,10 @@ public partial class MainWindow : Window
             : new[] { "#0F1015", "#16171E", "#20212B", "#EEEEF3", "#9A9CAB", "#2A2C37", "#A991FF", "#160E2E", "#272935", "#2A2442", "#3FB97A", "#C80F1015" };
         var keys = new[] { "Canvas", "Surface", "Elevated", "Ink", "Muted", "Line", "Accent", "AccentInk", "Hover", "AccentSoft", "Success", "Scrim" };
         for (int i = 0; i < keys.Length; i++) Application.Current.Resources[keys[i]] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(colors[i]));
+        var canvas = (Color)ColorConverter.ConvertFromString(colors[0]);
+        var fade = new LinearGradientBrush([new(Color.FromArgb(0, canvas.R, canvas.G, canvas.B), 0),
+            new(Color.FromArgb(0x4F, canvas.R, canvas.G, canvas.B), 0.45), new(canvas, 1)], 90);
+        fade.Freeze(); Application.Current.Resources["BackdropFade"] = fade;
         ApplyTitleBarTheme();
     }
     protected override void OnSourceInitialized(EventArgs e)

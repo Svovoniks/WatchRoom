@@ -30,7 +30,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     public bool IsGuestHovered { get; private set; }
     public void SetGuestHovered(bool value) { if (IsGuestHovered != value) { IsGuestHovered = value; Changed(nameof(IsGuestHovered)); } }
     private (long Length, long Modified) posterVersion;
-    private static (long Length, long Modified) Version(string? path)
+    public static (long Length, long Modified) Version(string? path)
     {
         if (path is null) return default;
         try { var file = new FileInfo(path); return file.Exists ? (file.Length, file.LastWriteTimeUtc.Ticks) : default; }
@@ -69,7 +69,8 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     }
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Changed(string property) => PropertyChanged?.Invoke(this, new(property));
-    public void Update(LibraryCard card)
+    // Filtering passes a version read off the UI thread to avoid a file stat per card.
+    public void Update(LibraryCard card, (long Length, long Modified)? posterFile = null)
     {
         var previous = Card; Card = card;
         if (previous != card) Changed(nameof(Card));
@@ -77,7 +78,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         if (previous.Caption != card.Caption) Changed(nameof(Caption));
         if (previous.Media.Season != card.Media.Season || previous.Media.Episode != card.Media.Episode || previous.Media.EpisodeEnd != card.Media.EpisodeEnd ||
             previous.Media.RuntimeMinutes != card.Media.RuntimeMinutes || previous.Media.IsVirtual != card.Media.IsVirtual || previous.Media.Available != card.Media.Available) Changed(nameof(EpisodeMeta));
-        var version = Version(card.Poster);
+        var version = posterFile ?? Version(card.Poster);
         var changed = previous.Poster != card.Poster || posterVersion != version;
         if (changed) { imageGeneration++; requestedPath = null; }
         posterVersion = version;
