@@ -1257,6 +1257,8 @@ public partial class MainWindow : Window
     private void RequestPlayback(bool playing)
     {
         videoClickDelay.Stop();
+        // During the up-next countdown, Play continues to the next episode instead of replaying this one.
+        if (playing && upNextChoice is not null) { EndUpNext(true); return; }
         if (!HasMediaPlayback) return;
         if (room is not null) SendPlayback(playing, player!.Length > 0 && player.Time >= player.Length - 250 ? 0 : Math.Max(0, player.Time));
         else if (!playing) player!.SetPause(true); else { if (player!.State == VLCState.Ended) player.Stop(); player.Play(); }
@@ -1623,6 +1625,7 @@ public partial class MainWindow : Window
         RoomSideWidth.Width = new GridLength(showRoomPanel ? roomPanelWidth : 0);
         RoomToggle.ToolTip = roomPanelVisible ? "Hide participants and chat" : "Show participants and chat";
         ApplyCaptionLayout(inPlayer);
+        PlaceUpdateCard(inPlayer);
     }
     private void RoomPanelSizeChanged(object sender, SizeChangedEventArgs e)
     {

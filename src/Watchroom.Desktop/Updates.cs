@@ -49,6 +49,14 @@ public partial class MainWindow
         { if (manual) UpdateStatus.Text = "Could not check for updates: " + ex.Message; }
         finally { checkingUpdates = false; CheckUpdatesButton.IsEnabled = true; }
     }
+    // Native video draws over the main window, so the player shows the card in its video overlay.
+    private void PlaceUpdateCard(bool inPlayer)
+    {
+        System.Windows.Controls.Panel host = inPlayer ? PlayerUpdateHost : WindowRoot;
+        if (UpdateCard.Parent == host) return;
+        (UpdateCard.Parent as System.Windows.Controls.Panel)?.Children.Remove(UpdateCard);
+        host.Children.Add(UpdateCard);
+    }
     private void DismissUpdate(object sender, RoutedEventArgs e)
     { if (installingUpdate) return; library.Setting("dismissedUpdate", availableUpdate?.Version.ToString() ?? ""); UpdateCard.Visibility = Visibility.Collapsed; }
     private async void InstallUpdate(object sender, RoutedEventArgs e)

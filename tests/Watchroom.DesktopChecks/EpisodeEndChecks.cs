@@ -65,6 +65,10 @@ static class EpisodeEndChecks
                 "the up-next card stacks above the fullscreen controls instead of under them");
             Call("EndUpNext", false);
             check(card.Visibility == Visibility.Collapsed && offer.IsCompleted && !offer.Result, "cancelling the countdown hides the card and keeps the episode");
+            offer = (Task<bool>)Call("OfferNextEpisode", second, (Func<bool>)(() => false))!;
+            Call("RequestPlayback", true);
+            check(offer.IsCompleted && offer.Result && card.Visibility == Visibility.Collapsed,
+                "pressing Play during the countdown continues to the next episode instead of replaying");
             var stale = false;
             offer = (Task<bool>)Call("OfferNextEpisode", second, (Func<bool>)(() => stale))!;
             stale = true;

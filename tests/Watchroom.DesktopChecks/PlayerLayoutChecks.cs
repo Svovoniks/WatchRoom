@@ -165,6 +165,8 @@ static class PlayerLayoutChecks
         fullscreenHost.Children.Remove(transport); docked.Children.Add(transport); window.WindowStyle = WindowStyle.SingleBorderWindow;
         Invoke(window, "ApplyPlayerLayout"); Layout(900, 600);
         Check(header.Visibility == Visibility.Visible && header.ActualHeight > 0, "leaving fullscreen restores the docked top bar");
+        var updateCard = (Border)window.FindName("UpdateCard");
+        Check(updateCard.Parent == window.FindName("PlayerUpdateHost"), "the update card shows in the video overlay so the video cannot cover it");
         Check(caption.Visibility == Visibility.Visible && System.Windows.Shell.WindowChrome.GetWindowChrome(window).CaptionHeight == 40 &&
             caption.Background is SolidColorBrush { Color: var captionColor } && captionColor == Color.FromRgb(0x17, 0x18, 0x1F),
             "the docked player keeps a dark caption row that matches its header");

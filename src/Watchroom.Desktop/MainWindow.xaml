@@ -443,6 +443,8 @@
         <!-- Offers the next episode in the player and plays it when the countdown ends.
              It stacks on the fullscreen controls host so the controls never cover it. -->
         <StackPanel VerticalAlignment="Bottom">
+         <!-- The update card moves here while the player is open; native video draws over the main window. -->
+         <Grid x:Name="PlayerUpdateHost"/>
          <Border x:Name="UpNextCard" Visibility="Collapsed" HorizontalAlignment="Right" Margin="0,0,24,24" Width="360" Background="#F217181F" BorderBrush="#2E303B" BorderThickness="1" CornerRadius="12" Padding="18,16" Effect="{StaticResource PopupShadow}" MouseLeftButtonDown="UpNextCardClicked" AutomationProperties.Name="Up next">
           <StackPanel>
            <TextBlock Text="UP NEXT" Foreground="#A991FF" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6"/>
