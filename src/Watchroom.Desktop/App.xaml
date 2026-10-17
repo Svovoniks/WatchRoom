@@ -257,6 +257,35 @@
   <Style x:Key="ScrollTrackButton" TargetType="RepeatButton"><Setter Property="Focusable" Value="False"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></Setter.Value></Setter></Style>
   <Style TargetType="ScrollBar"><Setter Property="Width" Value="12"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar"><Track x:Name="PART_Track" IsDirectionReversed="True" Orientation="{TemplateBinding Orientation}"><Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageUpCommand" Style="{StaticResource ScrollTrackButton}"/></Track.DecreaseRepeatButton><Track.Thumb><Thumb Style="{StaticResource ScrollThumb}"/></Track.Thumb><Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageDownCommand" Style="{StaticResource ScrollTrackButton}"/></Track.IncreaseRepeatButton></Track></ControlTemplate></Setter.Value></Setter><Style.Triggers><Trigger Property="Orientation" Value="Horizontal"><Setter Property="Width" Value="Auto"/><Setter Property="Height" Value="12"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar"><Track x:Name="PART_Track" Orientation="Horizontal"><Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageLeftCommand" Style="{StaticResource ScrollTrackButton}"/></Track.DecreaseRepeatButton><Track.Thumb><Thumb Style="{StaticResource ScrollThumb}"/></Track.Thumb><Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageRightCommand" Style="{StaticResource ScrollTrackButton}"/></Track.IncreaseRepeatButton></Track></ControlTemplate></Setter.Value></Setter></Trigger></Style.Triggers></Style>
 
+  <!-- Window caption buttons drawn by the app in place of the system title bar. -->
+  <Style x:Key="CaptionButton" TargetType="Button">
+   <Setter Property="Width" Value="46"/><Setter Property="Height" Value="40"/><Setter Property="Focusable" Value="False"/>
+   <Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="10"/>
+   <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="Transparent"/>
+   <Setter Property="WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Grid Background="Transparent">
+     <Border x:Name="Frame" Background="{TemplateBinding Background}"/>
+     <Border x:Name="Tint" Background="{DynamicResource Ink}" Opacity="0" IsHitTestVisible="False"/>
+     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    </Grid>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.08"/></Trigger>
+     <!-- The maximize button is hit-tested natively for snap layouts, so code reports its hover state through Tag. -->
+     <Trigger Property="Tag" Value="hover"><Setter TargetName="Tint" Property="Opacity" Value="0.08"/></Trigger>
+     <Trigger Property="Tag" Value="pressed"><Setter TargetName="Tint" Property="Opacity" Value="0.14"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.14"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+   <Style.Triggers><DataTrigger Binding="{Binding IsActive, RelativeSource={RelativeSource AncestorType=Window}}" Value="False"><Setter Property="Foreground" Value="{DynamicResource Muted}"/></DataTrigger></Style.Triggers>
+  </Style>
+  <Style x:Key="CaptionCloseButton" TargetType="Button" BasedOn="{StaticResource CaptionButton}">
+   <Style.Triggers>
+    <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#C42B1C"/><Setter Property="Foreground" Value="#FFFFFF"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter Property="Background" Value="#B02718"/><Setter Property="Foreground" Value="#FFFFFF"/></Trigger>
+   </Style.Triggers>
+  </Style>
+
   <!-- Player controls: borderless icon buttons on a dark bar. -->
   <Style x:Key="PlayerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="MinHeight" Value="40"/><Setter Property="Padding" Value="14,8"/>
    <Setter Property="Background" Value="#1AFFFFFF"/><Setter Property="Foreground" Value="{StaticResource PlayerInk}"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="MinWidth" Value="34"/><Setter Property="VerticalAlignment" Value="Center"/>

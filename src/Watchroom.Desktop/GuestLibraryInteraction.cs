@@ -42,7 +42,7 @@ public partial class MainWindow
         DetailSummary.Text = card.Media.Overview ?? ""; DetailFile.Text = "";
         DetailAvailability.Visibility = Visibility.Collapsed;
         DetailPlay.Content = "Play in room"; DetailPlay.IsEnabled = OwnsLibrary;
-        DetailHost.Visibility = DetailQueue.Visibility = RestartButton.Visibility = DetailRemove.Visibility = Visibility.Collapsed;
+        DetailHost.Visibility = DetailQueue.Visibility = DetailWatched.Visibility = RestartButton.Visibility = DetailRemove.Visibility = Visibility.Collapsed;
         Episodes.Visibility = Visibility.Collapsed; DetailPoster.Source = null;
         ScheduleGuestView();
         var view = guestLibraryCards.FirstOrDefault(view => view.Card == card);

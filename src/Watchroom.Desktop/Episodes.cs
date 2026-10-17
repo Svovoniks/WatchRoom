@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using LibVLCSharp.Shared;
 using Watchroom.Core;
 
@@ -87,17 +88,42 @@ public partial class MainWindow
         if (System.Windows.Input.InputManager.Current.MostRecentInputDevice is System.Windows.Input.MouseDevice && sender is FrameworkElement { Parent: Panel cardPanel })
             cardPanel.Children.OfType<Button>().FirstOrDefault(button => button != sender)?.Focus();
         if ((sender as FrameworkElement)?.DataContext is not LibraryCardView view) return;
-        var watched = !view.IsWatched;
-        var item = view.Card.Media;
+        MarkWatched(view.Card.Media, view.Card.Level, view.Card.Season, !view.IsWatched);
+    }
+    private void ToggleDetailWatched(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (selected is not { } item) return;
+        var watched = !WasWatched(item.Id);
+        // A watched video starts from the beginning next time.
+        if (watched) library.Setting("position:" + item.Id, "0");
+        MarkWatched(item, "video", null, watched);
+        UpdateDetailPlayback(item);
+    }
+    private void UpdateDetailPlayback(MediaItem item)
+    {
+        var watched = WasWatched(item.Id);
+        DetailWatchedText.Text = watched ? "Watched" : "Mark as watched";
+        DetailWatchedIcon.Text = watched ? "\uEC61" : "\uE73E";
+        DetailWatchedIcon.SetResourceReference(TextBlock.ForegroundProperty, watched ? "Success" : "Ink");
+        DetailWatched.ToolTip = watched ? "Mark as unwatched" : "Mark as watched";
+        System.Windows.Automation.AutomationProperties.SetName(DetailWatched, watched ? "Mark as unwatched" : "Mark as watched");
+        var resume = !watched && long.TryParse(library.Setting("position:" + item.Id), out var position) && position >= 10000 ? position : 0;
+        DetailPlay.Content = resume > 0 ? "Resume at " + FormatTime(resume) : "Play locally";
+        RestartButton.Visibility = resume > 0 ? Visibility.Visible : Visibility.Collapsed;
+        RestartButton.IsEnabled = DetailPlay.IsEnabled;
+    }
+    private void MarkWatched(MediaItem item, string level, int? season, bool watched)
+    {
         // Clearing a logical episode also clears watched versions that cover it.
-        var affected = view.Card.Level is "series" or "season"
+        var affected = level is "series" or "season"
             ? items.Where(candidate => !candidate.IsExtra && !candidate.IsVirtual && LibraryIdentity.SameShow(candidate, item) &&
-                (view.Card.Level == "series" || (candidate.Season ?? -1) == view.Card.Season)).ToArray()
+                (level == "series" || (candidate.Season ?? -1) == season)).ToArray()
             : !watched && item.Series is not null && item.Season is not null && item.Episode is not null && item.NumberingConflict is null
             ? items.Where(candidate => LibraryIdentity.SameShow(candidate, item) && candidate.Season == item.Season && candidate.NumberingConflict is null &&
                 LibraryIdentity.EpisodeNumbers(candidate).Intersect(LibraryIdentity.EpisodeNumbers(item)).Any()).ToArray()
             : [item];
-        foreach (var entry in affected) { library.Setting("watched:" + entry.Id, watched ? "true" : "false"); watchedState[entry.Id] = watched; }
+        foreach (var entry in affected.Append(item)) { library.Setting("watched:" + entry.Id, watched ? "true" : "false"); watchedState[entry.Id] = watched; }
         foreach (var card in libraryCards.Where(card => card.Card.Media.Id == item.Id || LibraryIdentity.SameShow(card.Card.Media, item)))
             UpdateCardPlayback(card);
         SetStatus(watched ? "Marked as watched." : "Marked as unwatched.");
@@ -131,11 +157,55 @@ public partial class MainWindow
         nextEpisodePromptOpen = true;
         try
         {
-            if (!Dialogs.OfferNextEpisode(this, next) || closing || generation != loadGeneration || room != endedRoom ||
-                playingItem?.Id != endedItem.Id || roomLibrary?.Queue.Entries.Length > 0) return;
-            if (room is not null && (room.Identity?.Host != true || !room.IsConnected)) return;
+            // Restarting, replacing or leaving the video, or losing room hosting, cancels the countdown.
+            bool Stale() => closing || generation != loadGeneration || room != endedRoom || playingItem?.Id != endedItem.Id ||
+                roomLibrary?.Queue.Entries.Length > 0 || player?.IsPlaying == true || RoomPage.Visibility != Visibility.Visible ||
+                room is not null && (room.Identity?.Host != true || !room.IsConnected);
+            if (!await OfferNextEpisode(next, Stale) || Stale()) return;
             await PlayFollowingEpisode(next);
         }
-        finally { nextEpisodePromptOpen = false; }
+        finally { nextEpisodePromptOpen = false; RefreshEpisodeEndAction(); }
     }
+
+    private const int UpNextCountdownMs = 15000;
+    private TaskCompletionSource<bool>? upNextChoice;
+    private DispatcherTimer? upNextTimer;
+    // Shows the up-next card over the video; resolves true when the countdown ends or the user plays now.
+    private Task<bool> OfferNextEpisode(MediaItem next, Func<bool> stale)
+    {
+        EndUpNext(false);
+        UpNextSeries.Text = next.Series ?? next.Title;
+        UpNextEpisode.Text = $"Season {next.Season} · {next.EpisodeDisplayTitle}";
+        var deadline = Environment.TickCount64 + UpNextCountdownMs;
+        var choice = upNextChoice = new();
+        var timer = upNextTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+        void Update()
+        {
+            if (stale()) { EndUpNext(false); return; }
+            var remaining = deadline - Environment.TickCount64;
+            if (remaining <= 0) { EndUpNext(true); return; }
+            UpNextCountdown.Text = $"Playing in {(remaining + 999) / 1000}s";
+        }
+        timer.Tick += (_, _) => Update();
+        Update();
+        if (!choice.Task.IsCompleted)
+        {
+            UpNextCard.Visibility = Visibility.Visible; timer.Start();
+            UpNextFillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty,
+                new System.Windows.Media.Animation.DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(UpNextCountdownMs)));
+        }
+        return choice.Task;
+    }
+    private void EndUpNext(bool play)
+    {
+        upNextTimer?.Stop(); upNextTimer = null;
+        UpNextFillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, null);
+        UpNextCard.Visibility = Visibility.Collapsed;
+        var choice = upNextChoice; upNextChoice = null;
+        choice?.TrySetResult(play);
+    }
+    private void UpNextPlayClicked(object sender, RoutedEventArgs e) { e.Handled = true; EndUpNext(true); }
+    private void UpNextCancelClicked(object sender, RoutedEventArgs e) { e.Handled = true; EndUpNext(false); }
+    // Clicks on the card must not reach the video, where they would toggle playback.
+    private void UpNextCardClicked(object sender, System.Windows.Input.MouseButtonEventArgs e) => e.Handled = true;
 }

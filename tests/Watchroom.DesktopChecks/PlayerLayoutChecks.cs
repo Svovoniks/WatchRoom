@@ -149,6 +149,9 @@ static class PlayerLayoutChecks
         var headerBounds = header.TransformToAncestor(fullscreenOverlay).TransformBounds(new Rect(new Point(), header.RenderSize));
         Check(header.Visibility == Visibility.Visible && headerBounds.Top == 0 && header.ActualWidth == fullscreenOverlay.ActualWidth,
             "fullscreen shows the original top bar across the video overlay");
+        var caption = (Grid)window.FindName("CaptionBar");
+        Check(caption.Visibility == Visibility.Collapsed && System.Windows.Shell.WindowChrome.GetWindowChrome(window).CaptionHeight == 0,
+            "fullscreen video hides the caption row and leaves the top of the video clickable");
         Save(fullscreenOverlay, "player-fullscreen-bars.png");
         transport.Visibility = Visibility.Collapsed; Layout(900, 600);
         Check(header.Visibility == Visibility.Collapsed, "fullscreen header follows bottom controls after moving into the overlay");
@@ -162,6 +165,9 @@ static class PlayerLayoutChecks
         fullscreenHost.Children.Remove(transport); docked.Children.Add(transport); window.WindowStyle = WindowStyle.SingleBorderWindow;
         Invoke(window, "ApplyPlayerLayout"); Layout(900, 600);
         Check(header.Visibility == Visibility.Visible && header.ActualHeight > 0, "leaving fullscreen restores the docked top bar");
+        Check(caption.Visibility == Visibility.Visible && System.Windows.Shell.WindowChrome.GetWindowChrome(window).CaptionHeight == 40 &&
+            caption.Background is SolidColorBrush { Color: var captionColor } && captionColor == Color.FromRgb(0x17, 0x18, 0x1F),
+            "the docked player keeps a dark caption row that matches its header");
         window.Close();
         Console.WriteLine("41 player layout and control checks passed.");
     }

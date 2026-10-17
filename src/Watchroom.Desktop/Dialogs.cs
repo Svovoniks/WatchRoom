@@ -31,25 +31,6 @@ public static class Dialogs
         return result;
     }
 
-    public static bool OfferNextEpisode(Window owner, MediaItem next)
-    {
-        var win = new Window { Owner = owner, Title = "Watch next episode?", Width = 560, SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
-        var panel = new StackPanel { Margin = new Thickness(24) };
-        panel.Children.Add(new TextBlock { Text = next.Series, FontSize = 20, FontWeight = FontWeights.SemiBold,
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
-        panel.Children.Add(new TextBlock { Text = $"Season {next.Season} · {next.EpisodeDisplayTitle}",
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) });
-        var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-        var later = new Button { Content = "Not now", IsCancel = true };
-        var play = new Button { Content = "Play next episode", IsDefault = true };
-        play.SetResourceReference(FrameworkElement.StyleProperty, "Primary");
-        play.Click += (_, _) => win.DialogResult = true;
-        actions.Children.Add(later); actions.Children.Add(play); panel.Children.Add(actions);
-        win.Content = panel;
-        return win.ShowDialog() == true;
-    }
-
     public sealed record WatchRoomChoice(SavedRoom? Room, string? NewRoomName);
 
     public static WatchRoomChoice? ChooseWatchRoom(Window owner, IEnumerable<SavedRoom> rooms, SavedRoom? current,

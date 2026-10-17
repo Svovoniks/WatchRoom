@@ -55,6 +55,34 @@ static class EpisodeEndChecks
             check(movieCard.HasPlaybackProgress && movieCard.PlaybackLabel == "Resume · 1:05",
                 "movie cards keep their resume overlay when playback progress refreshes");
             library2.Setting("position:" + movie.Id, "0");
+
+            // The next episode is offered in the player with a countdown the user can cancel.
+            var card = (Border)window.FindName("UpNextCard");
+            var offer = (Task<bool>)Call("OfferNextEpisode", second, (Func<bool>)(() => false))!;
+            check(card.Visibility == Visibility.Visible && ((TextBlock)window.FindName("UpNextCountdown")).Text == "Playing in 15s" && !offer.IsCompleted,
+                "the next episode is offered in the player with a 15 second countdown");
+            check(card.Parent is StackPanel stack && stack.Children.IndexOf(card) < stack.Children.IndexOf((UIElement)window.FindName("FullscreenControlsHost")),
+                "the up-next card stacks above the fullscreen controls instead of under them");
+            Call("EndUpNext", false);
+            check(card.Visibility == Visibility.Collapsed && offer.IsCompleted && !offer.Result, "cancelling the countdown hides the card and keeps the episode");
+            var stale = false;
+            offer = (Task<bool>)Call("OfferNextEpisode", second, (Func<bool>)(() => stale))!;
+            stale = true;
+            check(await Task.WhenAny(offer, Task.Delay(2000)) == offer && !offer.Result && card.Visibility == Visibility.Collapsed,
+                "restarting or replacing the video cancels the countdown");
+
+            // The details page marks an episode watched and back.
+            library2.Setting("watched:" + second.Id, "false"); Field<Dictionary<string, bool>>("watchedState").Remove(second.Id);
+            library2.Setting("position:" + second.Id, "65000");
+            Call("Select", second);
+            var watchedButton = (Button)window.FindName("DetailWatched"); var watchedText = (TextBlock)window.FindName("DetailWatchedText");
+            check(watchedButton.Visibility == Visibility.Visible && watchedText.Text == "Mark as watched" &&
+                ((Button)window.FindName("RestartButton")).Visibility == Visibility.Visible, "an unwatched episode offers Mark as watched on its details page");
+            watchedButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            check(library2.Setting("watched:" + second.Id) == "true" && library2.Setting("position:" + second.Id) == "0" && watchedText.Text == "Watched" &&
+                (string)((Button)window.FindName("DetailPlay")).Content == "Play locally", "marking an episode watched from details clears its resume point");
+            watchedButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            check(library2.Setting("watched:" + second.Id) == "false" && watchedText.Text == "Mark as watched", "the details page can mark an episode unwatched again");
         }
         finally
         {

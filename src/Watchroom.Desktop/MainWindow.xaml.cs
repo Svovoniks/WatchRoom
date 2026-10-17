@@ -569,7 +569,7 @@ public partial class MainWindow : Window
     }
     private void Select(MediaItem item)
     {
-        DetailHost.Visibility = DetailQueue.Visibility = Visibility.Visible;
+        DetailHost.Visibility = DetailQueue.Visibility = DetailWatched.Visibility = Visibility.Visible;
         if (currentPage != "Details" || selected?.Id != item.Id) RememberLocation();
         var restoring = restoringNavigation; restoringNavigation = true;
         selected = item; libraryCategory = CategoryFor(item);
@@ -584,10 +584,7 @@ public partial class MainWindow : Window
         DetailAvailability.Visibility = DetailAvailability.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         DetailRemove.Visibility = item.Available ? Visibility.Collapsed : Visibility.Visible;
         DetailRemove.IsEnabled = !scanning;
-        var resume = !WasWatched(item.Id) && long.TryParse(library.Setting("position:" + item.Id), out var position) && position >= 10000 ? position : 0;
-        DetailPlay.Content = resume > 0 ? "Resume at " + FormatTime(resume) : "Play locally";
-        RestartButton.Visibility = resume > 0 ? Visibility.Visible : Visibility.Collapsed;
-        RestartButton.IsEnabled = DetailPlay.IsEnabled;
+        UpdateDetailPlayback(item);
         DetailContext.Text = item.Series ?? "";
         DetailMeta.Text = item.Caption + " · " + Path.GetExtension(item.Path).TrimStart('.').ToUpperInvariant() + (string.IsNullOrWhiteSpace(item.AirDate) ? "" : " · " + item.AirDate) + (item.RuntimeMinutes is > 0 ? $" · {item.RuntimeMinutes} min" : "");
         _ = UpdateDetailPosterAsync(item);
@@ -1625,6 +1622,7 @@ public partial class MainWindow : Window
         RoomSideWidth.MinWidth = showRoomPanel ? 280 : 0;
         RoomSideWidth.Width = new GridLength(showRoomPanel ? roomPanelWidth : 0);
         RoomToggle.ToolTip = roomPanelVisible ? "Hide participants and chat" : "Show participants and chat";
+        ApplyCaptionLayout(inPlayer);
     }
     private void RoomPanelSizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -1722,6 +1720,7 @@ public partial class MainWindow : Window
         if (MediaKeyPressed(e)) return;
         if (e.Key is Key.BrowserBack or Key.BrowserForward || Keyboard.Modifiers == ModifierKeys.Alt && e.SystemKey is Key.Left or Key.Right)
         { BrowseHistory(e.Key == Key.BrowserBack || e.SystemKey == Key.Left); e.Handled = true; return; }
+        if (e.Key == Key.Escape && upNextChoice is not null) { EndUpNext(false); e.Handled = true; return; }
         if (e.Key == Key.Escape && fullscreen) { SetFullscreen(false); e.Handled = true; return; }
         if (fullscreen && e.Key == Key.Tab) ShowPlayerControls();
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen)
@@ -1768,6 +1767,7 @@ public partial class MainWindow : Window
     {
         base.OnSourceInitialized(e);
         HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(NavigationWindowMessage);
+        InitializeCaption(new WindowInteropHelper(this).Handle);
         InitializeMediaControls();
         ApplyTitleBarTheme();
         Activated += (_, _) => ApplyTitleBarTheme();
@@ -1777,7 +1777,7 @@ public partial class MainWindow : Window
     {
         var handle = new WindowInteropHelper(this).Handle;
         if (handle == IntPtr.Zero) return;
-        // Native chrome keeps Windows drag, resize, snap, and caption buttons.
+        // The app draws the caption row; DWM still themes the window border and system menus.
         // Unsupported attributes on older Windows versions leave the system defaults.
         uint dark = !light && !SystemParameters.HighContrast ? 1u : 0u;
         DwmSetWindowAttribute(handle, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, ref dark, sizeof(uint));

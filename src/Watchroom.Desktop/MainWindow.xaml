@@ -1,11 +1,13 @@
 <Window x:Class="Watchroom.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Watchroom.Desktop" xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF" Style="{StaticResource {x:Type Window}}" Title="Watchroom" Icon="Assets/Watchroom.ico" Width="1280" Height="850" MinWidth="900" MinHeight="640" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" WindowStartupLocation="CenterScreen" Closing="WindowClosing" PreviewKeyDown="KeyPressed">
- <Grid Background="{DynamicResource Canvas}"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition x:Name="StatusRow" Height="30"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="212" x:Name="RailWidth"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+ <!-- The app draws its own caption row; WindowChrome keeps native drag, resize and snap behaviour. -->
+ <WindowChrome.WindowChrome><WindowChrome CaptionHeight="40" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/></WindowChrome.WindowChrome>
+ <Grid x:Name="WindowRoot" Background="{DynamicResource Canvas}"><Grid.RowDefinitions><RowDefinition x:Name="TitleRow" Height="40"/><RowDefinition Height="*"/><RowDefinition x:Name="StatusRow" Height="30"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="212" x:Name="RailWidth"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 
   <!-- Sidebar -->
-  <Border x:Name="Rail" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
-   <DockPanel Margin="12,18,12,12" LastChildFill="False">
+  <Border x:Name="Rail" Grid.RowSpan="2" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
+   <DockPanel Margin="12,20,12,12" LastChildFill="False">
     <StackPanel DockPanel.Dock="Top">
-     <StackPanel Orientation="Horizontal" Margin="10,0,0,24"><Image Source="Assets/Watchroom.png" Width="26" Height="26"/><TextBlock Text="watchroom" FontSize="18" FontWeight="SemiBold" Margin="10,0,0,1" VerticalAlignment="Center"/></StackPanel>
+     <StackPanel Orientation="Horizontal" Margin="10,0,0,22"><Image Source="Assets/Watchroom.png" Width="26" Height="26"/><TextBlock Text="watchroom" FontSize="18" FontWeight="SemiBold" Margin="10,0,0,1" VerticalAlignment="Center"/></StackPanel>
      <Button x:Name="HomeNav" Tag="Home" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Home"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE80F;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Home"/></StackPanel></Button>
      <Button x:Name="LibraryNav" Tag="Library" Click="LibraryMenuClick" Style="{StaticResource Navigation}" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Library" AutomationProperties.HelpText="Expand or collapse library categories">
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8F1;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Library"/></StackPanel><TextBlock x:Name="LibraryChevron" Grid.Column="1" Text="&#xE70D;" Style="{StaticResource Icon}" FontSize="10" Foreground="{DynamicResource Muted}"/></Grid>
@@ -35,11 +37,11 @@
 
   <!-- Blurred artwork behind title details: spans the whole content column and fades downward. -->
   <!-- Pre-blurred artwork and a canvas-coloured fade keep this layer free of per-repaint effects and masks. -->
-  <Grid Grid.Column="1" Height="560" VerticalAlignment="Top" ClipToBounds="True" IsHitTestVisible="False" Visibility="{Binding Visibility, ElementName=Details}">
+  <Grid Grid.Column="1" Grid.RowSpan="2" Height="600" VerticalAlignment="Top" ClipToBounds="True" IsHitTestVisible="False" Visibility="{Binding Visibility, ElementName=Details}">
    <Image Source="{Binding Source, ElementName=DetailPoster, Converter={StaticResource DetailBackdrop}}" Stretch="UniformToFill" Margin="-90" RenderOptions.BitmapScalingMode="Linear"/>
    <Rectangle Fill="{DynamicResource BackdropFade}"/>
   </Grid>
-  <Grid Grid.Column="1" Margin="28,22,28,16" x:Name="ContentArea">
+  <Grid Grid.Column="1" Grid.Row="1" Margin="28,6,28,16" x:Name="ContentArea">
 
    <!-- Home -->
    <ScrollViewer x:Name="HomePage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -148,7 +150,7 @@
        <TextBlock x:Name="DetailContext" Foreground="{DynamicResource Accent}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,8"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
        <TextBlock x:Name="DetailTitle" FontSize="36" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,10"/>
        <TextBlock x:Name="DetailMeta" Style="{StaticResource MutedText}" FontSize="14" Margin="0,0,0,24"/>
-       <WrapPanel><Button x:Name="DetailPlay" Content="Play locally" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" Padding="20,8" Click="PlayLocal"/><Button x:Name="RestartButton" Content="Start over" Click="RestartLocal" Visibility="Collapsed"/><Button x:Name="DetailHost" Content="Watch together" ContentTemplate="{StaticResource PeopleContent}" Click="HostClick"/><Button x:Name="DetailQueue" Content="Add to queue" ContentTemplate="{StaticResource AddContent}" Click="QueueClick"/><Button x:Name="DetailRemove" Content="Remove from library" Click="RemoveUnavailableVideo" Visibility="Collapsed" ToolTip="Remove the saved entry for this unavailable video"/></WrapPanel>
+       <WrapPanel><Button x:Name="DetailPlay" Content="Play locally" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" Padding="20,8" Click="PlayLocal"/><Button x:Name="RestartButton" Content="Start over" Click="RestartLocal" Visibility="Collapsed"/><Button x:Name="DetailHost" Content="Watch together" ContentTemplate="{StaticResource PeopleContent}" Click="HostClick"/><Button x:Name="DetailQueue" Content="Add to queue" ContentTemplate="{StaticResource AddContent}" Click="QueueClick"/><Button x:Name="DetailWatched" Click="ToggleDetailWatched" ToolTip="Mark as watched" AutomationProperties.Name="Mark as watched"><StackPanel Orientation="Horizontal"><TextBlock x:Name="DetailWatchedIcon" Text="&#xE73E;" Style="{StaticResource Icon}" FontSize="13" Margin="0,0,9,0"/><TextBlock x:Name="DetailWatchedText" Text="Mark as watched" VerticalAlignment="Center"/></StackPanel></Button><Button x:Name="DetailRemove" Content="Remove from library" Click="RemoveUnavailableVideo" Visibility="Collapsed" ToolTip="Remove the saved entry for this unavailable video"/></WrapPanel>
        <TextBlock x:Name="DetailAvailability" Visibility="Collapsed" Foreground="{DynamicResource Accent}" TextWrapping="Wrap" Margin="0,8,0,12" AutomationProperties.LiveSetting="Polite"/>
        <TextBlock x:Name="DetailSummary" Margin="0,16,0,0" Style="{StaticResource MutedText}" FontSize="15" LineHeight="24" MaxWidth="720" HorizontalAlignment="Left"/>
        <ComboBox x:Name="Episodes" DisplayMemberPath="Caption" SelectionChanged="EpisodeChanged" Visibility="Collapsed" MaxWidth="420" HorizontalAlignment="Left" Margin="0,16,0,0"/>
@@ -438,7 +440,24 @@
         <Border x:Name="RoomPlaybackNotice" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24,112,24,112" Background="#E617181F" BorderBrush="#2E303B" BorderThickness="1" CornerRadius="12" Padding="22,14" IsHitTestVisible="False">
          <TextBlock x:Name="RoomPlaybackNoticeText" Foreground="#F4F4F7" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Center" AutomationProperties.Name="Room playback status" AutomationProperties.LiveSetting="Polite"/>
         </Border>
-        <Grid x:Name="FullscreenControlsHost" VerticalAlignment="Bottom"/>
+        <!-- Offers the next episode in the player and plays it when the countdown ends.
+             It stacks on the fullscreen controls host so the controls never cover it. -->
+        <StackPanel VerticalAlignment="Bottom">
+         <Border x:Name="UpNextCard" Visibility="Collapsed" HorizontalAlignment="Right" Margin="0,0,24,24" Width="360" Background="#F217181F" BorderBrush="#2E303B" BorderThickness="1" CornerRadius="12" Padding="18,16" Effect="{StaticResource PopupShadow}" MouseLeftButtonDown="UpNextCardClicked" AutomationProperties.Name="Up next">
+          <StackPanel>
+           <TextBlock Text="UP NEXT" Foreground="#A991FF" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6"/>
+           <TextBlock x:Name="UpNextSeries" Foreground="#F4F4F7" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+           <TextBlock x:Name="UpNextEpisode" Foreground="#B4B6C2" FontSize="13" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+           <!-- The fill shrinks with a render transform animation so it drains smoothly. -->
+           <Border Height="4" CornerRadius="2" Background="#2E303B" Margin="0,14,0,12" IsHitTestVisible="False"><Border x:Name="UpNextFill" CornerRadius="2" Background="#A991FF" RenderTransformOrigin="0,0.5"><Border.RenderTransform><ScaleTransform x:Name="UpNextFillScale"/></Border.RenderTransform></Border></Border>
+           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock x:Name="UpNextCountdown" Foreground="#B4B6C2" FontSize="13" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" AutomationProperties.LiveSetting="Polite"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="Cancel" Click="UpNextCancelClicked" Style="{StaticResource PlayerButton}" Background="Transparent" MinHeight="34" Height="34" Padding="12,0" ToolTip="Stay on this episode (Esc)"/><Button Content="Play now" Click="UpNextPlayClicked" Style="{StaticResource PlayerButton}" Background="#A991FF" Foreground="#160E2E" FontWeight="SemiBold" MinHeight="34" Height="34" Padding="14,0" Margin="0"/></StackPanel>
+           </Grid>
+          </StackPanel>
+         </Border>
+         <Grid x:Name="FullscreenControlsHost"/>
+        </StackPanel>
        </Grid>
       </vlc:VideoView>
      </Border>
@@ -522,6 +541,15 @@
     </Grid>
    </Grid>
   </Grid>
-  <Border x:Name="AppStatusBar" Grid.Row="1" Grid.ColumnSpan="2" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"><DockPanel><ProgressBar x:Name="ScanProgress" DockPanel.Dock="Right" Width="96" Height="3" Margin="18,0" IsIndeterminate="True" Visibility="Collapsed"/><TextBlock x:Name="StatusText" Text="Welcome to Watchroom" Foreground="{DynamicResource Muted}" Margin="16,0" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"/></DockPanel></Border>
-  <Border x:Name="UpdateCard" Grid.Column="1" Panel.ZIndex="100" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Width="420" Margin="24" Padding="22" CornerRadius="14" BorderThickness="1" BorderBrush="{DynamicResource Line}" Background="{DynamicResource Surface}" Effect="{StaticResource CardShadow}"><StackPanel><StackPanel Orientation="Horizontal" Margin="0,0,0,10"><Border Width="32" Height="32" CornerRadius="8" Background="{DynamicResource AccentSoft}" Margin="0,0,12,0"><TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><TextBlock x:Name="UpdateCardTitle" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" MaxWidth="320"/></StackPanel><TextBlock x:Name="UpdateCardStatus" Style="{StaticResource MutedText}" Margin="0,0,0,16" AutomationProperties.LiveSetting="Polite"/><ProgressBar x:Name="UpdateDownloadProgress" Visibility="Collapsed" Minimum="0" Maximum="100" Height="6" Margin="0,0,0,14"/><WrapPanel HorizontalAlignment="Right"><Button x:Name="DismissUpdateButton" Content="Later" Style="{StaticResource QuietButton}" Click="DismissUpdate" Margin="0,0,8,0"/><Button x:Name="InstallUpdateButton" Content="Update" Click="InstallUpdate" Style="{StaticResource Primary}" Margin="0"/></WrapPanel></StackPanel></Border></Grid>
+  <!-- Caption row: the sidebar and details backdrop extend behind it; empty space drags the window. -->
+  <Grid x:Name="CaptionBar" Grid.Column="1" Panel.ZIndex="50">
+   <StackPanel x:Name="CaptionIdentity" Orientation="Horizontal" Visibility="Collapsed" Margin="16,0,0,0" VerticalAlignment="Center"><Image Source="Assets/Watchroom.png" Width="16" Height="16"/><TextBlock Text="Watchroom" FontSize="12" Foreground="{DynamicResource Muted}" Margin="8,0,0,0" VerticalAlignment="Center"/></StackPanel>
+   <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+    <Button x:Name="MinimizeButton" Content="&#xE921;" Click="MinimizeWindow" Style="{StaticResource CaptionButton}" AutomationProperties.Name="Minimize"/>
+    <Button x:Name="MaximizeButton" Content="&#xE922;" Click="ToggleMaximizeWindow" Style="{StaticResource CaptionButton}" AutomationProperties.Name="Maximize"/>
+    <Button x:Name="CloseButton" Content="&#xE8BB;" Click="CloseWindow" Style="{StaticResource CaptionCloseButton}" AutomationProperties.Name="Close"/>
+   </StackPanel>
+  </Grid>
+  <Border x:Name="AppStatusBar" Grid.Row="2" Grid.ColumnSpan="2" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"><DockPanel><ProgressBar x:Name="ScanProgress" DockPanel.Dock="Right" Width="96" Height="3" Margin="18,0" IsIndeterminate="True" Visibility="Collapsed"/><TextBlock x:Name="StatusText" Text="Welcome to Watchroom" Foreground="{DynamicResource Muted}" Margin="16,0" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"/></DockPanel></Border>
+  <Border x:Name="UpdateCard" Grid.Column="1" Grid.Row="1" Panel.ZIndex="100" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Width="420" Margin="24" Padding="22" CornerRadius="14" BorderThickness="1" BorderBrush="{DynamicResource Line}" Background="{DynamicResource Surface}" Effect="{StaticResource CardShadow}"><StackPanel><StackPanel Orientation="Horizontal" Margin="0,0,0,10"><Border Width="32" Height="32" CornerRadius="8" Background="{DynamicResource AccentSoft}" Margin="0,0,12,0"><TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><TextBlock x:Name="UpdateCardTitle" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" MaxWidth="320"/></StackPanel><TextBlock x:Name="UpdateCardStatus" Style="{StaticResource MutedText}" Margin="0,0,0,16" AutomationProperties.LiveSetting="Polite"/><ProgressBar x:Name="UpdateDownloadProgress" Visibility="Collapsed" Minimum="0" Maximum="100" Height="6" Margin="0,0,0,14"/><WrapPanel HorizontalAlignment="Right"><Button x:Name="DismissUpdateButton" Content="Later" Style="{StaticResource QuietButton}" Click="DismissUpdate" Margin="0,0,8,0"/><Button x:Name="InstallUpdateButton" Content="Update" Click="InstallUpdate" Style="{StaticResource Primary}" Margin="0"/></WrapPanel></StackPanel></Border></Grid>
 </Window>
