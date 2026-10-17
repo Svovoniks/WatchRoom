@@ -44,8 +44,10 @@ static class UiFindingsChecks
         }
         void AddLanguage(LanguagePriorityPicker priority, string code)
         {
-            ((ComboBox)priority.FindName("LanguageOptions")).SelectedValue = code;
-            ((Button)priority.FindName("AddLanguageButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            // Choosing a language adds it immediately; there is no separate Add button.
+            var options = (ComboBox)priority.FindName("LanguageOptions");
+            options.SelectedValue = code;
+            if (!priority.Text.Split(", ").Contains(code)) throw new Exception("FAIL: choosing " + code + " did not add it");
         }
         void Capture(string name)
         {
@@ -141,7 +143,7 @@ static class UiFindingsChecks
             Descendants<Button>(audioPriority).First(button => Equals(button.Tag, "Down") && ReferenceEquals(button.DataContext, audioRows.Items[0]))
                 .RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Layout();
             Check(audioPriority.Text == "en, ru", "priority arrows change the language order");
-            Descendants<Button>(audioPriority).First(button => Equals(button.Content, "×") && ReferenceEquals(button.DataContext, audioRows.Items[0]))
+            Descendants<Button>(audioPriority).First(button => System.Windows.Automation.AutomationProperties.GetName(button) == "Remove language" && ReferenceEquals(button.DataContext, audioRows.Items[0]))
                 .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Check(audioPriority.Text == "ru" && Control<Button>("SavePreferencesButton").IsEnabled && store.Setting("audioLanguages") is null,
                 "removing a language updates only the settings draft");

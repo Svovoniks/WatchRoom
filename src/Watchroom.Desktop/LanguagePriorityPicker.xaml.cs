@@ -21,7 +21,11 @@ public partial class LanguagePriorityPicker : UserControl
         new FrameworkPropertyMetadata("", FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, PreferenceChanged));
     public static readonly DependencyProperty AllowOffProperty = DependencyProperty.Register(nameof(AllowOff), typeof(bool), typeof(LanguagePriorityPicker),
         new PropertyMetadata(false, PreferenceChanged));
+    public static readonly DependencyProperty EmptyTextProperty = DependencyProperty.Register(nameof(EmptyText), typeof(string), typeof(LanguagePriorityPicker),
+        new PropertyMetadata("Video defaults"));
     public string Text { get => (string)GetValue(TextProperty); set => SetValue(TextProperty, value); }
+    // Shown before any language is chosen.
+    public string EmptyText { get => (string)GetValue(EmptyTextProperty); set => SetValue(EmptyTextProperty, value); }
     public bool AllowOff { get => (bool)GetValue(AllowOffProperty); set => SetValue(AllowOffProperty, value); }
     public event RoutedEventHandler? TextChanged;
 
@@ -48,11 +52,22 @@ public partial class LanguagePriorityPicker : UserControl
         LanguageOptions.ItemsSource = options.Where(option => !codes.Contains(option.Code)).ToArray();
         LanguageOptions.SelectedIndex = -1;
     }
-    private void AddLanguage(object sender, RoutedEventArgs e)
+    // Choosing from the open list (or programmatically) adds at once. Arrow keys on the closed box only
+    // browse, so keyboard users confirm with Enter instead of adding every language they pass.
+    private void LanguageChosen(object sender, SelectionChangedEventArgs e)
+    {
+        if (LanguageOptions.IsDropDownOpen || !LanguageOptions.IsKeyboardFocusWithin) AddChosenLanguage();
+    }
+    private void LanguageListClosed(object? sender, EventArgs e) => AddChosenLanguage();
+    private void LanguageKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != System.Windows.Input.Key.Enter || LanguageOptions.SelectedItem is null) return;
+        AddChosenLanguage(); e.Handled = true;
+    }
+    private void AddChosenLanguage()
     {
         if (LanguageOptions.SelectedItem is not LanguageOption choice) return;
         SetCurrentValue(TextProperty, string.Join(", ", Codes().Append(choice.Code).Distinct()));
-        LanguageOptions.Focus();
     }
     private void RemoveLanguage(object sender, RoutedEventArgs e)
     {

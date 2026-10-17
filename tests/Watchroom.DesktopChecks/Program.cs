@@ -14,6 +14,24 @@ static class Program
     {
         if (args.FirstOrDefault() == "--metadata-probe") { MetadataProbe.Run(args[1], args[2]).GetAwaiter().GetResult(); return; }
         if (args.FirstOrDefault() == "--remaining-audit") { MetadataProbe.Audit(args[1], args[2], args.Contains("--apply")).GetAwaiter().GetResult(); return; }
+        if (args.FirstOrDefault() == "--render-screens")
+        {
+            // Uses the library in WATCHROOM_DATA; point it at a copy, never at a live profile.
+            if (Environment.GetEnvironmentVariable("WATCHROOM_DATA") is null) throw new InvalidOperationException("Set WATCHROOM_DATA to a library copy.");
+            Environment.SetEnvironmentVariable("WATCHROOM_DISABLE_UPDATES", "1");
+            System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly; // as in App.OnStartup
+            new LibraryStore(Environment.GetEnvironmentVariable("WATCHROOM_DATA")!).Setting("artwork", "false");
+            var renderApp = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown, Resources = LoadAppResources() };
+            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+            var renderWindow = new MainWindow { Left = -20000, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+            renderWindow.Loaded += async (_, _) =>
+            {
+                try { await ScreenRender.Run(renderWindow, args[1], args.Length > 3 ? int.Parse(args[2]) : 1280, args.Length > 3 ? int.Parse(args[3]) : 810); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { renderWindow.Close(); renderApp.Shutdown(); }
+            };
+            renderWindow.Show(); renderApp.Run(); return;
+        }
         var directory = Path.GetFullPath(Path.Combine("artifacts/library-responsiveness-check", Guid.NewGuid().ToString("N"))); Directory.CreateDirectory(directory);
         Environment.SetEnvironmentVariable("WATCHROOM_DATA", directory);
         Environment.SetEnvironmentVariable("WATCHROOM_DISABLE_UPDATES", "1");
@@ -27,13 +45,7 @@ static class Program
         store.Setting("watched:" + entries[3].Id, "true");
         var app = new Application();
         SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
-        var resourceXml = System.Xml.Linq.XDocument.Load("src/Watchroom.Desktop/App.xaml");
-        var resourceRoot = new System.Xml.Linq.XElement(System.Xml.Linq.XName.Get("ResourceDictionary", "http://schemas.microsoft.com/winfx/2006/xaml/presentation"), resourceXml.Root!.Elements().Single().Elements());
-        resourceRoot.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + "x", "http://schemas.microsoft.com/winfx/2006/xaml");
-        resourceRoot.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + "local", "clr-namespace:Watchroom.Desktop;assembly=Watchroom");
-        foreach (var element in resourceRoot.Descendants().Where(element => element.Name.NamespaceName == "clr-namespace:Watchroom.Desktop"))
-            element.Name = System.Xml.Linq.XName.Get(element.Name.LocalName, "clr-namespace:Watchroom.Desktop;assembly=Watchroom");
-        app.Resources = (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(resourceRoot.ToString());
+        app.Resources = LoadAppResources();
         if (args.FirstOrDefault() == "--metadata-picker")
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -252,6 +264,17 @@ static class Program
         app.Run(window);
     }
 
+    // App.xaml's resources without its compiled code-behind, so checks run against the same styles as the app.
+    private static ResourceDictionary LoadAppResources()
+    {
+        var resourceXml = System.Xml.Linq.XDocument.Load("src/Watchroom.Desktop/App.xaml");
+        var resourceRoot = new System.Xml.Linq.XElement(System.Xml.Linq.XName.Get("ResourceDictionary", "http://schemas.microsoft.com/winfx/2006/xaml/presentation"), resourceXml.Root!.Elements().Single().Elements());
+        resourceRoot.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + "x", "http://schemas.microsoft.com/winfx/2006/xaml");
+        resourceRoot.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + "local", "clr-namespace:Watchroom.Desktop;assembly=Watchroom");
+        foreach (var element in resourceRoot.Descendants().Where(element => element.Name.NamespaceName == "clr-namespace:Watchroom.Desktop"))
+            element.Name = System.Xml.Linq.XName.Get(element.Name.LocalName, "clr-namespace:Watchroom.Desktop;assembly=Watchroom");
+        return (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(resourceRoot.ToString());
+    }
     private static async Task CheckLibraryNavigation(MainWindow window, LibraryStore store, ObservableCollection<LibraryCardView> cards,
         string directory, string poster, Action<bool, string> check)
     {

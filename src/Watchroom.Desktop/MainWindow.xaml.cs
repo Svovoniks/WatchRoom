@@ -302,7 +302,7 @@ public partial class MainWindow : Window
         if (!ConfirmPageNavigation("Library")) return;
         var visible = LibraryCategories.Visibility == Visibility.Visible;
         LibraryCategories.Visibility = LibraryPage.Visibility == Visibility.Visible && visible ? Visibility.Collapsed : Visibility.Visible;
-        LibraryChevron.Text = LibraryCategories.Visibility == Visibility.Visible ? "▾" : "▸";
+        LibraryChevron.Text = LibraryCategories.Visibility == Visibility.Visible ? "" : "";
         ShowPage("Library"); UpdateBreadcrumbs();
     }
     private void LibraryCategoryClick(object sender, RoutedEventArgs e) => NavigateLibrary(int.Parse((string)((Button)sender).Tag));
@@ -684,7 +684,7 @@ public partial class MainWindow : Window
             AddFolderButton.IsEnabled = FolderKind.IsEnabled = ExcludeFolderButton.IsEnabled = true;
             RestoreFolderButton.IsEnabled = ExcludedFolderList.SelectedItem is string;
             RemoveFolderButton.IsEnabled = ChangeFolderButton.IsEnabled = FolderList.SelectedItem is LibraryFolder;
-            RescanButton.Content = "↻  Rescan";
+            RescanButton.Content = "Rescan";
             RescanButton.ToolTip = "Check your folders for new videos";
             ScanProgress.Visibility = Visibility.Collapsed;
             CancelScanButton.Visibility = Visibility.Collapsed;
@@ -1142,7 +1142,7 @@ public partial class MainWindow : Window
             PlaybackTime.Text = FormatTime(player.Time) + " / " + FormatTime(player.Length);
         }
         var wantsPlayback = room is null ? player.IsPlaying : playbackIntent.Playing(target, player.IsPlaying);
-        PlayButton.Content = wantsPlayback ? "Ⅱ" : "▶";
+        PlayButton.Content = wantsPlayback ? "\uF8AE" : "\uF5B0";
         PlayButton.ToolTip = wantsPlayback ? "Pause (Space)" : "Play (Space)";
         if (++tick % 8 == 0 && ready) RefreshTracks();
         if (tick % 20 == 0 && ready) SavePlaybackPosition();
@@ -1244,7 +1244,7 @@ public partial class MainWindow : Window
         if (!playing)
         {
             player?.SetPause(true);
-            PlayButton.Content = "▶";
+            PlayButton.Content = "\uF5B0";
         }
         if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("control-request", new { command.CommandId, playing, position, revision = target?.Revision });
     }
@@ -1609,10 +1609,10 @@ public partial class MainWindow : Window
     {
         bool inPlayer = RoomPage.Visibility == Visibility.Visible;
         Rail.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
-        RailWidth.Width = new GridLength(inPlayer ? 0 : 192);
-        ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(24, 20, 24, 16);
+        RailWidth.Width = new GridLength(inPlayer ? 0 : 212);
+        ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(28, 22, 28, 16);
         AppStatusBar.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
-        StatusRow.Height = new GridLength(inPlayer ? 0 : 34);
+        StatusRow.Height = new GridLength(inPlayer ? 0 : 30);
         RoomSide.Visibility = roomPanelVisible && !fullscreen ? Visibility.Visible : Visibility.Collapsed;
         var showRoomPanel = roomPanelVisible && !fullscreen;
         RoomSplitter.Visibility = showRoomPanel ? Visibility.Visible : Visibility.Collapsed;
@@ -1748,8 +1748,10 @@ public partial class MainWindow : Window
     private void ApplyTheme()
     {
         if (ThemeStatus is not null) ThemeStatus.Text = light ? "Current theme: Light" : "Current theme: Dark";
-        var colors = light ? new[] { "#F4F5FA", "#FFFFFF", "#EAECF4", "#202433", "#586175", "#D6DAE7", "#6950C9", "#FFFFFF" } : new[] { "#101218", "#191C26", "#232736", "#F2F1F8", "#A5ABBE", "#303547", "#BEABFF", "#241A40" };
-        var keys = new[] { "Canvas", "Surface", "Elevated", "Ink", "Muted", "Line", "Accent", "AccentInk" };
+        var colors = light
+            ? new[] { "#F5F5F8", "#FFFFFF", "#ECECF2", "#1B1C24", "#5C5F70", "#E0E1E9", "#6A47DE", "#FFFFFF", "#E6E6EE", "#EEE9FD", "#1F9D5C", "#C8F5F5F8" }
+            : new[] { "#0F1015", "#16171E", "#20212B", "#EEEEF3", "#9A9CAB", "#2A2C37", "#A991FF", "#160E2E", "#272935", "#2A2442", "#3FB97A", "#C80F1015" };
+        var keys = new[] { "Canvas", "Surface", "Elevated", "Ink", "Muted", "Line", "Accent", "AccentInk", "Hover", "AccentSoft", "Success", "Scrim" };
         for (int i = 0; i < keys.Length; i++) Application.Current.Resources[keys[i]] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(colors[i]));
         ApplyTitleBarTheme();
     }

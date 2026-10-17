@@ -83,6 +83,9 @@ public partial class MainWindow
     private void ToggleCardWatched(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
+        // The checkmark stays visible while focused; after a mouse click, return focus to its card so it fades.
+        if (System.Windows.Input.InputManager.Current.MostRecentInputDevice is System.Windows.Input.MouseDevice && sender is FrameworkElement { Parent: Panel cardPanel })
+            cardPanel.Children.OfType<Button>().FirstOrDefault(button => button != sender)?.Focus();
         if ((sender as FrameworkElement)?.DataContext is not LibraryCardView view) return;
         var watched = !view.IsWatched;
         var item = view.Card.Media;
@@ -104,7 +107,7 @@ public partial class MainWindow
     private async Task PlaybackEnded(MediaItem? endedItem, RoomClient? endedRoom, int generation)
     {
         if (closing || nextEpisodePromptOpen || generation != loadGeneration || room != endedRoom || playingItem?.Id != endedItem?.Id) return;
-        PlayButton.Content = "▶";
+        PlayButton.Content = "\uF5B0";
         RefreshEpisodeEndAction();
         if (endedItem is not null && (room is null || room.Identity?.Host == true))
         {
