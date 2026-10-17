@@ -85,9 +85,14 @@ public sealed class DiagnosticLog : IAsyncDisposable
     private void PruneOldMetadata()
     {
         var cutoff = Wire.Now - (long)TmdbRetention.MaximumAge.TotalMilliseconds;
-        foreach (var file in new DirectoryInfo(DirectoryPath).EnumerateFiles("diagnostics*.jsonl"))
+        // The live file and its rotations (diagnostics.jsonl.1, .2, ...).
+        foreach (var file in new DirectoryInfo(DirectoryPath).EnumerateFiles("diagnostics.jsonl*")
+            .Where(x => System.Text.RegularExpressions.Regex.IsMatch(x.Name, @"^diagnostics\.jsonl(?:\.\d+)?$")))
         {
-            var lines = File.ReadAllLines(file.FullName); var kept = new List<string>();
+            string[] lines;
+            try { lines = File.ReadAllLines(file.FullName); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+            var kept = new List<string>();
             foreach (var line in lines)
             {
                 try
@@ -102,7 +107,8 @@ public sealed class DiagnosticLog : IAsyncDisposable
             if (kept.Count == lines.Length) continue;
             var temporary = file.FullName + ".retention.tmp";
             try { File.WriteAllLines(temporary, kept); File.Move(temporary, file.FullName, true); }
-            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            finally { try { if (File.Exists(temporary)) File.Delete(temporary); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } }
         }
     }
     public async ValueTask DisposeAsync() { entries.Writer.TryComplete(); await writer; }

@@ -236,6 +236,7 @@ static class Program
                 StreamingBufferChecks.Run(window, activeStore, directory, Check);
                 PreferenceNavigationChecks.Run(window, activeStore, Check);
                 await QueuePlaybackChecks.Run(window, activeStore, directory, Check);
+                await EpisodeEndChecks.Run(window, Check);
                 await CheckBackNavigation(window, Check);
                 PlayerInteractionChecks.Run(window, Check);
                 UnavailableLibraryChecks.Run(window, activeStore, directory, Check);

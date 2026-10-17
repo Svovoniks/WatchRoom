@@ -47,6 +47,8 @@ public sealed class FileMediaSource : ILocalMediaSource
 
 internal record RangeRequest(string Id, string Media, long Offset, int Count, bool Binary = false);
 internal record RangeReply(string Id, byte[]? Bytes, string? Error = null);
+// The host's range queue was full; the same range can be requested again shortly.
+internal sealed class PeerBusyException(string message) : IOException(message);
 
 public sealed class PeerTransport : IDisposable
 {
@@ -91,9 +93,10 @@ public sealed class PeerTransport : IDisposable
     private readonly ConcurrentDictionary<string, PendingRange> pending = new();
     private readonly ConcurrentDictionary<string, byte> serving = new();
     private readonly SemaphoreSlim window = new(MediaStreaming.Window);
-    // Canceled HTTP seeks can leave earlier ranges queued at the host. Leave
-    // bounded room for those while the guest starts its next read window.
-    private readonly Channel<RangeRequest> requests = Channel.CreateBounded<RangeRequest>(MediaStreaming.Window * 4);
+    // Canceled HTTP seeks can leave earlier ranges queued at the host. They leave
+    // the queue lazily, so only active requests count toward the busy limit.
+    private const string BusyError = "Too many requests";
+    private readonly Channel<RangeRequest> requests = Channel.CreateBounded<RangeRequest>(MediaStreaming.Window * 16);
     private readonly CancellationTokenSource lifetime = new();
     private readonly TaskCompletionSource opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource controlOpened = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -248,8 +251,9 @@ public sealed class PeerTransport : IDisposable
                 {
                     var req = Wire.Read<RangeRequest>(message.Data!);
                     if (req.Count is < 1 or > 32768 || req.Offset < 0 || !Guid.TryParseExact(req.Id, "N", out _)) throw new InvalidDataException("Invalid media range");
+                    if (serving.Count >= MediaStreaming.Window * 4) { SendReply(new(req.Id, null, BusyError)); return; }
                     if (!serving.TryAdd(req.Id, 0)) return;
-                    if (!requests.Writer.TryWrite(req)) { serving.TryRemove(req.Id, out _); SendReply(new(req.Id, null, "Too many requests")); }
+                    if (!requests.Writer.TryWrite(req)) { serving.TryRemove(req.Id, out _); SendReply(new(req.Id, null, BusyError)); }
                 }
                 else if (message.Type == "cancel-read") serving.TryRemove(message.Data ?? "", out _);
                 else if (message.Type == "bytes")
@@ -257,7 +261,7 @@ public sealed class PeerTransport : IDisposable
                     var reply = Wire.Read<RangeReply>(message.Data!);
                     if (pending.TryGetValue(reply.Id, out var waiter))
                     {
-                        if (reply.Error is not null) waiter.Completion.TrySetException(new IOException(reply.Error));
+                        if (reply.Error is not null) waiter.Completion.TrySetException(reply.Error == BusyError ? new PeerBusyException(reply.Error) : new IOException(reply.Error));
                         else waiter.Completion.TrySetResult(reply.Bytes ?? []);
                     }
                 }
@@ -354,7 +358,8 @@ public sealed class PeerTransport : IDisposable
                 finally { serving.TryRemove(request.Id, out _); }
             }
         }
-        catch (OperationCanceledException) { }
+        // Disposal closes the channels while a range may still be sending.
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException || lifetime.IsCancellationRequested) { }
     }
     public async Task<byte[]> ReadAsync(string media, long offset, int count, CancellationToken ct)
     {

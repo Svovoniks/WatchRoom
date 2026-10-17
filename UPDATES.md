@@ -159,16 +159,20 @@ installs the app locally. If master advances during checks, integrate it and rer
 Playback snapshots distinguish requested Play/Pause from a temporary buffering
 hold. Readiness messages from updated apps carry the movie ID and seek generation;
 late readiness for an earlier seek is ignored. Explicit seeks supersede buffering
-at the previous position. The guest bridge retains at most 16 MiB of recently read
-movie data; canceled seeks stop transfers that have no remaining consumers.
-Guest forward buffering is selected per movie from the saved **Settings →
+at the previous position. The guest bridge retains 16 MiB of recently read
+movie data plus the read-ahead window; canceled seeks stop transfers that have no
+remaining consumers. VLC's network cache is chosen per movie from the measured
+round trip (1.5–5 s), so starting and seeking wait only for that short buffer.
+Guest read-ahead is selected per movie from the saved **Settings →
 Playback → Video to buffer ahead (seconds)** setting. It defaults to 30 seconds
-and accepts whole seconds from 2 to 60. The native player owns this time-based
-buffer independently of the bridge's 16 MiB range cache. This is a buffering
-target, not a guarantee of outage coverage or a byte-exact download cap; bandwidth,
-bitrate and native input/decoder queues affect the data retained. Larger values
-use more memory and can lengthen startup and seeking. Saved changes apply to the
-next streamed video; local-file playback bypasses network buffering.
+and accepts whole seconds from 2 to 60. Once the first frames play, the bridge
+prefetches that much video (estimated from the file's average bitrate plus 25%,
+capped at 256 MiB) past the playback position with a few background reads; a
+seek pauses read-ahead until playback advances from the new position. This is a
+target, not a guarantee of outage coverage; bandwidth and bitrate affect the data
+retained. Larger values use more memory but do not lengthen startup or seeking.
+Saved changes apply to the next streamed video; local-file playback bypasses
+network buffering.
 Buffering recovery requires 750 ms of stable full cache.
 Temporary peer losses request a replacement immediately while room discovery is
 available. Six seconds without host control replies also starts recovery, checked

@@ -25,6 +25,18 @@ public partial class MainWindow
             UpdateCardPlayback(card);
     }
     private bool HasPlaybackQueue => queue.Count > 0 || roomLibrary?.Queue.Entries.Length > 0 || room?.Snapshot?.Queue?.Length > 0;
+    // A loaded queue continues only the video it started; other videos offer their next episode.
+    private bool PlayingFromQueue(MediaItem? item) => item is not null && queuePosition >= 0 && queuePosition < queue.Count && queue[queuePosition].Id == item.Id;
+    // Guests' up-next requests and a queue that started this video take priority;
+    // at the end of that queue an episode still offers its next episode.
+    private bool ContinuesQueue(MediaItem? ended) => roomLibrary?.Queue.Entries.Length > 0 ||
+        PlayingFromQueue(ended) && QueuePlayback.FindNext(queue, queuePosition, 1, QueueItemAvailable) >= 0;
+    private long episodeActionCheckedAt;
+    // Library updates replace records; keep the playing video's current metadata.
+    private void RefreshPlayingItem()
+    {
+        if (playingItem is { } playing && items.FirstOrDefault(item => item.Id == playing.Id) is { } current) playingItem = current;
+    }
 
     private void RefreshEpisodeEndAction()
     {
@@ -35,9 +47,10 @@ public partial class MainWindow
         if (!visible) return;
         EpisodeEndButton.IsEnabled = player is not null && ready && !nextEpisodePromptOpen &&
             (room is null || room.IsConnected && room.Identity?.Host == true);
-        if (episodeActionItem != item || episodeActionLibrary != items)
+        // Recheck periodically so a drive that comes back reveals the next episode.
+        if (episodeActionItem != item || episodeActionLibrary != items || Environment.TickCount64 - episodeActionCheckedAt > 5000)
         {
-            episodeActionItem = item; episodeActionLibrary = items;
+            episodeActionItem = item; episodeActionLibrary = items; episodeActionCheckedAt = Environment.TickCount64;
             episodeActionNext = EpisodePlayback.Next(items, item!, false, next => File.Exists(next.Path));
         }
         EpisodeEndButton.Content = episodeActionNext is null ? "Finish ✓" : "Next episode →";
@@ -99,23 +112,24 @@ public partial class MainWindow
             SetWatched(endedItem, true);
         }
         if (room?.Identity?.Host == true) SendPlayback(false, Math.Max(0, player!.Length), stopReason: "ended");
-        if (HasPlaybackQueue)
+        var upNext = roomLibrary?.Queue.Entries.Length > 0;
+        if (ContinuesQueue(endedItem))
         {
             if (room is null || room.Identity?.Host == true)
             {
-                if (roomLibrary?.Queue.Entries.Length > 0) roomLibrary.Request(HostPeerId(), "next");
+                if (upNext) roomLibrary!.Request(HostPeerId(), "next");
                 else await PlayQueueStep(1);
             }
             return;
         }
         if (endedItem is null || room is not null && (room.Identity?.Host != true || !room.IsConnected)) return;
-        var next = EpisodePlayback.Next(items, endedItem, HasPlaybackQueue, item => File.Exists(item.Path));
+        var next = EpisodePlayback.Next(items, items.FirstOrDefault(item => item.Id == endedItem.Id) ?? endedItem, false, item => File.Exists(item.Path));
         if (next is null) return;
         nextEpisodePromptOpen = true;
         try
         {
             if (!Dialogs.OfferNextEpisode(this, next) || closing || generation != loadGeneration || room != endedRoom ||
-                playingItem?.Id != endedItem.Id || HasPlaybackQueue) return;
+                playingItem?.Id != endedItem.Id || roomLibrary?.Queue.Entries.Length > 0) return;
             if (room is not null && (room.Identity?.Host != true || !room.IsConnected)) return;
             await PlayFollowingEpisode(next);
         }

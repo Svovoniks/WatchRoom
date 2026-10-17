@@ -48,6 +48,10 @@ static class RoomRecoveryChecks
             var original = (RoomClient)Call("NewRoom")!;
             await original.ConnectAsync(url, "Recovery Host", persistent: true);
             var identity = original.Identity!;
+            var videoPath = Path.Combine(directory, "recovery-episode.avi"); VideoFixture.Write(videoPath, 5);
+            var hosted = new MediaItem("recovery-episode", videoPath, "Recovery Show", "Show", Series: "Recovery Show", Season: 1, Episode: 1);
+            original.SetHostedFile(videoPath, hosted.Title);
+            typeof(MainWindow).GetField("playingItem", flags)!.SetValue(window, hosted);
             server.Kill(true); await server.WaitForExitAsync(); server.Dispose();
             await Wait(() => Retry() is not null, "unexpected connection loss starts automatic reconnection");
             server = Start(); await Ready();
@@ -55,6 +59,8 @@ static class RoomRecoveryChecks
                 "automatic reconnection restores the room after the service returns");
             check(Current()!.Identity!.Room == identity.Room && Current()!.Identity!.HostKey == identity.HostKey,
                 "automatic reconnection preserves the room and host credential");
+            check(((MediaItem?)typeof(MainWindow).GetField("playingItem", flags)!.GetValue(window))?.Id == hosted.Id,
+                "automatic reconnection keeps the host's playing video for watch progress and episode controls");
             server.Kill(true); await server.WaitForExitAsync();
             await Wait(() => Retry() is not null, "another unexpected disconnect can start recovery again");
             await (Task)Call("Disconnect", false, false)!;

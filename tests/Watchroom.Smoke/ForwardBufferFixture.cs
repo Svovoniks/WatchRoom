@@ -33,7 +33,9 @@ static class ForwardBufferFixture
         player.SetAudioFormat("S16N", sampleRate, channels);
         player.SetAudioCallbacks((_, _, count, pts) => decoded.Enqueue((pts, count)), null, null, null, null);
         using var media = new Media(vlc, url);
-        media.AddOption($":network-caching={StreamingBufferOptions.CacheMs(10)}");
+        // Start from the short RTT cache; the bridge holds the ten-second buffer.
+        media.AddOption($":network-caching={MediaStreaming.NetworkCacheForRtt(50)}");
+        bridge.SetReadAhead(StreamingBufferOptions.ReadAheadBytes(10, source.Media.Length, seconds * 1000L));
         async Task Wait(Func<bool> condition)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -41,7 +43,7 @@ static class ForwardBufferFixture
         }
         try
         {
-            check(player.Play(media), "native player starts with the configurable ten-second forward buffer");
+            check(player.Play(media), "native player starts from the short network cache with ten seconds of bridge read-ahead");
             await Wait(() => player.IsPlaying && player.Time > 500);
             await source.Blocked.Task.WaitAsync(TimeSpan.FromSeconds(15));
             await Task.Delay(100);
@@ -50,7 +52,7 @@ static class ForwardBufferFixture
             check(Volatile.Read(ref source.Reads) == reads,
                 "simulated host outage delivers no fresh movie bytes for three seconds");
             check(player.IsPlaying && player.Time >= before + 2000,
-                "native forward buffer sustains playback across three seconds of host unavailability");
+                "bridge read-ahead sustains playback across three seconds of host unavailability");
             source.Resume();
             await Wait(() => Volatile.Read(ref source.Reads) > reads && player.Time > before + 4000);
             var blocks = decoded.ToArray();

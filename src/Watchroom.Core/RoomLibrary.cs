@@ -34,6 +34,8 @@ public sealed class RoomLibrary(bool host, string selfId)
     public long Generation { get; private set; }
     private readonly Dictionary<string, string> names = new();
     private readonly Dictionary<string, LibraryResult> results = new();
+    // Dictionary enumeration reuses freed slots, so eviction order is tracked separately.
+    private readonly Queue<string> resultOrder = new();
     private readonly Dictionary<string, LibraryStart> pending = new();
     private readonly Dictionary<string, long> viewUpdated = new();
     private readonly Dictionary<string, long> transfers = new();
@@ -182,8 +184,13 @@ public sealed class RoomLibrary(bool host, string selfId)
     private void Finish(string peer, LibraryCommand command, bool success, string text)
     {
         var result = new LibraryResult(command.RequestId, success, text);
-        if (results.Count >= 256) results.Remove(results.Keys.First());
-        results[Key(peer, command)] = result;
+        var key = Key(peer, command);
+        if (!results.ContainsKey(key))
+        {
+            if (results.Count >= 256) results.Remove(resultOrder.Dequeue());
+            resultOrder.Enqueue(key);
+        }
+        results[key] = result;
         if (peer == selfId) Result?.Invoke(result); else Emit(peer, "library-result", result);
     }
     private void Execute(string peer, LibraryCommand command)

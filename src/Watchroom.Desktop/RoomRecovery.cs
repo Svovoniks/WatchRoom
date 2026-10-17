@@ -24,6 +24,19 @@ public partial class MainWindow
         appliedRevision = readyGeneration = -1;
     }
 
+    private long? readAheadMediaBytes;
+    // Begin read-ahead once the first frames are playing, so the configured
+    // buffer never competes with startup for the host's bandwidth.
+    private void StartReadAhead()
+    {
+        if (bridge is null || readAheadMediaBytes is not { } mediaBytes || !ready || player is not { Length: > 0 } native ||
+            native.State == LibVLCSharp.Shared.VLCState.Buffering || buffering.IsActive) return;
+        readAheadMediaBytes = null;
+        var bytes = StreamingBufferOptions.ReadAheadBytes(activeStreamingBufferSeconds, mediaBytes, native.Length);
+        bridge.SetReadAhead(bytes);
+        PlaybackDiagnostics.Record("read-ahead", new { activeStreamingBufferSeconds, bytes });
+    }
+
     private void PollBufferedRecovery()
     {
         if (room?.IsPeerRecovering != true || player is null) return;
@@ -93,6 +106,9 @@ public partial class MainWindow
         var name = SavedDisplayName;
         var roomName = previous.Snapshot?.Name;
         var source = previous.HostedMedia as ILocalMediaSource;
+        // Disconnect clears the playing video; restore it so watch progress and
+        // the episode controls keep working after the room reconnects.
+        var resumedItem = playingItem;
         var playback = previous.Snapshot?.Playback;
         var position = playback is null ? 0 : SyncMath.TargetPosition(playback, previous.ServerNowMs);
         var attempt = 0;
@@ -116,14 +132,19 @@ public partial class MainWindow
                         candidate.Send(new("media", Data: Wire.Serialize(candidate.HostedMedia!.Media)));
                         candidate.Send(new("playback", Data: Wire.Serialize(new PlaybackState(0, candidate.HostedMedia.Media.Id, playback?.Playing == true, position, 0))));
                     }
+                    if (resumedItem is not null && (!identity.Host || source is not null && File.Exists(source.LocalPath)))
+                        playingItem = items.FirstOrDefault(item => item.Id == resumedItem.Id) ?? resumedItem;
                     RememberCurrentRoom();
                     RoomSubtitle.Text = identity.Host ? "Reconnected · You are the host" : "Reconnected · Waiting for the host";
                     SetStatus("Room connection restored."); UpdateSessionControls(); return;
                 }
-                catch (Exception ex) when (ex is IOException or System.Net.Http.HttpRequestException or System.Net.WebSockets.WebSocketException)
+                // A health-check or connect timeout is another failed attempt, not a reason to stop retrying.
+                catch (Exception ex) when (ex is IOException or System.Net.Http.HttpRequestException or System.Net.WebSockets.WebSocketException ||
+                    ex is OperationCanceledException && !retry.IsCancellationRequested)
                 {
                     if (room == candidate) await Disconnect(reconnecting: true); else await candidate.DisposeAsync();
-                    if (!retry.IsCancellationRequested) SetStatus("Reconnecting… " + ex.Message);
+                    if (!retry.IsCancellationRequested)
+                        SetStatus("Reconnecting… " + (ex is OperationCanceledException ? "The room service did not respond in time." : ex.Message));
                 }
             }
         }

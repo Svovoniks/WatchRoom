@@ -7,7 +7,7 @@ static class RoomPlaybackStatusFixture
         var room = new HostRoomCoordinator("host");
         Participant[] people = [new("host", "Alex", true, true), new("guest", "Sam", false, true), new("pending", "Pending", false, false)];
         var media = new SharedMedia("movie", "Movie", 1024, ".avi");
-        room.Discover(people, 1000);
+        room.Discover(people, 1000); room.SetConnected("guest", true, 1000);
         room.Apply("host", new("media", Data: Wire.Serialize(media)), 1000, out _);
         string? Status() => RoomPlaybackStatus.Describe(Wire.Read<RoomSnapshot>(Wire.Serialize(room.Snapshot)));
         void Command(string sender, bool playing, bool seek = false, PlaybackStop? stop = null) => room.Apply(sender,

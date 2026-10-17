@@ -45,7 +45,7 @@ public partial class MainWindow
             }
         }
         catch (OperationCanceledException) { if (manual && !closing) UpdateStatus.Text = "Update check timed out. Try again."; }
-        catch (Exception ex) when (ex is HttpRequestException or IOException or System.Text.Json.JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or System.Text.Json.JsonException)
         { if (manual) UpdateStatus.Text = "Could not check for updates: " + ex.Message; }
         finally { checkingUpdates = false; CheckUpdatesButton.IsEnabled = true; }
     }
@@ -70,7 +70,7 @@ public partial class MainWindow
             Close();
         }
         catch (OperationCanceledException) { if (!closing) UpdateCardStatus.Text = "Download interrupted. Try again."; }
-        catch (Exception ex) when (ex is IOException or HttpRequestException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or HttpRequestException or System.ComponentModel.Win32Exception)
         { UpdateCardStatus.Text = "Update failed: " + ex.Message; }
         finally { installingUpdate = false; InstallUpdateButton.IsEnabled = true; DismissUpdateButton.IsEnabled = true; UpdateDownloadProgress.IsIndeterminate = false; UpdateDownloadProgress.Visibility = Visibility.Collapsed; }
     }

@@ -29,8 +29,20 @@ static class TmdbAccessFixture
         check(TmdbCredentials.Select(null, "fixture-default") == "fixture-default", "blank personal key selects bundled credential");
         check(TmdbCredentials.Select(" personal-key ", "fixture-default") == "personal-key", "personal credential overrides bundled credential");
         check(TmdbCredentials.Select("", null) is null, "developer builds without a key retain credential-free fallbacks");
-        try { TmdbCredentials.Select("bad\r\ncredential", null); check(false, "invalid credential rejected"); }
-        catch (ArgumentException ex) { check(!ex.Message.Contains("credential\r"), "invalid credential is rejected without echoing its value"); }
+        check(TmdbCredentials.Select("bad\r\ncredential", null) is null && TmdbCredentials.Select("bad credential!", "fixture-default") == "fixture-default",
+            "malformed personal credential is ignored instead of breaking every metadata provider");
+        check(TmdbCredentials.Select(" Bearer eyJ.fixture-token ", "fixture-default") == "eyJ.fixture-token" && TmdbCredentials.Select("﻿bearer   abc123", null) == "abc123",
+            "pasted Bearer prefixes and surrounding whitespace are stripped");
+        check(TmdbCredentials.TryNormalize("  ", out var blank) && blank == "" && TmdbCredentials.TryNormalize(null, out blank) && blank == "" &&
+            TmdbCredentials.TryNormalize("Bearer abc.DEF-1_2", out var normalized) && normalized == "abc.DEF-1_2" &&
+            !TmdbCredentials.TryNormalize("bad\r\ncredential", out var rejected) && rejected == "" && !TmdbCredentials.TryNormalize("Bearer", out _) &&
+            !TmdbCredentials.TryNormalize(new string('a', 8193), out _), "credential normalization reports blank, valid and malformed keys");
+        var tolerant = new LibraryStore(Path.Combine(directory, "malformed-key-db"));
+        tolerant.Save(new MediaItem("malformed-key", Path.Combine(directory, "Malformed Key Movie (2001).mkv"), "Malformed Key Movie", "Movie", 2001, Available: false));
+        var malformedFailed = false;
+        try { using var noNetwork = new HttpClient(new Handler()); await AutomaticArtwork.FetchAsync(tolerant, directory, "bad key!", null, CancellationToken.None, noNetwork); }
+        catch (ArgumentException) { malformedFailed = true; }
+        check(!malformedFailed, "metadata fetch with a malformed personal key does not throw");
         using var handler = new Handler(); using var client = new MetadataClient("fixture-token", handler);
         await client.SearchAsync("Example", true);
         check(handler.Authorized, "metadata requests use the application credential");
@@ -81,6 +93,9 @@ static class TmdbAccessFixture
         check(!File.Exists(nfoPoster), "TMDB images fetched through NFO URLs obey offline retention");
 
         var report = Path.Combine(directory, "metadata-fetch-report.json"); File.WriteAllText(report, "{}"); File.SetLastWriteTimeUtc(report, DateTime.UtcNow.AddDays(-176));
+        var groupingReport = Path.Combine(directory, "grouping-repair-v1.json"); File.WriteAllText(groupingReport, "[]"); File.SetLastWriteTimeUtc(groupingReport, DateTime.UtcNow.AddDays(-176));
+        store.ExpireTmdbContent(force: true);
+        check(!File.Exists(groupingReport), "offline maintenance expires the grouping repair report under the name the migration writes");
         store.Setting("metadata-outstanding-v2", Wire.Serialize(new[] { new MetadataIssues.Issue("old", "title", "Old title", "no-candidates", ["one"], "", Wire.Now - (long)TimeSpan.FromDays(176).TotalMilliseconds) }));
         store.ExpireTmdbContent(force: true);
         check(!File.Exists(report) && store.Setting("metadata-outstanding-v2") == "[]", "offline maintenance expires old reports and outstanding issues");
@@ -99,10 +114,14 @@ static class TmdbAccessFixture
 
         var logs = Path.Combine(directory, "logs"); Directory.CreateDirectory(logs);
         var logFile = Path.Combine(logs, "diagnostics.jsonl");
-        File.WriteAllLines(logFile, [Wire.Serialize(new { kind = "metadata-candidates", utcMs = Wire.Now - (long)TimeSpan.FromDays(176).TotalMilliseconds, data = "Old provider title" }),
-            Wire.Serialize(new { kind = "playback", utcMs = 1, data = "Playback information" })]);
+        string[] OldLog() => [Wire.Serialize(new { kind = "metadata-candidates", utcMs = Wire.Now - (long)TimeSpan.FromDays(176).TotalMilliseconds, data = "Old provider title" }),
+            Wire.Serialize(new { kind = "playback", utcMs = 1, data = "Playback information" })];
+        var rotatedLogs = new[] { logFile + ".1", logFile + ".3" }; var unrelatedLog = Path.Combine(logs, "other.jsonl");
+        foreach (var file in rotatedLogs.Append(logFile).Append(unrelatedLog)) File.WriteAllLines(file, OldLog());
         await using (var log = new DiagnosticLog(logs)) { await log.FlushAsync(); }
-        check(!File.ReadAllText(logFile).Contains("Old provider title") && File.ReadAllText(logFile).Contains("Playback information"), "diagnostic retention removes old metadata and preserves playback records");
+        check(rotatedLogs.Append(logFile).All(file => !File.ReadAllText(file).Contains("Old provider title") && File.ReadAllText(file).Contains("Playback information")),
+            "diagnostic retention removes old metadata from current and rotated logs and preserves playback records");
+        check(File.ReadAllText(unrelatedLog).Contains("Old provider title") && !Directory.EnumerateFiles(logs, "*.tmp").Any(), "diagnostic retention only rewrites its own log files");
 
         var legacy = new MediaItem("legacy", Path.Combine(directory, "Original Movie (2000).mkv"), "Remote Movie", "Movie", Overview: "Legacy text", MetadataProvider: "tmdb", MetadataId: 2);
         store.Save(legacy); store.ExpireTmdbContent(force: true);

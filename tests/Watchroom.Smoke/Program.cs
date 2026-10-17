@@ -34,6 +34,16 @@ if (args.FirstOrDefault() == "--room-playback-status")
     Console.WriteLine($"{checks} room playback status checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--room-resilience")
+{
+    var checks = 0;
+    void ResilienceCheck(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; }
+    RoomResilienceFixture.Run(ResilienceCheck);
+    if (args.Length > 1) await RoomServerFixture.Run(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? Path.GetFullPath(".tools/dotnet/dotnet.exe"), Path.GetFullPath(args[1]),
+        Path.GetFullPath(Path.Combine("artifacts", "room-resilience-" + Guid.NewGuid().ToString("N"))), ResilienceCheck);
+    Console.WriteLine($"{checks} room resilience checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--metadata-fixes")
 {
     var checks = 0;
@@ -293,6 +303,12 @@ if (args.FirstOrDefault() == "--streaming-audio")
     Console.WriteLine($"{checks} streaming audio checks passed.");
     return;
 }
+if (args.FirstOrDefault() == "--read-ahead")
+{
+    await MediaCacheFixture.Run((condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); });
+    await ReadAheadFixture.Run((condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); });
+    return;
+}
 if (args.FirstOrDefault() == "--forward-buffer")
 {
     await ForwardBufferFixture.Run(args[1], (condition, name) =>
@@ -315,6 +331,7 @@ RoomLibraryChecks.Run(Check);
 await DiagnosticLogFixture.Run(Path.Combine(root, "diagnostic-log"), Check);
 await RecoveryFixture.Run(Check);
 await MediaCacheFixture.Run(Check);
+await ReadAheadFixture.Run(Check);
 await BridgeShutdownFixture.Run(Check);
 await LibrarySearchFixture.Run(Check);
 await MetadataPipelineFixture.Run(Path.Combine(root, "metadata-pipeline"), Check);
@@ -326,6 +343,7 @@ await FilenameSchemaFixture.Run(Path.Combine(root, "filename-schemas"), Check);
 await GroupingAuditFixture.Run(Path.Combine(root, "grouping-audit"), Check);
 HostRoomFixture.Run(Check);
 RoomPlaybackStatusFixture.Run(Check);
+RoomResilienceFixture.Run(Check);
 RoomTrackFixture.Run(Check);
 SharedLibraryFixture.Run(Check);
 await StreamingAudioFixture.Run(Path.Combine(root, "streaming-audio"), Check);

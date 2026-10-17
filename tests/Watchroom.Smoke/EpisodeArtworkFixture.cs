@@ -6,6 +6,13 @@ internal static class EpisodeArtworkFixture
     public static async Task Run(string directory, Action<bool, string> check)
     {
         Directory.CreateDirectory(directory);
+        var lookups = new System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Task<string?>>>(); var calls = 0;
+        async Task<string?> Lookup(Func<Task<string?>> lookup) { try { return await EpisodeArtwork.Cached(lookups, "show:1:1", lookup); } catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException) { return "failed"; } }
+        var failed = await Lookup(() => { calls++; return Task.FromException<string?>(new HttpRequestException("offline")); });
+        var cancelled = await Lookup(() => { calls++; return Task.FromCanceled<string?>(new CancellationToken(true)); });
+        var recovered = await Lookup(() => { calls++; return Task.FromResult<string?>("image"); });
+        var cached = await Lookup(() => { calls++; return Task.FromResult<string?>("other"); });
+        check(failed == "failed" && cancelled == "failed" && recovered == "image" && cached == "image" && calls == 3, "failed or cancelled episode lookups are retried while successful ones stay cached");
         var video = Path.Combine(directory, "short episode with spaces.avi"); VideoFixture.Write(video, 3);
         var item = new MediaItem("thumbnail", video, "Example", "Show", Series: "Example", Season: 1, Episode: 1);
         var service = new EpisodeArtwork();

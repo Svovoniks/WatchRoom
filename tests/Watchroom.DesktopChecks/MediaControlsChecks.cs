@@ -74,9 +74,13 @@ static class MediaControlsChecks
                 await WaitFor(() => player.IsPlaying);
                 check(await session.TryTogglePlayPauseAsync(), "Windows accepts a background play/pause button request");
             }
-            else await window.Dispatcher.InvokeAsync(() => Call("HandleMediaPlayback", false));
+            else await window.Dispatcher.InvokeAsync(() => Call("HandleMediaPlayback", false, true));
             await WaitFor(() => player.State == VLCState.Paused);
             check(controls.IsEnabled, "minimized playback retains its Windows media session");
+            Set("lastSystemMediaButtonAt", Environment.TickCount64);
+            Command(14, 0x1000); await Task.Delay(150);
+            check(!player.IsPlaying, "a key toggle duplicating a Windows media button does not undo it");
+            Set("lastSystemMediaButtonAt", long.MinValue / 2);
 
             await using var guest = new RoomClient();
             typeof(RoomClient).GetProperty("Identity")!.SetValue(guest, new Welcome("fixture", "guest", false, [], false));
@@ -103,7 +107,7 @@ static class MediaControlsChecks
             Call("UpdateSystemMediaControls");
             check(!controls.IsEnabled && controls.PlaybackStatus == MediaPlaybackStatus.Closed,
                 "closing the video releases the Windows media session");
-            check(!(bool)Call("HandleMediaPlayback", true)! && !player.IsPlaying,
+            check(!(bool)Call("HandleMediaPlayback", true, false)! && !player.IsPlaying,
                 "media buttons with no active video cannot start old playback");
         }
         finally

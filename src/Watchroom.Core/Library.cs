@@ -316,9 +316,16 @@ public sealed partial class LibraryStore
         };
         return item;
     }
+    // Scans merge each file into its current record under this gate, so a concurrent edit is never replaced by a stale copy.
+    private readonly object writeGate = new();
     public void Save(MediaItem item)
     {
         item = LibraryIdentity.Ensure(TmdbRetention.TrackLegacy(item));
+        lock (writeGate) Write(item);
+        MediaSaved?.Invoke(item);
+    }
+    private void Write(MediaItem item)
+    {
         using var db = Open(); using var c = db.CreateCommand();
         using var transaction = db.BeginTransaction(); c.Transaction = transaction;
         using var prior = db.CreateCommand(); prior.Transaction = transaction;
@@ -366,7 +373,6 @@ public sealed partial class LibraryStore
             hierarchy.Parameters.AddWithValue("$season", seasonId); hierarchy.Parameters.AddWithValue("$seasonJson", Wire.Serialize(season)); hierarchy.ExecuteNonQuery();
         }
         transaction.Commit();
-        MediaSaved?.Invoke(item);
     }
     public List<LibraryShow> Shows() { ExpireTmdbContent(); return ReadHierarchy<LibraryShow>("shows"); }
     public List<LibrarySeason> Seasons() { ExpireTmdbContent(); return ReadHierarchy<LibrarySeason>("seasons"); }
@@ -458,7 +464,7 @@ public sealed partial class LibraryStore
         return await Task.Run(() =>
         {
             Prune(roots, excluded);
-            var old = All().ToDictionary(x => x.Id); var seen = new HashSet<string>();
+            var seen = new HashSet<string>();
             foreach (var folder in roots)
             {
                 if (!Directory.Exists(folder.Path)) continue;
@@ -470,46 +476,61 @@ public sealed partial class LibraryStore
                     if (!FileNames.Extensions.Contains(System.IO.Path.GetExtension(path))) continue;
                     if (FileNames.IsExtra(path)) continue;
                     var parsed = FileNames.Parse(path, folder.Kind, folder.Path); seen.Add(parsed.Id);
-                    var item = old.TryGetValue(parsed.Id, out var previous) ? previous with { Available = true, Year = previous.Matched || previous.MetadataType is not null ? previous.Year : parsed.Year, Kind = previous.MetadataKind ?? parsed.Kind, Series = previous.MetadataType == "movie" ? null : previous.MetadataType == "tv" || previous.Matched ? previous.Series : parsed.Series ?? previous.Series, Season = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Season : parsed.Season ?? previous.Season, Episode = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Episode : parsed.Episode ?? previous.Episode, SeriesPoster = parsed.SeriesPoster ?? previous.SeriesPoster, SeasonPoster = parsed.SeasonPoster ?? previous.SeasonPoster, Poster = previous.Matched && File.Exists(previous.Poster) ? previous.Poster : parsed.Poster ?? (File.Exists(previous.Poster) ? previous.Poster : null) } : parsed;
-                    item = item with { ShowId = previous?.ShowId ?? parsed.ShowId, SeriesPath = parsed.SeriesPath ?? previous?.SeriesPath,
-                        EpisodeTitle = LibraryIdentity.Locked(item, "EpisodeTitle") ? item.EpisodeTitle : item.EpisodeTitle ?? parsed.EpisodeTitle,
-                        AirDate = LibraryIdentity.Locked(item, "AirDate") ? item.AirDate : parsed.AirDate ?? item.AirDate,
-                        EpisodeEnd = previous?.AbsoluteEpisode is not null ? previous.EpisodeEnd : parsed.EpisodeEnd ?? previous?.EpisodeEnd,
-                        AbsoluteEpisode = parsed.AbsoluteEpisode ?? previous?.AbsoluteEpisode, AbsoluteEpisodeEnd = parsed.AbsoluteEpisodeEnd ?? previous?.AbsoluteEpisodeEnd,
-                        SourcePart = parsed.SourcePart ?? previous?.SourcePart, SourcePartEpisode = parsed.SourcePartEpisode ?? previous?.SourcePartEpisode,
-                        SourcePartEpisodeEnd = parsed.SourcePartEpisodeEnd ?? previous?.SourcePartEpisodeEnd,
-                        NumberingConflict = parsed.NumberingConflict, NumberingOrder = previous?.NumberingOrder ?? parsed.NumberingOrder };
-                    var sourceNumbering = parsed.NumberingSource is "filename" or "season-folder";
-                    if (previous is not null && CanRepairGrouping(previous) && previous.MetadataType is null && parsed.Series is not null && !LibraryIdentity.Locked(previous, "Title"))
-                        item = item with { Title = parsed.Title };
-                    if (sourceNumbering && previous is not null && CanRepairGrouping(previous) && previous.NumberingOrder != "dvd")
-                        item = item with { Season = parsed.Season, Episode = parsed.Episode, EpisodeEnd = parsed.EpisodeEnd,
-                            AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, NumberingOrder = "aired" };
-                    if (parsed.AbsoluteEpisodeEnd is not null && previous is not null && CanRepairGrouping(previous) && previous.AbsoluteEpisode is null && previous.NumberingOrder != "dvd")
-                        item = item with { NumberingOrder = parsed.NumberingOrder };
-                    if (parsed.Series is null && parsed.Episode is null && previous is not null && CanRepairGrouping(previous) && previous.MetadataType is null &&
-                        (previous.Kind == "Movie" || parsed.Year is >= 1900 && previous.Episode == parsed.Year))
-                        item = item with { Title = parsed.Title, Series = null, ShowId = null, SeasonId = null, SeriesPath = null,
-                            Season = null, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null };
-                    if (previous is not null)
-                    {
-                        if (previous.Matched || LibraryIdentity.Locked(previous, "Season")) item = item with { Season = previous.Season };
-                        if (previous.Matched || LibraryIdentity.Locked(previous, "Episode")) item = item with
-                        { Episode = previous.Episode, EpisodeEnd = previous.EpisodeEnd, AbsoluteEpisode = previous.AbsoluteEpisode, AbsoluteEpisodeEnd = previous.AbsoluteEpisodeEnd };
-                        if (LibraryIdentity.Locked(previous, "Title")) item = item with { Title = previous.Title, Series = previous.Series };
-                        if (LibraryIdentity.Locked(previous, "Kind")) item = item with { Kind = previous.Kind };
-                    }
-                    item = LocalMetadata.Apply(item with { IsBonus = previous?.Matched == true || previous is not null && LibraryIdentity.Locked(previous, "Episode") ? previous.IsBonus : parsed.IsBonus, NumberingSource = parsed.NumberingSource,
-                        SourceLibraryKind = parsed.SourceLibraryKind, IsExtra = false });
-                    Save(item); progress?.Report($"Found {seen.Count} videos · {item.Title}");
+                    // Merge into the record as stored now: edits and fetches can land while a scan runs.
+                    MediaItem item;
+                    lock (writeGate) { item = MergeScanned(parsed, ByIds([parsed.Id]).FirstOrDefault()); Save(item); }
+                    progress?.Report($"Found {seen.Count} videos · {item.Title}");
                 }
             }
-            foreach (var item in old.Values.Where(x => !seen.Contains(x.Id) && !x.IsVirtual))
-                Save(item with { IsExtra = FileNames.IsExtra(item.Path), Available = FileNames.IsExtra(item.Path) && File.Exists(item.Path) });
+            foreach (var id in All().Where(x => !seen.Contains(x.Id) && !x.IsVirtual).Select(x => x.Id).ToArray())
+                lock (writeGate)
+                {
+                    if (ByIds([id]).FirstOrDefault() is not { IsVirtual: false } stored) continue;
+                    var missing = stored with { IsExtra = FileNames.IsExtra(stored.Path), Available = FileNames.IsExtra(stored.Path) && File.Exists(stored.Path) };
+                    if (missing != stored) Save(missing);
+                }
             AttachLooseReleases();
             GroupShowsByProvider();
             return All();
         }, cancellation);
+    }
+    private static MediaItem MergeScanned(MediaItem parsed, MediaItem? previous)
+    {
+        var item = previous is not null ? previous with { Available = true, Year = previous.Matched || previous.MetadataType is not null ? previous.Year : parsed.Year, Kind = previous.MetadataKind ?? parsed.Kind, Series = previous.MetadataType == "movie" ? null : previous.MetadataType == "tv" || previous.Matched ? previous.Series : parsed.Series ?? previous.Series, Season = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Season : parsed.Season ?? previous.Season, Episode = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Episode : parsed.Episode ?? previous.Episode, SeriesPoster = parsed.SeriesPoster ?? previous.SeriesPoster, SeasonPoster = parsed.SeasonPoster ?? previous.SeasonPoster, Poster = previous.Matched && File.Exists(previous.Poster) ? previous.Poster : parsed.Poster ?? (File.Exists(previous.Poster) ? previous.Poster : null) } : parsed;
+        item = item with { ShowId = previous?.ShowId ?? parsed.ShowId, SeriesPath = parsed.SeriesPath ?? previous?.SeriesPath,
+            EpisodeTitle = LibraryIdentity.Locked(item, "EpisodeTitle") ? item.EpisodeTitle : item.EpisodeTitle ?? parsed.EpisodeTitle,
+            AirDate = LibraryIdentity.Locked(item, "AirDate") ? item.AirDate : parsed.AirDate ?? item.AirDate,
+            EpisodeEnd = previous?.AbsoluteEpisode is not null ? previous.EpisodeEnd : parsed.EpisodeEnd ?? previous?.EpisodeEnd,
+            AbsoluteEpisode = parsed.AbsoluteEpisode ?? previous?.AbsoluteEpisode, AbsoluteEpisodeEnd = parsed.AbsoluteEpisodeEnd ?? previous?.AbsoluteEpisodeEnd,
+            SourcePart = parsed.SourcePart ?? previous?.SourcePart, SourcePartEpisode = parsed.SourcePartEpisode ?? previous?.SourcePartEpisode,
+            SourcePartEpisodeEnd = parsed.SourcePartEpisodeEnd ?? previous?.SourcePartEpisodeEnd,
+            NumberingConflict = parsed.NumberingConflict, NumberingOrder = previous?.NumberingOrder ?? parsed.NumberingOrder };
+        var sourceNumbering = parsed.NumberingSource is "filename" or "season-folder";
+        if (previous is not null && CanRepairGrouping(previous) && previous.MetadataType is null && parsed.Series is not null && !LibraryIdentity.Locked(previous, "Title"))
+            item = item with { Title = parsed.Title };
+        if (sourceNumbering && previous is not null && CanRepairGrouping(previous) && previous.NumberingOrder != "dvd")
+            item = item with { Season = parsed.Season, Episode = parsed.Episode, EpisodeEnd = parsed.EpisodeEnd,
+                AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, NumberingOrder = "aired" };
+        if (parsed.AbsoluteEpisodeEnd is not null && previous is not null && CanRepairGrouping(previous) && previous.AbsoluteEpisode is null && previous.NumberingOrder != "dvd")
+            item = item with { NumberingOrder = parsed.NumberingOrder };
+        if (parsed.Series is null && parsed.Episode is null && previous is not null && CanRepairGrouping(previous) && previous.MetadataType is null &&
+            (previous.Kind == "Movie" || parsed.Year is >= 1900 && previous.Episode == parsed.Year))
+            item = item with { Title = parsed.Title, Series = null, ShowId = null, SeasonId = null, SeriesPath = null,
+                Season = null, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null };
+        if (previous is not null)
+        {
+            if (previous.Matched || LibraryIdentity.Locked(previous, "Season")) item = item with { Season = previous.Season };
+            if (previous.Matched || LibraryIdentity.Locked(previous, "Episode")) item = item with
+            { Episode = previous.Episode, EpisodeEnd = previous.EpisodeEnd, AbsoluteEpisode = previous.AbsoluteEpisode, AbsoluteEpisodeEnd = previous.AbsoluteEpisodeEnd };
+            if (LibraryIdentity.Locked(previous, "Title")) item = item with { Title = previous.Title, Series = previous.Series };
+            if (LibraryIdentity.Locked(previous, "Kind")) item = item with { Kind = previous.Kind };
+            // Older parsers read "S03E07 - 42" as a range; drop a stored range the filename no longer supports.
+            if (previous.Matched && !LibraryIdentity.Locked(previous, "Episode") && previous.AbsoluteEpisode is null && previous.EpisodeEnd is not null &&
+                parsed.NumberingSource == "filename" && parsed.EpisodeEnd is null && parsed.Season == previous.Season && parsed.Episode == previous.Episode)
+                item = item with { EpisodeEnd = null };
+        }
+        return LocalMetadata.Apply(item with { IsBonus = previous?.Matched == true || previous is not null && LibraryIdentity.Locked(previous, "Episode") ? previous.IsBonus : parsed.IsBonus, NumberingSource = parsed.NumberingSource,
+            SourceLibraryKind = parsed.SourceLibraryKind, IsExtra = false });
     }
 }
 

@@ -96,7 +96,7 @@ public partial class MainWindow : Window
     private int? browseSeason;
     private int libraryCategory;
     private IReadOnlyList<LibraryBreadcrumb> breadcrumbItems = [];
-    private bool artworkBusy;
+    private bool artworkBusy, artworkRerun;
     private string savedMetadataToken = "";
     private bool displaySpecialsWithinSeasons;
     private ScrollViewer LibraryScroll
@@ -215,7 +215,7 @@ public partial class MainWindow : Window
                 };
             });
             if (folders.Count == 0 && savedRooms.Count == 0 && currentPage is "Home" or "Library") ShowPage("Welcome");
-            else if (SavedAutoArtwork) await FetchArtwork();
+            else if (SavedAutoArtwork) await Guard(FetchArtwork);
         };
     }
     private void SetStatus(string text)
@@ -363,7 +363,7 @@ public partial class MainWindow : Window
     private void RefreshLibraryFromItems(List<MediaItem> refreshedItems)
     {
         room?.SetHostedLibrary(refreshedItems);
-        items = refreshedItems;
+        items = refreshedItems; RefreshPlayingItem();
         RefreshHome();
         UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
         if (browseSeries is not null && !items.Any(x => LibraryIdentity.InShow(x, browseSeries, browseKind)))
@@ -403,7 +403,7 @@ public partial class MainWindow : Window
             { updated[id] = item; changed = true; }
         if (!changed) return;
         var browsedId = items.FirstOrDefault(item => LibraryIdentity.InShow(item, browseSeries, browseKind))?.Id;
-        items = updated.Values.ToList();
+        items = updated.Values.ToList(); RefreshPlayingItem();
         room?.SetHostedLibrary(items);
         RefreshHome();
         UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
@@ -583,7 +583,7 @@ public partial class MainWindow : Window
         DetailAvailability.Visibility = DetailAvailability.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         DetailRemove.Visibility = item.Available ? Visibility.Collapsed : Visibility.Visible;
         DetailRemove.IsEnabled = !scanning;
-        var resume = long.TryParse(library.Setting("position:" + item.Id), out var position) && position >= 10000 ? position : 0;
+        var resume = !WasWatched(item.Id) && long.TryParse(library.Setting("position:" + item.Id), out var position) && position >= 10000 ? position : 0;
         DetailPlay.Content = resume > 0 ? "Resume at " + FormatTime(resume) : "Play locally";
         RestartButton.Visibility = resume > 0 ? Visibility.Visible : Visibility.Collapsed;
         RestartButton.IsEnabled = DetailPlay.IsEnabled;
@@ -672,11 +672,11 @@ public partial class MainWindow : Window
             var progress = new ScanProgressSink(this);
             var scannedItems = await library.ScanAsync(folders.ToArray(), progress, scanCancellation.Token, exclusions.ToArray());
             Interlocked.Exchange(ref pendingScanStatus, null);
-            libraryUpdates.Clear(); RefreshLibraryFromItems(scannedItems);
+            RefreshLibraryFromItems(scannedItems);
             ScanStatus.Text = $"Scan complete · {items.Count} videos indexed.";
             if (SavedAutoArtwork && !scanCancellation.IsCancellationRequested) await FetchArtwork(scanCancellation.Token);
         }
-        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested) { var partial = await Task.Run(library.All); libraryUpdates.Clear(); RefreshLibraryFromItems(partial); ScanStatus.Text = "Scan cancelled. Videos already indexed remain in your library."; SetStatus(ScanStatus.Text); }
+        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested) { var partial = await Task.Run(library.All); RefreshLibraryFromItems(partial); ScanStatus.Text = "Scan cancelled. Videos already indexed remain in your library."; SetStatus(ScanStatus.Text); }
         finally
         {
             scanning = false;
@@ -705,10 +705,14 @@ public partial class MainWindow : Window
     private bool SaveMetadataToken()
     {
         if (MetadataToken.Password == savedMetadataToken) return true;
+        // Accept a pasted "Bearer …" token, but never save a key every provider would reject.
+        var entered = MetadataToken.Password.Trim();
+        if (entered.Length > 0 && !TmdbCredentials.TryNormalize(entered, out entered))
+        { MetadataKeyStatus.Text = "This isn't a TMDB API key or read access token. Paste only the key from your TMDB account settings."; return false; }
         try
         {
-            MetadataCredential.Save(App.DataDirectory, MetadataToken.Password);
-            MetadataToken.Password = savedMetadataToken = MetadataToken.Password.Trim();
+            MetadataCredential.Save(App.DataDirectory, entered);
+            MetadataToken.Password = savedMetadataToken = entered;
             return true;
         }
         catch (Exception ex) when (ex is Win32Exception or ArgumentException)
@@ -722,7 +726,9 @@ public partial class MainWindow : Window
     private Task FetchArtwork() => FetchArtwork(lifetime.Token);
     private async Task FetchArtwork(CancellationToken cancellation, bool force = false, MetadataRefresh? refresh = null)
     {
-        if (artworkBusy) return; artworkBusy = true;
+        // A forced refresh requested mid-fetch (such as a numbering change) runs next.
+        if (artworkBusy) { if (force) { artworkRerun = true; SetStatus("Metadata will refresh when the current fetch finishes."); } return; }
+        artworkBusy = true;
         var token = savedMetadataToken;
         var progress = new Progress<string>(SetStatus);
         try
@@ -731,10 +737,14 @@ public partial class MainWindow : Window
             var roots = folders.ToArray(); var excluded = exclusions.ToArray();
             var refreshed = await Task.Run(() => { library.Prune(roots, excluded); return library.All(); }, cancellation);
             if (closing) return;
-            libraryUpdates.Clear(); RefreshLibraryFromItems(refreshed); SetStatus(report);
+            RefreshLibraryFromItems(refreshed); SetStatus(report);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
-        finally { ApplyLibraryUpdates(); artworkBusy = false; }
+        finally
+        {
+            ApplyLibraryUpdates(); artworkBusy = false;
+            if (artworkRerun && !closing) { artworkRerun = false; _ = Guard(async () => { await FetchArtwork(lifetime.Token, true); RefreshLibrary(); }); }
+        }
     }
     private async void MatchClick(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
@@ -809,7 +819,7 @@ public partial class MainWindow : Window
     }
     private void UpdateCardPlayback(LibraryCardView view)
     {
-        var position = view.IsEpisode && long.TryParse(library.Setting("position:" + view.Card.Media.Id), out var saved) ? saved : 0;
+        var position = (view.IsEpisode || view.IsMovie) && long.TryParse(library.Setting("position:" + view.Card.Media.Id), out var saved) ? saved : 0;
         view.SetPlayback(position, LibraryWatchProgress.IsWatched(items, view.Card, WasWatched));
     }
     private void SavePlaybackPosition()
@@ -1053,7 +1063,7 @@ public partial class MainWindow : Window
             await loading.WaitAsync(cancellation.Token); locked = true;
             if (client != room || generation != loadGeneration) return;
             ready = false; buffering = new(); appliedGeneration = readyGeneration = -1; bridge?.CancelPendingReads(); await StopNativePlayback();
-            playbackRecovery.Clear(); activeStreamingBufferSeconds = SavedStreamingBufferSeconds;
+            playbackRecovery.Clear(); activeStreamingBufferSeconds = SavedStreamingBufferSeconds; readAheadMediaBytes = null;
             cancellation.Token.ThrowIfCancellationRequested();
             if (target?.Playing == true) SendReadiness("buffering");
             if (bridge is not null) await bridge.DisposeAsync(); bridge = null;
@@ -1069,9 +1079,12 @@ public partial class MainWindow : Window
             using var vlcMedia = source is ILocalMediaSource local
                 ? new Media(vlc!, local.LocalPath, FromType.FromPath)
                 : new Media(vlc!, streamUri!);
-            if (streamUri is not null) vlcMedia.AddOption($":network-caching={StreamingBufferOptions.CacheMs(activeStreamingBufferSeconds)}");
+            // Start from a short RTT-based cache. The configured buffer is filled
+            // as read-ahead after playback starts and never gates readiness.
+            var networkCacheMs = MediaStreaming.NetworkCacheForRtt(client.RecentRttMs);
+            if (streamUri is not null) { vlcMedia.AddOption($":network-caching={networkCacheMs}"); readAheadMediaBytes = media.Length; }
             if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("media-input", new { local = source is ILocalMediaSource, media.Extension,
-                bufferSeconds = streamUri is not null ? activeStreamingBufferSeconds : (int?)null });
+                networkCacheMs = streamUri is not null ? networkCacheMs : (int?)null, bufferSeconds = streamUri is not null ? activeStreamingBufferSeconds : (int?)null });
             // VLC's AVI demuxer reads slow-seekable HTTP inputs in 1.5-second
             // steps, exposing read-ahead time to the synchronization controller.
             // The avformat demuxer provides a regularly advancing timeline.
@@ -1112,6 +1125,7 @@ public partial class MainWindow : Window
         UpdateRoomPlaybackStatus();
         if (player is null || nativeStopCount > 0) return;
         PollBufferedRecovery();
+        StartReadAhead();
         buffering.Recover(Environment.TickCount64);
         if (room is not null && !room.IsPeerRecovering && ready && buffering.Poll(target?.WantsPlayback == true, Environment.TickCount64))
         { readyGeneration = -1; SendReadiness("buffering"); }
@@ -1525,7 +1539,7 @@ public partial class MainWindow : Window
             var log = await errors; if (process.ExitCode != 0) throw new IOException("FFmpeg could not prepare this file: " + log[^Math.Min(600, log.Length)..]);
             File.Move(output + ".partial", output, true);
         }
-        if (generation != loadGeneration || room != preparingRoom || playingItem != item) { SetStatus("720p copy saved. Playback changed during preparation."); return; }
+        if (generation != loadGeneration || room != preparingRoom || playingItem?.Id != item.Id) { SetStatus("720p copy saved. Playback changed during preparation."); return; }
         if (room?.Identity?.Host == true) { room.SetHostedFile(output, PlaybackTitle(item) + " · 720p"); room.Send(new("media", Data: Wire.Serialize(room.HostedMedia!.Media))); }
         else { await PrepareVideoSurface(); using var media = new Media(vlc!, output, FromType.FromPath); player?.Play(media); }
         SetStatus("720p copy ready.");

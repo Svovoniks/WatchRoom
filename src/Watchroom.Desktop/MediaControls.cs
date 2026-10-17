@@ -39,12 +39,17 @@ public partial class MainWindow
         var play = args.Button == SystemMediaTransportControlsButton.Play;
         // Windows delivers these events on a worker thread. Recheck the current
         // media and room permissions on the UI thread before applying them.
-        Dispatcher.BeginInvoke(() => HandleMediaPlayback(play));
+        Dispatcher.BeginInvoke(() => HandleMediaPlayback(play, system: true));
     }
 
-    private bool HandleMediaPlayback(bool? play)
+    private long lastSystemMediaButtonAt = long.MinValue / 2;
+    private bool HandleMediaPlayback(bool? play, bool system = false)
     {
         if (!HasMediaPlayback) return false;
+        // One hardware key can arrive both as a window key and as a system
+        // media button. A toggle right after a system button must not undo it.
+        var now = Environment.TickCount64;
+        if (system) lastSystemMediaButtonAt = now; else if (play is null && now - lastSystemMediaButtonAt < 400) return true;
         videoClickDelay.Stop();
         var requested = play ?? !WantsMediaPlayback;
         try { if (requested != WantsMediaPlayback) RequestPlayback(requested); }

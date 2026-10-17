@@ -9,6 +9,8 @@ internal sealed class HostRoomCoordinator(string host)
     private readonly Dictionary<string, Participant> people = [];
     private readonly HashSet<string> departed = [];
     private readonly HashSet<string> scopedReadiness = [];
+    // Guests gate shared playback only once their direct control channel exists.
+    private readonly HashSet<string> connected = [];
     private readonly Dictionary<string, (long At, int Count)> limits = [];
     private long revision, generation;
     private bool resumeWhenReady;
@@ -43,7 +45,7 @@ internal sealed class HostRoomCoordinator(string host)
     public void Discover(Participant[] members, long now)
     {
         var ids = members.Select(p => p.Id).ToHashSet();
-        foreach (var id in people.Keys.Where(id => !ids.Contains(id)).ToArray()) { people.Remove(id); scopedReadiness.Remove(id); }
+        foreach (var id in people.Keys.Where(id => !ids.Contains(id)).ToArray()) { people.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); }
         foreach (var p in members)
             if (!departed.Contains(p.Id)) people[p.Id] = p with { Ready = people.GetValueOrDefault(p.Id)?.Ready ?? false };
         if (LibraryActivity is { } activity && !Approved(activity.Peer)) LibraryActivity = null;
@@ -51,12 +53,19 @@ internal sealed class HostRoomCoordinator(string host)
     }
     public void Depart(string id, long now)
     {
-        departed.Add(id); people.Remove(id); limits.Remove(id); scopedReadiness.Remove(id);
+        departed.Add(id); people.Remove(id); limits.Remove(id); scopedReadiness.Remove(id); connected.Remove(id);
         if (LibraryActivity?.Peer == id) LibraryActivity = null;
         TryResume(now);
     }
     // Only an explicit connection authorized by discovery may restore a departed peer.
     public void Reconnect(string id) => departed.Remove(id);
+    public bool IsConnected(string id) => id == host || connected.Contains(id);
+    public bool SetConnected(string id, bool value, long now)
+    {
+        if (id == host || !(value ? connected.Add(id) : connected.Remove(id))) return false;
+        var before = Playback; TryResume(now); return !ReferenceEquals(before, Playback);
+    }
+    private bool Waiting(Participant p) => p.Approved && !p.Ready && IsConnected(p.Id);
     public bool Apply(string sender, WireMessage message, long now, out WireMessage? announcement)
     {
         announcement = null;
@@ -127,7 +136,7 @@ internal sealed class HostRoomCoordinator(string host)
                     // retain their existing buffering-based readiness behavior.
                     foreach (var p in people.Values.Where(p => scopedReadiness.Contains(p.Id)).ToArray()) people[p.Id] = p with { Ready = false };
                 }
-                resumeWhenReady = desired.Playing && people.Values.Any(p => p.Approved && !p.Ready);
+                resumeWhenReady = desired.Playing && people.Values.Any(Waiting);
                 // Attribute actions to the authenticated peer, never client-supplied names.
                 var stop = desired.Playing ? (resumeWhenReady ? new PlaybackStop("buffering") : null)
                     : desired.Stop?.Reason == "ended" && sender == host ? new PlaybackStop("ended")
@@ -168,11 +177,11 @@ internal sealed class HostRoomCoordinator(string host)
     }
     private void TryResume(long now)
     {
-        if (!resumeWhenReady || Playback is null || people.Values.Any(p => p.Approved && !p.Ready)) return;
+        if (!resumeWhenReady || Playback is null || people.Values.Any(Waiting)) return;
         resumeWhenReady = false;
         Playback = Playback with { Stop = null, Revision = ++revision, Playing = true, AtUnixMs = now + 200 };
     }
-    private static bool ValidMedia(SharedMedia m, bool sidecar = false) =>
+    internal static bool ValidMedia(SharedMedia m, bool sidecar = false) =>
         m.Id is { Length: > 0 and <= 128 } && m.Title is { Length: <= 300 } && m.Length > 0 && m.Extension is { Length: <= 16 } &&
         (sidecar ? m.Length <= 8388608 && m.Subtitles is null or { Length: 0 } :
             m.Subtitles is null || m.Subtitles.Length <= 12 && m.Subtitles.All(s => s is not null && ValidMedia(s, true)));

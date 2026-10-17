@@ -48,7 +48,7 @@ public sealed partial class LibraryStore
             var responses = Path.Combine(directory, "metadata-http-cache");
             if (Directory.Exists(responses)) foreach (var file in new DirectoryInfo(responses).EnumerateFiles("*.json"))
                 if (file.LastWriteTimeUtc <= DateTime.UtcNow.AddDays(-8)) DeleteCacheFile(file.FullName);
-            foreach (var name in new[] { "metadata-fetch-report.json", "metadata-identity-repair-v1.json", "grouping-audit-repair-v1.json" })
+            foreach (var name in new[] { "metadata-fetch-report.json", "metadata-identity-repair-v1.json", "grouping-repair-v1.json" })
             {
                 var report = Path.Combine(directory, name);
                 if (File.Exists(report) && File.GetLastWriteTimeUtc(report) <= DateTime.UtcNow - TmdbRetention.MaximumAge) DeleteCacheFile(report);

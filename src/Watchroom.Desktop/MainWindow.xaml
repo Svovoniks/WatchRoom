@@ -234,7 +234,7 @@
       <TextBlock Text="Streaming buffer" Style="{StaticResource SectionHeading}"/>
       <TextBlock Text="Video to buffer ahead (seconds)"/><TextBox x:Name="StreamingBufferSeconds" MaxLength="3" Width="120" HorizontalAlignment="Left" AutomationProperties.Name="Video buffer ahead in seconds" ToolTip="Choose from 2 to 60 seconds"/>
       <TextBlock x:Name="StreamingBufferError" Style="{StaticResource FieldError}" AutomationProperties.LiveSetting="Polite"/>
-      <TextBlock Text="Default: 30 seconds. Applies to the next streamed video. Larger buffers use more memory and may take longer to start or seek. During a brief host connection interruption, playback continues from buffered video for up to this time, then pauses if recovery has not finished. Actual coverage depends on available bandwidth." Style="{StaticResource MutedText}" Margin="0,0,0,16"/>
+      <TextBlock Text="Default: 30 seconds. Playback starts as soon as a few seconds are ready; Watchroom then keeps downloading up to this much video ahead while you watch. Applies to the next streamed video. Larger buffers use more memory but do not delay starting or seeking. During a brief host connection interruption, playback continues from buffered video for up to this time, then pauses if recovery has not finished. Actual coverage depends on available bandwidth." Style="{StaticResource MutedText}" Margin="0,0,0,16"/>
       <TextBlock Text="FFmpeg executable (optional)"/><TextBox x:Name="FfmpegBox" AutomationProperties.Name="FFmpeg executable path" ToolTip="Used to prepare smaller copies of your videos"/>
      </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="AppearancePreferences" Tag="Appearance" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel>

@@ -11,21 +11,25 @@ public static class TmdbCredentials
         using var stream = typeof(TmdbCredentials).Assembly.GetManifestResourceStream("Watchroom.TmdbKey");
         if (stream is null) return null;
         using var reader = new StreamReader(stream);
-        return Validate(reader.ReadToEnd());
+        return TryNormalize(reader.ReadToEnd(), out var key) && key.Length > 0 ? key : null;
     });
     public const string Attribution = "This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.";
     public const string StreamingAttribution = "Streaming-provider data supplied by JustWatch via TMDB.";
     public static string DefaultStatus => HasBundledKey ? "Using the bundled WatchRoom key." : "This build needs a TMDB key.";
     public static bool HasBundledKey => Bundled.Value is not null;
     public static string? Resolve(string? userKey) => Select(userKey, Bundled.Value);
+    // A malformed personal key is ignored rather than thrown, so TVmaze/Wikipedia and the bundled key keep working.
     internal static string? Select(string? userKey, string? bundledKey) =>
-        string.IsNullOrWhiteSpace(userKey) ? Validate(bundledKey) : Validate(userKey);
-    private static string? Validate(string? value)
+        TryNormalize(userKey, out var user) && user.Length > 0 ? user : TryNormalize(bundledKey, out var bundled) && bundled.Length > 0 ? bundled : null;
+    /// <summary>Trims whitespace/BOM and a leading "Bearer " prefix. True with "" for a blank value (use the bundled key),
+    /// true with the cleaned key when well formed, false with "" when the value cannot be a TMDB credential.</summary>
+    public static bool TryNormalize(string? value, out string normalized)
     {
-        value = value?.Trim().TrimStart('\uFEFF');
-        if (string.IsNullOrEmpty(value)) return null;
-        if (value.Length > 8192 || !Regex.IsMatch(value, @"\A[A-Za-z0-9._-]+\z"))
-            throw new ArgumentException("Invalid TMDB application credential format.");
-        return value;
+        normalized = "";
+        value = value?.Trim().Trim('\uFEFF').Trim();
+        if (string.IsNullOrEmpty(value)) return true;
+        value = Regex.Replace(value, @"\ABearer(?:\s+|\z)", "", RegexOptions.IgnoreCase).Trim();
+        if (value.Length == 0 || value.Length > 8192 || !Regex.IsMatch(value, @"\A[A-Za-z0-9._-]+\z")) return false;
+        normalized = value; return true;
     }
 }

@@ -27,7 +27,7 @@ static class FilenameSchemaFixture
             check(item.Title == "Azumanga Daioh" && item.Series == "Azumanga Daioh" && item.Episode == episode && item.Kind == "Show" && item.EpisodeTitle == "Episode subtitle",
                 "Azumanga filename groups and retains episode " + episode);
         }
-        foreach (var (marker, first, last) in new[] { ("S01E02-E04", 2, 4), ("S01E02-S01E04", 2, 4), ("S01E02E03", 2, 3), ("S01E02E03E04", 2, 4), ("1x02-1x04", 2, 4), ("1x02x03", 2, 3), ("EP02-EP04", 2, 4), ("- 02-04", 2, 4) })
+        foreach (var (marker, first, last) in new[] { ("S01E02-E04", 2, 4), ("S01E02-S01E04", 2, 4), ("S01E02E03", 2, 3), ("S01E02E03E04", 2, 4), ("1x02-1x04", 2, 4), ("1x02x03", 2, 3), ("EP02-EP04", 2, 4), ("- 02-04", 2, 4), ("S01E02-03", 2, 3), ("S01E02 - E03", 2, 3) })
         {
             var item = FileNames.Parse(Path.Combine(directory, $"Example {marker} - Combined.mkv"));
             check(item.Series == "Example" && item.Episode == first && item.EpisodeEnd == last && item.EpisodeTitle == "Combined" && item.NumberingConflict is null,
@@ -38,6 +38,15 @@ static class FilenameSchemaFixture
         var relativeRange = FileNames.Parse(Path.Combine(directory, "Shows", "Example", "Season 02", "Example EP02-EP04.mkv"));
         check(relativeRange.Season == 2 && relativeRange.Episode == 2 && relativeRange.EpisodeEnd == 4 && relativeRange.AbsoluteEpisode is null && relativeRange.NumberingOrder == "aired",
             "season folders keep unlabelled ranges relative to their season");
+        foreach (var (name, season, episode, title) in new[] { ("Doctor Who - S03E07 - 42.mkv", 3, 7, "42"), ("Show - S01E05 - 24 Hours.mkv", 1, 5, "24 Hours"), ("Show - 1x05 - 24 Hours.mkv", 1, 5, "24 Hours") })
+        {
+            var item = FileNames.Parse(Path.Combine(directory, "Shows", "Example", "Season 0" + season, name));
+            check(item.Season == season && item.Episode == episode && item.EpisodeEnd is null && item.AbsoluteEpisode is null && item.EpisodeTitle == title && item.NumberingConflict is null,
+                "a numeric episode title after a spaced dash is not a range end: " + name);
+        }
+        var titled = new[] { "Doctor Who - S03E07 - 42.mkv", "Doctor Who - S03E08 - Human Nature.mkv", "Doctor Who - S03E42 - Later.mkv" }
+            .Select(name => FileNames.Parse(Path.Combine(directory, "Shows", "Doctor Who", "Season 03", name))).ToArray();
+        check(LibraryCatalog.PreferredFiles(titled).Count() == 3, "numeric episode titles do not hide neighbouring episodes");
         foreach (var marker in new[] { "S01E02E04", "S01E02-S02E03", "S01E04-E02", "S01E01-E200" })
         {
             var item = FileNames.Parse(Path.Combine(directory, $"Example {marker}.mkv"));
@@ -88,6 +97,27 @@ static class FilenameSchemaFixture
         store.Save(repaired with { Series = "Manual title", Title = "Manual title", Season = 4, Episode = 8, EpisodeTitle = "Manual subtitle", LockedFields = ["Title", "Season", "Episode", "EpisodeTitle"] });
         await store.ScanAsync([new(root)]); var locked = store.All().Single();
         check(locked.Title == "Manual title" && locked.Season == 4 && locked.Episode == 8 && locked.EpisodeTitle == "Manual subtitle", "broader filename parsing preserves manually locked identities");
+        var raceRoot = Path.Combine(directory, "race-media"); var raceSeason = Path.Combine(raceRoot, "Doctor Who", "Season 03"); Directory.CreateDirectory(raceSeason);
+        var raceFiles = new[] { "Doctor Who - S03E07 - 42.mkv", "Doctor Who - S03E08 - Human Nature.mkv", "Doctor Who - S03E09 - Removed.mkv" }.Select(name => Path.Combine(raceSeason, name)).ToArray();
+        foreach (var file in raceFiles[..2]) await File.WriteAllBytesAsync(file, [0]);
+        var race = new LibraryStore(Path.Combine(directory, "race-db"));
+        var raceItems = raceFiles.Select(file => FileNames.Parse(file, "Mixed", raceRoot) with { Available = true }).ToArray();
+        race.Save(raceItems[0] with { Matched = true, EpisodeEnd = 42 }); race.Save(raceItems[1]); race.Save(raceItems[2]);
+        string? firstScanned = null;
+        race.MediaSaved += saved =>
+        {
+            if (firstScanned is not null) return; firstScanned = saved.Id;
+            // Simulate a user edit / metadata fetch landing while the scan is still running.
+            foreach (var other in race.ByIds(raceItems.Select(x => x.Id).Where(id => id != saved.Id)))
+                race.Save(other with { EpisodeTitle = "Edited " + other.Episode, EpisodeOverview = "Fetched overview", LockedFields = ["EpisodeTitle"] });
+        };
+        await race.ScanAsync([new(raceRoot)]);
+        var raced = race.All().ToDictionary(x => x.Id); var firstSaved = raceItems[0].Id;
+        check(firstScanned is not null && raceItems.Where(x => x.Id != firstScanned).All(x => raced[x.Id].EpisodeTitle == "Edited " + x.Episode && raced[x.Id].EpisodeOverview == "Fetched overview"),
+            "library scan preserves edits saved while it runs, including for files that went missing");
+        check(!raced[raceItems[2].Id].Available && raced[raceItems[1].Id].Available, "scan still updates availability around concurrent edits");
+        check(raced[firstSaved].Episode == 7 && raced[firstSaved].EpisodeEnd is null && LibraryCatalog.PreferredFiles(race.All()).Count() == 3,
+            "rescan drops a stored range misread from a numeric episode title");
         var dates = new LibraryStore(Path.Combine(directory, "date-db"));
         var dateItem = FileNames.Parse(Path.Combine(directory, "Shows", "Example Show", "Example Show 2021-01-01.mkv")) with { Matched = true, MetadataProvider = "tvmaze", MetadataId = 1, ProviderIds = new() { ["tvmaze"] = "1" } };
         dates.Save(dateItem);

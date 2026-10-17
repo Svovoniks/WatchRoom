@@ -19,9 +19,9 @@ public sealed class GitHubUpdates(HttpClient http, string repository)
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
         var release = await response.Content.ReadFromJsonAsync<Release>(cancellationToken: token);
-        if (release is null || release.draft || release.prerelease || !Version.TryParse(release.tag_name.TrimStart('v'), out var version) || version <= installed) return null;
+        if (release is null || release.draft || release.prerelease || !Version.TryParse(release.tag_name?.TrimStart('v'), out var version) || version <= installed) return null;
         var name = $"Watchroom-Setup-{version}-win-x64.exe";
-        var asset = release.assets.FirstOrDefault(x => x.name == name && x.state == "uploaded");
+        var asset = release.assets?.FirstOrDefault(x => x is not null && x.name == name && x.state == "uploaded");
         if (asset is null) throw new InvalidDataException("The latest release has no Windows installer yet.");
         if (!Uri.TryCreate(asset.browser_download_url, UriKind.Absolute, out var url) || url.Scheme != "https" || url.Host != "github.com" ||
             !url.AbsolutePath.StartsWith($"/{Repository}/releases/download/", StringComparison.OrdinalIgnoreCase) || url.Segments.Last() != name ||

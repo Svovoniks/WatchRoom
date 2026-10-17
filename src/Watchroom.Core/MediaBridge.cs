@@ -10,7 +10,7 @@ public sealed class MediaBridge : IAsyncDisposable
 {
     private WebApplication? app;
     private readonly string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
-    private IMediaSource? source;
+    private CachedMediaSource? source;
     private long diagnosticReads;
     private readonly CancellationTokenSource shutdown = new();
     private int stopped;
@@ -44,10 +44,11 @@ public sealed class MediaBridge : IAsyncDisposable
         context.Response.ContentLength = end - start + 1;
         if (partial) context.Response.Headers.ContentRange = $"bytes {start}-{end}/{length}";
         if (context.Request.Method == "HEAD") return;
+        source.Requested(start);
         try
         {
             // A bounded pipeline plus a per-movie cache amortizes nearby seeks.
-            var inflight = new Queue<Task<byte[]>>(); var offset = start;
+            var inflight = new Queue<Task<byte[]>>(); var offset = start; long served = 0;
             while (offset <= end || inflight.Count > 0)
             {
                 while (offset <= end && inflight.Count < MediaStreaming.Window)
@@ -57,6 +58,8 @@ public sealed class MediaBridge : IAsyncDisposable
                 }
                 var bytes = await inflight.Dequeue();
                 await context.Response.Body.WriteAsync(bytes, cancellation.Token);
+                // Only a sustained stream, not a short index probe, moves read-ahead.
+                served += bytes.Length; if (served >= MediaStreaming.ChunkBytes * MediaStreaming.Window) source.Played(start + served);
             }
         }
         catch (Exception) { context.Abort(); }
@@ -96,9 +99,13 @@ public sealed class MediaBridge : IAsyncDisposable
         if (parts[1] != "" && (!long.TryParse(parts[1], out end) || end < start)) return false;
         end = Math.Min(end, length - 1); return true;
     }
+    // Background read-ahead past the playback position; it never delays the
+    // first frames, which only wait for VLC's short network cache.
+    public void SetReadAhead(long bytes) => source?.SetReadAhead(bytes);
+    public long BufferedAheadBytes => source?.CachedAheadBytes ?? 0;
     public void CancelPendingReads()
     {
-        if (Interlocked.Exchange(ref stopped, 1) == 0) shutdown.Cancel();
+        if (Interlocked.Exchange(ref stopped, 1) == 0) { shutdown.Cancel(); source?.Stop(); }
     }
     public async ValueTask DisposeAsync()
     {

@@ -25,6 +25,10 @@ try
     handler.Json = Release(prerelease: true); Check(await updates.CheckAsync(new(0, 2, 0), default) is null, "prerelease is ignored");
     handler.Json = Release(url: "https://evil.test/installer.exe"); await Reject(() => updates.CheckAsync(new(0, 2, 0), default), "installer from another host is rejected");
     handler.Json = Release(checksum: "invalid"); await Reject(() => updates.CheckAsync(new(0, 2, 0), default), "missing trustworthy checksum is rejected");
+    handler.Json = JsonSerializer.Serialize(new { tag_name = "v0.3.0", draft = false, prerelease = false, assets = (object?)null });
+    await Reject(() => updates.CheckAsync(new(0, 2, 0), default), "release without an asset list reports a missing installer");
+    handler.Json = JsonSerializer.Serialize(new { tag_name = (string?)null, draft = false, prerelease = false, assets = Array.Empty<object>() });
+    Check(await updates.CheckAsync(new(0, 2, 0), default) is null, "release without a tag is ignored");
     handler.Json = Release();
     var file = await updates.DownloadAsync(update!, directory, null, default);
     Check(File.ReadAllBytes(file).SequenceEqual(bytes), "verified download becomes an installer");

@@ -11,6 +11,7 @@ internal interface IRoomConnection : IAsyncDisposable
     Task<WireMessage?> ReadAsync(CancellationToken ct);
     void Abort();
     void UseDiscoveryPolling() { }
+    void SignalingActivity() { }
 }
 
 internal sealed class WebSocketRoomConnection(ClientWebSocket socket) : IRoomConnection
@@ -33,8 +34,17 @@ internal sealed class SitesRoomConnection : IRoomConnection
     private long cursor;
     private bool disposed;
     private readonly bool idempotentRequests;
-    private int pollingIntervalMs = 100;
-    public void UseDiscoveryPolling() => Volatile.Write(ref pollingIntervalMs, 1000);
+    private const int FastPollMs = 100, IdlePollMs = 1000, SignalingWindowMs = 5000;
+    private int pollingIntervalMs = FastPollMs;
+    private long lastSignalingMs = Environment.TickCount64;
+    // Back off only once peers are negotiated and signaling has been quiet for a few seconds.
+    public void UseDiscoveryPolling() => Volatile.Write(ref pollingIntervalMs, IdlePollMs);
+    public void SignalingActivity()
+    {
+        var idle = Environment.TickCount64 - Interlocked.Exchange(ref lastSignalingMs, Environment.TickCount64) >= SignalingWindowMs;
+        if (idle) try { pollWake.Release(); } catch (SemaphoreFullException) { }
+    }
+    private int PollDelayMs => Environment.TickCount64 - Interlocked.Read(ref lastSignalingMs) < SignalingWindowMs ? FastPollMs : Volatile.Read(ref pollingIntervalMs);
 
     internal SitesRoomConnection(HttpClient http, bool idempotentRequests = false)
     {
@@ -87,9 +97,10 @@ internal sealed class SitesRoomConnection : IRoomConnection
                 {
                     if (item.Sequence <= cursor) continue;
                     if (item.Sequence != cursor + 1) throw new IOException("Room events expired. Rejoin the room.");
+                    if (item.Message.Type is "signal" or "connect" or "admitted") Interlocked.Exchange(ref lastSignalingMs, Environment.TickCount64);
                     await incoming.Writer.WriteAsync(item.Message, lifetime.Token); cursor = item.Sequence;
                 }
-                await pollWake.WaitAsync(Volatile.Read(ref pollingIntervalMs), lifetime.Token);
+                await pollWake.WaitAsync(PollDelayMs, lifetime.Token);
             }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }

@@ -6,7 +6,7 @@ static class HostRoomFixture
     {
         var room = new HostRoomCoordinator("host");
         Participant[] members = [new("host", "Host", true, true), new("guest", "Guest", false, true), new("pending", "Pending", false, false)];
-        room.Discover(members, 1000);
+        room.Discover(members, 1000); room.SetConnected("guest", true, 1000);
         var media = new SharedMedia("movie", "Movie", 1024, ".avi");
         check(room.Apply("host", new("media", Data: Wire.Serialize(media)), 1000, out _), "host owns media state without discovery service");
         check(!room.Apply("pending", new("ready"), 1000, out _), "unapproved member cannot change direct room state");
@@ -38,7 +38,7 @@ static class HostRoomFixture
         check(room.Playback?.Playing == true, "departed buffering guest cannot block remaining participants");
         room.Discover(members, 2700);
         check(!room.Snapshot.People.Any(p => p.Id == "guest"), "stale discovery cannot restore a revoked peer");
-        var scoped = new HostRoomCoordinator("host"); scoped.Discover(members, 1000);
+        var scoped = new HostRoomCoordinator("host"); scoped.Discover(members, 1000); scoped.SetConnected("guest", true, 1000);
         scoped.Apply("host", new("media", Data: Wire.Serialize(media)), 1000, out _);
         var firstGeneration = scoped.Playback!.Generation;
         WireMessage Ready(long generation) => new("ready", Data: Wire.Serialize(new PlaybackReadiness(media.Id, generation)));
@@ -67,7 +67,7 @@ static class HostRoomFixture
         check(scoped.Playback.Playing, "latest rapid seek completes without waiting for obsolete seeks");
         scoped.Apply("guest", new("buffering"), 2600, out _);
         check(scoped.Playback.Playing, "scoped peers cannot fall back to ambiguous unscoped buffering events");
-        var mixed = new HostRoomCoordinator("host"); mixed.Discover(members, 1000);
+        var mixed = new HostRoomCoordinator("host"); mixed.Discover(members, 1000); mixed.SetConnected("guest", true, 1000);
         mixed.Apply("host", new("media", Data: Wire.Serialize(media)), 1000, out _);
         mixed.Apply("host", Ready(mixed.Playback!.Generation), 1000, out _);
         mixed.Apply("guest", new("ready"), 1000, out _);

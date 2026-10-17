@@ -15,6 +15,7 @@ public sealed class PersistentRooms
         rooms = Wire.Read<List<PersistentRoom>>(store.Setting("persistentRooms") ?? "[]");
     }
     public PersistentRoom[] All() { lock (gate) return rooms.ToArray(); }
+    public int Count { get { lock (gate) return rooms.Count; } }
     public void Update(string code, AdmittedGuest[] guests, bool sharedControls, string? name = null)
     {
         lock (gate)

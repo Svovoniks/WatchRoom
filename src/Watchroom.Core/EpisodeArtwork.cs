@@ -28,7 +28,7 @@ public sealed class EpisodeArtwork
                 {
                     using var metadata = new MetadataClient(token, options: options);
                     var show = int.Parse(source.Groups[1].Value); var season = int.Parse(source.Groups[2].Value); var episode = int.Parse(source.Groups[3].Value);
-                    var details = await seasons.GetOrAdd($"{LibraryIdentity.Hash(TmdbCredentials.Resolve(token)!)}:{show}:{season}", _ => new(() => metadata.SeasonAsync(show, season, ct))).Value;
+                    var details = await Cached(seasons, $"{LibraryIdentity.Hash(TmdbCredentials.Resolve(token)!)}:{show}:{season}", () => metadata.SeasonAsync(show, season, ct));
                     if (details?.Episodes.FirstOrDefault(x => x.Number == episode)?.Image is { } image)
                     {
                         var path = await metadata.CacheImageAsync(image, $"tv-{show}-s{season}-e{episode}", Path.Combine(directory, "posters"), ct, imageSize: "w780");
@@ -43,7 +43,7 @@ public sealed class EpisodeArtwork
             {
                 try
                 {
-                    var url = await mazeImages.GetOrAdd($"{maze.Groups[1].Value}:{mazeSeason}:{mazeEpisode}", _ => new(() => MazeImage(maze.Groups[1].Value, mazeSeason, mazeEpisode, ct))).Value;
+                    var url = await Cached(mazeImages, $"{maze.Groups[1].Value}:{mazeSeason}:{mazeEpisode}", () => MazeImage(maze.Groups[1].Value, mazeSeason, mazeEpisode, ct));
                     if (url is not null)
                     {
                         using var http = MetadataHttp.CreateClient();
@@ -58,6 +58,14 @@ public sealed class EpisodeArtwork
             return thumbnail is null ? item : item with { GeneratedEpisodePoster = thumbnail };
         }
         finally { workers.Release(); }
+    }
+
+    // Share in-flight lookups, but forget failed or cancelled ones so a later visit retries.
+    internal static async Task<T> Cached<T>(ConcurrentDictionary<string, Lazy<Task<T>>> cache, string key, Func<Task<T>> lookup)
+    {
+        var entry = cache.GetOrAdd(key, _ => new(lookup));
+        try { return await entry.Value; }
+        catch { cache.TryRemove(new(key, entry)); throw; }
     }
 
     private static async Task<string?> MazeImage(string show, int season, int episode, CancellationToken ct)

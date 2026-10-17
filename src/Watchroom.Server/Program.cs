@@ -17,8 +17,40 @@ builder.Services.AddRateLimiter(options =>
 });
 var app = builder.Build();
 app.UseRateLimiter();
-app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
+// Half-open sockets close after a missed pong so a returning host is not rejected for minutes.
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20), KeepAliveTimeout = TimeSpan.FromSeconds(30) });
 var rooms = new ConcurrentDictionary<string, Room>();
+int Setting(string name, int fallback) => int.TryParse(builder.Configuration[name], out var value) && value > 0 ? value : fallback;
+// Temporary rooms cannot be resumed by their host, so an empty one only waits briefly for rejoining guests.
+var emptyRoomGraceMs = Setting("WATCHROOM_EMPTY_ROOM_SECONDS", 300) * 1000L;
+var persistentPerHour = Setting("WATCHROOM_PERSISTENT_ROOMS_PER_HOUR", 20);
+const int TemporaryRoomLimit = 1000, PersistentRoomLimit = 10000;
+var persistentCreations = new ConcurrentDictionary<string, Queue<long>>();
+bool AllowPersistent(string address, long now)
+{
+    var times = persistentCreations.GetOrAdd(address, _ => new());
+    lock (times)
+    {
+        while (times.Count > 0 && now - times.Peek() > 3600000) times.Dequeue();
+        if (times.Count >= persistentPerHour) return false;
+        times.Enqueue(now); return true;
+    }
+}
+void SweepRooms(long now)
+{
+    foreach (var pair in rooms)
+        if (!pair.Value.Persistent)
+            lock (pair.Value.Gate)
+                if (pair.Value.Expires < now || pair.Value.People.Count == 0 && now - pair.Value.EmptySince >= emptyRoomGraceMs) rooms.TryRemove(pair);
+    foreach (var pair in persistentCreations)
+        lock (pair.Value) if (pair.Value.All(at => now - at > 3600000)) persistentCreations.TryRemove(pair);
+}
+_ = Task.Run(async () =>
+{
+    using var timer = new PeriodicTimer(TimeSpan.FromSeconds(Setting("WATCHROOM_SWEEP_SECONDS", 60)));
+    try { while (await timer.WaitForNextTickAsync(app.Lifetime.ApplicationStopping)) SweepRooms(Wire.Now); }
+    catch (OperationCanceledException) { }
+});
 var persistentRooms = new PersistentRooms(builder.Configuration["WATCHROOM_DATA"] ?? Path.Combine(AppContext.BaseDirectory, "data"));
 foreach (var saved in persistentRooms.All())
 {
@@ -67,7 +99,10 @@ app.Map("/room", async context =>
         string? hostKey = null;
         if (first.Type == "create")
         {
-            if (rooms.Count >= 1000) throw new InvalidDataException("Server room limit reached");
+            // Only live temporary rooms count toward the temporary cap; persistent rooms have their own limits.
+            if (first.Target == "persistent" ? persistentRooms.Count >= PersistentRoomLimit || !AllowPersistent(context.Connection.RemoteIpAddress?.ToString() ?? "unknown", Wire.Now)
+                : rooms.Values.Count(x => !x.Persistent && x.Expires >= Wire.Now) >= TemporaryRoomLimit)
+                throw new InvalidDataException(first.Target == "persistent" ? "Persistent room limit reached. Try again later." : "Server room limit reached");
             room = new Room(Convert.ToHexString(RandomNumberGenerator.GetBytes(12)), first.Target == "persistent");
             if (room.Persistent) hostKey = persistentRooms.Create(room.Code);
             rooms[room.Code] = room;
@@ -83,6 +118,8 @@ app.Map("/room", async context =>
         var sender = member.SendLoop();
         lock (room.Gate)
         {
+            // The sweep removes rooms under this lock; never admit a member into a removed room.
+            if (!rooms.TryGetValue(room.Code, out var live) || live != room) throw new InvalidDataException("Invitation is invalid or expired");
             if (room.People.Count >= 9) throw new InvalidDataException("Room is full");
             if (host && room.People.Values.Any(x => x.Host)) throw new InvalidDataException("The host is already connected to this room");
             if (!host && room.ApprovedGuests.Contains(member.GuestHash!) && room.People.Values.Count(x => x.Approved) < 5 && !room.People.Values.Any(x => x.GuestHash == member.GuestHash)) member.Approved = true;
@@ -92,19 +129,21 @@ app.Map("/room", async context =>
             if (!host && member.Approved) room.People.Values.FirstOrDefault(x => x.Host)?.Send(new("connect", Target: member.Id));
             if (host) foreach (var guest in room.People.Values.Where(x => !x.Host && x.Approved)) member.Send(new("connect", Target: guest.Id));
         }
-        var messages = 0; var window = Wire.Now;
+        // Token bucket: the host's burst covers resume signaling for every guest; sustained floods still disconnect.
+        var (burst, perSecond) = host ? (400.0, 160.0) : (120.0, 80.0);
+        var tokens = burst; var refilled = Wire.Now;
         while (!lifetime.IsCancellationRequested)
         {
             var message = await SocketMessages.ReadAsync(socket, lifetime.Token); if (message is null) break;
-            if (Wire.Now - window > 1000) { messages = 0; window = Wire.Now; }
-            if (++messages > 80) throw new InvalidDataException("Message rate limit exceeded");
+            var now = Wire.Now; tokens = Math.Min(burst, tokens + (now - refilled) * perSecond / 1000); refilled = now;
+            if (--tokens < 0) throw new InvalidDataException("Message rate limit exceeded");
             lock (room.Gate)
             {
                 if (message.Type == "ping") { member.Send(new("pong", Number: message.Number, Data: Wire.Now.ToString())); continue; }
                 if (!member.Approved) continue;
                 switch (message.Type)
                 {
-                    case "reconnect" when !member.Host:
+                    case "reconnect" when !member.Host && member.AllowBroadcast():
                         room.Snapshot();
                         room.People.Values.FirstOrDefault(x => x.Host)?.Send(new("connect", Target: member.Id));
                         break;
@@ -146,13 +185,14 @@ app.Map("/room", async context =>
                         var queue = Wire.Read<string[]>(message.Data!);
                         if (queue.Length > 1000 || queue.Any(x => x is null || x.Length > 300)) throw new InvalidDataException("Invalid queue");
                         room.Queue = queue; room.Snapshot(); break;
-                    case "playback" when member.Host || room.SharedControls:
+                    case "playback" when (member.Host || room.SharedControls) && member.AllowBroadcast():
                         var desired = Wire.Read<PlaybackState>(message.Data!);
                         if (room.Media is null || desired.MediaId != room.Media.Id || desired.PositionMs < 0 || desired.PositionMs > 7 * 86400000L) break;
                         room.ResumeWhenReady = desired.Playing && room.People.Values.Any(x => x.Approved && !x.Ready);
                         room.Playback = desired with { Revision = ++room.Revision, Playing = desired.Playing && !room.ResumeWhenReady, AtUnixMs = Wire.Now + (desired.Playing && !room.ResumeWhenReady ? 200 : 0) };
                         room.Broadcast(new("playback", Data: Wire.Serialize(room.Playback))); break;
-                    case "buffering":
+                    // Readiness broadcasts reach every member; ignore unchanged state and bound each member's rate.
+                    case "buffering" when (member.Ready || room.Playback is { Playing: true }) && member.AllowBroadcast():
                         member.Ready = false;
                         if (room.Playback is { Playing: true } current)
                         {
@@ -163,9 +203,9 @@ app.Map("/room", async context =>
                         }
                         room.Snapshot();
                         break;
-                    case "ready":
+                    case "ready" when !member.Ready && member.AllowBroadcast():
                         member.Ready = true; room.TryResume(); room.Snapshot(); break;
-                    case "chat":
+                    case "chat" when member.AllowBroadcast():
                         var text = message.Text?.Trim();
                         if (!string.IsNullOrEmpty(text) && text.Length <= 1000) room.Broadcast(new("chat", Sender: member.Id, Text: member.Name + ": " + text));
                         break;
@@ -192,6 +232,7 @@ app.Map("/room", async context =>
                     room.Broadcast(new("peer-left", Sender: member.Id)); room.Snapshot();
                 }
                 else if (registered) { room.Broadcast(new("peer-left", Sender: member.Id)); room.TryResume(); room.Snapshot(); }
+                if (registered && room.People.Count == 0) room.EmptySince = Wire.Now;
             }
         }
         lifetime.Cancel(); socket.Abort();
@@ -206,6 +247,14 @@ sealed class Member(string id, string name, bool host, WebSocket socket, Cancell
     public string Id => id; public string Name => name; public bool Host { get; } = host;
     public bool Approved = host;
     public bool Ready;
+    private double broadcastTokens = 20; private long broadcastRefilled = Wire.Now;
+    // Called under the room lock for member messages that broadcast to everyone.
+    public bool AllowBroadcast()
+    {
+        var now = Wire.Now; broadcastTokens = Math.Min(20, broadcastTokens + (now - broadcastRefilled) * 4 / 1000.0); broadcastRefilled = now;
+        if (broadcastTokens < 1) return false;
+        broadcastTokens--; return true;
+    }
     public CancellationTokenSource Lifetime => lifetime;
     private readonly Channel<(WireMessage Message, TaskCompletionSource? Sent)> outgoing = Channel.CreateBounded<(WireMessage, TaskCompletionSource?)>(128);
     public void Send(WireMessage message) { if (!outgoing.Writer.TryWrite((message, null))) lifetime.Cancel(); }
@@ -227,6 +276,7 @@ sealed class Room(string code, bool persistent = false)
     public bool Persistent { get; } = persistent;
     public string? Name;
     public long Expires { get; } = persistent ? long.MaxValue : Wire.Now + 6 * 3600000; public long Revision;
+    public long EmptySince = Wire.Now;
     public Dictionary<string, Member> People { get; } = new();
     public HashSet<string> ApprovedGuests { get; } = [];
     public Dictionary<string, string> GuestNames { get; } = [];

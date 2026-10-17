@@ -116,8 +116,10 @@ internal static class FilenameEpisodes
         while (position < name.Length)
         {
             var tail = name[position..];
-            var next = Match(tail, @"^\s*(?<dash>-)?\s*(?:S(?<s>\d{1,2})[ -]*E|(?<s>\d{1,2})x|" + Label + @"|x)?\s*" + Number + @"(?=\b|E\d|x\d)");
+            var next = Match(tail, @"^\s*(?<dash>-)?(?<gap>\s*)(?<marker>S(?<s>\d{1,2})[ -]*E|(?<s>\d{1,2})x|" + Label + @"|x)?\s*" + Number + @"(?=\b|E\d|x\d)");
             if (!next.Success || !next.Groups["dash"].Success && !Match(tail, @"^\s*(?:e(?:p(?:isode)?)?|x)\d").Success) break;
+            // "S03E07 - 42" and "S01E05 - 24 Hours" are titles; a bare range end joins its dash ("E07-08", "- 02-04").
+            if (next.Groups["dash"].Success && next.Groups["gap"].Length > 0 && !next.Groups["marker"].Success) break;
             var finish = int.Parse(next.Groups["n"].Value);
             if (Year(finish) || Resolution(finish)) break;
             if (next.Groups["s"].Success && int.Parse(next.Groups["s"].Value) != season)

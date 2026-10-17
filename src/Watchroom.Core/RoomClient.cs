@@ -14,8 +14,32 @@ public sealed partial class RoomClient : IAsyncDisposable
     private readonly CancellationTokenSource lifetime = new();
     private readonly CancellationTokenSource discoveryLifetime = new();
     private readonly Channel<WireMessage> outgoing = Channel.CreateBounded<WireMessage>(128);
-    private sealed record RoomEvent(string Kind, string? Peer = null, WireMessage? Message = null, PeerTransport? Transport = null, HostedFileSelection? Selection = null, bool Play = false, IMediaSource? Subtitle = null, string? MediaId = null, long PositionMs = 0);
+    private sealed record RoomEvent(string Kind, string? Peer = null, WireMessage? Message = null, PeerTransport? Transport = null, HostedFileSelection? Selection = null, bool Play = false, IMediaSource? Subtitle = null, string? MediaId = null, long PositionMs = 0, PeerInbox? Inbox = null, Action? Then = null);
     private readonly Channel<RoomEvent> events = Channel.CreateBounded<RoomEvent>(256);
+    // Bounds each peer's share of the control queue before its messages are enqueued,
+    // so one peer cannot overflow the queue or starve local and discovery events.
+    private sealed class PeerInbox(bool budgeted, int maxQueued)
+    {
+        private const int Capacity = 200, RefillPerSecond = 100, FloodDrops = 200;
+        private double tokens = Capacity;
+        private long refilled = Environment.TickCount64;
+        private int queued, dropped;
+        public bool Admit(out int drops)
+        {
+            lock (this)
+            {
+                var now = Environment.TickCount64;
+                tokens = Math.Min(Capacity, tokens + (now - refilled) * RefillPerSecond / 1000.0); refilled = now;
+                if (queued < maxQueued && (!budgeted || tokens >= 1)) { tokens--; queued++; drops = dropped = 0; return true; }
+                drops = ++dropped; return false;
+            }
+        }
+        public bool Flooding(int drops) => budgeted && drops == FloodDrops;
+        public void Release() { lock (this) queued--; }
+    }
+    private readonly ConcurrentQueue<(string Peer, PeerTransport Transport)> flooded = new();
+    private Task offloaded = Task.CompletedTask;
+    private int offloadedCount;
     private readonly ConcurrentDictionary<string, PeerTransport> peers = new();
     private readonly ConcurrentDictionary<string, byte> negotiated = new();
     private TaskCompletionSource directConnected = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -87,6 +111,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     }
     private readonly ServerClock clock = new();
     private long pingId;
+    private string? clockHost;
     public long ServerNowMs => clock.Now;
     public long ServerOffsetMs => clock.OffsetMs;
     public long RecentRttMs => clock.RecentRttMs;
@@ -179,6 +204,12 @@ public sealed partial class RoomClient : IAsyncDisposable
     private void QueueDiscovery(WireMessage message)
     {
         if (!DiscoveryOnline || !outgoing.Writer.TryWrite(message)) throw new IOException("Room discovery is offline. New joins are unavailable.");
+        if (message.Type is "signal" or "reconnect") connection?.SignalingActivity();
+    }
+    // Existing peer playback continues while discovery is offline or congested.
+    private bool TryQueueDiscovery(WireMessage message)
+    {
+        try { QueueDiscovery(message); return true; } catch (IOException) { return false; }
     }
     private async Task SendLoop()
     {
@@ -202,6 +233,8 @@ public sealed partial class RoomClient : IAsyncDisposable
                 if (Identity?.Host == true) Post(new("library-expire"));
                 if (tick++ % 5 == 0 && DiscoveryOnline)
                     try { QueueDiscovery(new("ping", Number: tick)); } catch (IOException ex) { DiscoveryLost(ex.Message); }
+                // Poll discovery quickly while any peer is still negotiating or recovering.
+                if (IsPeerRecovering || peers.Keys.Any(id => !negotiated.ContainsKey(id))) connection?.SignalingActivity();
                 Post(new("retry-host"));
                 Post(new("peer-health"));
                 if (Identity?.Host == false && directConnected.Task.IsCompletedSuccessfully)
@@ -229,6 +262,34 @@ public sealed partial class RoomClient : IAsyncDisposable
     {
         if (!lifetime.IsCancellationRequested && !events.Writer.TryWrite(item)) FailRoom("Room control queue overflow. Rejoin the room.");
     }
+    private void PostPeer(PeerInbox inbox, RoomEvent item)
+    {
+        if (lifetime.IsCancellationRequested) return;
+        if (inbox.Admit(out var drops))
+        {
+            if (events.Writer.TryWrite(item with { Inbox = inbox })) return;
+            inbox.Release(); drops = 1;
+        }
+        // Peer traffic is dropped, never allowed to fail the room. A sustained flood disconnects that peer.
+        if (inbox.Flooding(drops)) { flooded.Enqueue((item.Peer!, item.Transport!)); events.Writer.TryWrite(new("flood")); }
+        if (drops == 1 || inbox.Flooding(drops))
+            PlaybackDiagnostics.Record("peer-message-dropped", new { room = diagnosticId, transport = item.Transport?.DiagnosticId, command = item.Message?.Type, flood = inbox.Flooding(drops) });
+    }
+    // Runs blocking library work off the control loop; results return to it in request order.
+    private bool Offload<T>(Func<T> work, Action<T> then, Action<Exception> failed)
+    {
+        if (Interlocked.Increment(ref offloadedCount) > 32) { Interlocked.Decrement(ref offloadedCount); return false; }
+        offloaded = offloaded.ContinueWith(async _ =>
+        {
+            Action result;
+            try { var value = work(); result = () => then(value); }
+            catch (Exception ex) { result = () => failed(ex); }
+            finally { Interlocked.Decrement(ref offloadedCount); }
+            try { await events.Writer.WriteAsync(new("completed", Then: () => { try { result(); } catch (Exception ex) when (ex is not OperationCanceledException) { failed(ex); } }), lifetime.Token); }
+            catch (Exception) { /* The room closed while the work ran. */ }
+        }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
+        return true;
+    }
     private void DiscoveryLost(string reason)
     {
         if (Interlocked.Exchange(ref discoveryFailed, 1) != 0) return;
@@ -248,11 +309,15 @@ public sealed partial class RoomClient : IAsyncDisposable
         {
             await foreach (var item in events.Reader.ReadAllAsync(lifetime.Token))
             {
-                if (item.Transport is not null && (!peers.TryGetValue(item.Peer!, out var current) || current != item.Transport)) continue;
+                item.Inbox?.Release();
                 try
                 {
+                    while (flooded.TryDequeue(out var flood))
+                        if (peers.TryGetValue(flood.Peer, out var flooding) && flooding == flood.Transport) DepartPeer(flood.Peer, "Peer exceeded the room message rate");
+                    if (item.Transport is not null && (!peers.TryGetValue(item.Peer!, out var current) || current != item.Transport)) continue;
                     switch (item.Kind)
                     {
+                        case "completed": item.Then!(); break;
                         case "library-expire": if (coordinator?.ExpireLibrary(clock.Now) == true) PublishHostState(); break;
                         case "retry-host":
                             RequestHostReconnect();
@@ -282,9 +347,19 @@ public sealed partial class RoomClient : IAsyncDisposable
                                 HostedMedia = new UpdatedHostedMedia(local, updated);
                             break;
                         case "selection":
-                            ApplyHostedFile(item.Selection!);
-                            ApplyHostCommand(Identity!.Peer, new("media", Data: Wire.Serialize(item.Selection!.Media.Media)));
-                            ApplyHostCommand(Identity.Peer, new("playback", Data: Wire.Serialize(new PlaybackState(0, item.Selection.Media.Media.Id, item.Play, item.PositionMs, 0))));
+                            // Validate before replacing the shared file so a rejected selection keeps the current media.
+                            var selected = item.Selection!.Media.Media;
+                            if (!HostRoomCoordinator.ValidMedia(selected)) throw new InvalidDataException("This video cannot be shared.");
+                            var (previousMedia, previousAssets) = (HostedMedia, assets.ToArray());
+                            ApplyHostedFile(item.Selection);
+                            try { ApplyHostCommand(Identity!.Peer, new("media", Data: Wire.Serialize(selected))); }
+                            finally
+                            {
+                                if (coordinator?.Media?.Id != selected.Id)
+                                { assets.Clear(); foreach (var pair in previousAssets) assets[pair.Key] = pair.Value; HostedMedia = previousMedia; }
+                            }
+                            if (coordinator?.Media?.Id == selected.Id)
+                                ApplyHostCommand(Identity.Peer, new("playback", Data: Wire.Serialize(new PlaybackState(0, selected.Id, item.Play, item.PositionMs, 0))));
                             break;
                         case "library-opened": LibraryPeerReady?.Invoke(item.Peer!); break;
                         case "opened": SendPeer(item.Peer!, new("control-hello", Number: 2)); break;
@@ -303,13 +378,14 @@ public sealed partial class RoomClient : IAsyncDisposable
                             break;
                     }
                 }
-                catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException or IOException or ArgumentException)
+                catch (Exception ex) when (ex is not OperationCanceledException || !lifetime.IsCancellationRequested)
                 {
                     PlaybackDiagnostics.Record("room-command-error", new { room = diagnosticId, phase = item.Kind, command = item.Message?.Type, error = ex.GetType().Name });
+                    // A guest's command or a local action can fail without ending the room.
                     if (item.Kind == "peer" && Identity?.Host == true)
-                        SendPeer(item.Peer!, new("error", Text: "Invalid or unauthorized room command"));
-                    else if (item.Kind == "local") Message?.Invoke(new("error", Text: ex.Message));
-                    else FailRoom(ex.Message);
+                    { if (negotiated.ContainsKey(item.Peer!)) SendPeer(item.Peer!, new("error", Text: "Invalid or unauthorized room command")); }
+                    else if (item.Kind is "local" or "selection" or "subtitle-selection" or "completed") Message?.Invoke(new("error", Text: ex.Message));
+                    else FailRoom(ex is InvalidDataException or System.Text.Json.JsonException or IOException or ArgumentException ? ex.Message : "Room controls failed: " + ex.Message);
                 }
             }
         }
@@ -343,7 +419,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                     if (storedControls == "true")
                         coordinator.Apply(Identity.Peer, new("controls", Number: 1), clock.Now, out _);
                     coordinator.Apply(Identity.Peer, new("catalog-permission", Number: settings?.Setting(RoomSetting(Identity.Room, "libraryBrowsing")) == "true" ? 1 : 0), clock.Now, out _);
-                    if (roomControlsRestored) QueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
+                    if (roomControlsRestored) TryQueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
                     Snapshot = coordinator.Snapshot; directConnected.TrySetResult();
                 }
                 connected.TrySetResult(Identity); Message?.Invoke(message); break;
@@ -357,7 +433,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                         coordinator!.Apply(Identity.Peer, new("controls", Number: discovery.SharedControls ? 1 : 0), clock.Now, out _);
                         settings?.Setting(RoomSetting(Identity.Room, "sharedControls"), discovery.SharedControls ? "true" : "false");
                         roomControlsRestored = true;
-                        QueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
+                        TryQueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
                     }
                     coordinator!.AdmittedGuests = discovery.AdmittedGuests ?? [];
                     coordinator!.Discover(discovery.People, clock.Now); PublishHostState();
@@ -417,6 +493,7 @@ public sealed partial class RoomClient : IAsyncDisposable
             PlaybackDiagnostics.Record("peer-handshake", new { room = diagnosticId, protocol = message.Number, host = Identity?.Host == true });
             if (message.Number != 2) { DepartPeer(sender, "Update all participants to use direct room controls."); return; }
             negotiated.TryAdd(sender, 0);
+            if (Identity?.Host == true) coordinator!.SetConnected(sender, true, clock.Now);
             Message?.Invoke(new("peer-connected", Sender: sender));
             connection?.UseDiscoveryPolling();
             if (Identity?.Host == true) PublishHostState();
@@ -442,7 +519,8 @@ public sealed partial class RoomClient : IAsyncDisposable
                     var state = Wire.Read<HostRoomState>(message.Data!);
                     if (state.Sequence <= receivedSequence) return;
                     if (state.HostNowMs <= 0 || !state.Snapshot.People.Any(p => p.Id == sender && p.IsHost && p.Approved)) throw new InvalidDataException("Invalid host room state");
-                    if (!directConnected.Task.IsCompletedSuccessfully) clock.Initialize(state.HostNowMs);
+                    // Recovery to the same host keeps its RTT-compensated samples instead of an uncompensated reset.
+                    if (clockHost != sender) { clock.Initialize(state.HostNowMs); clockHost = sender; }
                     receivedSequence = state.Sequence; ApplySnapshot(state.Snapshot);
                     directConnected.TrySetResult();
                     if (Interlocked.Exchange(ref peerRecovering, 0) != 0)
@@ -486,14 +564,24 @@ public sealed partial class RoomClient : IAsyncDisposable
         if (HandleLibraryInteraction(sender, message)) return;
         if (browse is not null)
         {
-            try
+            PublishHostState();
+            var (source, thumbnail, store) = (Volatile.Read(ref hostedLibrary), LibraryThumbnail, settings);
+            // Thumbnails and watch progress read files and SQLite; build the page off the control loop.
+            if (!Offload(() => SharedLibrary.Browse(source, browse, thumbnail, browse.Home ? store?.PlaybackSettings() : null), page =>
             {
-                var page = SharedLibrary.Browse(Volatile.Read(ref hostedLibrary), browse, LibraryThumbnail, browse.Home ? settings?.PlaybackSettings() : null);
+                if (!negotiated.ContainsKey(sender)) return;
+                if (!coordinator.LibraryBrowsing || coordinator.LibraryActivity?.Peer != sender)
+                { SendPeer(sender, new("catalog-error", Number: message.Number, Text: "Library browsing ended. Try again.")); return; }
                 coordinator.DescribeLibrary(page.Location, browse.Query, clock.Now);
                 PublishHostState();
                 SendPeer(sender, new("catalog-page", Number: message.Number, Data: Wire.Serialize(page)));
-            }
-            catch (InvalidDataException ex) { PublishHostState(); SendPeer(sender, new("catalog-error", Number: message.Number, Text: ex.Message)); }
+            }, ex =>
+            {
+                PlaybackDiagnostics.Record("library-interaction-error", new { room = diagnosticId, command = message.Type, error = ex.GetType().Name });
+                if (negotiated.ContainsKey(sender))
+                    SendPeer(sender, new("catalog-error", Number: message.Number, Text: ex is InvalidDataException ? ex.Message : "The host could not load its library."));
+            }))
+                SendPeer(sender, new("catalog-error", Number: message.Number, Text: "The host is busy. Try again shortly."));
             return;
         }
         if (message.Type == "catalog-view")
@@ -523,18 +611,18 @@ public sealed partial class RoomClient : IAsyncDisposable
         {
             roomControlsRestored = true;
             settings?.Setting(RoomSetting(Identity.Room, "sharedControls"), coordinator.SharedControls ? "true" : "false");
-            if (DiscoveryOnline) QueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
+            TryQueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
         }
         if (sender == Identity!.Peer && message.Type == "room-name")
         {
             settings?.Setting(RoomSetting(Identity.Room, "name"), coordinator.Name!);
-            if (DiscoveryOnline) QueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
+            TryQueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
         }
         PublishHostState();
         if (announcement is not null) { Message?.Invoke(announcement); Broadcast(announcement); }
         if (message.Type is "playback" or "ready" or "buffering")
             PlaybackDiagnostics.Record("host-command-accepted", new { sender, message.Type, playback = coordinator.Playback,
-                waiting = coordinator.Snapshot.People.Where(p => p.Approved && !p.Ready).Select(p => p.Id).ToArray() });
+                waiting = coordinator.Snapshot.People.Where(p => p.Approved && !p.Ready && coordinator.IsConnected(p.Id)).Select(p => p.Id).ToArray() });
     }
     private void ApplySnapshot(RoomSnapshot snapshot)
     {
@@ -574,8 +662,8 @@ public sealed partial class RoomClient : IAsyncDisposable
     {
         if (Identity?.Host != false || !admitted || hostPeer is null || peers.ContainsKey(hostPeer) || !DiscoveryOnline ||
             Environment.TickCount64 < nextHostRetryMs) return;
+        if (!TryQueueDiscovery(new("reconnect"))) return;
         nextHostRetryMs = Environment.TickCount64 + 10000;
-        QueueDiscovery(new("reconnect"));
         PlaybackDiagnostics.Record("peer-reconnect-request", new { room = diagnosticId });
     }
     private void DepartPeer(string id, string? reason = null, bool recover = true)
@@ -628,17 +716,19 @@ public sealed partial class RoomClient : IAsyncDisposable
         if (Identity is null) throw new InvalidOperationException("Missing room identity");
         if (peers.TryRemove(id, out var previous)) previous.Dispose();
         negotiated.TryRemove(id, out _);
+        if (Identity.Host && coordinator?.SetConnected(id, false, clock.Now) == true) PublishHostState();
         var peer = new PeerTransport(Identity.IceServers, Identity.ForceRelay);
         PlaybackDiagnostics.Record("peer-created", new { room = diagnosticId, transport = peer.DiagnosticId, offer });
         peer.ResolveMedia = media => Identity?.Host == true && negotiated.ContainsKey(id) && Snapshot?.People.Any(p => p.Id == id && p.Approved) == true
             ? HostedMedia?.Media.Id == media ? HostedMedia : assets.GetValueOrDefault(media) : null;
-        peer.Signal += (type, data) => { try { QueueDiscovery(new("signal", Target: id, Text: type, Data: data)); } catch (IOException) { } };
+        peer.Signal += (type, data) => TryQueueDiscovery(new("signal", Target: id, Text: type, Data: data));
         peer.Status += text => Status?.Invoke(text);
-        peer.ControlMessage += message => Post(new("peer", id, message, peer));
+        var inbox = new PeerInbox(Identity.Host, Identity.Host ? 48 : 160);
+        peer.ControlMessage += message => PostPeer(inbox, new("peer", id, message, peer));
         peer.ControlClosed += () => Post(new("closed", id, Transport: peer));
         peers[id] = peer;
         if (offer) peer.StartOffer();
-        QueueDiscovery(new("signal", Target: id, Text: "library-capability", Data: "1"));
+        TryQueueDiscovery(new("signal", Target: id, Text: "library-capability", Data: "1"));
         _ = MonitorLibraryPeer(id, peer);
         _ = MonitorPeer(id, peer);
         return peer;
@@ -683,6 +773,7 @@ public sealed partial class RoomClient : IAsyncDisposable
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, lifetime.Token);
         deadline.CancelAfter(TimeSpan.FromSeconds(45));
         PeerTransport? failed = null;
+        var busy = 0;
         try
         {
             while (true)
@@ -698,6 +789,12 @@ public sealed partial class RoomClient : IAsyncDisposable
                 {
                     await peer.Ready.WaitAsync(deadline.Token);
                     return await peer.ReadAsync(media.Id, offset, count, deadline.Token);
+                }
+                catch (PeerBusyException) when (!deadline.IsCancellationRequested && !peer.IsInterrupted && ++busy <= 40)
+                {
+                    // The host's range queue is full; back off briefly instead of aborting VLC's input.
+                    if (busy == 1) PlaybackDiagnostics.Record("media-range-busy", new { room = diagnosticId, transport = peer.DiagnosticId });
+                    await Task.Delay(Math.Min(500, 25 * busy), deadline.Token);
                 }
                 catch (Exception ex) when (!deadline.IsCancellationRequested && (peer.IsInterrupted || ex is TimeoutException))
                 {

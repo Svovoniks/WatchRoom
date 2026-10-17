@@ -91,7 +91,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         if (Progress != progress) { Progress = progress; Changed(nameof(Progress)); }
         if (PlaybackLabel != label) { PlaybackLabel = label; Changed(nameof(PlaybackLabel)); Changed(nameof(HasPlaybackProgress)); }
     }
-    public void SetPlaybackLabel(string label) { PlaybackLabel = label; Changed(nameof(PlaybackLabel)); }
+    public void SetPlaybackLabel(string label) { if (PlaybackLabel == label) return; PlaybackLabel = label; Changed(nameof(PlaybackLabel)); Changed(nameof(HasPlaybackProgress)); }
     public Task LoadPosterAsync()
     {
         if (IsRemote)
