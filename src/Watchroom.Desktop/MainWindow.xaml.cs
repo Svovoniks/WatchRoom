@@ -24,6 +24,7 @@ public partial class MainWindow : Window
     private sealed record TrackChoice(int Id, string Name)
     {
         public override string ToString() => Name;
+        public string Label => Id == -1 ? "Off" : Name;
     }
     private readonly LibraryStore library;
     private readonly ConcurrentDictionary<string, MediaItem> libraryUpdates = new();
@@ -62,7 +63,7 @@ public partial class MainWindow : Window
     private List<MediaItem> items = [];
     private MediaItem? selected;
     private MediaItem? playingItem;
-    private bool roomBusy, preparing;
+    private bool roomBusy;
     private CancellationTokenSource? scanCancellation;
     private long localResume;
     private LibVLC? vlc;
@@ -108,7 +109,9 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         RegisterName("LibraryScroll", LibraryScroll);
-        RoomPage.SizeChanged += (_, _) => PlayerOptionsScroll.MaxHeight = Math.Clamp(RoomPage.ActualHeight / 3, 120, 260);
+        RoomPage.SizeChanged += (_, _) => AudioTracks.MaxHeight = SubtitleTracks.MaxHeight = QueueList.MaxHeight = Math.Clamp(RoomPage.ActualHeight - 260, 120, 360);
+        // Menus are separate popup windows; close them when the bar hides, moves to fullscreen or the player closes.
+        PlaybackControls.IsVisibleChanged += (_, _) => { if (!PlaybackControls.IsVisible) ClosePlayerMenus(); };
         InitializeBackNavigation();
         videoClickDelay.Interval = TimeSpan.FromMilliseconds(GetDoubleClickTime());
         videoClickDelay.Tick += (_, _) =>
@@ -251,7 +254,6 @@ public partial class MainWindow : Window
             RememberLocation();
             StatusText.Text = scanning ? (string.IsNullOrEmpty(ScanStatus.Text) ? "Scanning your library…" : ScanStatus.Text)
                 : artworkBusy ? "Fetching artwork and metadata…"
-                : preparing ? "Preparing a smaller copy…"
                 : $"{items.Count(x => x.Available)} videos available · {folders.Count} folders";
             StatusText.ToolTip = StatusText.Text;
         }
@@ -962,6 +964,7 @@ public partial class MainWindow : Window
                 if (room.Identity?.Host == false)
                 {
                     QueueStatus.Text = $"{snapshot.Queue?.Length ?? 0} videos in the host's queue";
+                    QueuePillText.Text = snapshot.Queue?.Length > 0 ? $"Queue · {snapshot.Queue.Length}" : "Queue";
                     QueueList.ItemsSource = (snapshot.Queue ?? []).Select(title => new { QueueTitle = title }).ToArray();
                 }
                 foreach (var id in pendingAdmissions.Keys.ToArray())
@@ -1118,7 +1121,7 @@ public partial class MainWindow : Window
         roomLibrary?.ExpireViews(Wire.Now);
         if (fullscreen && PlaybackControls.Visibility == Visibility.Visible &&
             Environment.TickCount64 - lastPlayerInteraction > 2600 && !PlaybackControls.IsMouseOver && !RoomHeader.IsMouseOver &&
-            !seeking && PlayerOptions.Visibility != Visibility.Visible)
+            !seeking && !PlayerMenuOpen)
         {
             if (PlaybackControls.IsKeyboardFocusWithin || RoomHeader.IsKeyboardFocusWithin) PlayerOverlay.Focus();
             PlaybackControls.Visibility = FullscreenHint.Visibility = Visibility.Collapsed;
@@ -1143,7 +1146,7 @@ public partial class MainWindow : Window
             Timeline.Maximum = Math.Max(1, player.Length); Timeline.Value = pendingSeek ?? Math.Max(0, player.Time);
             PlaybackTime.Text = FormatTime(player.Time) + " / " + FormatTime(player.Length);
         }
-        var wantsPlayback = room is null ? player.IsPlaying : playbackIntent.Playing(target, player.IsPlaying);
+        var wantsPlayback = WantsMediaPlayback;
         PlayButton.Content = wantsPlayback ? "\uF8AE" : "\uF5B0";
         PlayButton.ToolTip = wantsPlayback ? "Pause (Space)" : "Play (Space)";
         if (++tick % 8 == 0 && ready) RefreshTracks();
@@ -1257,8 +1260,10 @@ public partial class MainWindow : Window
     private void RequestPlayback(bool playing)
     {
         videoClickDelay.Stop();
-        // During the up-next countdown, Play continues to the next episode instead of replaying this one.
-        if (playing && upNextChoice is not null) { EndUpNext(true); return; }
+        // During the up-next countdown, Play continues to the next episode instead of replaying this one;
+        // once the countdown is paused, Play restarts it.
+        if (playing && upNextChoice is not null) { if (upNextPaused) StartUpNextCountdown(); else EndUpNext(true); return; }
+        if (!playing && UpNextCounting) { PauseUpNext(); return; }
         if (!HasMediaPlayback) return;
         if (room is not null) SendPlayback(playing, player!.Length > 0 && player.Time >= player.Length - 250 ? 0 : Math.Max(0, player.Time));
         else if (!playing) player!.SetPause(true); else { if (player!.State == VLCState.Ended) player.Stop(); player.Play(); }
@@ -1465,7 +1470,8 @@ public partial class MainWindow : Window
     private void PublishQueue()
     {
         var titles = queue.Select(PlaybackTitle).ToArray(); QueueStatus.Text = titles.Length == 0 ? "Queue is empty." : queuePosition >= 0 && queuePosition < queue.Count ? $"{queuePosition + 1} / {queue.Count} · {titles[queuePosition]}" : $"{queue.Count} videos";
-        QueueList.ItemsSource = queue.ToArray(); QueueList.SelectedIndex = queuePosition; UpdateSessionControls();
+        QueuePillText.Text = queue.Count == 0 ? "Queue" : queuePosition >= 0 && queuePosition < queue.Count ? $"{queuePosition + 1} / {queue.Count}" : $"Queue · {queue.Count}";
+        RefreshQueueList(true); UpdateSessionControls();
         library.Setting("queuePosition", queuePosition.ToString());
         library.Setting("queue", Wire.Serialize(queue.Select(x => x.Id).ToArray()));
         if (room?.Identity?.Host == true) room.Send(new("queue", Data: Wire.Serialize(titles.Take(150).ToArray())));
@@ -1478,6 +1484,12 @@ public partial class MainWindow : Window
     private async void PreviousQueued(object sender, RoutedEventArgs e) => await Guard(() => PlayQueueStep(-1));
     private async Task PlayQueueStep(int direction)
     {
+        if (ShowingEpisodeList)
+        {
+            if (AdjacentEpisode(direction) is { } episode) await PlayListedEpisode(episode);
+            else SetStatus(direction > 0 ? "This is the last episode." : "This is the first episode.");
+            return;
+        }
         if (!CanEditQueue()) return;
         var index = QueuePlayback.FindNext(queue, queuePosition, direction, QueueItemAvailable);
         if (index < 0) { SetStatus(direction > 0 ? "End of queue." : "Start of queue."); return; }
@@ -1522,37 +1534,10 @@ public partial class MainWindow : Window
         guestBrowsePending = false; ++guestBrowseRequest; RefreshSharedLibrary();
         UpdateSessionControls();
     }
-    private async void PrepareCopy(object sender, RoutedEventArgs e) => await Guard(async () =>
-    {
-        if (playingItem is null || room?.Identity?.Host == false || preparing) return;
-        var exe = SavedFfmpeg;
-        if (!File.Exists(exe)) { ShowPage("Settings"); ShowPreferenceSection("Playback"); SetStatus("Choose and save an FFmpeg executable in Settings to prepare a smaller copy."); return; }
-        var item = playingItem; var preparingRoom = room; var generation = loadGeneration;
-        preparing = true; PrepareButton.IsEnabled = false;
-        try {
-        var dir = Path.Combine(App.DataDirectory, "prepared"); Directory.CreateDirectory(dir);
-        var output = Path.Combine(dir, item.Id + "-" + File.GetLastWriteTimeUtc(item.Path).Ticks + "-720p.mkv");
-        if (!File.Exists(output))
-        {
-            var info = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
-            foreach (var arg in new[] { "-nostdin", "-y", "-i", item.Path, "-map", "0:v:0", "-map", "0:a:0?", "-map", "0:s?", "-map", "0:t?", "-vf", "scale=-2:min(720\\,ih)", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-maxrate", "3000k", "-bufsize", "6000k", "-c:a", "aac", "-b:a", "160k", "-c:s", "copy", "-c:t", "copy", "-f", "matroska", output + ".partial" }) info.ArgumentList.Add(arg);
-            SetStatus("Preparing a 720p copy. Original file stays unchanged; playback can start when preparation finishes.");
-            using var process = Process.Start(info)!;
-            var errors = process.StandardError.ReadToEndAsync(lifetime.Token);
-            try { await process.WaitForExitAsync(lifetime.Token); } catch { if (!process.HasExited) process.Kill(true); throw; }
-            var log = await errors; if (process.ExitCode != 0) throw new IOException("FFmpeg could not prepare this file: " + log[^Math.Min(600, log.Length)..]);
-            File.Move(output + ".partial", output, true);
-        }
-        if (generation != loadGeneration || room != preparingRoom || playingItem?.Id != item.Id) { SetStatus("720p copy saved. Playback changed during preparation."); return; }
-        if (room?.Identity?.Host == true) { room.SetHostedFile(output, PlaybackTitle(item) + " · 720p"); room.Send(new("media", Data: Wire.Serialize(room.HostedMedia!.Media))); }
-        else { await PrepareVideoSurface(); using var media = new Media(vlc!, output, FromType.FromPath); player?.Play(media); }
-        SetStatus("720p copy ready.");
-        } finally { preparing = false; UpdateSessionControls(); }
-    });
     private static string PlaybackTitle(MediaItem item) => item.QueueTitle;
     private void RemoveQueued(object sender, RoutedEventArgs e)
     {
-        if (room is not null && room.Identity?.Host != true) return;
+        if (room is not null && room.Identity?.Host != true || ShowingEpisodeList) return;
         if (QueueList.SelectedIndex < 0) return;
         var removedIndex = QueueList.SelectedIndex;
         queue.RemoveAt(removedIndex);
@@ -1562,7 +1547,7 @@ public partial class MainWindow : Window
     private void QueueSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSessionControls();
     private void MoveQueued(object sender, RoutedEventArgs e)
     {
-        if (room is not null && room.Identity?.Host != true) return;
+        if (room is not null && room.Identity?.Host != true || ShowingEpisodeList) return;
         var index = QueueList.SelectedIndex;
         var destination = index + (((string)((Button)sender).Tag) == "Earlier" ? -1 : 1);
         if (index < 0 || destination < 0 || destination >= queue.Count) return;
@@ -1574,6 +1559,7 @@ public partial class MainWindow : Window
     private void UpdateSessionControls()
     {
         if (InviteButton is null || QueueList is null) return;
+        RefreshQueueList();
         var connectedRoom = room?.IsConnected == true;
         SharedControls.Visibility = connectedRoom && room!.Identity?.Host == true ? Visibility.Visible : Visibility.Collapsed;
         SharedControls.IsEnabled = connectedRoom && room!.Identity?.Host == true;
@@ -1587,22 +1573,29 @@ public partial class MainWindow : Window
         ChatInput.IsEnabled = SendChatButton.IsEnabled = connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.People.Any(p => p.Id == room.Identity?.Peer && p.Approved) == true);
         PlayButton.IsEnabled = StopButton.IsEnabled = canControl && (ready || playingItem is not null && player?.State is VLCState.Stopped or VLCState.Ended);
         Timeline.IsEnabled = BackwardButton.IsEnabled = ForwardButton.IsEnabled = canControl && player?.Length > 0;
-        NextButton.Visibility = PreviousButton.Visibility = HasPlaybackQueue ? Visibility.Visible : Visibility.Collapsed;
+        NextButton.Visibility = PreviousButton.Visibility = HasPlaybackQueue || ShowingEpisodeList ? Visibility.Visible : Visibility.Collapsed;
+        NextButton.ToolTip = ShowingEpisodeList ? "Next episode (N)" : "Next in queue (N)";
+        PreviousButton.ToolTip = ShowingEpisodeList ? "Previous episode (P)" : "Previous video (P)";
         RefreshEpisodeEndAction();
-        NextButton.IsEnabled = roomLibrary?.Queue.Entries.Length > 0
+        var canManageEpisodes = room is null || connectedRoom && room!.Identity?.Host == true;
+        NextButton.IsEnabled = ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(1) is not null
+            : roomLibrary?.Queue.Entries.Length > 0
             ? connectedRoom && (room!.Identity?.Host == true || roomLibrary.OwnAccess.Start)
             : QueuePlayback.FindNext(queue, queuePosition, 1, x => File.Exists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
-        PreviousButton.IsEnabled = QueuePlayback.FindNext(queue, queuePosition, -1, x => File.Exists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
+        PreviousButton.IsEnabled = ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(-1) is not null
+            : QueuePlayback.FindNext(queue, queuePosition, -1, x => File.Exists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
         ReturnToRoomButton.IsEnabled = ready || room is not null;
         var canManageQueue = room is null || connectedRoom && room!.Identity?.Host == true;
         QueueEditActions.Visibility = canManageQueue && QueueList.HasItems ? Visibility.Visible : Visibility.Collapsed;
         PlayPlayerQueueButton.IsEnabled = canManageQueue && queue.Any(item => item.Available);
-        RemoveQueueButton.IsEnabled = QueueList.SelectedIndex >= 0 && canManageQueue;
-        PlaySelectedQueueButton.IsEnabled = canManageQueue && QueueList.SelectedItem is MediaItem queued && QueueItemAvailable(queued);
+        // An episode list can be played from but not reordered or edited.
+        RemoveQueueButton.IsEnabled = QueueList.SelectedIndex >= 0 && canManageQueue && !ShowingEpisodeList;
+        PlaySelectedQueueButton.IsEnabled = canManageQueue && ((QueueList.SelectedItem as EpisodeEntry)?.Media ?? QueueList.SelectedItem as MediaItem) is { } chosen && QueueItemAvailable(chosen);
         QueueEarlier.IsEnabled = RemoveQueueButton.IsEnabled && QueueList.SelectedIndex > 0;
         QueueLater.IsEnabled = RemoveQueueButton.IsEnabled && QueueList.SelectedIndex < queue.Count - 1;
-        PrepareButton.IsEnabled = playingItem is not null && !preparing && (room is null || connectedRoom && room!.Identity?.Host == true);
         LoadSubtitlesButton.IsEnabled = ready && room?.Identity?.Host != false;
+        AudioPill.IsEnabled = AudioTracks.IsEnabled && AudioTracks.HasItems;
+        SubtitlePill.IsEnabled = SubtitleTracks.IsEnabled && SubtitleTracks.HasItems || LoadSubtitlesButton.IsEnabled;
         UpdateSavedQueueActions();
     }
     private void Fullscreen(object sender, RoutedEventArgs e)
@@ -1635,6 +1628,7 @@ public partial class MainWindow : Window
     private void SetFullscreen(bool value)
     {
         if (fullscreen == value || RoomPage.Visibility != Visibility.Visible) return;
+        ClosePlayerMenus();
         var handle = new WindowInteropHelper(this).Handle;
         if (value)
         {
@@ -1670,7 +1664,6 @@ public partial class MainWindow : Window
             WindowState = previousState;
             ApplyPlayerLayout();
         }
-        PlayerOptions.Visibility = Visibility.Collapsed;
         FullscreenButton.Content = fullscreen ? "\uE73F" : "\uE740";
         FullscreenButton.ToolTip = fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen (F or double-click video)";
         System.Windows.Automation.AutomationProperties.SetName(FullscreenButton, fullscreen ? "Exit fullscreen" : "Fullscreen");
@@ -1678,10 +1671,35 @@ public partial class MainWindow : Window
         PlayerOverlay.Focus();
     }
     private void ToggleRoomPanel(object sender, RoutedEventArgs e) { roomPanelVisible = !roomPanelVisible; ApplyPlayerLayout(); }
-    private void TogglePlayerOptions(object sender, RoutedEventArgs e)
+    private bool PlayerMenuOpen => AudioMenu.IsOpen || SubtitleMenu.IsOpen || PlayerQueueMenu.IsOpen;
+    private void ClosePlayerMenus() => AudioMenu.IsOpen = SubtitleMenu.IsOpen = PlayerQueueMenu.IsOpen = false;
+    private void PlayerMenuOpened(object sender, EventArgs e)
     {
-        PlayerOptions.Visibility = PlayerOptions.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         ShowPlayerControls();
+        // Move focus into the menu so arrow keys pick tracks instead of seeking.
+        var menu = (System.Windows.Controls.Primitives.Popup)sender;
+        var list = menu == AudioMenu ? AudioTracks : menu == SubtitleMenu ? SubtitleTracks : QueueList;
+        // Rows are virtualized, so bring the selected one into view before focusing it.
+        if (list.SelectedItem is { } chosen) list.ScrollIntoView(chosen);
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (list.ItemContainerGenerator.ContainerFromIndex(Math.Max(0, list.SelectedIndex)) is ListBoxItem item) item.Focus();
+            else menu.Child.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
+        }, DispatcherPriority.Input);
+    }
+    private void PlayerMenuKeyDown(object sender, KeyEventArgs e)
+    {
+        ShowPlayerControls();
+        // Arrow keys select tracks as they move; Enter confirms. The queue list handles Enter itself.
+        var trackConfirmed = e.Key == Key.Enter && e.OriginalSource is ListBoxItem && !PlayerQueueMenu.IsOpen;
+        if (e.Key != Key.Escape && !trackConfirmed) return;
+        var pill = AudioMenu.IsOpen ? AudioPill : SubtitleMenu.IsOpen ? SubtitlePill : QueuePill;
+        ClosePlayerMenus(); pill.Focus(); e.Handled = true;
+    }
+    private void TrackMenuClicked(object sender, MouseButtonEventArgs e)
+    {
+        // Selection happens on mouse down; close once the click on a track completes.
+        if (ItemsControl.ContainerFromElement((ItemsControl)sender, (DependencyObject)e.OriginalSource) is ListBoxItem) ClosePlayerMenus();
     }
     private void ShowPlayerControls()
     {

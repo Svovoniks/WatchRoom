@@ -25,7 +25,7 @@ The app includes a default HTTPS room-service address. Its availability and publ
 
 The Windows **Home** tab opens with **Continue watching**, suggestions for unstarted movies, shows, and anime, and a **Mystery pick** from available titles. Continue watching resumes paused movies or opens the next unwatched episode of a started show. **Refresh picks** reshuffles suggestions and the mystery card. Guests see the same Home sections for the host's library and saved progress while the host permits library browsing; their playback starts in the room.
 
-Local playback remembers your position and volume. Details offer **Resume** and **Start over**; a **Return to player** strip keeps playback reachable while browsing. Playback options include an editable, persistent queue with episode labels, reordering, removal, and automatic advancement. Room invitation and chat actions appear when connected to a room.
+Local playback remembers your position and volume. Details offer **Resume** and **Start over**; a **Return to player** strip keeps playback reachable while browsing. The player's queue menu includes an editable, persistent queue with episode labels, reordering, removal, and automatic advancement; with no queue loaded, it lists the playing show's episodes so you can jump to another. Room invitation and chat actions appear when connected to a room.
 
 Headset and keyboard media buttons can play or pause the current video, including while Watchroom is minimized or another app has focus. Windows media controls show the current title and playback state. Room playback buttons follow the host's shared-controls setting.
 
@@ -64,7 +64,7 @@ Room AVI playback selects VLC's `avformat` demuxer because its native AVI demuxe
 
 - Original-file streaming and remote seeking work in automated same-machine tests. A Windows host/VM public-room H.264/AAC run met the experimental 500 ms p95 pair-position target. Silent AVI still fails that target; forced-TURN and wider multi-machine/media coverage remain unvalidated.
 - External `.srt`, `.ass`, and `.ssa` sidecars matching the video filename are shared with the room. Embedded subtitles, audio tracks and fonts are delivered as part of the original file. Full HEVC/AV1/ASS/PGS compatibility still needs a representative media corpus.
-- Smaller copies can be prepared using a user-supplied FFmpeg executable. Preparation completes before streaming; this is **not live adaptive transcoding**. The current action prepares a 720p H.264/AAC MKV with copied subtitle tracks and attachments.
+- Videos are always streamed as the original file; Watchroom does not transcode or prepare smaller copies. An optional user-supplied FFmpeg executable is used only to generate episode thumbnails.
 - Guest library access defaults off per person. Hosts can share up to 10,000 titles in category collections; the shared room queue holds 50 entries. Saved host queues remain separate. Library browsing reveals metadata/thumbnails; video bytes remain authorized only for the selected video and subtitles. Older clients retain their existing room controls without the guest library feature.
 - HTTP room coordination retries transient network/server failures for up to 30 seconds using the existing session. Updated services deduplicate retried commands. Expired, revoked, or lost sessions still require leaving/rejoining and obtaining host approval. Host disconnect closes the room.
 - The UI has dark/light themes. The shell uses software rendering for reliable WPF/native-video composition; libVLC retains hardware decoding.

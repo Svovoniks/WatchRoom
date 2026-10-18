@@ -51,7 +51,7 @@ static class TrackPreferenceChecks
             var subtitle = tracks.Single(t => t.TrackType == TrackType.Text && t.Language == "eng").Id;
             Call("RefreshTracks"); Wait(() => player.AudioTrack == russian && player.Spu == subtitle);
             Check(true, "native playback picks preferred audio and subtitles from stream language metadata");
-            var picker = (ComboBox)window.FindName("AudioTracks");
+            var picker = (ListBox)window.FindName("AudioTracks");
             picker.SelectedItem = picker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == english);
             Call("RefreshTracks"); Wait(() => player.AudioTrack == english);
             Check(true, "manual track selection survives periodic player refreshes");
@@ -69,7 +69,7 @@ static class TrackPreferenceChecks
             var russianSubtitle = tracks.Single(t => t.TrackType == TrackType.Text && t.Language == "rus").Id;
             Call("RefreshTracks"); Wait(() => player.AudioTrack == english && player.Spu == russianSubtitle);
             Check(true, "manual audio changes apply the matching subtitle priority");
-            var subtitlePicker = (ComboBox)window.FindName("SubtitleTracks");
+            var subtitlePicker = (ListBox)window.FindName("SubtitleTracks");
             subtitlePicker.SelectedItem = subtitlePicker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == subtitle);
             picker.SelectedItem = picker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == russian);
             Call("RefreshTracks"); Wait(() => player.AudioTrack == russian && player.Spu == subtitle);

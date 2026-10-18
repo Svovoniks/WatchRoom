@@ -18,4 +18,14 @@ public static class EpisodePlayback
             .OrderBy(item => item.Season).ThenBy(item => item.Episode).ThenBy(item => item.Path)
             .FirstOrDefault();
     }
+
+    // The show's playable episodes in order; the current episode is always included.
+    public static MediaItem[] Episodes(IEnumerable<MediaItem> library, MediaItem current) =>
+        current.Series is null || current.Season is null || current.Episode is null ? [] :
+        LibraryCatalog.PreferredFiles(library.Where(item => LibraryIdentity.SameShow(item, current) &&
+                !item.IsExtra && !item.IsVirtual && item.Season is not null && item.Episode is not null &&
+                (item.Id == current.Id || item.Available && item.NumberingConflict is null))
+            .OrderBy(item => item.Id != current.Id))
+            .OrderBy(item => item.Season).ThenBy(item => item.Episode).ThenBy(item => item.Path)
+            .ToArray();
 }

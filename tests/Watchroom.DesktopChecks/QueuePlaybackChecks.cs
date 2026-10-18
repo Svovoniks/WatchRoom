@@ -89,7 +89,7 @@ static class QueuePlaybackChecks
             playerList.RaiseEvent(key);
             await WaitFor(() => Playing(first, 0));
             check(key.Handled, "Enter in the player queue starts its selected entry");
-            Call("TogglePlayerOptions", window, new RoutedEventArgs()); window.UpdateLayout();
+            Control<System.Windows.Controls.Primitives.ToggleButton>("QueuePill").IsChecked = true; window.UpdateLayout(); playerList.UpdateLayout();
             playerList.SelectedIndex = 1;
             var row = (ListBoxItem)playerList.ItemContainerGenerator.ContainerFromIndex(1);
             var doubleClick = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
@@ -97,7 +97,7 @@ static class QueuePlaybackChecks
             playerList.RaiseEvent(doubleClick);
             await WaitFor(() => Playing(first, 1));
             check(doubleClick.Handled, "double-click in the player starts the chosen queue occurrence");
-            Call("TogglePlayerOptions", window, new RoutedEventArgs());
+            Call("ClosePlayerMenus");
             Call("ShowPage", "Queues"); list.SelectedIndex = 4; window.UpdateLayout();
             list.ScrollIntoView(list.SelectedItem); window.UpdateLayout();
             var savedRow = (ListBoxItem)list.ItemContainerGenerator.ContainerFromIndex(4);

@@ -16,7 +16,9 @@ public partial class MainWindow
     private bool HasMediaPlayback => !closing && player is not null && PlayerEmpty.Visibility != Visibility.Visible;
     private bool CanControlMediaPlayback => HasMediaPlayback &&
         (room is null || room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
-    private bool WantsMediaPlayback => room is null ? player?.IsPlaying == true : playbackIntent.Playing(target, player?.IsPlaying == true);
+    // While the up-next card shows, its countdown is the playback state: Pause stops it and Play restarts it.
+    private bool WantsMediaPlayback => upNextChoice is not null ? UpNextCounting :
+        room is null ? player?.IsPlaying == true : playbackIntent.Playing(target, player?.IsPlaying == true);
 
     private void InitializeMediaControls()
     {

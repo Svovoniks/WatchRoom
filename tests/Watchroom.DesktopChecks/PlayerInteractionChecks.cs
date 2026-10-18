@@ -32,8 +32,16 @@ static class PlayerInteractionChecks
         Call("ShowPlayerControls");
         check(controls.Visibility == Visibility.Visible && header.Visibility == Visibility.Visible,
             "explicit player interaction reveals both player bars");
+        var audioMenu = (System.Windows.Controls.Primitives.Popup)window.FindName("AudioMenu");
+        var audioPill = (System.Windows.Controls.Primitives.ToggleButton)window.FindName("AudioPill");
+        audioPill.IsChecked = true;
+        check(audioMenu.IsOpen && !audioPill.IsHitTestVisible, "the audio pill opens its menu and ignores clicks until it closes");
         typeof(MainWindow).GetField("lastPlayerInteraction", flags)!.SetValue(window, Environment.TickCount64 - 3000);
-        ((Border)window.FindName("PlayerOptions")).Visibility = Visibility.Collapsed;
+        Call("PlaybackTick");
+        check(controls.Visibility == Visibility.Visible, "an open track menu keeps fullscreen controls visible");
+        Call("ClosePlayerMenus");
+        check(!audioMenu.IsOpen && audioPill.IsChecked == false && audioPill.IsHitTestVisible, "closing player menus closes the track menu and resets its pill");
+        typeof(MainWindow).GetField("lastPlayerInteraction", flags)!.SetValue(window, Environment.TickCount64 - 3000);
         Call("PlaybackTick");
         check(controls.Visibility == Visibility.Collapsed && header.Visibility == Visibility.Collapsed,
             "fullscreen inactivity hides both player bars");

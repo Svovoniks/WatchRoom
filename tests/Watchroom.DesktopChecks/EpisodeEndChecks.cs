@@ -38,7 +38,7 @@ static class EpisodeEndChecks
             check(!(bool)Call("ContinuesQueue", first)!, "a loaded queue does not replace the next episode of a library video");
 
             // Metadata matching assigns a show identity after playback started.
-            var matched = library.Select(item => item.Series is null ? item : item with { ShowId = "show-matched", Series = "Fixture Show (2026)" }).ToList();
+            var matched = library.Select(item => !item.Id.StartsWith("episode-end-") || item.Series is null ? item : item with { ShowId = "show-matched", Series = "Fixture Show (2026)" }).ToList();
             Set("items", matched); Call("RefreshPlayingItem"); Call("UpdateSessionControls");
             check(Field<MediaItem>("playingItem").ShowId == "show-matched" && (string)button.Content == "Next episode →",
                 "the playing episode follows library metadata updates and keeps its next episode");
@@ -69,6 +69,21 @@ static class EpisodeEndChecks
             Call("RequestPlayback", true);
             check(offer.IsCompleted && offer.Result && card.Visibility == Visibility.Collapsed,
                 "pressing Play during the countdown continues to the next episode instead of replaying");
+            offer = (Task<bool>)Call("OfferNextEpisode", second, (Func<bool>)(() => false))!;
+            Call("TogglePlayback", window, new RoutedEventArgs());
+            await Task.Delay(400);
+            check(!offer.IsCompleted && card.Visibility == Visibility.Visible && ((Border)window.FindName("UpNextProgress")).Visibility == Visibility.Collapsed &&
+                ((TextBlock)window.FindName("UpNextCountdown")).Text == "Autoplay paused",
+                "pausing during the countdown stops it and removes the card's time bar");
+            Call("TogglePlayback", window, new RoutedEventArgs());
+            check(!offer.IsCompleted && card.Visibility == Visibility.Visible && ((Border)window.FindName("UpNextProgress")).Visibility == Visibility.Visible &&
+                ((TextBlock)window.FindName("UpNextCountdown")).Text == "Playing in 15s", "pressing pause again restarts the full countdown and its time bar");
+            Call("TogglePlayback", window, new RoutedEventArgs());
+            Call("UpNextPlayClicked", window, new RoutedEventArgs(Button.ClickEvent));
+            check(offer.IsCompleted && offer.Result && card.Visibility == Visibility.Collapsed, "Play now after pausing the countdown continues to the next episode");
+            offer = (Task<bool>)Call("OfferNextEpisode", second, (Func<bool>)(() => false))!;
+            check(((Border)window.FindName("UpNextProgress")).Visibility == Visibility.Visible, "a new countdown shows its time bar again");
+            Call("EndUpNext", false);
             var stale = false;
             offer = (Task<bool>)Call("OfferNextEpisode", second, (Func<bool>)(() => stale))!;
             stale = true;
@@ -87,6 +102,34 @@ static class EpisodeEndChecks
                 (string)((Button)window.FindName("DetailPlay")).Content == "Play locally", "marking an episode watched from details clears its resume point");
             watchedButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             check(library2.Setting("watched:" + second.Id) == "false" && watchedText.Text == "Mark as watched", "the details page can mark an episode unwatched again");
+
+            // Without a queue, the queue menu lists the playing show's episodes.
+            var queueList = (ListBox)window.FindName("QueueList");
+            queue.Clear(); Set("queuePosition", -1); Call("PublishQueue");
+            var listed = queueList.Items.Cast<object>().Select(entry => (MediaItem)entry.GetType().GetProperty("Media")!.GetValue(entry)!).ToArray();
+            var firstIndex = Array.FindIndex(listed, item => item.Id == first.Id);
+            check(listed.Select(item => item.Id).Where(id => id.StartsWith("episode-end-")).SequenceEqual([first.Id, second.Id]) && listed[firstIndex + 1].Id == second.Id && queueList.SelectedIndex == firstIndex &&
+                ((TextBlock)window.FindName("QueuePillText")).Text == "Episodes" &&
+                ((Button)window.FindName("RemoveQueueButton")) is { Visibility: Visibility.Visible, IsEnabled: false } &&
+                ((Button)window.FindName("QueueEarlier")) is { Visibility: Visibility.Visible, IsEnabled: false } &&
+                ((Button)window.FindName("PlayPlayerQueueButton")).Visibility == Visibility.Collapsed,
+                "without a queue, the queue menu lists the show's episodes with the playing one selected");
+            var listSource = queueList.ItemsSource;
+            Set("items", Field<List<MediaItem>>("items").ToList()); Call("UpdateSessionControls");
+            check(ReferenceEquals(listSource, queueList.ItemsSource), "a library refresh with the same episodes keeps the list instead of rebuilding it");
+            var nextButton = (Button)window.FindName("NextButton"); var previousButton = (Button)window.FindName("PreviousButton");
+            check(nextButton.Visibility == Visibility.Visible && nextButton.IsEnabled && (string)nextButton.ToolTip == "Next episode (N)",
+                "previous and next stay in the player bar and step through the show's episodes");
+            await (Task)Call("PlayListedEpisode", listed[firstIndex + 1])!;
+            check(Field<MediaItem>("playingItem").Id == second.Id && queueList.SelectedIndex == firstIndex + 1 && queue.Count == 0,
+                "playing an episode from the list follows the selection without creating a queue");
+            check(!nextButton.IsEnabled && previousButton.IsEnabled, "next is disabled on the last episode");
+            await (Task)Call("PlayQueueStep", -1)!;
+            check(Field<MediaItem>("playingItem").Id == first.Id && queueList.SelectedIndex == firstIndex, "previous plays the episode before");
+            queue.AddRange([movie, movieTwo]); Call("PublishQueue");
+            check(queueList.Items.Cast<object>().SequenceEqual([movie, movieTwo]) && ((TextBlock)window.FindName("QueuePillText")).Text == "Queue · 2" &&
+                ((Button)window.FindName("RemoveQueueButton")).Visibility == Visibility.Visible && (string)nextButton.ToolTip == "Next in queue (N)",
+                "a loaded queue replaces the episode list");
         }
         finally
         {

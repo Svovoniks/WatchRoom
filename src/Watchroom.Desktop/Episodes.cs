@@ -170,39 +170,63 @@ public partial class MainWindow
     private const int UpNextCountdownMs = 15000;
     private TaskCompletionSource<bool>? upNextChoice;
     private DispatcherTimer? upNextTimer;
+    private bool upNextPaused;
+    private bool UpNextCounting => upNextChoice is not null && !upNextPaused;
     // Shows the up-next card over the video; resolves true when the countdown ends or the user plays now.
     private Task<bool> OfferNextEpisode(MediaItem next, Func<bool> stale)
     {
         EndUpNext(false);
         UpNextSeries.Text = next.Series ?? next.Title;
         UpNextEpisode.Text = $"Season {next.Season} · {next.EpisodeDisplayTitle}";
-        var deadline = Environment.TickCount64 + UpNextCountdownMs;
         var choice = upNextChoice = new();
         var timer = upNextTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
-        void Update()
+        upNextUpdate = () =>
         {
             if (stale()) { EndUpNext(false); return; }
-            var remaining = deadline - Environment.TickCount64;
+            if (upNextPaused) return;
+            var remaining = upNextDeadline - Environment.TickCount64;
             if (remaining <= 0) { EndUpNext(true); return; }
             UpNextCountdown.Text = $"Playing in {(remaining + 999) / 1000}s";
-        }
-        timer.Tick += (_, _) => Update();
-        Update();
-        if (!choice.Task.IsCompleted)
-        {
-            UpNextCard.Visibility = Visibility.Visible; timer.Start();
-            UpNextFillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty,
-                new System.Windows.Media.Animation.DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(UpNextCountdownMs)));
-        }
+        };
+        timer.Tick += (_, _) => upNextUpdate?.Invoke();
+        upNextPaused = false;
+        upNextDeadline = Environment.TickCount64 + UpNextCountdownMs;
+        upNextUpdate();
+        if (!choice.Task.IsCompleted) { UpNextCard.Visibility = Visibility.Visible; timer.Start(); StartUpNextCountdown(); }
         return choice.Task;
+    }
+    private long upNextDeadline;
+    private Action? upNextUpdate;
+    // Starts the full countdown and its time bar; Play after a pause restarts it from the beginning.
+    private void StartUpNextCountdown()
+    {
+        upNextPaused = false;
+        upNextDeadline = Environment.TickCount64 + UpNextCountdownMs;
+        UpNextProgress.Visibility = Visibility.Visible;
+        UpNextFillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty,
+            new System.Windows.Media.Animation.DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(UpNextCountdownMs)));
+        PlayButton.Content = "";
+        upNextUpdate?.Invoke();
+        UpdateSystemMediaControls();
     }
     private void EndUpNext(bool play)
     {
-        upNextTimer?.Stop(); upNextTimer = null;
+        upNextTimer?.Stop(); upNextTimer = null; upNextUpdate = null; upNextPaused = false;
+        if (upNextChoice is not null) PlayButton.Content = "";
         UpNextFillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, null);
         UpNextCard.Visibility = Visibility.Collapsed;
         var choice = upNextChoice; upNextChoice = null;
         choice?.TrySetResult(play);
+    }
+    // Pause keeps the card so the next episode is one click away, but stops the countdown and drops its time bar.
+    private void PauseUpNext()
+    {
+        upNextPaused = true;
+        UpNextFillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, null);
+        UpNextProgress.Visibility = Visibility.Collapsed;
+        UpNextCountdown.Text = "Autoplay paused";
+        PlayButton.Content = "";
+        UpdateSystemMediaControls();
     }
     private void UpNextPlayClicked(object sender, RoutedEventArgs e) { e.Handled = true; EndUpNext(true); }
     private void UpNextCancelClicked(object sender, RoutedEventArgs e) { e.Handled = true; EndUpNext(false); }

@@ -13,11 +13,12 @@ static class PlayerLayoutChecks
         RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         var window = new MainWindow();
         Invoke(window, "ShowPage", "Room");
-        var options = (Border)window.FindName("PlayerOptions");
-        var scroll = (ScrollViewer)window.FindName("PlayerOptionsScroll");
+        var queueMenu = (System.Windows.Controls.Primitives.Popup)window.FindName("PlayerQueueMenu");
+        var queueMenuContent = (FrameworkElement)queueMenu.Child;
+        var queuePill = (System.Windows.Controls.Primitives.ToggleButton)window.FindName("QueuePill");
         var page = (Grid)window.FindName("RoomPage");
         var video = (FrameworkElement)window.FindName("Video");
-        // Enough queue rows to exercise the expanded panel's worst case.
+        // Enough queue rows to exercise the queue menu's worst case.
         ((ListBox)window.FindName("QueueList")).ItemsSource = Enumerable.Range(1, 40).Select(i => new { QueueTitle = "Fixture video " + i }).ToArray();
         var root = (FrameworkElement)window.Content;
         var volume = (Slider)window.FindName("Volume");
@@ -50,8 +51,8 @@ static class PlayerLayoutChecks
         Check(episodeButton.Visibility == Visibility.Visible && episodeButton.Content.ToString() == "Next episode →",
             "next episode remains in the player bar before the video nears its end and crosses seasons");
         var previousButton = (Button)window.FindName("PreviousButton"); var nextButton = (Button)window.FindName("NextButton");
-        Check(previousButton.Visibility == Visibility.Collapsed && nextButton.Visibility == Visibility.Collapsed,
-            "queue navigation is hidden when there is no queue");
+        Check(previousButton.Visibility == Visibility.Visible && nextButton.Visibility == Visibility.Visible && !previousButton.IsEnabled && nextButton.IsEnabled,
+            "without a queue, previous and next step through the playing show's episodes");
         var queue = (List<Watchroom.Core.MediaItem>)typeof(MainWindow).GetField("queue", flags)!.GetValue(window)!;
         queue.Add(episode); Invoke(window, "UpdateSessionControls");
         Check(previousButton.Visibility == Visibility.Visible && nextButton.Visibility == Visibility.Visible && episodeButton.Visibility == Visibility.Visible,
@@ -68,38 +69,47 @@ static class PlayerLayoutChecks
         var queueList = (ListBox)window.FindName("QueueList");
         var queueActions = (FrameworkElement)window.FindName("QueueEditActions");
         var playQueue = (Button)window.FindName("PlayPlayerQueueButton");
-        var populatedQueue = queueList.ItemsSource;
+        // The playing episode would list its show in place of the queue; these checks cover the queue itself.
+        typeof(MainWindow).GetField("playingItem", flags)!.SetValue(window, null); Invoke(window, "UpdateSessionControls");
+        var populatedQueue = new[] { episode, following };
+        void LayoutMenu()
+        {
+            queueMenuContent.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            queueMenuContent.Arrange(new Rect(queueMenuContent.DesiredSize)); queueMenuContent.UpdateLayout();
+        }
         foreach (var name in new[] { "AudioTracks", "SubtitleTracks" })
         {
-            var picker = (ComboBox)window.FindName(name);
-            picker.ItemsSource = new[] { new { Name = "English" } }; picker.SelectedIndex = 0;
+            var picker = (ListBox)window.FindName(name);
+            picker.ItemsSource = new[] { new { Label = "English" } }; picker.SelectedIndex = 0;
         }
+        var audioPill = (System.Windows.Controls.Primitives.ToggleButton)window.FindName("AudioPill");
+        Layout(900, 600); window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+        Check(audioPill.Content is StackPanel { Children: [_, TextBlock { Text: "English" }] }, "the audio pill shows the selected track");
+        queueList.ItemsSource = Array.Empty<string>(); Invoke(window, "UpdateSessionControls"); LayoutMenu();
+        Check(queueList.Visibility == Visibility.Collapsed && queueActions.Visibility == Visibility.Collapsed &&
+            playQueue.Visibility == Visibility.Collapsed && queueMenuContent.ActualHeight < 200,
+            "empty player queue menu hides its blank list and inactive actions");
+        Save(queueMenuContent, "player-queue-menu-empty.png");
+        queueList.ItemsSource = populatedQueue; Invoke(window, "UpdateSessionControls"); LayoutMenu();
+        Check(queueList.Visibility == Visibility.Visible && queueActions.Visibility == Visibility.Visible &&
+            playQueue.Visibility == Visibility.Visible && queueList.ActualHeight <= queueList.MaxHeight,
+            "populating the player queue restores its list and controls within a bounded menu");
+        Save(queueMenuContent, "player-queue-menu.png");
         foreach (var size in new[] { (900, 600), (1280, 810) })
         {
-            queueList.ItemsSource = Array.Empty<string>(); Invoke(window, "UpdateSessionControls");
-            options.Visibility = Visibility.Visible; Layout(size.Item1, size.Item2);
-            Check(queueList.Visibility == Visibility.Collapsed && queueActions.Visibility == Visibility.Collapsed &&
-                playQueue.Visibility == Visibility.Collapsed, "empty player queue hides its blank list and inactive actions at " + size);
-            Check(scroll.ScrollableHeight == 0, "empty playback options fit without scrolling at " + size);
-            Save(root, "player-options-empty-" + size.Item1 + ".png");
-            queueList.ItemsSource = populatedQueue; Invoke(window, "UpdateSessionControls"); Layout(size.Item1, size.Item2);
-            Check(queueList.Visibility == Visibility.Visible && queueActions.Visibility == Visibility.Visible &&
-                playQueue.Visibility == Visibility.Visible, "populating the player queue restores its list and controls at " + size);
-        }
-        foreach (var size in new[] { (900, 600), (1280, 810) })
-        {
-            options.Visibility = Visibility.Collapsed; Layout(size.Item1, size.Item2);
-            var closedHeight = video.ActualHeight;
-            Invoke(window, "TogglePlayerOptions", window, new RoutedEventArgs()); Layout(size.Item1, size.Item2);
-            Check(options.Visibility == Visibility.Visible && scroll.ViewportHeight > 0, "playback options open at " + size);
-            Check(video.ActualHeight >= 180 && video.ActualHeight < closedHeight, "expanded options preserve a usable video area at " + size);
-            Check(scroll.ScrollableHeight > 0, "long playback options scroll at " + size);
+            Invoke(window, "ClosePlayerMenus"); Layout(size.Item1, size.Item2);
             var controls = (FrameworkElement)window.FindName("PlaybackControls");
+            foreach (var pill in new[] { "AudioPill", "SubtitlePill", "QueuePill" })
+            {
+                var pillButton = (FrameworkElement)window.FindName(pill);
+                var pillBounds = pillButton.TransformToAncestor(controls).TransformBounds(new Rect(new Point(), pillButton.RenderSize));
+                Check(pillButton.Visibility == Visibility.Visible && pillBounds.Left >= 0 && pillBounds.Right <= controls.ActualWidth, pill + " fits in the player bar at " + size);
+            }
+            // Menus are popups placed above their pill, so opening one cannot resize the video or the bar.
+            Check(queueMenuContent.Parent == queueMenu && queueMenu.PlacementTarget == queuePill && !IsDescendant(queueMenuContent, controls),
+                "the queue menu floats above its pill outside the player layout at " + size);
             var bounds = controls.TransformToAncestor(page).TransformBounds(new Rect(new Point(), controls.RenderSize));
             Check(bounds.Bottom <= page.ActualHeight + 1, "transport controls stay inside the player at " + size);
-            if (size.Item1 == 900) Save(root, "player-options.png");
-            Invoke(window, "TogglePlayerOptions", window, new RoutedEventArgs()); Layout(size.Item1, size.Item2);
-            Check(options.Visibility == Visibility.Collapsed && Math.Abs(video.ActualHeight - closedHeight) < 1, "closing options restores video size at " + size);
             var overlay = (Grid)window.FindName("PlayerOverlay");
             ((Border)window.FindName("PlayerEmpty")).Visibility = Visibility.Collapsed;
             var episodeAction = (Button)window.FindName("EpisodeEndButton"); episodeAction.Visibility = Visibility.Visible;
@@ -115,7 +125,7 @@ static class PlayerLayoutChecks
             episodeAction.Visibility = Visibility.Collapsed;
         }
         var library = (Button)window.FindName("RoomLibraryButton");
-        Check(!IsDescendant(library, options), "library access is outside collapsed playback options");
+        Check(!IsDescendant(library, queueMenuContent), "library access is outside the queue menu");
         Check(window.FindName("SavedRoomLibraryButton") is Button, "Rooms settings provide a library access entry");
         library.Visibility = Visibility.Visible; library.Content = "Library & guest access";
         ((Button)window.FindName("RoomToggle")).Visibility = Visibility.Visible;

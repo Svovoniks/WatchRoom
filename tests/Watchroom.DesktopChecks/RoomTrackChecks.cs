@@ -81,15 +81,15 @@ static class RoomTrackChecks
                 Check(true, "guest follows host preferred audio rather than its own language preference");
                 await Wait(() => hostPlayer.Spu == -1 && guestPlayer.Spu == -1 && guest.Snapshot?.Tracks?.Subtitles?.Index == -1, Refresh);
                 Check(true, "guest follows the host's audio-specific subtitle rule instead of its default list");
-                var picker = (ComboBox)hostWindow.FindName("AudioTracks");
+                var picker = (ListBox)hostWindow.FindName("AudioTracks");
                 picker.SelectedItem = picker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == english);
                 await Wait(() => guestPlayer.AudioTrack == english, Refresh);
                 Check(true, "host audio track changes reach the guest native player");
                 var russianSubtitles = hostMedia.Tracks.Single(track => track.TrackType == TrackType.Text && track.Language == "rus").Id;
                 await Wait(() => hostPlayer.Spu == russianSubtitles && guestPlayer.Spu == russianSubtitles, Refresh);
                 Check(true, "changing host audio publishes its matching subtitle choice to the guest");
-                Check(!((ComboBox)guestWindow.FindName("AudioTracks")).IsEnabled, "guest track picker respects host-only controls");
-                var embeddedSubtitles = (ComboBox)hostWindow.FindName("SubtitleTracks");
+                Check(!((ListBox)guestWindow.FindName("AudioTracks")).IsEnabled, "guest track picker respects host-only controls");
+                var embeddedSubtitles = (ListBox)hostWindow.FindName("SubtitleTracks");
                 var manualSubtitleChoice = embeddedSubtitles.Items.Cast<object>().First(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! >= 0);
                 var manualSubtitle = (int)manualSubtitleChoice.GetType().GetProperty("Id")!.GetValue(manualSubtitleChoice)!;
                 embeddedSubtitles.SelectedItem = manualSubtitleChoice;
@@ -115,12 +115,12 @@ static class RoomTrackChecks
                 await Wait(() => Ids(hostWindow).ContainsKey(assetId) && Ids(guestWindow).ContainsKey(assetId) &&
                     hostPlayer.Spu == Ids(hostWindow)[assetId] && guestPlayer.Spu == Ids(guestWindow)[assetId], Refresh);
                 Check(true, "host and guest attach and select the same external subtitles without restarting video");
-                Check(((ComboBox)guestWindow.FindName("SubtitleTracks")).Items.Cast<object>().Any(t =>
+                Check(((ListBox)guestWindow.FindName("SubtitleTracks")).Items.Cast<object>().Any(t =>
                     (string)t.GetType().GetProperty("Name")!.GetValue(t)! == "shared-manual.srt"), "guest subtitle picker shows the host file name");
                 Check(host.Snapshot.Playback == playback, "external subtitle loading preserves shared playback state");
                 Check(!hostPlayer.IsPlaying && !guestPlayer.IsPlaying, "loading shared subtitles keeps paused players paused");
                 host.Send(new("controls", Number: 1)); await Wait(() => guest.Snapshot?.SharedControls == true);
-                Refresh(); var guestPicker = (ComboBox)guestWindow.FindName("SubtitleTracks");
+                Refresh(); var guestPicker = (ListBox)guestWindow.FindName("SubtitleTracks");
                 guestPicker.SelectedItem = guestPicker.Items.Cast<object>().Single(t => (int)t.GetType().GetProperty("Id")!.GetValue(t)! == -1);
                 await Wait(() => hostPlayer.Spu == -1 && host.Snapshot?.Tracks?.Subtitles?.Index == -1, Refresh);
                 Check(true, "shared-control guest subtitle choice updates the host and supports subtitles off");

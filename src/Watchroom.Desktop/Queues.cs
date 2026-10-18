@@ -141,7 +141,63 @@ public partial class MainWindow
         SelectPlaybackQueue(saved);
         await PlayQueueAt(playbackIndex);
     }
-    private async void PlaySelectedQueued(object sender, RoutedEventArgs e) => await Guard(() => PlayQueueAt(QueueList.SelectedIndex));
+    private async void PlaySelectedQueued(object sender, RoutedEventArgs e) =>
+        await Guard(() => QueueList.SelectedItem is EpisodeEntry entry ? PlayListedEpisode(entry.Media) : PlayQueueAt(QueueList.SelectedIndex));
+
+    // Without a queue, the queue menu lists the playing show's episodes so another one is a double-click away.
+    private sealed record EpisodeEntry(MediaItem Media)
+    {
+        public string QueueTitle => $"S{Media.Season} · {Media.EpisodeDisplayTitle}";
+    }
+    private (string Id, List<MediaItem> Library)? episodeListKey;
+    private MediaItem[] listedEpisodes = [];
+    private bool ShowingEpisodeList => episodeListKey is not null;
+    private void RefreshQueueList(bool force = false)
+    {
+        var current = !HasPlaybackQueue && (room is null || room.Identity?.Host == true) &&
+            playingItem is { Series: not null, Season: not null, Episode: not null, IsExtra: false } playing ? playing : null;
+        (string, List<MediaItem>)? key = current is null ? null : (current.Id, items);
+        if (!force && key == episodeListKey) return;
+        var wasShowing = ShowingEpisodeList; episodeListKey = key;
+        if (current is null)
+        {
+            if (!force && !wasShowing) return;
+            listedEpisodes = [];
+            QueueList.ItemsSource = queue.ToArray(); QueueList.SelectedIndex = queuePosition;
+            PlayPlayerQueueButton.ClearValue(VisibilityProperty);
+            if (!force) { QueueStatus.Text = "Queue is empty."; QueuePillText.Text = "Queue"; }
+            return;
+        }
+        var episodes = EpisodePlayback.Episodes(items, current);
+        // Library refreshes replace the item list; keep the rows (and scroll position) when the episodes are the same.
+        if (!wasShowing || !episodes.Select(item => item.Id).SequenceEqual(listedEpisodes.Select(item => item.Id)))
+            QueueList.ItemsSource = episodes.Select(item => new EpisodeEntry(item)).ToArray();
+        listedEpisodes = episodes;
+        QueueList.SelectedIndex = Array.FindIndex(episodes, item => item.Id == current.Id) is var index and >= 0 ? index
+            : Array.FindIndex(episodes, item => item.Season == current.Season && item.Episode == current.Episode);
+        QueueStatus.Text = $"{current.Series} · {episodes.Length} episodes. Choose a queue above to play something else.";
+        QueuePillText.Text = "Episodes";
+        PlayPlayerQueueButton.Visibility = Visibility.Collapsed;
+    }
+    // Previous and next step through the listed episodes when no queue is loaded.
+    private MediaItem? AdjacentEpisode(int direction)
+    {
+        if (!ShowingEpisodeList) return null;
+        var current = Array.FindIndex(listedEpisodes, item => item.Id == playingItem?.Id);
+        if (current < 0) current = QueueList.SelectedIndex;
+        if (current < 0) return null;
+        for (var index = current + direction; index >= 0 && index < listedEpisodes.Length; index += direction)
+            if (QueueItemAvailable(listedEpisodes[index])) return listedEpisodes[index];
+        return null;
+    }
+    private async Task PlayListedEpisode(MediaItem item)
+    {
+        if (!CanEditQueue()) return;
+        if (!QueueItemAvailable(item)) { SetStatus("This episode is unavailable. Reconnect its drive and rescan."); return; }
+        selected = item;
+        await PlayFollowingEpisode(item);
+        UpdateSessionControls();
+    }
     private async Task PlayQueueAt(int index)
     {
         if (!CanEditQueue() || index < 0 || index >= queue.Count) return;
