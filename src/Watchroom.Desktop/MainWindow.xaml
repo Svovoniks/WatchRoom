@@ -44,39 +44,205 @@
   <Grid Grid.Column="1" Grid.Row="1" Margin="28,6,28,16" x:Name="ContentArea">
 
    <!-- Home -->
-   <ScrollViewer x:Name="HomePage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+   <ScrollViewer x:Name="HomePage" Visibility="Collapsed" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
     <ScrollViewer.Resources>
-     <DataTemplate x:Key="HomePoster">
-      <Button Click="OpenHomeCard" Tag="{Binding Card}" Style="{StaticResource PosterCard}" Width="180" Height="306" Margin="0,0,12,8" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}">
+     <!-- A plain clickable surface: hover lifts the artwork and outlines it in the accent colour. -->
+     <Style x:Key="HomeTile" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,14,0"/><Setter Property="MinHeight" Value="0"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Top"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/></ControlTemplate></Setter.Value></Setter>
+     </Style>
+     <Style x:Key="HomeArtwork" TargetType="Border">
+      <Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="CornerRadius" Value="10"/><Setter Property="local:RoundedClip.Radius" Value="10"/>
+      <Setter Property="BorderThickness" Value="1"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+      <!-- Each frame declares its own TranslateTransform: a transform shared through a style setter is frozen and cannot animate. -->
+      <Style.Triggers><DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True">
+       <DataTrigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="-6" Duration="0:0:0.22"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation></Storyboard></BeginStoryboard></DataTrigger.EnterActions>
+       <DataTrigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="0" Duration="0:0:0.3"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation></Storyboard></BeginStoryboard></DataTrigger.ExitActions>
+      </DataTrigger></Style.Triggers>
+     </Style>
+     <!-- Accent outline that fades in over hovered artwork; drawn inside the frame so its corners match the clip. -->
+     <Style x:Key="HoverRing" TargetType="Border">
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/><Setter Property="BorderThickness" Value="2"/><Setter Property="Opacity" Value="0"/><Setter Property="IsHitTestVisible" Value="False"/>
+      <!-- Hidden while idle, so dozens of transparent outlines cost nothing to repaint while scrolling. -->
+      <Setter Property="Visibility" Value="Hidden"/>
+      <Style.Triggers><DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True">
+       <DataTrigger.EnterActions><BeginStoryboard><Storyboard><ObjectAnimationUsingKeyFrames Storyboard.TargetProperty="Visibility"><DiscreteObjectKeyFrame KeyTime="0" Value="{x:Static Visibility.Visible}"/></ObjectAnimationUsingKeyFrames><DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.18"/></Storyboard></BeginStoryboard></DataTrigger.EnterActions>
+       <DataTrigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.28"/><ObjectAnimationUsingKeyFrames Storyboard.TargetProperty="Visibility"><DiscreteObjectKeyFrame KeyTime="0:0:0.28" Value="{x:Static Visibility.Hidden}"/></ObjectAnimationUsingKeyFrames></Storyboard></BeginStoryboard></DataTrigger.ExitActions>
+      </DataTrigger></Style.Triggers>
+     </Style>
+     <!-- Single-choice filter pill for the mystery deck. -->
+     <Style x:Key="Chip" TargetType="RadioButton">
+      <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Margin" Value="0,0,6,6"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+       <Border x:Name="Pill" Background="Transparent" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="14" Padding="12,5"><ContentPresenter VerticalAlignment="Center"/></Border>
+       <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger>
+        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Accent}"/><Setter TargetName="Pill" Property="Background" Value="{DynamicResource AccentSoft}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+       </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+     </Style>
+     <Style x:Key="CardBack" TargetType="Border">
+      <Setter Property="Width" Value="128"/><Setter Property="Height" Value="190"/><Setter Property="CornerRadius" Value="11"/><Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="BorderBrush" Value="#59A991FF"/><Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+     </Style>
+     <LinearGradientBrush x:Key="CardStripes" MappingMode="Absolute" StartPoint="0,0" EndPoint="13,13" SpreadMethod="Repeat"><GradientStop Color="#00A991FF" Offset="0"/><GradientStop Color="#00A991FF" Offset="0.5"/><GradientStop Color="#1FA991FF" Offset="0.5"/><GradientStop Color="#1FA991FF" Offset="1"/></LinearGradientBrush>
+     <DataTemplate x:Key="HomePill">
+      <Button Click="OpenHomeCard" Loaded="HomeItemLoaded" Style="{StaticResource HomeTile}" Margin="0,0,8,8" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}">
+       <Border x:Name="PillFrame" Background="{DynamicResource Elevated}" CornerRadius="9" Padding="6">
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="36"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+         <Border Width="36" Height="52" CornerRadius="5" local:RoundedClip.Radius="5" Background="{DynamicResource Line}"><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/></Border>
+         <StackPanel Grid.Column="1" Margin="10,0,4,0" VerticalAlignment="Center">
+          <TextBlock Text="{Binding HomeTitle}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+          <TextBlock Text="{Binding HomeDetail}" FontSize="11.5" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
+          <ProgressBar Height="3" Value="{Binding Progress, Mode=OneWay}" Maximum="100" Margin="0,7,0,0" Style="{StaticResource CardProgress}"/>
+         </StackPanel>
+        </Grid>
+       </Border>
+      </Button>
+      <DataTemplate.Triggers><DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True"><Setter TargetName="PillFrame" Property="Background" Value="{DynamicResource Hover}"/></DataTrigger></DataTemplate.Triggers>
+     </DataTemplate>
+     <DataTemplate x:Key="HomeTilePoster">
+      <Button Click="OpenHomeCard" Loaded="HomeItemLoaded" Style="{StaticResource HomeTile}" Width="140" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}">
        <StackPanel>
-        <Border Height="216" Style="{StaticResource ArtworkFrame}">
-         <Grid><TextBlock Text="{Binding DisplayTitle}" Margin="14" FontSize="17" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/><Image Source="{Binding Poster}" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/></Grid>
+        <Border Height="210" Style="{StaticResource HomeArtwork}"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+         <Grid><TextBlock Text="{Binding DisplayTitle}" Margin="12" FontSize="15" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/><Border Style="{StaticResource HoverRing}" CornerRadius="9"/></Grid>
         </Border>
-        <TextBlock Text="{Binding DisplayTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="2,10,2,3"/>
-        <TextBlock Text="{Binding Caption}" FontSize="12" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis" Margin="2,0"/>
-        <ProgressBar Height="3" Value="{Binding Progress, Mode=OneWay}" Maximum="100" Margin="2,8,2,0" Style="{StaticResource CardProgress}"/>
-        <TextBlock Text="{Binding PlaybackLabel}" FontSize="11" Foreground="{DynamicResource Muted}" Margin="2,5,2,0"/>
+        <TextBlock Text="{Binding DisplayTitle}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="2,9,2,1"/>
+        <TextBlock Text="{Binding HomeDetail}" FontSize="11.5" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis" Margin="2,0"/>
        </StackPanel>
       </Button>
      </DataTemplate>
-     <Style x:Key="HomeRow" TargetType="ItemsControl"><Setter Property="ItemTemplate" Value="{StaticResource HomePoster}"/><Setter Property="ItemsPanel"><Setter.Value><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></Setter.Value></Setter></Style>
+     <!-- One category of recommendations: a wide spotlight title, then posters. -->
+     <DataTemplate x:Key="HomeRowTemplate">
+      <Grid Margin="0,0,0,30" Visibility="{Binding Visibility}">
+       <!-- A brush, not an Image: an Image would size the row from its own aspect ratio. -->
+       <!-- One pre-faded image whose edges melt into the next row; layered gradients would repaint on every scroll frame. -->
+       <Canvas IsHitTestVisible="False"><Image Source="{Binding Spotlight.Poster, Converter={StaticResource RowBackdrop}}" Width="720" Height="380" Stretch="Fill" Canvas.Top="-40" RenderOptions.BitmapScalingMode="LowQuality"/></Canvas>
+       <StackPanel>
+        <DockPanel Margin="0,0,0,12">
+         <Button DockPanel.Dock="Right" Click="OpenHomeCategory" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Accent}" Padding="8,4" MinHeight="0" Margin="10,0,0,0" AutomationProperties.Name="{Binding OpenLabel}">
+          <StackPanel Orientation="Horizontal"><TextBlock Text="Open in library" FontSize="12.5"/><TextBlock Text="&#xE76C;" Style="{StaticResource Icon}" FontSize="9" Margin="6,1,0,0"/></StackPanel></Button>
+         <Button DockPanel.Dock="Right" Click="ReshuffleHomeRow" Style="{StaticResource QuietButton}" Padding="8,4" MinHeight="0" Margin="0" AutomationProperties.Name="{Binding ReshuffleLabel}">
+          <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" Style="{StaticResource Icon}" FontSize="11" Margin="0,1,6,0"/><TextBlock Text="New suggestions" FontSize="12.5"/></StackPanel></Button>
+         <TextBlock Text="{Binding Label}" FontSize="19" FontWeight="SemiBold" VerticalAlignment="Bottom"/>
+         <TextBlock Text="{Binding CountText}" Foreground="{DynamicResource Muted}" FontSize="12" Margin="10,0,0,3" VerticalAlignment="Bottom"/>
+        </DockPanel>
+        <local:HorizontalScroller Padding="0,6,0,4" ArrowCenter="111">
+         <StackPanel Orientation="Horizontal">
+          <Button Click="OpenHomeCard" DataContext="{Binding Spotlight}" DataContextChanged="HomeSpotlightChanged" Loaded="HomeItemLoaded" Style="{StaticResource HomeTile}" Width="400" Height="210" VerticalAlignment="Top" VerticalContentAlignment="Stretch" Margin="0,0,16,0" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}">
+           <Border Style="{StaticResource HomeArtwork}" CornerRadius="12" local:RoundedClip.Radius="12"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+            <Grid>
+             <Image Source="{Binding Poster, Converter={StaticResource DetailBackdrop}}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="LowQuality"/>
+             <Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Width="250" HorizontalAlignment="Right" Loaded="HomeArtworkLoaded"/>
+             <Rectangle Fill="{DynamicResource HeroFade}"/>
+             <Border Style="{StaticResource HoverRing}" CornerRadius="11"/>
+             <DockPanel Margin="18,16,18,16">
+              <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal">
+               <Button Content="Play" Click="PlayHomeCard" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" Padding="14,0" MinHeight="32" Height="32" Margin="0,0,6,0" AutomationProperties.Name="{Binding DisplayTitle, StringFormat=Play {0}}"/>
+               <Button Content="&#xE946;" Click="OpenHomeCard" Style="{StaticResource IconButton}" Width="32" Height="32" MinHeight="32" Margin="0" ToolTip="Details" AutomationProperties.Name="{Binding DisplayTitle, StringFormat=Details for {0}}"/>
+              </StackPanel>
+              <StackPanel MaxWidth="250" HorizontalAlignment="Left">
+               <Border Background="{DynamicResource AccentSoft}" CornerRadius="9" Padding="8,2" HorizontalAlignment="Left" Margin="0,0,0,8" Visibility="{Binding HomeTagVisibility}"><TextBlock Text="{Binding HomeTag}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/></Border>
+               <TextBlock Text="{Binding DisplayTitle}" FontSize="22" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+               <TextBlock Text="{Binding HomeDetail}" FontSize="12" Foreground="{DynamicResource Muted}" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
+               <TextBlock Text="{Binding Card.Media.DetailOverview}" FontSize="12" Foreground="{DynamicResource Muted}" Margin="0,7,0,0" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="34" LineHeight="17" LineStackingStrategy="BlockLineHeight"/>
+              </StackPanel>
+             </DockPanel>
+            </Grid>
+           </Border>
+          </Button>
+          <ItemsControl ItemsSource="{Binding Tiles}" ItemTemplate="{StaticResource HomeTilePoster}" AutomationProperties.Name="{Binding Label}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel></ItemsControl>
+         </StackPanel>
+        </local:HorizontalScroller>
+       </StackPanel>
+      </Grid>
+     </DataTemplate>
     </ScrollViewer.Resources>
     <StackPanel Margin="0,0,8,0">
-     <DockPanel Margin="0,0,0,22"><Button DockPanel.Dock="Right" Content="Refresh picks" Click="RefreshHomePicks" Style="{StaticResource QuietButton}" ContentTemplate="{StaticResource RefreshContent}" VerticalAlignment="Center" Margin="0"/><StackPanel><TextBlock Text="Home" Style="{StaticResource PageHeading}"/><TextBlock Text="Pick up where you left off, or find something new." Style="{StaticResource MutedText}" Margin="0,4,0,0"/></StackPanel></DockPanel>
      <TextBlock x:Name="HomeStatus" TextWrapping="Wrap" Margin="0,0,0,14" AutomationProperties.LiveSetting="Polite"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
-     <TextBlock Text="Continue watching" Style="{StaticResource RowHeading}"/>
-     <TextBlock x:Name="HomeContinueEmpty" Text="Your unfinished movies and shows will appear here once you start watching." Style="{StaticResource MutedText}" Margin="0,0,0,22"/>
-     <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="-6,0,0,0"><ItemsControl x:Name="HomeContinue" Style="{StaticResource HomeRow}"/></ScrollViewer>
-     <Button x:Name="HomeMystery" Click="PickMystery" HorizontalContentAlignment="Stretch" Padding="20,18" Margin="0,18,0,30" Background="{DynamicResource AccentSoft}" AutomationProperties.Name="Mystery pick: choose a random movie, show, or anime">
+
+     <!-- Hero: the title watched most recently, ready to resume. -->
+     <Border x:Name="HomeHero" Height="340" CornerRadius="14" local:RoundedClip.Radius="14" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" Margin="0,0,0,16" Visibility="Collapsed">
+      <Grid>
+       <Image Source="{Binding Poster, Converter={StaticResource DetailBackdrop}}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="LowQuality"/>
+       <Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" HorizontalAlignment="Right" Width="620" Loaded="HomeArtworkLoaded"/>
+       <Rectangle Fill="{DynamicResource HeroFade}"/>
+       <StackPanel Margin="34,0,34,0" VerticalAlignment="Center" HorizontalAlignment="Left" MaxWidth="500">
+        <TextBlock x:Name="HomeHeroKicker" FontSize="13" Foreground="{DynamicResource Accent}" FontWeight="SemiBold" Margin="0,0,0,8" TextTrimming="CharacterEllipsis"/>
+        <TextBlock x:Name="HomeHeroTitle" FontSize="44" FontWeight="Bold" TextWrapping="Wrap" MaxHeight="100" TextTrimming="CharacterEllipsis" LineHeight="50" LineStackingStrategy="BlockLineHeight"/>
+        <TextBlock x:Name="HomeHeroOverview" Style="{StaticResource MutedText}" Margin="0,10,0,0" MaxHeight="63" TextTrimming="CharacterEllipsis"/>
+        <ProgressBar Height="4" Width="300" HorizontalAlignment="Left" Value="{Binding Progress, Mode=OneWay}" Maximum="100" Margin="0,16,0,18" Style="{StaticResource CardProgress}"/>
+        <StackPanel Orientation="Horizontal">
+         <Button x:Name="HomeHeroResume" Content="Resume" Click="PlayHomeCard" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" Padding="20,8"/>
+         <Button Content="Details" Click="OpenHomeCard" AutomationProperties.Name="{Binding DisplayTitle, StringFormat=Details for {0}}"/>
+        </StackPanel>
+       </StackPanel>
+      </Grid>
+     </Border>
+     <StackPanel x:Name="HomeIntro" Margin="0,0,0,22">
+      <TextBlock Text="Home" Style="{StaticResource PageHeading}"/>
+      <TextBlock x:Name="HomeContinueEmpty" Text="Your unfinished movies and shows will appear here once you start watching." Style="{StaticResource MutedText}" Margin="0,4,0,0"/>
+     </StackPanel>
+
+     <!-- Everything else in progress, newest first. -->
+     <Border x:Name="HomeStrip" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="12" Padding="10,8,4,0" Margin="0,0,0,18" SizeChanged="HomeStripResized">
       <DockPanel>
-       <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0,0,0"><TextBlock Text="Surprise me" Foreground="{DynamicResource Accent}" FontWeight="SemiBold"/><TextBlock Text="&#xE72A;" Style="{StaticResource Icon}" FontSize="12" Foreground="{DynamicResource Accent}" Margin="8,1,0,0"/></StackPanel>
-       <Border DockPanel.Dock="Left" Width="48" Height="48" CornerRadius="12" Background="{DynamicResource Accent}" Margin="0,0,18,0"><TextBlock Text="&#xE8B1;" Style="{StaticResource Icon}" FontSize="20" Foreground="{DynamicResource AccentInk}" HorizontalAlignment="Center"/></Border>
-       <StackPanel VerticalAlignment="Center"><TextBlock Text="Mystery pick" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="Can't decide? Let Watchroom choose a random title from your library." Style="{StaticResource MutedText}" Margin="0,3,0,0"/></StackPanel>
+       <StackPanel DockPanel.Dock="Left" Width="104" Margin="6,0,0,8" VerticalAlignment="Center"><TextBlock Text="Not finished" FontSize="13" FontWeight="SemiBold"/><TextBlock x:Name="HomeStripCount" FontSize="11.5" Foreground="{DynamicResource Muted}"/></StackPanel>
+       <Button x:Name="HomeStripMore" DockPanel.Dock="Right" Click="ToggleHomeStrip" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Accent}" Padding="10,4" MinHeight="0" Margin="4,0,4,8" VerticalAlignment="Center"/>
+       <ItemsControl x:Name="HomeContinue" ItemTemplate="{StaticResource HomePill}" AutomationProperties.Name="Not finished"><ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="{Binding Tag, ElementName=HomeStrip}"/></ItemsPanelTemplate></ItemsControl.ItemsPanel></ItemsControl>
       </DockPanel>
-     </Button>
-     <TextBlock Text="Suggestions" Style="{StaticResource RowHeading}"/>
-     <TextBlock x:Name="HomeSuggestionsEmpty" Text="No new titles to suggest. Try a mystery pick or browse your library." Style="{StaticResource MutedText}" Margin="0,0,0,16"/>
-     <ItemsControl x:Name="HomeSuggestions" ItemTemplate="{StaticResource HomePoster}" Margin="-6,0,0,0" AutomationProperties.Name="Suggestions"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel></ItemsControl>
+     </Border>
+
+     <!-- Mystery deck: filter, then play the drawn card or draw another. -->
+     <Border x:Name="HomeMysteryPanel" CornerRadius="14" BorderThickness="1" BorderBrush="#59A991FF" Background="{DynamicResource Surface}" Margin="0,0,0,34" ClipToBounds="True">
+      <Grid>
+       <Rectangle IsHitTestVisible="False"><Rectangle.Fill><RadialGradientBrush Center="0.82,0.5" GradientOrigin="0.82,0.5" RadiusX="0.4" RadiusY="0.8"><GradientStop Color="#38A991FF" Offset="0"/><GradientStop Color="#00A991FF" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
+       <Grid Margin="30,26,40,24"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
+        <StackPanel VerticalAlignment="Center">
+         <TextBlock Text="Can't decide?" FontSize="28" FontWeight="Bold"/>
+         <TextBlock x:Name="HomeMysteryIntro" Text="Draw a random title you haven't started. Narrow it down by type and length." Style="{StaticResource MutedText}" Margin="0,6,0,14" MaxWidth="380" HorizontalAlignment="Left"/>
+         <StackPanel x:Name="HomeMysteryFilters">
+          <WrapPanel>
+           <RadioButton x:Name="MysteryAnything" GroupName="MysteryKind" Content="Anything" Tag="" IsChecked="True" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
+           <RadioButton GroupName="MysteryKind" Content="Movie" Tag="Movie" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
+           <RadioButton GroupName="MysteryKind" Content="Show" Tag="Show" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
+           <RadioButton x:Name="MysteryAnime" GroupName="MysteryKind" Content="Anime" Tag="Anime" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
+          </WrapPanel>
+          <WrapPanel>
+           <RadioButton GroupName="MysteryLength" Content="Any length" Tag="Any" IsChecked="True" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
+           <RadioButton GroupName="MysteryLength" Content="Under 30 min" Tag="Short" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
+           <RadioButton GroupName="MysteryLength" Content="Under 2 hours" Tag="Evening" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
+           <RadioButton GroupName="MysteryLength" Content="Long night" Tag="LongNight" Checked="MysteryFilterChanged" Style="{StaticResource Chip}" ToolTip="Movies over two hours, or series with six or more episodes"/>
+          </WrapPanel>
+         </StackPanel>
+         <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+          <Button x:Name="HomeMysteryPlay" Content="Play" Click="PlayHomeCard" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" Padding="20,8"/>
+          <Button x:Name="HomeMysteryDraw" Content="Draw another" Click="DrawMystery" ContentTemplate="{StaticResource RefreshContent}"/>
+         </StackPanel>
+        </StackPanel>
+        <Grid Grid.Column="1" Height="262" VerticalAlignment="Center">
+         <Grid Height="214" VerticalAlignment="Top" Margin="0,6,0,0">
+          <Grid Width="128" Height="190" VerticalAlignment="Top" RenderTransformOrigin="0.5,1"><Grid.RenderTransform><TransformGroup><RotateTransform x:Name="MysteryLeftTilt" Angle="-11"/><TranslateTransform x:Name="MysteryLeftShift" X="-78" Y="8"/></TransformGroup></Grid.RenderTransform><Image Source="{x:Static local:SoftShadow.Card}" Margin="-30" IsHitTestVisible="False"/><Border Style="{StaticResource CardBack}"><Grid><Border CornerRadius="10" Background="{StaticResource CardStripes}"/><TextBlock Text="?" FontSize="46" FontWeight="Bold" Foreground="{DynamicResource Accent}" Opacity="0.55" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Border></Grid>
+          <Grid Width="128" Height="190" VerticalAlignment="Top" RenderTransformOrigin="0.5,1"><Grid.RenderTransform><TransformGroup><RotateTransform x:Name="MysteryRightTilt" Angle="11"/><TranslateTransform x:Name="MysteryRightShift" X="78" Y="8"/></TransformGroup></Grid.RenderTransform><Image Source="{x:Static local:SoftShadow.Card}" Margin="-30" IsHitTestVisible="False"/><Border Style="{StaticResource CardBack}"><Grid><Border CornerRadius="10" Background="{StaticResource CardStripes}"/><TextBlock Text="?" FontSize="46" FontWeight="Bold" Foreground="{DynamicResource Accent}" Opacity="0.55" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Border></Grid>
+          <Button x:Name="HomeMysteryCard" Click="OpenHomeCard" Style="{StaticResource HomeTile}" Width="128" Height="190" Margin="0" VerticalContentAlignment="Stretch" VerticalAlignment="Top" AutomationProperties.Name="{Binding DisplayTitle, StringFormat=Mystery pick: {0}}">
+           <Border Style="{StaticResource HomeArtwork}" CornerRadius="11" local:RoundedClip.Radius="11"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+            <Grid><TextBlock Text="{Binding DisplayTitle}" Margin="12" FontSize="15" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/><Border Style="{StaticResource HoverRing}" CornerRadius="10"/></Grid>
+           </Border>
+          </Button>
+         </Grid>
+         <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Center">
+          <TextBlock x:Name="HomeMysteryTitle" FontWeight="SemiBold" TextAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="300"/>
+          <TextBlock x:Name="HomeMysteryMeta" FontSize="12" Foreground="{DynamicResource Muted}" TextAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="300" Margin="0,2,0,0"/>
+         </StackPanel>
+        </Grid>
+       </Grid>
+      </Grid>
+     </Border>
+
+     <DockPanel Margin="0,0,0,16"><TextBlock DockPanel.Dock="Right" Text="From your library, not started yet" FontSize="12" Foreground="{DynamicResource Muted}" VerticalAlignment="Bottom" Margin="0,0,0,3"/><TextBlock Text="Recommended for you" FontSize="22" FontWeight="SemiBold"/></DockPanel>
+     <TextBlock x:Name="HomeSuggestionsEmpty" Text="Everything here has been started. Try a mystery pick or browse your library." Style="{StaticResource MutedText}" Margin="0,0,0,16"/>
+     <ItemsControl x:Name="HomeRows" Panel.ZIndex="-1" ItemTemplate="{StaticResource HomeRowTemplate}" Focusable="False" AutomationProperties.Name="Recommended for you"/>
     </StackPanel>
    </ScrollViewer>
 
@@ -106,7 +272,7 @@
      <Grid Margin="-8,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ItemsControl x:Name="LibraryBreadcrumbs" Button.Click="BreadcrumbClick" Style="{StaticResource LibraryBreadcrumbs}" AutomationProperties.Name="Library location"/><TextBlock Grid.Column="1" x:Name="ResultCount" Width="100" TextAlignment="Right" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="12,0,8,0"/></Grid>
      <Expander x:Name="SeasonInformation" Foreground="{DynamicResource Muted}" Header="Season details" Visibility="Collapsed" Margin="-6,0,0,10"><TextBlock x:Name="SeasonSummary" Style="{StaticResource MutedText}" Margin="0,8,0,8" MaxWidth="760" HorizontalAlignment="Left"/></Expander>
     </StackPanel>
-    <Grid x:Name="LocalLibraryContent" Grid.Row="1" Margin="-6,0,0,0"><ItemsControl x:Name="PosterGrid" PreviewMouseWheel="HostLibraryScrollInput" PreviewTouchDown="HostLibraryTouchInput" VirtualizingPanel.ScrollUnit="Pixel"><ItemsControl.Template><ControlTemplate TargetType="ItemsControl"><ScrollViewer x:Name="LibraryScroll" PreviewMouseLeftButtonDown="HostLibraryPointerInput" ScrollChanged="LibraryScrollChanged" CanContentScroll="True" VerticalScrollBarVisibility="Visible" HorizontalScrollBarVisibility="Disabled"><ItemsPresenter/></ScrollViewer></ControlTemplate></ItemsControl.Template><ItemsControl.ItemsPanel><ItemsPanelTemplate><local:VirtualizingLibraryPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Grid>
+    <Grid x:Name="LocalLibraryContent" Grid.Row="1" Margin="-6,0,0,0"><ItemsControl x:Name="PosterGrid" PreviewMouseWheel="HostLibraryScrollInput" PreviewTouchDown="HostLibraryTouchInput" VirtualizingPanel.ScrollUnit="Pixel"><ItemsControl.Template><ControlTemplate TargetType="ItemsControl"><ScrollViewer x:Name="LibraryScroll" PreviewMouseLeftButtonDown="HostLibraryPointerInput" ScrollChanged="LibraryScrollChanged" CanContentScroll="True" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled"><ItemsPresenter/></ScrollViewer></ControlTemplate></ItemsControl.Template><ItemsControl.ItemsPanel><ItemsPanelTemplate><local:VirtualizingLibraryPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Grid>
       <Border Panel.ZIndex="1" IsHitTestVisible="False" BorderBrush="{DynamicResource Accent}" BorderThickness="3" CornerRadius="12" Margin="0,0,14,18"><Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsGuestHovered}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style></Border>
       <Button Click="SelectMovie" MouseEnter="LibraryCardHoverEnter" MouseLeave="LibraryCardHoverLeave" Tag="{Binding Card}" Style="{StaticResource PosterCard}" VerticalAlignment="Top" ContextMenuOpening="CardContextMenu" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}"><Button.ContextMenu><ContextMenu/></Button.ContextMenu>
        <StackPanel>

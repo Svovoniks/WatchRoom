@@ -22,11 +22,41 @@ static class MetadataEvidenceFixture
         var large = Mp4(90); BinaryPrimitives.WriteUInt32BigEndian(large, uint.MaxValue); await File.WriteAllBytesAsync(Path.Combine(directory,"invalid.mp4"),large);
         check(MediaDuration.Minutes(Path.Combine(directory,"invalid.mp4")) is null && MediaDuration.Minutes(Path.Combine(directory,"absent.mkv")) is null,
             "invalid or missing containers cannot supply matching evidence");
+        await File.WriteAllBytesAsync(Path.Combine(directory,"plain.avi"), Avi(25, 23.976, 0));
+        await File.WriteAllBytesAsync(Path.Combine(directory,"opendml.avi"), Avi(150, 25, 100));
+        var wave = Avi(25, 25, 0); "WAVE"u8.CopyTo(wave.AsSpan(8)); await File.WriteAllBytesAsync(Path.Combine(directory,"wave.avi"), wave);
+        check(Math.Abs(MediaDuration.Minutes(Path.Combine(directory,"plain.avi"))!.Value - 25) < .001 &&
+            Math.Abs(MediaDuration.Minutes(Path.Combine(directory,"opendml.avi"))!.Value - 150) < .001 && MediaDuration.Minutes(Path.Combine(directory,"wave.avi")) is null,
+            "AVI header durations use the video stream and OpenDML total frame count");
         await File.WriteAllBytesAsync(Path.Combine(directory,"nan.mkv"), Mkv(double.NaN));
         check(MediaDuration.Minutes(Path.Combine(directory,"nan.mkv")) is null, "non-finite container durations are ignored");
         using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
         var stopped = false; try { MediaDuration.Minutes(mp4.Path, cancelled.Token); } catch (OperationCanceledException) { stopped = true; }
         check(stopped, "duration inspection respects cancellation");
+        var runtimeStore = new LibraryStore(Path.Combine(directory, "runtime-db"));
+        var longFilm = await FileItem("Long Film.mp4", "Long Film", 151.4);
+        var known = await FileItem("Known Film.mp4", "Known Film", 90) with { RuntimeMinutes = 95 };
+        var locked = await FileItem("Locked Film.mp4", "Locked Film", 70) with { LockedFields = ["RuntimeMinutes"] };
+        var episodeFile = await FileItem("Some Show S01E01.mkv", "Some Show", 24) with { Kind = "Show", Series = "Some Show", Season = 1, Episode = 1 };
+        foreach (var entry in new[] { longFilm, known, locked, episodeFile }) runtimeStore.Save(entry);
+        var filledRuntimes = LibraryRuntimes.Backfill(runtimeStore, runtimeStore.All());
+        var runtimes = runtimeStore.All().ToDictionary(entry => entry.Id);
+        check(filledRuntimes == 1 && runtimes[longFilm.Id].RuntimeMinutes == 151 && runtimes[known.Id].RuntimeMinutes == 95 &&
+            runtimes[locked.Id].RuntimeMinutes is null && runtimes[episodeFile.Id].RuntimeMinutes is null,
+            "missing movie lengths are read from the file, without replacing known, locked, or episode runtimes");
+        check(LibraryHome.Draw(LibraryHome.Overview(runtimeStore.All()).Unseen, "Movie", MysteryLength.LongNight, 1)?.Card.Media.Id == longFilm.Id,
+            "a movie with a file-derived length over two hours matches the Long night filter");
+        runtimeStore.Save(runtimes[longFilm.Id] with { RuntimeMinutes = null, Overview = "Newer metadata" });
+        var refilled = runtimeStore.FillMovieRuntime(longFilm.Id, 151);
+        check(refilled is not null && runtimeStore.All().Single(entry => entry.Id == longFilm.Id) is { Overview: "Newer metadata", RuntimeMinutes: 151 } &&
+            runtimeStore.FillMovieRuntime(longFilm.Id, 10) is null, "filling a length keeps newer metadata and never replaces an existing length");
+        var mergedFilm = AutomaticArtwork.MergeDetails(new MediaItem("merged-film", "", "Merged Film", "Movie", RuntimeMinutes: 151), new MetadataMatch(7, "movie", "Merged Film", "2020", null, "", RuntimeMinutes: 148));
+        var mergedEpisode = AutomaticArtwork.MergeDetails(new MediaItem("merged-episode", "", "Some Show", "Show", Series: "Some Show", RuntimeMinutes: 24), new MetadataMatch(8, "tv", "Some Show", "2020", null, "", RuntimeMinutes: 60));
+        check(mergedFilm.RuntimeMinutes == 148 && mergedFilm.TmdbFields?.GetValueOrDefault("runtimeMinutes") is { Original: "151" } && mergedEpisode.RuntimeMinutes == 24,
+            "provider movie runtimes are saved and tracked for expiry, restoring the file length; episodes keep their own runtime");
+        check(MetadataClassification.Apply(runtimes[known.Id], "Movie", "movie").RuntimeMinutes == 95 &&
+            MetadataClassification.Apply(runtimes[episodeFile.Id] with { RuntimeMinutes = 24 }, "Movie", "movie").RuntimeMinutes is null,
+            "classifying a movie keeps its length, while an episode reclassified as a movie drops its episode runtime");
         check(MetadataTitles.Queries(island).Contains("остров сокровищ") && !MetadataTitles.Queries(new("church","The Church.mkv","The Church","Movie")).Any(x=>x.Contains('щ')),
             "informal Russian ch spelling expands without changing English titles");
         using var handler = new EvidenceHandler(); using var tmdb = new MetadataClient("fixture", handler);
@@ -89,6 +119,22 @@ static class MetadataEvidenceFixture
         byte[] Atom(string type,byte[] payload) { var bytes=new byte[payload.Length+8]; BinaryPrimitives.WriteUInt32BigEndian(bytes,(uint)bytes.Length); Encoding.ASCII.GetBytes(type).CopyTo(bytes,4); payload.CopyTo(bytes,8); return bytes; }
         var header=new byte[20]; BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(12),1000); BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(16),(uint)(minutes*60_000));
         return Atom("moov",Atom("mvhd",header));
+    }
+    // firstSegmentMinutes > 0 writes an OpenDML file whose avih and strh only count the first RIFF segment.
+    private static byte[] Avi(double minutes, double fps, double firstSegmentMinutes)
+    {
+        byte[] Chunk(string id, byte[] payload) { var bytes=new byte[payload.Length+8+(payload.Length & 1)]; Encoding.ASCII.GetBytes(id).CopyTo(bytes,0); BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4),(uint)payload.Length); payload.CopyTo(bytes,8); return bytes; }
+        byte[] List(string type, params byte[][] children) => Chunk("LIST",[..Encoding.ASCII.GetBytes(type),..children.SelectMany(child => child)]);
+        uint total=(uint)Math.Round(minutes*60*fps), counted=firstSegmentMinutes > 0 ? (uint)Math.Round(firstSegmentMinutes*60*fps) : total;
+        var main=new byte[56]; BinaryPrimitives.WriteUInt32LittleEndian(main,(uint)Math.Round(1_000_000/fps)); BinaryPrimitives.WriteUInt32LittleEndian(main.AsSpan(16),counted);
+        var stream=new byte[56]; "vids"u8.CopyTo(stream); BinaryPrimitives.WriteUInt32LittleEndian(stream.AsSpan(20),1000); BinaryPrimitives.WriteUInt32LittleEndian(stream.AsSpan(24),(uint)Math.Round(fps*1000));
+        BinaryPrimitives.WriteUInt32LittleEndian(stream.AsSpan(32),counted);
+        var audio=new byte[56]; "auds"u8.CopyTo(audio); BinaryPrimitives.WriteUInt32LittleEndian(audio.AsSpan(20),1); BinaryPrimitives.WriteUInt32LittleEndian(audio.AsSpan(24),1); BinaryPrimitives.WriteUInt32LittleEndian(audio.AsSpan(32),1);
+        var odml=new byte[248]; BinaryPrimitives.WriteUInt32LittleEndian(odml,total);
+        byte[][] headers=[Chunk("avih",main),List("strl",Chunk("strh",audio),Chunk("strf",new byte[18])),List("strl",Chunk("strh",stream),Chunk("strf",new byte[40]))];
+        if (firstSegmentMinutes > 0) headers=[..headers,List("odml",Chunk("dmlh",odml))];
+        byte[] body=[.."AVI "u8,..List("hdrl",headers),..Chunk("JUNK",new byte[3]),..List("movi",Chunk("00dc",new byte[16]))];
+        return Chunk("RIFF",body);
     }
     private static byte[] Mkv(double minutes)
     {

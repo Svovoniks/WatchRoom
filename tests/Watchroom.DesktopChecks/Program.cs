@@ -363,7 +363,7 @@ static class Program
         check(frame.ActualWidth == width && toolbar.ActualHeight == height, "search text and clear button do not resize the field");
         search.Clear(); await Task.Delay(300);
         var scroll = (System.Windows.Controls.ScrollViewer)window.FindName("LibraryScroll");
-        check(scroll.VerticalScrollBarVisibility == System.Windows.Controls.ScrollBarVisibility.Visible, "poster grid reserves scrollbar space across filters");
+        check(scroll.VerticalScrollBarVisibility == System.Windows.Controls.ScrollBarVisibility.Hidden, "poster grid scrolls without a scrollbar, so filters never shift its width");
         check(height >= 40 && status.ActualHeight == height && scan.ActualHeight == height && frame.ActualHeight == height,
             "search, status filter, and rescan align to a single usable toolbar height");
         status.Focus(); window.UpdateLayout();

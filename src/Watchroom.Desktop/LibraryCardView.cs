@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.IO;
+using System.Windows;
 using System.Windows.Media.Imaging;
 using Watchroom.Core;
 
@@ -44,6 +45,17 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     public bool HasPlaybackProgress => !IsRemote && PlaybackLabel.Length > 0;
     public bool IsRemote { get; private set; }
     public string? HomeSection { get; set; }
+    public long HomePosition { get; set; }
+    // Home shows a show's name on its next episode; the description lines are set by Home.
+    public string HomeTitle => IsEpisode ? Card.Media.DisplayTitle : Card.DisplayTitle;
+    public string HomeDetail { get; private set; } = "";
+    public string HomeTag { get; private set; } = "";
+    public Visibility HomeTagVisibility => HomeTag.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public void SetHomeText(string detail, string tag = "")
+    {
+        if (HomeDetail != detail) { HomeDetail = detail; Changed(nameof(HomeDetail)); }
+        if (HomeTag != tag) { HomeTag = tag; Changed(nameof(HomeTag)); Changed(nameof(HomeTagVisibility)); }
+    }
     public string EpisodeMeta => (Card.Media.Season is { } season ? $"S{season:00} · " : "") +
         (Card.Media.Episode is { } episode ? $"E{episode:00}" + (Card.Media.EpisodeEnd > episode ? $"–{Card.Media.EpisodeEnd:00}" : "") : "Episode unknown") +
         (Card.Media.RuntimeMinutes is > 0 ? $" · {Card.Media.RuntimeMinutes} min" : "") + (Card.Media.IsVirtual ? " · Missing" : Card.Media.Available ? "" : " · Unavailable");
@@ -62,7 +74,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
             Overview: entry.Overview, RuntimeMinutes: entry.RuntimeMinutes), entry.Level, entry.Season))
     {
         IsRemote = true;
-        HomeSection = entry.HomeSection;
+        HomeSection = entry.HomeSection; HomePosition = entry.PositionMs;
         SetPlayback(entry.PositionMs, false);
         if (entry.HomeSection == "continue" && entry.PositionMs < 10000) SetPlaybackLabel("Next episode");
         remoteThumbnail = entry.Thumbnail is { Length: > 0 and <= 5400 } data ? data : null;
@@ -75,6 +87,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         var previous = Card; Card = card;
         if (previous != card) Changed(nameof(Card));
         if (previous.DisplayTitle != card.DisplayTitle) Changed(nameof(DisplayTitle));
+        if (previous.Media.DisplayTitle != card.Media.DisplayTitle || previous.DisplayTitle != card.DisplayTitle) Changed(nameof(HomeTitle));
         if (previous.Caption != card.Caption) Changed(nameof(Caption));
         if (previous.Media.Season != card.Media.Season || previous.Media.Episode != card.Media.Episode || previous.Media.EpisodeEnd != card.Media.EpisodeEnd ||
             previous.Media.RuntimeMinutes != card.Media.RuntimeMinutes || previous.Media.IsVirtual != card.Media.IsVirtual || previous.Media.Available != card.Media.Available) Changed(nameof(EpisodeMeta));

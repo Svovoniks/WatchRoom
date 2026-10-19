@@ -227,7 +227,7 @@ public sealed partial class LibraryStore
     public Dictionary<string, string> PlaybackSettings()
     {
         using var db = Open(); using var command = db.CreateCommand();
-        command.CommandText = "SELECT key, value FROM settings WHERE key LIKE 'watched:%' OR key LIKE 'position:%'";
+        command.CommandText = "SELECT key, value FROM settings WHERE key LIKE 'watched:%' OR key LIKE 'position:%' OR key LIKE 'played:%'";
         using var rows = command.ExecuteReader(); var result = new Dictionary<string, string>();
         while (rows.Read()) result[rows.GetString(0)] = rows.GetString(1);
         return result;
@@ -324,6 +324,27 @@ public sealed partial class LibraryStore
         lock (writeGate) Write(item);
         MediaSaved?.Invoke(item);
     }
+    // Adds a file-derived length to a movie that has none. The entry is re-read under the write
+    // lock, so a metadata save that lands first is kept rather than replaced with an older copy.
+    public MediaItem? FillMovieRuntime(string id, int minutes)
+    {
+        MediaItem updated;
+        lock (writeGate)
+        {
+            using (var db = Open())
+            using (var read = db.CreateCommand())
+            {
+                read.CommandText = "SELECT json FROM media WHERE id=$id"; read.Parameters.AddWithValue("$id", id);
+                if (read.ExecuteScalar() is not string json) return null;
+                var current = Wire.Read<MediaItem>(json);
+                if (!LibraryRuntimes.NeedsRuntime(current) || minutes <= 0) return null;
+                updated = current with { RuntimeMinutes = minutes };
+            }
+            Write(updated);
+        }
+        MediaSaved?.Invoke(updated);
+        return updated;
+    }
     private void Write(MediaItem item)
     {
         using var db = Open(); using var c = db.CreateCommand();
@@ -398,9 +419,10 @@ public sealed partial class LibraryStore
             command.Parameters.AddWithValue("$id", id);
             if (command.ExecuteNonQuery() == 0) continue;
             removed++;
-            command.CommandText = "DELETE FROM settings WHERE key=$position OR key=$watched";
+            command.CommandText = "DELETE FROM settings WHERE key=$position OR key=$watched OR key=$played";
             command.Parameters.AddWithValue("$position", "position:" + id);
             command.Parameters.AddWithValue("$watched", "watched:" + id);
+            command.Parameters.AddWithValue("$played", "played:" + id);
             command.ExecuteNonQuery();
         }
         transaction.Commit(); CleanHierarchy();

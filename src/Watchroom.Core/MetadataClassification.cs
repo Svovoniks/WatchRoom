@@ -50,6 +50,8 @@ public static class MetadataClassification
         EpisodeTitle = type == "tv" ? item.EpisodeTitle : null, EpisodeOverview = type == "tv" ? item.EpisodeOverview : null,
         SeasonPoster = type == "tv" ? item.SeasonPoster : null, SeriesPoster = type == "tv" ? item.SeriesPoster : null,
         EpisodePoster = type == "tv" ? item.EpisodePoster : null, SeasonSource = type == "tv" ? item.SeasonSource : null,
-        EpisodeSource = type == "tv" ? item.EpisodeSource : null, AirDate = type == "tv" ? item.AirDate : null, RuntimeMinutes = type == "tv" ? item.RuntimeMinutes : null
+        EpisodeSource = type == "tv" ? item.EpisodeSource : null, AirDate = type == "tv" ? item.AirDate : null,
+        // An episode runtime is meaningless for a movie, but a movie keeps its own length.
+        RuntimeMinutes = type == "tv" || item.Series is null ? item.RuntimeMinutes : null
     };
 }

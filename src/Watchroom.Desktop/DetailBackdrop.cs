@@ -35,3 +35,37 @@ public sealed class DetailBackdropConverter : IValueConverter
     }
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
 }
+
+// Home row glow: the blurred artwork with its edges already faded to transparent, baked once
+// into one small image so scrolling draws a single bitmap instead of stacked gradient layers.
+public sealed class RowBackdropConverter : IValueConverter
+{
+    // Baked at the size the row draws it, so each scroll frame copies pixels without rescaling them.
+    private const int Width = 720, Height = 380;
+    private static readonly DetailBackdropConverter blur = new();
+    private static readonly ConditionalWeakTable<BitmapSource, BitmapSource> cache = new();
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        blur.Convert(value, targetType, parameter, culture) is BitmapSource blurred ? cache.GetValue(blurred, Fade) : null;
+    private static BitmapSource Fade(BitmapSource source)
+    {
+        static LinearGradientBrush Mask(double angle, params (double Alpha, double Offset)[] stops)
+        {
+            var brush = new LinearGradientBrush { StartPoint = new(0, 0), EndPoint = angle == 0 ? new(1, 0) : new(0, 1) };
+            foreach (var (alpha, offset) in stops) brush.GradientStops.Add(new(Color.FromArgb((byte)(alpha * 255), 0, 0, 0), offset));
+            brush.Freeze(); return brush;
+        }
+        var visual = new DrawingVisual();
+        using (var context = visual.RenderOpen())
+        {
+            // Strongest behind the spotlight at the left, fading across the row and at its top and bottom.
+            context.PushOpacityMask(Mask(0, (0, 0), (1, 0.14), (0.55, 0.6), (0, 1)));
+            context.PushOpacityMask(Mask(90, (0, 0), (1, 0.32), (1, 0.66), (0, 1)));
+            context.DrawImage(source, new Rect(0, 0, Width, Height));
+            context.Pop(); context.Pop();
+        }
+        var bitmap = new RenderTargetBitmap(Width, Height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual); bitmap.Freeze();
+        return bitmap;
+    }
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
+}

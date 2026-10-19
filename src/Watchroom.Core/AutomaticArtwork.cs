@@ -258,7 +258,10 @@ public static class AutomaticArtwork
             Genres = LibraryIdentity.Locked(item, "Genres") ? item.Genres : match.Genres ?? item.Genres,
             Cast = LibraryIdentity.Locked(item, "Cast") ? item.Cast : match.Cast ?? item.Cast,
             Rating = LibraryIdentity.Locked(item, "Rating") ? item.Rating : match.Rating ?? item.Rating,
-            Year = LibraryIdentity.Locked(item, "Year") ? item.Year : int.TryParse(match.Year, out var year) ? year : item.Year }, match.Provider, TmdbRetention.TitleFields);
+            Year = LibraryIdentity.Locked(item, "Year") ? item.Year : int.TryParse(match.Year, out var year) ? year : item.Year,
+            // A movie keeps its provider runtime; episode runtimes come from the episode list instead.
+            RuntimeMinutes = item.Series is null && match.RuntimeMinutes is > 0 && !LibraryIdentity.Locked(item, "RuntimeMinutes") ? match.RuntimeMinutes : item.RuntimeMinutes },
+            match.Provider, item.Series is null ? [.. TmdbRetention.TitleFields, "runtimeMinutes"] : TmdbRetention.TitleFields);
     }
     internal static async Task<Resolved?> ResolveAsync(HttpClient http, MetadataClient? tmdb, MediaItem item, MetadataOptions options, string directory, CancellationToken ct, MediaItem[]? entries = null)
     {

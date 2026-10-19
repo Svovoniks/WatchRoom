@@ -15,6 +15,7 @@ public static class MediaDuration
             {
                 ".mp4" or ".m4v" or ".mov" => Mp4(file, file.Length, ct),
                 ".mkv" or ".webm" => Matroska(file, ct),
+                ".avi" => Avi(file, ct),
                 _ => null
             };
             return seconds is > 0 and < 604800 && double.IsFinite(seconds.Value) ? seconds / 60 : null;
@@ -93,5 +94,45 @@ public static class MediaDuration
             file.Position = next;
         }
         return null;
+    }
+    private static double? Avi(Stream file, CancellationToken ct)
+    {
+        Span<byte> bytes = stackalloc byte[36];
+        file.ReadExactly(bytes[..12]);
+        if (!bytes[..4].SequenceEqual("RIFF"u8) || !bytes[8..12].SequenceEqual("AVI "u8)) return null;
+        var end = Math.Min(file.Length, 8 + (long)BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]));
+        uint perFrame = 0, frames = 0, totalFrames = 0, scale = 0, rate = 0, length = 0; var video = false;
+        for (var count = 0; count < 512 && file.Position + 8 <= end; count++)
+        {
+            ct.ThrowIfCancellationRequested(); file.ReadExactly(bytes[..8]);
+            var size = (long)BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]); var next = file.Position + size + (size & 1);
+            if (bytes[..4].SequenceEqual("LIST"u8))
+            {
+                if (size < 4) return null;
+                file.ReadExactly(bytes[..4]);
+                // Header lists hold the chunks we need and their children follow in order, so walk straight in.
+                if (bytes[..4].SequenceEqual("hdrl"u8) || bytes[..4].SequenceEqual("strl"u8) || bytes[..4].SequenceEqual("odml"u8)) continue;
+                if (bytes[..4].SequenceEqual("movi"u8)) break; // stream data; every header precedes it
+            }
+            else if (bytes[..4].SequenceEqual("avih"u8) && size >= 20)
+            {
+                file.ReadExactly(bytes[..20]); perFrame = BinaryPrimitives.ReadUInt32LittleEndian(bytes); frames = BinaryPrimitives.ReadUInt32LittleEndian(bytes[16..]);
+            }
+            else if (bytes[..4].SequenceEqual("strh"u8) && size >= 36 && !video)
+            {
+                file.ReadExactly(bytes[..36]);
+                if (video = bytes[..4].SequenceEqual("vids"u8))
+                {
+                    scale = BinaryPrimitives.ReadUInt32LittleEndian(bytes[20..]); rate = BinaryPrimitives.ReadUInt32LittleEndian(bytes[24..]);
+                    length = (uint)Math.Min(uint.MaxValue, (ulong)BinaryPrimitives.ReadUInt32LittleEndian(bytes[28..]) + BinaryPrimitives.ReadUInt32LittleEndian(bytes[32..]));
+                }
+            }
+            // OpenDML files over 1 GB count only the first RIFF segment in avih; dmlh has the whole file.
+            else if (bytes[..4].SequenceEqual("dmlh"u8) && size >= 4) { file.ReadExactly(bytes[..4]); totalFrames = BinaryPrimitives.ReadUInt32LittleEndian(bytes); }
+            if (next > end) break;
+            file.Position = next;
+        }
+        if (scale > 0 && rate > 0 && length > 0) return (double)Math.Max(length, totalFrames) * scale / rate;
+        return perFrame > 0 ? (double)Math.Max(frames, totalFrames) * perFrame / 1_000_000 : null;
     }
 }

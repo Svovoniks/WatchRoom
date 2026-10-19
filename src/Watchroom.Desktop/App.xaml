@@ -3,6 +3,7 @@
   <Style TargetType="ScrollViewer"><Setter Property="local:PrecisionScrolling.Enabled" Value="True"/></Style>
   <local:ArtworkCardWidthConverter x:Key="ArtworkCardWidth"/>
   <local:DetailBackdropConverter x:Key="DetailBackdrop"/>
+  <local:RowBackdropConverter x:Key="RowBackdrop"/>
   <Thickness x:Key="ActionButtonPadding">16,8</Thickness>
   <Thickness x:Key="IconButtonPadding">8,12</Thickness>
   <!-- Fluent icons on Windows 11; MDL2 shares the code points on Windows 10. -->
@@ -12,6 +13,10 @@
   <SolidColorBrush x:Key="Canvas" Color="#0F1015"/><SolidColorBrush x:Key="Surface" Color="#16171E"/><SolidColorBrush x:Key="Elevated" Color="#20212B"/><SolidColorBrush x:Key="Ink" Color="#EEEEF3"/><SolidColorBrush x:Key="Muted" Color="#9A9CAB"/><SolidColorBrush x:Key="Line" Color="#2A2C37"/><SolidColorBrush x:Key="Accent" Color="#A991FF"/><SolidColorBrush x:Key="AccentInk" Color="#160E2E"/>
   <SolidColorBrush x:Key="Hover" Color="#272935"/><SolidColorBrush x:Key="AccentSoft" Color="#2A2442"/><SolidColorBrush x:Key="Success" Color="#3FB97A"/><SolidColorBrush x:Key="Scrim" Color="#C80F1015"/>
   <!-- Fades the details backdrop into Canvas; MainWindow.ApplyTheme rebuilds it with the theme's Canvas colour. -->
+  <!-- Home artwork fades: hero and spotlight text sit on Surface; recommendation rows fade into Canvas. ApplyTheme rebuilds both. -->
+  <LinearGradientBrush x:Key="HeroFade" StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#FF16171E" Offset="0"/><GradientStop Color="#E616171E" Offset="0.38"/><GradientStop Color="#0016171E" Offset="0.8"/></LinearGradientBrush>
+  <LinearGradientBrush x:Key="EdgeFadeLeft" StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#FF0F1015" Offset="0"/><GradientStop Color="#000F1015" Offset="1"/></LinearGradientBrush>
+  <LinearGradientBrush x:Key="EdgeFadeRight" StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#000F1015" Offset="0"/><GradientStop Color="#FF0F1015" Offset="1"/></LinearGradientBrush>
   <LinearGradientBrush x:Key="BackdropFade" StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#000F1015" Offset="0"/><GradientStop Color="#4F0F1015" Offset="0.45"/><GradientStop Color="#FF0F1015" Offset="1"/></LinearGradientBrush>
 
   <!-- The player is always dark so video stays the brightest thing on screen. -->
@@ -196,10 +201,14 @@
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
     <Grid>
      <Border x:Name="Frame" Background="{TemplateBinding Background}" CornerRadius="12"/>
+     <Border x:Name="HoverFill" Background="{DynamicResource Surface}" CornerRadius="12" Opacity="0" IsHitTestVisible="False"/>
      <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
     </Grid>
     <ControlTemplate.Triggers>
-     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="Background" Value="{DynamicResource Surface}"/></Trigger>
+     <Trigger Property="IsMouseOver" Value="True">
+      <Trigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.15"/></Storyboard></BeginStoryboard></Trigger.EnterActions>
+      <Trigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="HoverFill" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.25"/></Storyboard></BeginStoryboard></Trigger.ExitActions>
+     </Trigger>
      <Trigger Property="IsPressed" Value="True"><Setter TargetName="Frame" Property="Background" Value="{DynamicResource Elevated}"/></Trigger>
     </ControlTemplate.Triggers>
    </ControlTemplate></Setter.Value></Setter>
@@ -209,6 +218,31 @@
   <Style x:Key="ArtworkFrame" TargetType="Border">
    <Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="CornerRadius" Value="10"/><Setter Property="local:RoundedClip.Radius" Value="10"/><Setter Property="BorderThickness" Value="1"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
    <Style.Triggers><DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Muted}"/></DataTrigger></Style.Triggers>
+  </Style>
+  <!-- Round arrow that pages a horizontal row; it floats over the artwork, so it carries its own shadow. -->
+  <Style x:Key="PagerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+   <Setter Property="Width" Value="40"/><Setter Property="Height" Value="40"/><Setter Property="MinHeight" Value="40"/><Setter Property="Padding" Value="0"/>
+   <Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="13"/><Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+   <Setter Property="Panel.ZIndex" Value="2"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Grid><Image Source="{x:Static local:SoftShadow.Disc}" Margin="-30" IsHitTestVisible="False"/><Ellipse x:Name="Disc" Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="1"/><Ellipse x:Name="Tint" Fill="{DynamicResource Ink}" Opacity="0" IsHitTestVisible="False"/><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.08"/><Setter TargetName="Disc" Property="Stroke" Value="{DynamicResource Muted}"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.16"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style TargetType="local:HorizontalScroller">
+   <Setter Property="Focusable" Value="False"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="local:HorizontalScroller">
+    <Grid>
+     <ScrollViewer x:Name="PART_Scroll" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" Focusable="False"><ContentPresenter Margin="{TemplateBinding Padding}"/></ScrollViewer>
+     <Rectangle x:Name="PART_FadeLeft" Width="64" HorizontalAlignment="Left" Fill="{DynamicResource EdgeFadeLeft}" IsHitTestVisible="False" Opacity="0"/>
+     <Rectangle x:Name="PART_FadeRight" Width="64" HorizontalAlignment="Right" Fill="{DynamicResource EdgeFadeRight}" IsHitTestVisible="False" Opacity="0"/>
+     <Button x:Name="PART_Left" Style="{StaticResource PagerButton}" Content="&#xE76B;" HorizontalAlignment="Left" Margin="8,0,0,0" Visibility="Collapsed" IsHitTestVisible="False" ToolTip="Scroll left" AutomationProperties.Name="Scroll left"/>
+     <Button x:Name="PART_Right" Style="{StaticResource PagerButton}" Content="&#xE76C;" HorizontalAlignment="Right" Margin="0,0,8,0" Visibility="Collapsed" IsHitTestVisible="False" ToolTip="Scroll right" AutomationProperties.Name="Scroll right"/>
+    </Grid>
+   </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="SettingsButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Margin" Value="0,8,12,12"/><Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
   <Style x:Key="SettingsPrimary" TargetType="Button" BasedOn="{StaticResource SettingsButton}"><Setter Property="Background" Value="{DynamicResource Accent}"/><Setter Property="Foreground" Value="{DynamicResource AccentInk}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>

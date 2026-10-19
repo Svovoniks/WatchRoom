@@ -180,7 +180,7 @@ public partial class MainWindow : Window
                 catch (System.Text.Json.JsonException) { }
                 if (int.TryParse(savedCursor, out var cursor)) queuePosition = Math.Clamp(cursor, -1, queue.Count - 1);
                 libraryLoaded = true;
-                RefreshLibraryFromItems(loaded); WatchFolders();
+                RefreshLibraryFromItems(loaded); WatchFolders(); BackfillRuntimes();
             });
             if (closing) return;
             await Guard(async () =>
@@ -361,6 +361,31 @@ public partial class MainWindow : Window
         libraryUpdates.Clear();
         items = library.All();
         RefreshLibraryFromItems(items);
+        BackfillRuntimes();
+    }
+    private bool runtimeBackfillRunning, runtimeBackfillAgain;
+    // Reads missing movie lengths from file headers in the background; Home's length filters need them.
+    private async void BackfillRuntimes()
+    {
+        if (runtimeBackfillRunning) { runtimeBackfillAgain = true; return; }
+        runtimeBackfillRunning = true;
+        try
+        {
+            do
+            {
+                runtimeBackfillAgain = false;
+                var candidates = items.Where(LibraryRuntimes.NeedsRuntime).ToArray();
+                if (candidates.Length == 0 || closing) break;
+                using var stop = new CancellationTokenSource();
+                void Stop(object? sender, EventArgs e) => stop.Cancel();
+                Closed += Stop;
+                try { await Task.Run(() => LibraryRuntimes.Backfill(library, candidates, stop.Token)); }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { PlaybackDiagnostics.Record("runtime-backfill-failed", new { ex.Message }); }
+                finally { Closed -= Stop; }
+            } while (runtimeBackfillAgain && !closing);
+        }
+        finally { runtimeBackfillRunning = false; }
     }
     private void RefreshLibraryFromItems(List<MediaItem> refreshedItems)
     {
@@ -827,6 +852,8 @@ public partial class MainWindow : Window
         if (nativeStopCount == 0 && (room is null || room.Identity?.Host == true) && playingItem is not null && player is not null && player.Time >= 0)
         {
             library.Setting("position:" + playingItem.Id, WasWatched(playingItem.Id) || player.Length > 0 && player.Time >= player.Length - 2000 ? "0" : Math.Max(0, player.Time).ToString());
+            // Home orders unfinished titles by when they were last played.
+            if (player.Time >= 10000) library.Setting("played:" + playingItem.Id, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString());
             foreach (var card in libraryCards.Where(x => x.Card.Media.Id == playingItem.Id)) UpdateCardPlayback(card);
         }
     }
@@ -1782,6 +1809,13 @@ public partial class MainWindow : Window
         var fade = new LinearGradientBrush([new(Color.FromArgb(0, canvas.R, canvas.G, canvas.B), 0),
             new(Color.FromArgb(0x4F, canvas.R, canvas.G, canvas.B), 0.45), new(canvas, 1)], 90);
         fade.Freeze(); Application.Current.Resources["BackdropFade"] = fade;
+        var surface = (Color)ColorConverter.ConvertFromString(colors[1]);
+        var hero = new LinearGradientBrush([new(surface, 0), new(Color.FromArgb(0xE6, surface.R, surface.G, surface.B), 0.38),
+            new(Color.FromArgb(0, surface.R, surface.G, surface.B), 0.8)], 0);
+        hero.Freeze(); Application.Current.Resources["HeroFade"] = hero;
+        Color Faded(byte alpha) => Color.FromArgb(alpha, canvas.R, canvas.G, canvas.B);
+        var fadeLeft = new LinearGradientBrush(canvas, Faded(0), 0); fadeLeft.Freeze(); Application.Current.Resources["EdgeFadeLeft"] = fadeLeft;
+        var fadeRight = new LinearGradientBrush(Faded(0), canvas, 0); fadeRight.Freeze(); Application.Current.Resources["EdgeFadeRight"] = fadeRight;
         ApplyTitleBarTheme();
     }
     protected override void OnSourceInitialized(EventArgs e)
