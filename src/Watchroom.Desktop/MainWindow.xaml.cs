@@ -75,6 +75,8 @@ public partial class MainWindow : Window
     private readonly SemaphoreSlim librarySearchGate = new(1);
     private CancellationTokenSource? librarySearchCancellation;
     private readonly CancellationTokenSource lifetime = new();
+    private readonly TaskCompletionSource playerRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource playerInitialized = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private List<MediaItem> items = [];
     private MediaItem? selected;
     private MediaItem? playingItem;
@@ -198,6 +200,11 @@ public partial class MainWindow : Window
                 RefreshLibraryFromItems(loaded); WatchFolders(); BackfillRuntimes();
             });
             if (closing) return;
+            // Starting the native player loads hundreds of DLLs under the process loader lock, which
+            // stalls the UI thread's own first-frame work. Wait until the library has rendered unless
+            // playback is requested sooner.
+            await Task.WhenAny(Task.Delay(1000), playerRequested.Task);
+            if (closing) return;
             await Guard(async () =>
             {
                 var volume = (int)Volume.Value;
@@ -233,9 +240,16 @@ public partial class MainWindow : Window
                     Dispatcher.BeginInvoke(async () => await Guard(() => PlaybackEnded(endedItem, endedRoom, generation)));
                 };
             });
+            playerInitialized.TrySetResult();
             if (folders.Count == 0 && savedRooms.Count == 0 && currentPage is "Home" or "Library") ShowPage("Welcome");
             else if (SavedAutoArtwork) await Guard(FetchArtwork);
         };
+    }
+    private async Task<bool> EnsurePlayer()
+    {
+        playerRequested.TrySetResult();
+        if (player is null) await playerInitialized.Task.WaitAsync(lifetime.Token);
+        return player is not null && !closing;
     }
     private static void PrefetchVlcLibraries()
     {
@@ -850,7 +864,7 @@ public partial class MainWindow : Window
     private async void PlayLocal(object sender, RoutedEventArgs e) => await Guard(async () => { if (GuestLibrary) { WatchGuestVideo(); return; } if (selected is not null) { queuePosition = -1; await PlayLocalItem(selected); PublishQueue(); } });
     private async Task PlayLocalItem(MediaItem item)
     {
-        if (player is null) return;
+        if (!await EnsurePlayer()) return;
         if (!File.Exists(item.Path)) throw new FileNotFoundException("Movie file is unavailable. Reconnect its drive and rescan.");
         await Disconnect(preserveFullscreen: fullscreen && room is null); target = null; loadedMedia = null; playingItem = item;
         var generation = loadGeneration;
@@ -1123,7 +1137,7 @@ public partial class MainWindow : Window
         try
         {
             await loading.WaitAsync(cancellation.Token); locked = true;
-            if (client != room || generation != loadGeneration) return;
+            if (!await EnsurePlayer() || client != room || generation != loadGeneration) return;
             ready = false; buffering = new(); appliedGeneration = readyGeneration = -1; bridge?.CancelPendingReads(); await StopNativePlayback();
             playbackRecovery.Clear(); activeStreamingBufferSeconds = SavedStreamingBufferSeconds; readAheadMediaBytes = null;
             cancellation.Token.ThrowIfCancellationRequested();
