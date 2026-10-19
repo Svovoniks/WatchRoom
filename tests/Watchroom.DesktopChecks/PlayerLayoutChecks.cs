@@ -84,7 +84,7 @@ static class PlayerLayoutChecks
         }
         var audioPill = (System.Windows.Controls.Primitives.ToggleButton)window.FindName("AudioPill");
         Layout(900, 600); window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
-        Check(audioPill.Content is StackPanel { Children: [_, TextBlock { Text: "English" }] }, "the audio pill shows the selected track");
+        Check(audioPill.Content is StackPanel { Children: [_, TextBlock { Text: "English" }, ..] }, "the audio pill shows the selected track");
         queueList.ItemsSource = Array.Empty<string>(); Invoke(window, "UpdateSessionControls"); LayoutMenu();
         Check(queueList.Visibility == Visibility.Collapsed && queueActions.Visibility == Visibility.Collapsed &&
             playQueue.Visibility == Visibility.Collapsed && queueMenuContent.ActualHeight < 200,
@@ -95,6 +95,45 @@ static class PlayerLayoutChecks
             playQueue.Visibility == Visibility.Visible && queueList.ActualHeight <= queueList.MaxHeight,
             "populating the player queue restores its list and controls within a bounded menu");
         Save(queueMenuContent, "player-queue-menu.png");
+        // Long-running shows list hundreds of episodes; only the rows in view may be built.
+        var longSeason = Enumerable.Range(1, 1500).Select(i => new { QueueTitle = $"S01 · E{i:0000} · Episode {i}" }).ToArray();
+        int Realized(ItemsControl list, int count) => Enumerable.Range(0, count).Count(i => list.ItemContainerGenerator.ContainerFromIndex(i) is not null);
+        queueList.ItemsSource = longSeason; LayoutMenu();
+        var realizedRows = Realized(queueList, longSeason.Length);
+        Check(VirtualizingPanel.GetIsVirtualizing(queueList) && realizedRows is > 0 and < 40, $"a 1500-episode queue menu builds only its visible rows ({realizedRows})");
+        queueList.ScrollIntoView(longSeason[^1]); LayoutMenu();
+        Check(queueList.ItemContainerGenerator.ContainerFromIndex(longSeason.Length - 1) is not null && Realized(queueList, longSeason.Length) < 40,
+            "the queue menu scrolls to the last of 1500 episodes while staying virtualized");
+        queueList.ItemsSource = populatedQueue; Invoke(window, "UpdateSessionControls"); LayoutMenu();
+        Invoke(window, "ShowPage", "Queues"); Layout(1280, 810);
+        var savedItems = (ListBox)window.FindName("SavedQueueItems"); var savedSource = savedItems.ItemsSource;
+        savedItems.ItemsSource = longSeason; Layout(1280, 810);
+        var savedRealized = Realized(savedItems, longSeason.Length);
+        Check(savedRealized is > 0 and < 60, $"the queue editor builds only its visible rows for a 1500-video queue ({savedRealized})");
+        savedItems.ItemsSource = savedSource; Invoke(window, "ShowPage", "Room");
+        // The playback tick refreshes the player chrome four times a second; keep that cheap with a long queue whose files are offline.
+        var longQueue = Enumerable.Range(1, 1500).Select(i => episode with { Id = "long-" + i, Path = Path.Combine(App.DataDirectory, $"offline-{i}.mp4"), Episode = i }).ToList();
+        var activeQueue = (List<Watchroom.Core.MediaItem>)typeof(MainWindow).GetField("queue", flags)!.GetValue(window)!;
+        activeQueue.AddRange(longQueue); typeof(MainWindow).GetField("queuePosition", flags)!.SetValue(window, 700);
+        typeof(MainWindow).GetField("playingItem", flags)!.SetValue(window, longQueue[700]);
+        Invoke(window, "PublishQueue"); LayoutMenu();
+        var refresh = typeof(MainWindow).GetMethod("UpdateSessionControls", flags)!;
+        refresh.Invoke(window, []);
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        for (var i = 0; i < 200; i++) refresh.Invoke(window, []);
+        var tickMs = timer.Elapsed.TotalMilliseconds / 200;
+        Console.WriteLine($"Player chrome refresh with a 1500-video offline queue: {tickMs:F3} ms per tick");
+        Check(tickMs < 2, $"the per-tick player refresh stays cheap with a long queue of offline videos ({tickMs:F3} ms)");
+        timer.Restart(); var steps = 0;
+        for (var i = 0; i < longQueue.Count; i += 50, steps++) { queueList.ScrollIntoView(queueList.Items[i]); LayoutMenu(); }
+        var scrollMs = timer.Elapsed.TotalMilliseconds / steps;
+        Console.WriteLine($"Queue menu scroll step across 1500 rows: {scrollMs:F2} ms");
+        Check(scrollMs < 25, $"scrolling the 1500-row queue menu lays out quickly ({scrollMs:F2} ms per step)");
+        activeQueue.Clear(); typeof(MainWindow).GetField("queuePosition", flags)!.SetValue(window, -1);
+        typeof(MainWindow).GetField("playingItem", flags)!.SetValue(window, null);
+        Invoke(window, "PublishQueue"); queueList.ItemsSource = populatedQueue; Invoke(window, "UpdateSessionControls"); LayoutMenu();
+        var queuePicker = (ComboBox)window.FindName("PlayerQueuePicker");
+        Check(VirtualizingPanel.GetIsVirtualizing(queuePicker) && ScrollViewer.GetCanContentScroll(queuePicker), "the player queue picker virtualizes its rows");
         foreach (var size in new[] { (900, 600), (1280, 810) })
         {
             Invoke(window, "ClosePlayerMenus"); Layout(size.Item1, size.Item2);
@@ -108,13 +147,14 @@ static class PlayerLayoutChecks
             // Menus are popups placed above their pill, so opening one cannot resize the video or the bar.
             Check(queueMenuContent.Parent == queueMenu && queueMenu.PlacementTarget == queuePill && !IsDescendant(queueMenuContent, controls),
                 "the queue menu floats above its pill outside the player layout at " + size);
-            var bounds = controls.TransformToAncestor(page).TransformBounds(new Rect(new Point(), controls.RenderSize));
-            Check(bounds.Bottom <= page.ActualHeight + 1, "transport controls stay inside the player at " + size);
             var overlay = (Grid)window.FindName("PlayerOverlay");
             ((Border)window.FindName("PlayerEmpty")).Visibility = Visibility.Collapsed;
             var episodeAction = (Button)window.FindName("EpisodeEndButton"); episodeAction.Visibility = Visibility.Visible;
             var overlaySize = new Size(video.ActualWidth, video.ActualHeight);
             overlay.Measure(overlaySize); overlay.Arrange(new Rect(new Point(), overlaySize)); overlay.UpdateLayout();
+            // The bars float over the video, so they must stay within its overlay.
+            var bounds = controls.TransformToAncestor(overlay).TransformBounds(new Rect(new Point(), controls.RenderSize));
+            Check(bounds.Bottom <= overlay.ActualHeight + 1 && bounds.Width <= overlay.ActualWidth + 1, "transport controls stay inside the player at " + size);
             var actionBounds = episodeAction.TransformToAncestor(controls).TransformBounds(new Rect(new Point(), episodeAction.RenderSize));
             Check(actionBounds.Left >= 0 && actionBounds.Right <= controls.ActualWidth && actionBounds.Bottom <= controls.ActualHeight,
                 "episode action fits inside the bottom player bar at " + size);
@@ -146,10 +186,9 @@ static class PlayerLayoutChecks
             System.Windows.Automation.AutomationProperties.GetName(episodeButton) == "Finish movie",
             "movies expose a Finish action in the player bar");
         var transport = (Border)window.FindName("PlaybackControls");
-        var docked = (Grid)window.FindName("DockedControlsHost"); var fullscreenHost = (Grid)window.FindName("FullscreenControlsHost");
-        var dockedHeader = (Grid)window.FindName("DockedHeaderHost"); var fullscreenHeader = (Grid)window.FindName("FullscreenHeaderHost");
-        dockedHeader.Children.Remove(header); fullscreenHeader.Children.Add(header);
-        docked.Children.Remove(transport); fullscreenHost.Children.Add(transport);
+        var playerOverlay = (Grid)window.FindName("PlayerOverlay");
+        Check(IsDescendant(header, playerOverlay) && IsDescendant(transport, playerOverlay),
+            "both player bars float over the video in the window as well as in fullscreen");
         window.WindowStyle = WindowStyle.None;
         typeof(MainWindow).GetField("fullscreen", flags)!.SetValue(window, true);
         Invoke(window, "ApplyPlayerLayout"); Invoke(window, "ShowPlayerControls"); Layout(900, 600);
@@ -168,11 +207,10 @@ static class PlayerLayoutChecks
         Invoke(window, "ShowPlayerControls");
         var disconnect = (Task)typeof(MainWindow).GetMethod("Disconnect", flags)!.Invoke(window, [true, false])!;
         Check(disconnect.IsCompletedSuccessfully && (bool)typeof(MainWindow).GetField("fullscreen", flags)!.GetValue(window)! &&
-            window.WindowStyle == WindowStyle.None && fullscreenHost.Children.Contains(transport) && fullscreenHeader.Children.Contains(header),
+            window.WindowStyle == WindowStyle.None && IsDescendant(transport, playerOverlay) && IsDescendant(header, playerOverlay),
             "local media cleanup preserves fullscreen and both player bars during episode changes");
         typeof(MainWindow).GetField("fullscreen", flags)!.SetValue(window, false);
-        fullscreenHeader.Children.Remove(header); dockedHeader.Children.Add(header);
-        fullscreenHost.Children.Remove(transport); docked.Children.Add(transport); window.WindowStyle = WindowStyle.SingleBorderWindow;
+        window.WindowStyle = WindowStyle.SingleBorderWindow;
         Invoke(window, "ApplyPlayerLayout"); Layout(900, 600);
         Check(header.Visibility == Visibility.Visible && header.ActualHeight > 0, "leaving fullscreen restores the docked top bar");
         var updateCard = (Border)window.FindName("UpdateCard");
@@ -181,7 +219,7 @@ static class PlayerLayoutChecks
             caption.Background is SolidColorBrush { Color: var captionColor } && captionColor == Color.FromRgb(0x17, 0x18, 0x1F),
             "the docked player keeps a dark caption row that matches its header");
         window.Close();
-        Console.WriteLine("41 player layout and control checks passed.");
+        Console.WriteLine("48 player layout and control checks passed.");
     }
     static bool IsDescendant(DependencyObject child, DependencyObject parent)
     {

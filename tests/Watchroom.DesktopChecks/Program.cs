@@ -434,8 +434,8 @@ static class Program
         Call("ShowPage", "Queues"); window.UpdateLayout();
         check(list.ActualHeight > 100 && list.AllowDrop, "redesigned queue keeps a usable drag-and-drop list");
         var picker = (System.Windows.Controls.ComboBox)window.FindName("PlayerQueuePicker");
-        var noQueue = picker.Items.Cast<SavedQueue>().Single(item => item.Name == "No queue");
-        picker.SelectedItem = noQueue;
+        check(picker.Items.Cast<SavedQueue>().All(item => item.Name != "No queue"), "the player queue picker lists only queues; the switch turns the queue off");
+        Call("QueueModeOffClicked", window, new RoutedEventArgs());
         check(((List<MediaItem>)Field("queue")).Count == 0 && (int)Field("queuePosition") == -1,
             "No queue disables active queue playback and clears its cursor");
         check(saved.Single(item => item.Id == fixture.Id).MediaIds.SequenceEqual([media[0].Id, media[1].Id]),

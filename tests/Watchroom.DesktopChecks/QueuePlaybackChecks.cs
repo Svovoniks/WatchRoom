@@ -89,7 +89,8 @@ static class QueuePlaybackChecks
             playerList.RaiseEvent(key);
             await WaitFor(() => Playing(first, 0));
             check(key.Handled, "Enter in the player queue starts its selected entry");
-            Control<System.Windows.Controls.Primitives.ToggleButton>("QueuePill").IsChecked = true; window.UpdateLayout(); playerList.UpdateLayout();
+            // Controls fade while a video plays; a pill is clicked only once the mouse has revealed them.
+            Call("ShowPlayerControls"); Control<System.Windows.Controls.Primitives.ToggleButton>("QueuePill").IsChecked = true; window.UpdateLayout(); playerList.UpdateLayout();
             playerList.SelectedIndex = 1;
             var row = (ListBoxItem)playerList.ItemContainerGenerator.ContainerFromIndex(1);
             var doubleClick = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)

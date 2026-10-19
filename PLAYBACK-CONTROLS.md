@@ -1,6 +1,8 @@
 # Playback controls
 
-Windows uses a dedicated VLC-style player: a black video surface, compact charcoal transport bar, orange seek/volume tracks, elapsed/total time, and audio, subtitle and queue pills that show the current choice and open a menu above the bar. The library rail and app status bar give way to the player. Room participants and chat can be toggled from the header and start hidden for local playback.
+Windows uses a dedicated player whose bars float over the video in the window and in fullscreen. The top bar holds the back button, the title, a room status chip (with the host's shared-controls toggle), and Room library, Room & chat (with an unread count), Copy invite and Leave. The bottom bar has a full-width timeline; Play, Stop, Previous and Next with elapsed/total time; the Audio, Subtitles and Queue pills, which show the current choice with a muted detail (for example "English 5.1" or "Season 2 3 / 8") and open their menu above the bar; and mute, volume and fullscreen. Narrow windows drop the pill details first, then the volume slider, then the time. While the room panel is closed, new chat appears briefly as bubbles at the top right.
+
+The queue menu starts with a two-way switch. Episodes (or Off for a movie) turns the queue off, and Previous and Next step through the playing show's season. Queue picks a queue and brings back the last one used; it can also start a new queue from the playing season. Switching never interrupts the playing video. When the chosen queue contains it, the queue continues from there; otherwise Next starts the queue from its first video.
 
 | Key | Action |
 | --- | --- |
@@ -9,13 +11,14 @@ Windows uses a dedicated VLC-style player: a black video surface, compact charco
 | Up / Down | Change volume by 5% |
 | M | Mute / unmute |
 | S | Stop local playback; pause and return to start in a room |
-| N | Play next queued title |
+| N | Play next queued title or episode |
+| P | Play previous queued title or episode |
 | F | Toggle fullscreen |
 | F11 (Windows) | Toggle fullscreen |
 | Escape | Exit fullscreen |
 
 Typing in a text field does not trigger playback shortcuts. Seek and volume sliders retain their own arrow-key behavior. Shared play, pause, seek and return-to-start commands use the room's existing host/shared-control permissions. Volume, mute and track selection affect only your player.
 
-On Windows, fullscreen occupies the entire current monitor, including the taskbar area. It removes the title bar, borders, page padding, header, sidebar and status row. The video retains its original aspect ratio; black bars can remain for differently shaped media. Controls overlay the native video and hide after 2.6 seconds of inactivity. Move the mouse or press Tab to reveal them; controls remain visible while hovered, scrubbing, or while a player menu is open. The fullscreen button, F, F11, or a double-click on the video toggles fullscreen; Escape exits and restores the previous window bounds and maximized state. Mac fullscreen behavior is unchanged.
+On Windows, fullscreen occupies the entire current monitor, including the taskbar area. It removes the title bar, borders, page padding, header, sidebar and status row. The video retains its original aspect ratio; black bars can remain for differently shaped media. Controls hide after 2.6 seconds of inactivity, in the window only while a video is playing. Move the mouse or press Tab to reveal them; controls remain visible while hovered, scrubbing, or while a player menu is open. The fullscreen button, F, F11, or a double-click on the video toggles fullscreen; Escape exits and restores the previous window bounds and maximized state. Mac fullscreen behavior is unchanged.
 
 Validation: Windows desktop builds without warnings or errors. Generated-video playback, the fullscreen button, idle overlay hiding, double-click fullscreen, Escape restoration, and the audio/subtitle panel were checked in the running Windows app. All 47 existing smoke checks pass, including remote playback, seeking, room permissions and subtitle transfer. Multi-monitor/mixed-DPI fullscreen still needs testing on that hardware. Windows waits for its native video surface before starting playback to avoid a separate VLC output window.

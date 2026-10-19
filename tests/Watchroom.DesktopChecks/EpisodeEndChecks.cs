@@ -61,8 +61,8 @@ static class EpisodeEndChecks
             var offer = (Task<bool>)Call("OfferNextEpisode", second, (Func<bool>)(() => false))!;
             check(card.Visibility == Visibility.Visible && ((TextBlock)window.FindName("UpNextCountdown")).Text == "Playing in 15s" && !offer.IsCompleted,
                 "the next episode is offered in the player with a 15 second countdown");
-            check(card.Parent is StackPanel stack && stack.Children.IndexOf(card) < stack.Children.IndexOf((UIElement)window.FindName("FullscreenControlsHost")),
-                "the up-next card stacks above the fullscreen controls instead of under them");
+            check(card.Parent is StackPanel stack && stack.Children.IndexOf(card) < stack.Children.IndexOf((UIElement)window.FindName("PlaybackControls")),
+                "the up-next card stacks above the player controls instead of under them");
             Call("EndUpNext", false);
             check(card.Visibility == Visibility.Collapsed && offer.IsCompleted && !offer.Result, "cancelling the countdown hides the card and keeps the episode");
             offer = (Task<bool>)Call("OfferNextEpisode", second, (Func<bool>)(() => false))!;
@@ -110,8 +110,10 @@ static class EpisodeEndChecks
             var firstIndex = Array.FindIndex(listed, item => item.Id == first.Id);
             check(listed.Select(item => item.Id).Where(id => id.StartsWith("episode-end-")).SequenceEqual([first.Id, second.Id]) && listed[firstIndex + 1].Id == second.Id && queueList.SelectedIndex == firstIndex &&
                 ((TextBlock)window.FindName("QueuePillText")).Text == "Episodes" &&
-                ((Button)window.FindName("RemoveQueueButton")) is { Visibility: Visibility.Visible, IsEnabled: false } &&
-                ((Button)window.FindName("QueueEarlier")) is { Visibility: Visibility.Visible, IsEnabled: false } &&
+                ((Button)window.FindName("RemoveQueueButton")).Visibility == Visibility.Collapsed &&
+                ((Button)window.FindName("QueueEarlier")).Visibility == Visibility.Collapsed &&
+                ((Button)window.FindName("AddEpisodeToQueueButton")).Visibility == Visibility.Visible &&
+                ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("QueueModeOff")).IsChecked == true && ((TextBlock)window.FindName("QueueModeOffText")).Text == "Episodes" &&
                 ((Button)window.FindName("PlayPlayerQueueButton")).Visibility == Visibility.Collapsed,
                 "without a queue, the queue menu lists the show's episodes with the playing one selected");
             var listSource = queueList.ItemsSource;
@@ -127,7 +129,8 @@ static class EpisodeEndChecks
             await (Task)Call("PlayQueueStep", -1)!;
             check(Field<MediaItem>("playingItem").Id == first.Id && queueList.SelectedIndex == firstIndex, "previous plays the episode before");
             queue.AddRange([movie, movieTwo]); Call("PublishQueue");
-            check(queueList.Items.Cast<object>().SequenceEqual([movie, movieTwo]) && ((TextBlock)window.FindName("QueuePillText")).Text == "Queue · 2" &&
+            check(queueList.Items.Cast<object>().SequenceEqual([movie, movieTwo]) && ((TextBlock)window.FindName("QueuePillText")).Text == "Queue" && ((TextBlock)window.FindName("QueuePillDetail")).Text == "2 videos" &&
+                ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("QueueModeOn")).IsChecked == true &&
                 ((Button)window.FindName("RemoveQueueButton")).Visibility == Visibility.Visible && (string)nextButton.ToolTip == "Next in queue (N)",
                 "a loaded queue replaces the episode list");
         }

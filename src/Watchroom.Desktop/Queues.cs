@@ -10,7 +10,8 @@ namespace Watchroom.Desktop;
 
 public partial class MainWindow
 {
-    private static readonly SavedQueue noPlaybackQueue = new("", "No queue", []);
+    // Starts a queue from the playing season; it appears at the end of the player's queue picker.
+    private static readonly SavedQueue seasonQueueChoice = new("new-season", "+ New queue from this season", []);
     private bool CanEditQueue()
     {
         if (room is not null && (!room.IsConnected || room.Identity?.Host != true))
@@ -18,6 +19,16 @@ public partial class MainWindow
         return true;
     }
     private static bool QueueItemAvailable(MediaItem item) => item.Available && File.Exists(item.Path);
+    // The playback tick enables Previous and Next by scanning for the nearest playable file. With a drive offline that
+    // can mean hundreds of disk checks per tick, so the tick reuses answers for a few seconds; playing still checks the disk.
+    private readonly Dictionary<string, (bool Exists, long CheckedAt)> recentFileChecks = new(StringComparer.OrdinalIgnoreCase);
+    private bool RecentlyExists(string path)
+    {
+        var now = Environment.TickCount64;
+        if (recentFileChecks.TryGetValue(path, out var known) && now - known.CheckedAt < 5000) return known.Exists;
+        if (recentFileChecks.Count > 4096) recentFileChecks.Clear();
+        var exists = File.Exists(path); recentFileChecks[path] = (exists, now); return exists;
+    }
     private IEnumerable<MediaItem> ResolveQueue(SavedQueue saved) => saved.MediaIds.Select(id => items.FirstOrDefault(x => x.Id == id)).OfType<MediaItem>();
     private void SaveActiveQueueEdits()
     {
@@ -38,8 +49,10 @@ public partial class MainWindow
         QueuePicker.ItemsSource = savedQueues.ToArray();
         QueuePicker.SelectedItem = savedQueues.FirstOrDefault(x => x.Id == selectedId) ?? savedQueues.FirstOrDefault();
         var temporary = activeQueueId is null && queue.Count > 0 ? new SavedQueue("temporary", "Current queue", queue.Select(item => item.Id).ToArray()) : null;
-        PlayerQueuePicker.ItemsSource = new[] { noPlaybackQueue }.Concat(temporary is null ? [] : new[] { temporary }).Concat(savedQueues).ToArray();
-        PlayerQueuePicker.SelectedItem = savedQueues.FirstOrDefault(x => x.Id == activeQueueId) ?? temporary ?? noPlaybackQueue;
+        // "No queue" is the Episodes / Off side of the queue menu's switch, so the picker lists only queues.
+        var seasonChoice = playingItem is { Series: not null, Season: not null, Episode: not null, IsExtra: false } ? new[] { seasonQueueChoice } : [];
+        PlayerQueuePicker.ItemsSource = (temporary is null ? [] : new[] { temporary }).Concat(savedQueues).Concat(seasonChoice).ToArray();
+        PlayerQueuePicker.SelectedItem = savedQueues.FirstOrDefault(x => x.Id == activeQueueId) ?? temporary;
         updatingQueues = false;
         RefreshSavedItems();
     }
@@ -83,20 +96,38 @@ public partial class MainWindow
     private void SelectPlaybackQueue(SavedQueue saved)
     {
         activeQueueId = saved.Id; queue.Clear(); queuePosition = -1;
+        library.Setting("lastQueue", saved.Id);
         foreach (var item in ResolveQueue(saved)) queue.Add(item);
         SaveQueues(); RefreshQueuePickers(saved.Id); PublishQueue();
+    }
+    // Switching to a queue keeps the current video playing. When the queue contains it, the queue
+    // continues from that point; otherwise Next starts the queue from its first video.
+    private void SwitchToQueue(SavedQueue saved)
+    {
+        SelectPlaybackQueue(saved);
+        if (playingItem is { } playing && queue.FindIndex(item => item.Id == playing.Id) is var index and >= 0) { queuePosition = index; PublishQueue(); }
+        RefreshEpisodeEndAction();
     }
     private void PlayerQueueChanged(object sender, SelectionChangedEventArgs e)
     {
         if (updatingQueues || PlayerQueuePicker.SelectedItem is not SavedQueue saved) return;
         if (saved.Id == "temporary") return;
         if (!CanEditQueue()) { RefreshQueuePickers(); return; }
-        if (saved == noPlaybackQueue) SelectNoQueue(); else SelectPlaybackQueue(saved);
+        if (saved == seasonQueueChoice) CreateSeasonQueue(); else SwitchToQueue(saved);
+    }
+    private void CreateSeasonQueue()
+    {
+        if (playingItem is not { Series: not null, Season: not null } playing) { RefreshQueuePickers(); return; }
+        var episodes = EpisodePlayback.Episodes(items, playing).Where(item => item.Season == playing.Season).ToArray();
+        if (episodes.Length == 0) episodes = [playing];
+        var saved = new SavedQueue(Guid.NewGuid().ToString("N"), $"{playing.Series} · Season {playing.Season}", episodes.Select(item => item.Id).ToArray());
+        savedQueues.Add(saved); SwitchToQueue(saved);
+        SetStatus($"Created {saved.Name}.");
     }
     private void SelectNoQueue()
     {
         SaveActiveQueueEdits();
-        activeQueueId = null; queue.Clear(); queuePosition = -1;
+        activeQueueId = null; queue.Clear(); queuePosition = -1; queueModeRequested = false;
         if (roomLibrary?.Queue.Entries.Length > 0) roomLibrary.Request(HostPeerId(), "clear");
         SaveQueues(); RefreshQueuePickers(); PublishQueue(); RefreshEpisodeEndAction();
     }
@@ -154,7 +185,7 @@ public partial class MainWindow
     private bool ShowingEpisodeList => episodeListKey is not null;
     private void RefreshQueueList(bool force = false)
     {
-        var current = !HasPlaybackQueue && (room is null || room.Identity?.Host == true) &&
+        var current = !HasPlaybackQueue && !queueModeRequested && (room is null || room.Identity?.Host == true) &&
             playingItem is { Series: not null, Season: not null, Episode: not null, IsExtra: false } playing ? playing : null;
         (string, List<MediaItem>)? key = current is null ? null : (current.Id, items);
         if (!force && key == episodeListKey) return;
@@ -165,7 +196,7 @@ public partial class MainWindow
             listedEpisodes = [];
             QueueList.ItemsSource = queue.ToArray(); QueueList.SelectedIndex = queuePosition;
             PlayPlayerQueueButton.ClearValue(VisibilityProperty);
-            if (!force) { QueueStatus.Text = "Queue is empty."; QueuePillText.Text = "Queue"; }
+            if (!force) QueueStatus.Text = "Queue is empty.";
             return;
         }
         var episodes = EpisodePlayback.Episodes(items, current);
@@ -175,9 +206,10 @@ public partial class MainWindow
         listedEpisodes = episodes;
         QueueList.SelectedIndex = Array.FindIndex(episodes, item => item.Id == current.Id) is var index and >= 0 ? index
             : Array.FindIndex(episodes, item => item.Season == current.Season && item.Episode == current.Episode);
-        QueueStatus.Text = $"{current.Series} · {episodes.Length} episodes. Choose a queue above to play something else.";
-        QueuePillText.Text = "Episodes";
+        QueueStatus.Text = current.Season is { } season ? $"{current.Series} · Season {season} · plays in order" : $"{current.Series} · plays in order";
         PlayPlayerQueueButton.Visibility = Visibility.Collapsed;
+        // Rows mark the playing episode, so redraw them when it changes.
+        QueueList.Items.Refresh();
     }
     // Previous and next step through the listed episodes when no queue is loaded.
     private MediaItem? AdjacentEpisode(int direction)
@@ -187,7 +219,7 @@ public partial class MainWindow
         if (current < 0) current = QueueList.SelectedIndex;
         if (current < 0) return null;
         for (var index = current + direction; index >= 0 && index < listedEpisodes.Length; index += direction)
-            if (QueueItemAvailable(listedEpisodes[index])) return listedEpisodes[index];
+            if (listedEpisodes[index].Available && RecentlyExists(listedEpisodes[index].Path)) return listedEpisodes[index];
         return null;
     }
     private async Task PlayListedEpisode(MediaItem item)
@@ -229,7 +261,7 @@ public partial class MainWindow
     }
     private void StartQueue(SavedQueue? saved, object sender, RoutedEventArgs e)
     {
-        if (saved is null || saved == noPlaybackQueue || !CanEditQueue()) return;
+        if (saved is null || saved == seasonQueueChoice || !CanEditQueue()) return;
         if (!ResolveQueue(saved).Any(x => x.Available && File.Exists(x.Path)))
         { UpdateSavedQueueActions(); SetStatus("This queue has no available videos."); return; }
         SelectPlaybackQueue(saved); NextQueued(sender, e);
@@ -349,6 +381,9 @@ public partial class MainWindow
         var panel = new DockPanel { Margin = new Thickness(20) };
         var add = new Button { Content = "Add selected", IsDefault = true, IsEnabled = false }; DockPanel.SetDock(add, Dock.Bottom); panel.Children.Add(add);
         var list = new ListBox { ItemsSource = available, DisplayMemberPath = "QueueTitle", SelectionMode = SelectionMode.Extended }; panel.Children.Add(list);
+        // The whole library can be listed here; realize only the visible rows.
+        ScrollViewer.SetCanContentScroll(list, true); VirtualizingPanel.SetIsVirtualizing(list, true);
+        VirtualizingPanel.SetVirtualizationMode(list, VirtualizationMode.Recycling); VirtualizingPanel.SetScrollUnit(list, ScrollUnit.Pixel);
         list.SelectionChanged += (_, _) => add.IsEnabled = list.SelectedItems.Count > 0;
         add.Click += (_, _) => { if (list.SelectedItems.Count > 0) win.DialogResult = true; };
         win.Content = panel;
