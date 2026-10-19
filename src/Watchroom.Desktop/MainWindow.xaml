@@ -645,30 +645,30 @@
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
              <Button x:Name="PlayButton" Content="&#xF5B0;" Click="TogglePlayback" Style="{StaticResource PlayerPlayButton}" ToolTip="Play / pause (Space)" AutomationProperties.Name="Play or pause"/>
              <Button x:Name="StopButton" Content="&#xEE95;" Click="StopPlayback" Style="{StaticResource PlayerIconButton}" ToolTip="Stop (S)" AutomationProperties.Name="Stop playback"/>
-             <Button x:Name="PreviousButton" Visibility="Collapsed" Content="&#xE892;" Click="PreviousQueued" Style="{StaticResource PlayerIconButton}" ToolTip="Previous video (P)" AutomationProperties.Name="Previous video"/>
-             <Button x:Name="NextButton" Visibility="Collapsed" Content="&#xE893;" Click="NextQueued" Style="{StaticResource PlayerIconButton}" ToolTip="Next in queue (N)" AutomationProperties.Name="Next in queue"/>
+             <Button x:Name="PreviousButton" IsEnabled="False" ToolTipService.ShowOnDisabled="True" Content="&#xE892;" Click="PreviousQueued" Style="{StaticResource PlayerIconButton}" ToolTip="Previous video (P)" AutomationProperties.Name="Previous video"/>
+             <Button x:Name="NextButton" IsEnabled="False" ToolTipService.ShowOnDisabled="True" Content="&#xE893;" Click="NextQueued" Style="{StaticResource PlayerIconButton}" ToolTip="Next video (N)" AutomationProperties.Name="Next video"/>
              <TextBlock x:Name="PlaybackTime" Text="00:00 / 00:00" Foreground="#D9DAE2" FontSize="12.5" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" Margin="6,0,12,0"/>
             </StackPanel>
             <StackPanel x:Name="PlayerPills" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
              <ToggleButton x:Name="AudioPill" Style="{StaticResource PlayerMenuPill}" ToolTip="Audio track" AutomationProperties.Name="Audio track"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7F6;" Style="{StaticResource PlayerPillIcon}"/><TextBlock x:Name="AudioPillText" Text="Audio" Style="{StaticResource PlayerPillText}"/><TextBlock x:Name="AudioPillDetail" Style="{StaticResource PlayerPillDetail}"/><TextBlock Text="&#xE70E;" Style="{StaticResource PlayerPillChevron}"/></StackPanel></ToggleButton>
-             <Popup x:Name="AudioMenu" Style="{StaticResource PlayerMenuPopup}" Opened="PlayerMenuOpened">
+             <local:PlayerMenuPopup x:Name="AudioMenu" Style="{StaticResource PlayerMenuPopup}" Opened="PlayerMenuOpened"><local:MenuSizer>
               <ContentControl Style="{StaticResource PlayerMenu}" PreviewKeyDown="PlayerMenuKeyDown"><StackPanel>
                <TextBlock Text="Audio" Style="{StaticResource PlayerMenuCaption}"/>
                <ListBox x:Name="AudioTracks" Style="{StaticResource PlayerMenuList}" ItemTemplate="{StaticResource PlayerTrackRow}" SelectionChanged="AudioChanged" PreviewMouseLeftButtonUp="TrackMenuClicked" AutomationProperties.Name="Audio track"/>
                <TextBlock x:Name="AudioPreferenceHint" Visibility="Collapsed" Foreground="#7D7F8C" FontSize="11" TextWrapping="Wrap" MaxWidth="300" HorizontalAlignment="Left" Margin="10,6,10,4"/>
-              </StackPanel></ContentControl>
-             </Popup>
+              </StackPanel></ContentControl></local:MenuSizer>
+             </local:PlayerMenuPopup>
              <ToggleButton x:Name="SubtitlePill" Style="{StaticResource PlayerMenuPill}" ToolTip="Subtitles" AutomationProperties.Name="Subtitles"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7F0;" Style="{StaticResource PlayerPillIcon}"/><TextBlock x:Name="SubtitlePillText" Text="Subtitles" Style="{StaticResource PlayerPillText}"/><TextBlock x:Name="SubtitlePillDetail" Style="{StaticResource PlayerPillDetail}"/><TextBlock Text="&#xE70E;" Style="{StaticResource PlayerPillChevron}"/></StackPanel></ToggleButton>
-             <Popup x:Name="SubtitleMenu" Style="{StaticResource PlayerMenuPopup}" Opened="PlayerMenuOpened">
+             <local:PlayerMenuPopup x:Name="SubtitleMenu" Style="{StaticResource PlayerMenuPopup}" Opened="PlayerMenuOpened"><local:MenuSizer>
               <ContentControl Style="{StaticResource PlayerMenu}" PreviewKeyDown="PlayerMenuKeyDown"><StackPanel>
                <TextBlock Text="Subtitles" Style="{StaticResource PlayerMenuCaption}"/>
                <ListBox x:Name="SubtitleTracks" Style="{StaticResource PlayerMenuList}" ItemTemplate="{StaticResource PlayerTrackRow}" SelectionChanged="SubtitlesChanged" PreviewMouseLeftButtonUp="TrackMenuClicked" AutomationProperties.Name="Subtitle track"/>
                <Border Height="1" Background="{StaticResource PlayerLine}" Margin="6,4"/>
                <Button x:Name="LoadSubtitlesButton" Click="LoadSubtitles" Style="{StaticResource PlayerMenuButton}" AutomationProperties.Name="Load subtitles from file"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8E5;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{StaticResource PlayerAccent}" Width="24" VerticalAlignment="Center"/><TextBlock Text="Load from file…"/></StackPanel></Button>
-              </StackPanel></ContentControl>
-             </Popup>
+              </StackPanel></ContentControl></local:MenuSizer>
+             </local:PlayerMenuPopup>
              <ToggleButton x:Name="QueuePill" Style="{StaticResource PlayerMenuPill}" Margin="0" ToolTip="Queue" AutomationProperties.Name="Queue"><StackPanel Orientation="Horizontal"><TextBlock x:Name="QueuePillIcon" Text="&#xE8FD;" Style="{StaticResource PlayerPillIcon}"/><TextBlock x:Name="QueuePillText" Text="Queue" Style="{StaticResource PlayerPillText}"/><TextBlock x:Name="QueuePillDetail" Style="{StaticResource PlayerPillDetail}" Typography.NumeralAlignment="Tabular"/><TextBlock Text="&#xE70E;" Style="{StaticResource PlayerPillChevron}"/></StackPanel></ToggleButton>
-             <Popup x:Name="PlayerQueueMenu" Style="{StaticResource PlayerMenuPopup}" Opened="PlayerMenuOpened">
+             <local:PlayerMenuPopup x:Name="PlayerQueueMenu" Style="{StaticResource PlayerMenuPopup}" Opened="PlayerMenuOpened"><local:MenuSizer>
               <ContentControl Style="{StaticResource PlayerMenu}" Width="380" PreviewKeyDown="PlayerMenuKeyDown"><StackPanel Margin="6,2,6,2">
                <!-- Switching between the episode list (or no queue) and a queue never interrupts the playing video. -->
                <Border Background="#0F1015" BorderBrush="{StaticResource PlayerLine}" BorderThickness="1" CornerRadius="9" Padding="3" Margin="0,0,0,8">
@@ -696,8 +696,8 @@
                 <Button x:Name="PlayPlayerQueueButton" Content="Play queue from start" Click="PlayPlayerQueue" Style="{StaticResource PlayerOptionButton}"/>
                 <Button x:Name="AddCurrentToQueueButton" Content="Add current video" Click="AddCurrentToQueue" Style="{StaticResource PlayerOptionButton}" Visibility="Collapsed" ToolTip="Add the playing video to the end of this queue"/>
                </WrapPanel>
-              </StackPanel></ContentControl>
-             </Popup>
+              </StackPanel></ContentControl></local:MenuSizer>
+             </local:PlayerMenuPopup>
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0"><Button x:Name="MuteButton" Content="&#xE767;" Click="MutePlayback" Style="{StaticResource PlayerIconButton}" ToolTip="Mute (M)" AutomationProperties.Name="Mute"/><Slider x:Name="Volume" PreviewMouseWheel="VolumeWheel" IsMoveToPointEnabled="True" Style="{StaticResource PlayerSlider}" Width="90" Minimum="0" Maximum="100" Value="80" ValueChanged="VolumeChanged" AutomationProperties.Name="Volume" Margin="2,0,8,0"/><TextBlock x:Name="VolumeText" Text="80%" Foreground="#D9DAE2" Width="38" VerticalAlignment="Center" FontSize="12" Typography.NumeralAlignment="Tabular"/><Button x:Name="FullscreenButton" Content="&#xE740;" Click="Fullscreen" Style="{StaticResource PlayerIconButton}" Margin="0" ToolTip="Fullscreen (F or double-click video)" AutomationProperties.Name="Fullscreen"/></StackPanel>
            </Grid>

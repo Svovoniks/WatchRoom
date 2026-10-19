@@ -128,7 +128,7 @@ public partial class MainWindow : Window
         RegisterName("LibraryScroll", LibraryScroll);
         RoomPage.SizeChanged += (_, _) => AudioTracks.MaxHeight = SubtitleTracks.MaxHeight = QueueList.MaxHeight = Math.Clamp(RoomPage.ActualHeight - 260, 120, 360);
         // Menus are separate popup windows; close them when the bar hides, moves to fullscreen or the player closes.
-        PlaybackControls.IsVisibleChanged += (_, _) => { if (!PlaybackControls.IsVisible) ClosePlayerMenus(); };
+        PlaybackControls.IsVisibleChanged += (_, _) => { if (!PlaybackControls.IsVisible) ClosePlayerMenusNow(); };
         InitializeBackNavigation();
         videoClickDelay.Interval = TimeSpan.FromMilliseconds(GetDoubleClickTime());
         videoClickDelay.Tick += (_, _) =>
@@ -874,7 +874,7 @@ public partial class MainWindow : Window
         ConnectionStatus.Text = "Local playback";
         await PrepareVideoSurface();
         if (closing || generation != loadGeneration || room is not null) return;
-        player.Play(media);
+        player!.Play(media);
     }
     private void RestartLocal(object sender, RoutedEventArgs e)
     {
@@ -1646,8 +1646,8 @@ public partial class MainWindow : Window
         ChatInput.IsEnabled = SendChatButton.IsEnabled = connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.People.Any(p => p.Id == room.Identity?.Peer && p.Approved) == true);
         PlayButton.IsEnabled = StopButton.IsEnabled = canControl && (ready || playingItem is not null && player?.State is VLCState.Stopped or VLCState.Ended);
         Timeline.IsEnabled = canControl && player?.Length > 0;
-        NextButton.Visibility = PreviousButton.Visibility = HasPlaybackQueue || ShowingEpisodeList ? Visibility.Visible : Visibility.Collapsed;
-        NextButton.ToolTip = ShowingEpisodeList ? "Next episode (N)" : "Next in queue (N)";
+        // Previous and Next stay in the bar; they are disabled when there is nothing to step to.
+        NextButton.ToolTip = ShowingEpisodeList ? "Next episode (N)" : HasPlaybackQueue ? "Next in queue (N)" : "Next video (N)";
         PreviousButton.ToolTip = ShowingEpisodeList ? "Previous episode (P)" : "Previous video (P)";
         RefreshEpisodeEndAction();
         var canManageEpisodes = room is null || connectedRoom && room!.Identity?.Host == true;
@@ -1705,7 +1705,7 @@ public partial class MainWindow : Window
     private void SetFullscreen(bool value)
     {
         if (fullscreen == value || RoomPage.Visibility != Visibility.Visible) return;
-        ClosePlayerMenus();
+        ClosePlayerMenusNow();
         var handle = new WindowInteropHelper(this).Handle;
         if (value)
         {
@@ -1742,6 +1742,8 @@ public partial class MainWindow : Window
     private void ToggleRoomPanel(object sender, RoutedEventArgs e) { roomPanelVisible = !roomPanelVisible; if (roomPanelVisible) { RoomTabs.SelectedIndex = unreadChat > 0 ? 1 : RoomTabs.SelectedIndex; ClearChatBubbles(); } ApplyPlayerLayout(); }
     private bool PlayerMenuOpen => AudioMenu.IsOpen || SubtitleMenu.IsOpen || PlayerQueueMenu.IsOpen;
     private void ClosePlayerMenus() => AudioMenu.IsOpen = SubtitleMenu.IsOpen = PlayerQueueMenu.IsOpen = false;
+    // Skips the fade when the bar itself hides or the window changes size.
+    private void ClosePlayerMenusNow() { AudioMenu.CloseNow(); SubtitleMenu.CloseNow(); PlayerQueueMenu.CloseNow(); }
     private void PlayerMenuOpened(object sender, EventArgs e)
     {
         ShowPlayerControls();

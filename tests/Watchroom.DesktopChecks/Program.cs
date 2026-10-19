@@ -442,6 +442,28 @@ static class Program
             "No queue preserves saved queue contents");
         check(store.Setting("activeQueue") == "" && Wire.Read<string[]>(store.Setting("queue")!).Length == 0,
             "No queue persists independently of saved queues");
+        var lastQueue = store.Setting("lastQueue"); store.Setting("lastQueue", "");
+        void Drain() { var frame = new DispatcherFrame(); Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, () => frame.Continue = false); Dispatcher.PushFrame(frame); }
+        var queueMenu = (PlayerMenuPopup)window.FindName("PlayerQueueMenu");
+        Call("ShowPage", "Room"); Call("ShowPlayerControls");
+        for (var wait = 0; wait < 200 && !queueMenu.IsLoaded; wait++) { Drain(); Thread.Sleep(10); }
+        queueMenu.IsOpen = true; Drain();
+        var sizer = (MenuSizer)queueMenu.Child; var menuCard = (FrameworkElement)sizer.Child;
+        for (var wait = 0; wait < 200 && menuCard.ActualHeight == 0; wait++) { Drain(); Thread.Sleep(10); }
+        var episodesHeight = menuCard.ActualHeight;
+        Call("QueueModeOnClicked", window, new RoutedEventArgs());
+        Drain(); // Anything queued to open the picker has run by now.
+        var resizeStarted = sizer.IsResizing;
+        for (var wait = 0; wait < 50 && !resizeStarted; wait++) { Drain(); Thread.Sleep(10); resizeStarted = sizer.IsResizing; }
+        for (var wait = 0; wait < 200 && sizer.IsResizing; wait++) { Drain(); Thread.Sleep(10); }
+        menuCard.Measure(new Size(menuCard.ActualWidth + menuCard.Margin.Left + menuCard.Margin.Right, double.PositiveInfinity));
+        check((resizeStarted || !SystemParameters.ClientAreaAnimation) && !sizer.IsResizing && double.IsNaN(menuCard.Height) &&
+            Math.Abs(menuCard.ActualHeight - (menuCard.DesiredSize.Height - menuCard.Margin.Top - menuCard.Margin.Bottom)) < 1 && sizer.ActualHeight >= menuCard.DesiredSize.Height - 1,
+            $"switching modes eases the queue menu from {episodesHeight:F0} to its new height inside a popup that holds it");
+        check(queueMenu.IsOpen && !picker.IsDropDownOpen && ((FrameworkElement)window.FindName("QueuePickerRow")).Visibility == Visibility.Visible,
+            "switching to queue mode shows the queue picker without opening it");
+        queueMenu.CloseNow(); Call("ShowPage", "Queues");
+        Call("QueueModeOffClicked", window, new RoutedEventArgs()); store.Setting("lastQueue", lastQueue ?? "");
         var card = new LibraryCardView(new(media[0].Title, "", null, media[0], "movie"));
         var cards = (ObservableCollection<LibraryCardView>)Field("libraryCards"); cards.Add(card);
         var watchedButton = new System.Windows.Controls.Button { DataContext = card };

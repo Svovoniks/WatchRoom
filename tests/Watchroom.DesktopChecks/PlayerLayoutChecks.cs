@@ -61,6 +61,8 @@ static class PlayerLayoutChecks
         Invoke(window, "UpdateSessionControls");
         Check(episodeButton.Visibility == Visibility.Visible && episodeButton.Content.ToString() == "Finish ✓",
             "the final episode has a persistent Finish action");
+        Check(previousButton.Visibility == Visibility.Visible && nextButton.Visibility == Visibility.Visible && !previousButton.IsEnabled && !nextButton.IsEnabled,
+            "previous and next stay in the player bar, disabled, when there is nothing to step to");
         Check(IsDescendant(episodeButton, (Border)window.FindName("PlaybackControls")), "episode action belongs to the bottom player bar");
         void Layout(int width, int height)
         {
@@ -219,7 +221,7 @@ static class PlayerLayoutChecks
             caption.Background is SolidColorBrush { Color: var captionColor } && captionColor == Color.FromRgb(0x17, 0x18, 0x1F),
             "the docked player keeps a dark caption row that matches its header");
         window.Close();
-        Console.WriteLine("48 player layout and control checks passed.");
+        Console.WriteLine("49 player layout and control checks passed.");
     }
     static bool IsDescendant(DependencyObject child, DependencyObject parent)
     {

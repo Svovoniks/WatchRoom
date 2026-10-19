@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Watchroom.Core;
@@ -42,6 +43,7 @@ public partial class MainWindow
         foreach (var (pill, menu) in new[] { (AudioPill, AudioMenu), (SubtitlePill, SubtitleMenu), (QueuePill, PlayerQueueMenu) })
         {
             menu.PlacementTarget = pill;
+            menu.Dismissing += (_, _) => OpenPillUnderPointer(pill);
             pill.SetBinding(System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, new Binding(nameof(System.Windows.Controls.Primitives.Popup.IsOpen)) { Source = menu, Mode = BindingMode.TwoWay });
         }
         foreach (var (text, detail, list, fallback) in new[] { (AudioPillText, AudioPillDetail, AudioTracks, "Audio"), (SubtitlePillText, SubtitlePillDetail, SubtitleTracks, "Subtitles") })
@@ -52,6 +54,34 @@ public partial class MainWindow
         // Closing the menu without choosing a queue returns the switch to Episodes / Off.
         PlayerQueueMenu.Closed += (_, _) => { if (queueModeRequested && !HasPlaybackQueue) { queueModeRequested = false; UpdateSessionControls(); } };
     }
+
+    // An open menu holds the mouse, so the press that dismisses it never reaches another pill. When that
+    // press lands on a different pill, open its menu once the button is released over it, as a normal
+    // click would; opening on the press would let the release dismiss the new menu. The release may be
+    // delivered to the closing menu or to no WPF element at all, so watch the button itself.
+    private DispatcherTimer? pillReleaseWatch;
+    private void OpenPillUnderPointer(System.Windows.Controls.Primitives.ToggleButton closing)
+    {
+        if (Mouse.LeftButton != MouseButtonState.Pressed) return;
+        var pill = new[] { AudioPill, SubtitlePill, QueuePill }.FirstOrDefault(candidate =>
+            candidate != closing && candidate.IsVisible && candidate.IsEnabled && new Rect(candidate.RenderSize).Contains(Mouse.GetPosition(candidate)));
+        if (pill is null) return;
+        pillReleaseWatch?.Stop();
+        var button = SystemParameters.SwapButtons ? 0x02 : 0x01; // The primary button, as a physical key.
+        var deadline = Environment.TickCount64 + 3000;
+        var watch = pillReleaseWatch = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(15) };
+        watch.Tick += (_, _) =>
+        {
+            if ((GetAsyncKeyState(button) & 0x8000) != 0 && Environment.TickCount64 < deadline) return;
+            watch.Stop();
+            if (Environment.TickCount64 >= deadline || !pill.IsVisible || !GetCursorPos(out var cursor)) return;
+            if (new Rect(pill.RenderSize).Contains(pill.PointFromScreen(new Point(cursor.X, cursor.Y)))) pill.IsChecked = true;
+        };
+        watch.Start();
+    }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetCursorPos(out ScreenPoint point);
+    private struct ScreenPoint { public int X, Y; }
 
     // Row positions, built once per list so a long season's rows don't each scan the whole list as they're realized.
     private (object? Source, Dictionary<object, int> Positions) queueRowPositions = (null, new(ReferenceEqualityComparer.Instance));
@@ -123,11 +153,10 @@ public partial class MainWindow
     {
         if (!CanEditQueue() || HasPlaybackQueue) { UpdateSessionControls(); return; }
         queueModeRequested = true;
-        // Bring back the last queue used; otherwise let the user pick one.
+        // Bring back the last queue used; otherwise show the picker for the user to open.
         var last = savedQueues.FirstOrDefault(saved => saved.Id == library.Setting("lastQueue"));
         if (last is not null && ResolveQueue(last).Any()) { SwitchToQueue(last); return; }
         RefreshQueuePickers(); UpdateSessionControls();
-        Dispatcher.BeginInvoke(() => PlayerQueuePicker.IsDropDownOpen = PlayerQueueMenu.IsOpen, DispatcherPriority.Input);
     }
     private void AddEpisodeToQueue(object sender, RoutedEventArgs e)
     {

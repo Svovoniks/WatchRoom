@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Watchroom.Desktop;
 
 static class PlayerInteractionChecks
@@ -36,11 +37,40 @@ static class PlayerInteractionChecks
         var audioPill = (System.Windows.Controls.Primitives.ToggleButton)window.FindName("AudioPill");
         audioPill.IsChecked = true;
         check(audioMenu.IsOpen && !audioPill.IsHitTestVisible, "the audio pill opens its menu and ignores clicks until it closes");
+        void PumpUntil(Func<bool> done)
+        {
+            var until = Environment.TickCount64 + 2000;
+            while (!done() && Environment.TickCount64 < until)
+            {
+                var frame = new DispatcherFrame(); Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, () => frame.Continue = false);
+                Dispatcher.PushFrame(frame); Thread.Sleep(10);
+            }
+        }
+        var menuContent = (UIElement)((ContentControl)((Decorator)audioMenu.Child).Child).Content;
+        bool Settled() => audioMenu.Child.Opacity > 0.999 && audioMenu.Child.Clip is null && menuContent.Opacity > 0.999 && menuContent.RenderTransform.Value.IsIdentity;
+        PumpUntil(Settled);
+        check(Settled(), "an opened track menu finishes growing out of its pill fully opaque and unclipped");
         typeof(MainWindow).GetField("lastPlayerInteraction", flags)!.SetValue(window, Environment.TickCount64 - 3000);
         Call("PlaybackTick");
         check(controls.Visibility == Visibility.Visible, "an open track menu keeps fullscreen controls visible");
         Call("ClosePlayerMenus");
-        check(!audioMenu.IsOpen && audioPill.IsChecked == false && audioPill.IsHitTestVisible, "closing player menus closes the track menu and resets its pill");
+        PumpUntil(() => !audioMenu.IsOpen); // The menu fades out before its popup closes.
+        check(!audioMenu.IsOpen && audioPill.IsChecked == false && audioPill.IsHitTestVisible,
+            "closing player menus shrinks the track menu into its pill, then closes it and resets its pill");
+        var subtitleMenu = (System.Windows.Controls.Primitives.Popup)window.FindName("SubtitleMenu");
+        var queueMenu = (System.Windows.Controls.Primitives.Popup)window.FindName("PlayerQueueMenu");
+        IInputElement? Root(System.Windows.Controls.Primitives.Popup menu) => PresentationSource.FromVisual(menu.Child)?.RootVisual as IInputElement;
+        audioMenu.IsOpen = true; PumpUntil(Settled);
+        audioMenu.SetCurrentValue(System.Windows.Controls.Primitives.Popup.IsOpenProperty, false); // An outside click starts its fade.
+        subtitleMenu.IsOpen = true;
+        var tookMouse = audioMenu.IsOpen && Root(subtitleMenu) is { } subtitleRoot && Mouse.Captured == subtitleRoot;
+        PumpUntil(() => !audioMenu.IsOpen);
+        check(tookMouse && subtitleMenu.IsOpen && Mouse.Captured == Root(subtitleMenu),
+            "a menu opened while another fades out takes the mouse at once, so an outside click still closes it");
+        queueMenu.IsOpen = true;
+        PumpUntil(() => !subtitleMenu.IsOpen);
+        check(queueMenu.IsOpen && !subtitleMenu.IsOpen && !audioMenu.IsOpen, "opening a player menu folds away the one that was open");
+        Call("ClosePlayerMenus"); PumpUntil(() => !queueMenu.IsOpen);
         typeof(MainWindow).GetField("lastPlayerInteraction", flags)!.SetValue(window, Environment.TickCount64 - 3000);
         Call("PlaybackTick");
         check(controls.Visibility == Visibility.Collapsed && header.Visibility == Visibility.Collapsed,
