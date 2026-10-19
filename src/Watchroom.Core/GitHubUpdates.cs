@@ -6,6 +6,22 @@ using System.Text.RegularExpressions;
 namespace Watchroom.Core;
 
 public sealed record AppUpdate(Version Version, string Name, Uri DownloadUrl, long Size, string Sha256);
+// The installer updates the folder it is given and re-registers the installation there, so only the
+// installed copy may update itself. A build or copied folder would otherwise take over the registration.
+public static class UpdateLocation
+{
+    public static string? InstallTarget(string running, string? registered, string defaultDirectory)
+    {
+        try
+        {
+            static string Normal(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            var here = Normal(running);
+            var installed = Normal(string.IsNullOrWhiteSpace(registered) ? defaultDirectory : registered);
+            return string.Equals(here, installed, StringComparison.OrdinalIgnoreCase) ? here : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return null; }
+    }
+}
 public sealed class GitHubUpdates(HttpClient http, string repository)
 {
     private string Repository => Regex.IsMatch(repository, @"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") ? repository : throw new ArgumentException("Invalid update repository.");

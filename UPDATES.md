@@ -228,9 +228,12 @@ different release.
 **Update** streams the installer into the profile's `updates` folder, reports
 progress, and verifies its length and GitHub-provided SHA-256 digest. Failed or
 interrupted downloads never launch an installer. After successful verification,
-the per-user Inno Setup installer updates the running app's directory, and
-reopens Watchroom. Library data, rooms, queues, and credentials remain outside the
-installation directory. Updating closes playback and disconnects the current room.
+the per-user Inno Setup installer updates the installed app's directory, and
+reopens Watchroom. Only the copy running from the installer-registered folder (or
+the default folder when none is registered) updates itself; development builds and
+copied folders disable update checks so they cannot take over the installation.
+Library data, rooms, queues, and credentials remain outside the installation
+directory. Updating closes playback and disconnects the current room.
 Installation failures are handled by Inno Setup; its setup log is available for
 diagnosis. The binaries currently have no publisher code-signing certificate.
 Checksums protect against transfer corruption, not a compromised GitHub account.

@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using Watchroom.Core;
 
 namespace Watchroom.Desktop;
@@ -13,21 +14,35 @@ public partial class MainWindow
     private static readonly HttpClient updateHttp = new() { Timeout = TimeSpan.FromMinutes(20) };
     private AppUpdate? availableUpdate;
     private bool checkingUpdates, installingUpdate;
+    private string? updateDirectory;
     private static Version InstalledVersion => new(Assembly.GetExecutingAssembly().GetName().Version!.ToString(3));
     private static string UpdateRepository => Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>().First(x => x.Key == "UpdateRepository").Value!;
     private void InitializeUpdates()
     {
         UpdateStatus.Text = $"Installed version {InstalledVersion}";
         AutoCheckUpdates.IsChecked = library.Setting("autoUpdates") != "false";
+        updateDirectory = UpdateLocation.InstallTarget(AppContext.BaseDirectory, RegisteredInstall(),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Watchroom"));
+        if (updateDirectory is null)
+        {
+            UpdateStatus.Text = $"Version {InstalledVersion} · This copy runs outside the installed app, so it doesn't update itself.";
+            AutoCheckUpdates.IsEnabled = CheckUpdatesButton.IsEnabled = false; return;
+        }
         updateTimer.Tick += async (_, _) => { updateTimer.Interval = TimeSpan.FromHours(6); if (AutoCheckUpdates.IsChecked == true) await CheckAppUpdates(false); };
         if (Environment.GetEnvironmentVariable("WATCHROOM_DISABLE_UPDATES") != "1") updateTimer.Start();
+    }
+    private static string? RegisteredInstall()
+    {
+        const string key = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\{90B3BA58-BBC8-4993-A0EA-25C68D8B1DA6}_is1";
+        try { using var entry = Registry.CurrentUser.OpenSubKey(key) ?? Registry.LocalMachine.OpenSubKey(key); return entry?.GetValue("InstallLocation") as string; }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException) { return null; }
     }
     private void AutoUpdatesChanged(object sender, RoutedEventArgs e)
     { if (library is not null) library.Setting("autoUpdates", AutoCheckUpdates.IsChecked == true ? "true" : "false"); }
     private async void CheckUpdatesClick(object sender, RoutedEventArgs e) => await CheckAppUpdates(true);
     private async Task CheckAppUpdates(bool manual)
     {
-        if (checkingUpdates || installingUpdate || closing) return;
+        if (checkingUpdates || installingUpdate || closing || updateDirectory is null) return;
         checkingUpdates = true; CheckUpdatesButton.IsEnabled = false;
         if (manual) UpdateStatus.Text = "Checking GitHub releases…";
         try
@@ -61,7 +76,7 @@ public partial class MainWindow
     { if (installingUpdate) return; library.Setting("dismissedUpdate", availableUpdate?.Version.ToString() ?? ""); UpdateCard.Visibility = Visibility.Collapsed; }
     private async void InstallUpdate(object sender, RoutedEventArgs e)
     {
-        if (availableUpdate is null || installingUpdate) return;
+        if (availableUpdate is null || installingUpdate || updateDirectory is null) return;
         installingUpdate = true; InstallUpdateButton.IsEnabled = false; DismissUpdateButton.IsEnabled = false;
         UpdateDownloadProgress.Visibility = Visibility.Visible;
         try
@@ -73,7 +88,7 @@ public partial class MainWindow
             var start = new ProcessStartInfo(installer) { UseShellExecute = false };
             UpdateDownloadProgress.IsIndeterminate = true;
             UpdateCardStatus.Text = "Installing and restarting Watchroom… The installer will show progress.";
-            foreach (var argument in new[] { "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/WATCHROOMUPDATE=1", "/LOG=" + Path.Combine(App.DataDirectory, "updates", "install.log"), "/DIR=" + AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar) }) start.ArgumentList.Add(argument);
+            foreach (var argument in new[] { "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/WATCHROOMUPDATE=1", "/LOG=" + Path.Combine(App.DataDirectory, "updates", "install.log"), "/DIR=" + updateDirectory }) start.ArgumentList.Add(argument);
             if (Process.Start(start) is null) throw new IOException("Could not start the installer.");
             Close();
         }

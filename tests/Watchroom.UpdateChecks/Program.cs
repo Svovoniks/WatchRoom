@@ -40,6 +40,12 @@ try
     handler.Status = HttpStatusCode.NotFound; Check(await updates.CheckAsync(new(0, 2, 0), default) is null, "no published release is handled normally");
     using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
     try { await updates.DownloadAsync(update!, directory, null, cancellation.Token); throw new Exception("Cancellation ignored"); } catch (OperationCanceledException) { Check(true, "shutdown cancels downloads"); }
+    var installed = Path.Combine(directory, "Programs", "Watchroom"); var build = Path.Combine(directory, "src", "bin", "Release");
+    Check(UpdateLocation.InstallTarget(installed + Path.DirectorySeparatorChar, installed.ToUpperInvariant(), build) == installed, "the registered installation updates itself in place");
+    Check(UpdateLocation.InstallTarget(build, installed, installed) is null, "a build folder never installs updates over itself");
+    Check(UpdateLocation.InstallTarget(installed, null, installed) == installed && UpdateLocation.InstallTarget(build, " ", installed) is null,
+        "without a registration only the default install folder updates");
+    Check(UpdateLocation.InstallTarget(installed, "bad\0path", installed) is null, "an unreadable registration disables self-updates");
     Console.WriteLine($"{checks} updater checks passed.");
 }
 finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
