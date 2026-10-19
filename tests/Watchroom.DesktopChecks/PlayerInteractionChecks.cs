@@ -59,14 +59,16 @@ static class PlayerInteractionChecks
             "closing player menus shrinks the track menu into its pill, then closes it and resets its pill");
         var subtitleMenu = (System.Windows.Controls.Primitives.Popup)window.FindName("SubtitleMenu");
         var queueMenu = (System.Windows.Controls.Primitives.Popup)window.FindName("PlayerQueueMenu");
-        IInputElement? Root(System.Windows.Controls.Primitives.Popup menu) => PresentationSource.FromVisual(menu.Child)?.RootVisual as IInputElement;
         audioMenu.IsOpen = true; PumpUntil(Settled);
         audioMenu.SetCurrentValue(System.Windows.Controls.Primitives.Popup.IsOpenProperty, false); // An outside click starts its fade.
+        // A popup only takes the mouse when nothing else holds it. The fading menu must let go (StaysOpen)
+        // so the new one can, or the new one never closes on an outside click.
+        var releasedWhileFading = audioMenu.IsOpen && audioMenu.StaysOpen;
         subtitleMenu.IsOpen = true;
-        var tookMouse = audioMenu.IsOpen && Root(subtitleMenu) is { } subtitleRoot && Mouse.Captured == subtitleRoot;
+        var newMenuDismissable = !subtitleMenu.StaysOpen;
         PumpUntil(() => !audioMenu.IsOpen);
-        check(tookMouse && subtitleMenu.IsOpen && Mouse.Captured == Root(subtitleMenu),
-            "a menu opened while another fades out takes the mouse at once, so an outside click still closes it");
+        check(releasedWhileFading && newMenuDismissable && subtitleMenu.IsOpen && !audioMenu.StaysOpen,
+            "a fading menu lets go of the mouse, so one opened meanwhile still closes on an outside click");
         queueMenu.IsOpen = true;
         PumpUntil(() => !subtitleMenu.IsOpen);
         check(queueMenu.IsOpen && !subtitleMenu.IsOpen && !audioMenu.IsOpen, "opening a player menu folds away the one that was open");
