@@ -63,12 +63,13 @@ static class PlayerInteractionChecks
         audioMenu.SetCurrentValue(System.Windows.Controls.Primitives.Popup.IsOpenProperty, false); // An outside click starts its fade.
         // A popup only takes the mouse when nothing else holds it. The fading menu must let go (StaysOpen)
         // so the new one can, or the new one never closes on an outside click.
-        var releasedWhileFading = audioMenu.IsOpen && audioMenu.StaysOpen;
+        // Without Windows animation effects (as on build servers) the menu closes at once instead of fading.
+        var releasedWhileFading = SystemParameters.ClientAreaAnimation ? audioMenu.IsOpen && audioMenu.StaysOpen : !audioMenu.IsOpen;
         subtitleMenu.IsOpen = true;
         var newMenuDismissable = !subtitleMenu.StaysOpen;
         PumpUntil(() => !audioMenu.IsOpen);
         check(releasedWhileFading && newMenuDismissable && subtitleMenu.IsOpen && !audioMenu.StaysOpen,
-            "a fading menu lets go of the mouse, so one opened meanwhile still closes on an outside click");
+            $"a fading menu lets go of the mouse, so one opened meanwhile still closes on an outside click (animations {(SystemParameters.ClientAreaAnimation ? "on" : "off")})");
         queueMenu.IsOpen = true;
         PumpUntil(() => !subtitleMenu.IsOpen);
         check(queueMenu.IsOpen && !subtitleMenu.IsOpen && !audioMenu.IsOpen, "opening a player menu folds away the one that was open");
