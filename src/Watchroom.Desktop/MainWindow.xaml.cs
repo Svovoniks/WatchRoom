@@ -44,7 +44,7 @@ public partial class MainWindow : Window
     private readonly LibraryStore library;
     private readonly ConcurrentDictionary<string, MediaItem> libraryUpdates = new();
     private readonly LibraryCardCollection libraryCards = [];
-    private readonly EpisodeArtwork episodeArtwork = new();
+    private readonly EpisodeArtwork episodeArtwork;
     private readonly HashSet<string> episodeArtworkRequests = [];
     private bool libraryViewDirty;
     private bool libraryLoaded;
@@ -124,6 +124,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        episodeArtwork = new(CaptureEpisodeFrame);
         InitializeComponent();
         RegisterName("LibraryScroll", LibraryScroll);
         RoomPage.SizeChanged += (_, _) => AudioTracks.MaxHeight = SubtitleTracks.MaxHeight = QueueList.MaxHeight = Math.Clamp(RoomPage.ActualHeight - 260, 120, 360);
@@ -1129,15 +1130,15 @@ public partial class MainWindow : Window
         if (view.IsRemote || !view.IsEpisode) return;
         var item = view.Card.Media;
         var token = savedMetadataToken;
-        var (ffmpeg, options) = await Task.Run(() =>
+        var options = await Task.Run(() =>
         {
             var options = MetadataOptions.Load(library);
-            return (SavedFfmpeg, SavedAutoArtwork ? options : options with { Providers = [] });
+            return SavedAutoArtwork ? options : options with { Providers = [] };
         });
         if (closing || !episodeArtworkRequests.Add(item.Id + ":" + item.EpisodeSource + ":" + LibraryIdentity.Hash(token) + ":" + string.Join(',', options.ProviderOrder))) return;
         try
         {
-            var improved = await Task.Run(() => episodeArtwork.ImproveAsync(item, App.DataDirectory, token, ffmpeg, lifetime.Token, options));
+            var improved = await Task.Run(() => episodeArtwork.ImproveAsync(item, App.DataDirectory, token, lifetime.Token, options));
             if (closing || improved == item) return;
             var current = await Task.Run(() => library.Get(item.Id));
             if (current is null || current.EpisodeSource != item.EpisodeSource || current.Path != item.Path ||
@@ -1148,6 +1149,13 @@ public partial class MainWindow : Window
                 GeneratedEpisodePoster = improved.GeneratedEpisodePoster });
         }
         catch (Exception ex) when (ex is OperationCanceledException or IOException or HttpRequestException or UnauthorizedAccessException) { }
+    }
+    private async Task<bool> CaptureEpisodeFrame(string video, double seconds, string output, CancellationToken ct)
+    {
+        // Native libraries load under the loader lock; wait until the player has started so startup stays smooth.
+        await playerInitialized.Task.WaitAsync(ct);
+        try { return await VideoFrames.CaptureAsync(video, seconds, output, ct); }
+        catch (VLCException) { return false; }
     }
     private async Task ApplyScheduledPlayback(RoomClient client, PlaybackState state)
     {

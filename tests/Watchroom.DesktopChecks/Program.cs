@@ -12,6 +12,10 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        if (args.FirstOrDefault() == "--video-frames")
+        {
+            VideoFrameChecks.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? Path.Combine("artifacts", "video-frames-" + Guid.NewGuid().ToString("N")))).GetAwaiter().GetResult(); return;
+        }
         if (args.FirstOrDefault() == "--metadata-probe") { MetadataProbe.Run(args[1], args[2]).GetAwaiter().GetResult(); return; }
         if (args.FirstOrDefault() == "--remaining-audit") { MetadataProbe.Audit(args[1], args[2], args.Contains("--apply")).GetAwaiter().GetResult(); return; }
         if (args.FirstOrDefault() == "--render-screens")

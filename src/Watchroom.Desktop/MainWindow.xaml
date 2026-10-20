@@ -523,10 +523,6 @@
        <TextBlock x:Name="StreamingBufferError" Style="{StaticResource FieldError}" AutomationProperties.LiveSetting="Polite"/>
        <TextBlock Text="Default: 30 seconds. Playback starts as soon as a few seconds are ready; Watchroom then keeps downloading up to this much video ahead while you watch. Applies to the next streamed video. Larger buffers use more memory but do not delay starting or seeking. During a brief host connection interruption, playback continues from buffered video for up to this time, then pauses if recovery has not finished. Actual coverage depends on available bandwidth." Style="{StaticResource Hint}"/>
       </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
-       <TextBlock Text="FFmpeg executable (optional)" Style="{StaticResource FieldLabel}"/><TextBox x:Name="FfmpegBox" AutomationProperties.Name="FFmpeg executable path" ToolTip="Used to generate episode thumbnails" Margin="0,6,0,4"/>
-       <TextBlock Text="Used to generate episode thumbnails from your videos." Style="{StaticResource Hint}"/>
-      </StackPanel></Border>
      </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="AppearancePreferences" Tag="Appearance" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,0,12">
       <Border Style="{StaticResource Card}"><DockPanel>

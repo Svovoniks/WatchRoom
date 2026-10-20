@@ -1,18 +1,19 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Watchroom.Core;
 
+/// <summary>Writes one JPEG frame of <paramref name="video"/> at <paramref name="seconds"/>; false when no frame was decoded.</summary>
+public delegate Task<bool> FrameCapture(string video, double seconds, string output, CancellationToken ct);
+
 /// <summary>Lazy artwork upgrades for a visited season; never scans the entire library.</summary>
-public sealed class EpisodeArtwork
+public sealed class EpisodeArtwork(FrameCapture? capture = null)
 {
     private readonly SemaphoreSlim workers = new(2);
     private readonly ConcurrentDictionary<string, Lazy<Task<MetadataSeason?>>> seasons = new();
     private readonly ConcurrentDictionary<string, Lazy<Task<string?>>> mazeImages = new();
 
-    public async Task<MediaItem> ImproveAsync(MediaItem item, string directory, string? token, string? ffmpeg, CancellationToken ct, MetadataOptions? options = null)
+    public async Task<MediaItem> ImproveAsync(MediaItem item, string directory, string? token, CancellationToken ct, MetadataOptions? options = null)
     {
         options ??= new();
         if (item.Series is null || item.IsVirtual || item.MetadataLocked || LibraryIdentity.Locked(item, "EpisodePoster")) return item;
@@ -53,8 +54,8 @@ public sealed class EpisodeArtwork
                 }
                 catch (Exception ex) when (ex is HttpRequestException or IOException or System.Text.Json.JsonException or OperationCanceledException && !ct.IsCancellationRequested) { }
             }
-            if (ArtworkCache.IsUsable(item.EpisodePoster) || ArtworkCache.IsUsable(item.GeneratedEpisodePoster) || !item.Available || !File.Exists(item.Path)) return item;
-            var thumbnail = await GenerateAsync(item, directory, ffmpeg, ct);
+            if (ArtworkCache.IsUsable(item.EpisodePoster) || ArtworkCache.IsUsable(item.GeneratedEpisodePoster) || !item.Available || capture is null || !File.Exists(item.Path)) return item;
+            var thumbnail = await GenerateAsync(item, directory, capture, ct);
             return thumbnail is null ? item : item with { GeneratedEpisodePoster = thumbnail };
         }
         finally { workers.Release(); }
@@ -76,7 +77,7 @@ public sealed class EpisodeArtwork
             image.TryGetProperty("original", out var original) ? original.GetString() : null;
     }
 
-    public static async Task<string?> GenerateAsync(MediaItem item, string directory, string? ffmpeg, CancellationToken ct)
+    public static async Task<string?> GenerateAsync(MediaItem item, string directory, FrameCapture capture, CancellationToken ct)
     {
         var file = new FileInfo(item.Path);
         if (!file.Exists) return null;
@@ -88,21 +89,11 @@ public sealed class EpisodeArtwork
         {
             var temporary = path + "." + Guid.NewGuid().ToString("N") + ".jpg";
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(20));
-            using var process = new Process { StartInfo = new ProcessStartInfo(string.IsNullOrWhiteSpace(ffmpeg) ? "ffmpeg" : ffmpeg) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true } };
-            foreach (var arg in new[] { "-nostdin", "-v", "error", "-ss", seconds.ToString(CultureInfo.InvariantCulture), "-i", item.Path, "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "3", "-y", temporary }) process.StartInfo.ArgumentList.Add(arg);
             try
             {
-                process.Start();
-                var errors = process.StandardError.ReadToEndAsync(timeout.Token); var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
-                await process.WaitForExitAsync(timeout.Token); await Task.WhenAll(errors, output);
-                if (process.ExitCode == 0 && ArtworkCache.IsUsable(temporary)) { File.Move(temporary, path, true); return path; }
+                if (await capture(item.Path, seconds, temporary, timeout.Token) && ArtworkCache.IsUsable(temporary)) { File.Move(temporary, path, true); return path; }
             }
-            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or OperationCanceledException)
-            {
-                try { if (!process.HasExited) process.Kill(true); } catch (InvalidOperationException) { }
-                ct.ThrowIfCancellationRequested();
-                if (ex is System.ComponentModel.Win32Exception) return null;
-            }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException) { ct.ThrowIfCancellationRequested(); }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
         return null;

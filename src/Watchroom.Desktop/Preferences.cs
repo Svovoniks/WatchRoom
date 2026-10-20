@@ -33,7 +33,6 @@ public partial class MainWindow
         (PreferenceSnapshot() != preferencesBaseline || MetadataToken.Password != savedMetadataToken);
     private string SavedServerAddress => library.Setting("server") ?? "https://watchroom-rooms.svovoniks.chatgpt.site";
     private string SavedDisplayName => library.Setting("name") ?? Environment.UserName;
-    private string SavedFfmpeg => library.Setting("ffmpeg") ?? "";
     private bool SavedAutoArtwork => library.Setting("artwork") != "false";
     private int SavedStreamingBufferSeconds => StreamingBufferOptions.Load(library);
 
@@ -49,7 +48,7 @@ public partial class MainWindow
         MetadataProviders.ItemsSource = providerChoices;
         SubtitleLanguageRules.ItemsSource = subtitleRuleDrafts;
         LoadPreferences();
-        foreach (var box in new[] { DisplayNameBox, ServerBox, FfmpegBox, MetadataRefreshDays, StreamingBufferSeconds }) box.TextChanged += PreferencesChanged;
+        foreach (var box in new[] { DisplayNameBox, ServerBox, MetadataRefreshDays, StreamingBufferSeconds }) box.TextChanged += PreferencesChanged;
         PreferredAudioLanguages.TextChanged += PreferencesChanged;
         PreferredSubtitleLanguages.TextChanged += PreferencesChanged;
         foreach (var box in new[] { AutoArtwork, ImportMissing, ImportUpcoming, SaveNfo, DisplaySpecials, GroupShows, NeverRefresh })
@@ -64,7 +63,7 @@ public partial class MainWindow
         loadingPreferences = true;
         try
         {
-            DisplayNameBox.Text = SavedDisplayName; ServerBox.Text = SavedServerAddress; FfmpegBox.Text = SavedFfmpeg;
+            DisplayNameBox.Text = SavedDisplayName; ServerBox.Text = SavedServerAddress;
             AutoArtwork.IsChecked = SavedAutoArtwork;
             StreamingBufferSeconds.Text = SavedStreamingBufferSeconds.ToString(CultureInfo.InvariantCulture);
             MetadataToken.Password = savedMetadataToken;
@@ -101,7 +100,7 @@ public partial class MainWindow
     {
         bufferSeconds = StreamingBufferSeconds.Text, audio = PreferredAudioLanguages.Text, subtitles = PreferredSubtitleLanguages.Text,
         subtitleRules = subtitleRuleDrafts.Select(rule => new { rule.AudioLanguage, rule.SubtitleLanguages }).ToArray(),
-        name = DisplayNameBox.Text, server = ServerBox.Text, ffmpeg = FfmpegBox.Text, artwork = AutoArtwork.IsChecked,
+        name = DisplayNameBox.Text, server = ServerBox.Text, artwork = AutoArtwork.IsChecked,
         providers = providerChoices.Select(p => new { p.Id, p.Enabled }).ToArray(), language = MetadataLanguage.SelectedValue,
         country = MetadataCountry.SelectedValue, days = MetadataRefreshDays.Text, never = NeverRefresh.IsChecked,
         missing = ImportMissing.IsChecked, upcoming = ImportUpcoming.IsChecked, nfo = SaveNfo.IsChecked,
@@ -205,7 +204,7 @@ public partial class MainWindow
             DisplaySpecials.IsChecked == true, GroupShows.IsChecked == true).Save(library);
         displaySpecialsWithinSeasons = DisplaySpecials.IsChecked == true;
         library.Setting("name", DisplayNameBox.Text.Trim()); library.Setting("server", ServerBox.Text.Trim().TrimEnd('/'));
-        library.Setting("artwork", AutoArtwork.IsChecked == true ? "true" : "false"); library.Setting("ffmpeg", FfmpegBox.Text.Trim());
+        library.Setting("artwork", AutoArtwork.IsChecked == true ? "true" : "false");
         preferencesBaseline = PreferenceSnapshot();
         SavePreferencesButton.IsEnabled = CancelPreferencesButton.IsEnabled = false;
         PreferencesStatus.Text = "Settings saved.";
