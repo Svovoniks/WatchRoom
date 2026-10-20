@@ -49,6 +49,38 @@ static class LibraryIngestionFixture
         await scan; store.MediaSaved -= OnSave;
         check(notified == 2 && LibraryCatalog.Browse(store.All()).Count == 1, "incremental scan groups both episodes into one show");
 
+        // A moved or renamed file keeps its record, playback progress and metadata.
+        var moveRoot = Path.Combine(directory, "move-media"); var oldFolder = Path.Combine(moveRoot, "Moved Show");
+        Directory.CreateDirectory(oldFolder);
+        var oldPath = Path.Combine(oldFolder, "Moved Show S01E01.mkv"); await File.WriteAllBytesAsync(oldPath, [1, 2, 3]);
+        var moveStore = new LibraryStore(Path.Combine(directory, "move-db"));
+        await moveStore.ScanAsync([new(moveRoot)]);
+        var original = moveStore.All().Single();
+        moveStore.Save(original with { Overview = "Kept overview" }); moveStore.Setting("position:" + original.Id, "42000");
+        var newFolder = Path.Combine(moveRoot, "Shared", "Moved Show"); Directory.CreateDirectory(newFolder);
+        var newPath = Path.Combine(newFolder, "Moved Show S01E01.mkv"); File.Move(oldPath, newPath);
+        await moveStore.ScanAsync([new(moveRoot)]);
+        var relocated = moveStore.All();
+        check(relocated.Count == 1 && relocated[0].Id == original.Id && relocated[0].Path == newPath && relocated[0].Available &&
+            relocated[0].Overview == "Kept overview" && moveStore.Setting("position:" + original.Id) == "42000",
+            "moved file keeps its record, progress and metadata instead of leaving an unavailable copy");
+        await moveStore.ScanAsync([new(moveRoot)]);
+        check(moveStore.All() is [{ Available: true } again] && again.Id == original.Id && again.Path == newPath, "rescanning a moved file keeps its original record");
+        var renamedPath = Path.Combine(newFolder, "Moved Show - S01E01 - Pilot.mkv"); File.Move(newPath, renamedPath);
+        await moveStore.ScanAsync([new(moveRoot)]);
+        check(moveStore.All() is [{ Available: true } renamed] && renamed.Id == original.Id && renamed.Path == renamedPath,
+            "a file renamed within its folder keeps its record when its size is unchanged");
+        var twinA = Path.Combine(moveRoot, "A", "Twin.mkv"); var twinB = Path.Combine(moveRoot, "B", "Twin.mkv");
+        foreach (var twin in new[] { twinA, twinB }) { Directory.CreateDirectory(Path.GetDirectoryName(twin)!); await File.WriteAllBytesAsync(twin, [4, 5]); }
+        await moveStore.ScanAsync([new(moveRoot)]);
+        var twins = moveStore.All().Where(item => item.Path.EndsWith("Twin.mkv")).Select(item => item.Id).ToArray();
+        var twinC = Path.Combine(moveRoot, "C", "Twin.mkv"); Directory.CreateDirectory(Path.GetDirectoryName(twinC)!);
+        File.Move(twinA, twinC); File.Delete(twinB);
+        await moveStore.ScanAsync([new(moveRoot)]);
+        var afterTwins = moveStore.All().Where(item => item.Path.EndsWith("Twin.mkv")).ToArray();
+        check(afterTwins.Length == 3 && afterTwins.Count(item => !item.Available && twins.Contains(item.Id)) == 2 && afterTwins.Single(item => item.Available).Path == twinC,
+            "an ambiguous move adds the file as new and leaves both candidates unavailable");
+
         var poster = Path.Combine(directory, "season.png"); await File.WriteAllBytesAsync(poster, ArtworkFixture.Png);
         var artworkStore = new LibraryStore(Path.Combine(directory, "artwork-db"));
         artworkStore.Save(new("matched", "matched.mkv", "Example Show", "Show", 2020, "Example Show", 1, 1,

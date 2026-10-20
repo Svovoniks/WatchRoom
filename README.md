@@ -29,7 +29,7 @@ Local playback remembers your position and volume. Details offer **Resume** and 
 
 Headset and keyboard media buttons can play or pause the current video, including while Watchroom is minimized or another app has focus. Windows media controls show the current title and playback state. Room playback buttons follow the host's shared-controls setting.
 
-Search covers the whole library, including when browsing a season. Missing files have an **Unavailable** filter and disabled playback actions. **Correct title** works without a metadata token and survives rescanning. Folder categories can be edited in place; folder changes trigger scanning, and an active scan can be cancelled while keeping videos already indexed.
+Search covers the whole library, including when browsing a season. Missing files have an **Unavailable** filter and disabled playback actions. A rescan recognizes a file moved or renamed within the library folders and keeps its watch progress, queue entries and metadata. **Correct title** works without a metadata token and survives rescanning. Folder categories can be edited in place; folder changes trigger scanning, and an active scan can be cancelled while keeping videos already indexed.
 
 ## Build and test
 

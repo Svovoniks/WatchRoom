@@ -308,6 +308,15 @@ public sealed partial class LibraryStore
         command.Parameters.AddWithValue("$show", LibraryIdentity.ShowKey(show));
         return SortItems(ReadMedia(command));
     }
+    // A moved file keeps its original ID, so a record can live at a path whose hash is not its ID.
+    private MediaItem? ByPath(string path)
+    {
+        ExpireTmdbContent();
+        using var db = Open(); using var command = db.CreateCommand();
+        command.CommandText = MediaWithHierarchy + "WHERE m.path=$path" + (OperatingSystem.IsWindows() ? " COLLATE NOCASE" : "");
+        command.Parameters.AddWithValue("$path", path);
+        return ReadMedia(command).FirstOrDefault();
+    }
     private static List<MediaItem> ReadMedia(SqliteCommand command)
     {
         using var rows = command.ExecuteReader(); var result = new List<MediaItem>();
@@ -386,7 +395,7 @@ public sealed partial class LibraryStore
         var identityChanged = previous is not null && (previous.MetadataType != item.MetadataType && item.MetadataType is not null ||
             previous.MetadataKind != item.MetadataKind && item.MetadataKind is not null ||
             previous.MetadataProvider == item.MetadataProvider && previous.MetadataId is not null && item.MetadataId is not null && previous.MetadataId != item.MetadataId);
-        c.CommandText = "INSERT INTO media VALUES($id,$path,$json) ON CONFLICT(id) DO UPDATE SET json=$json";
+        c.CommandText = "INSERT INTO media VALUES($id,$path,$json) ON CONFLICT(id) DO UPDATE SET path=$path, json=$json";
         c.Parameters.AddWithValue("$id", item.Id); c.Parameters.AddWithValue("$path", item.Path); c.Parameters.AddWithValue("$json", Wire.Serialize(item)); c.ExecuteNonQuery();
         if (item.ShowId is { } showId && item.SeasonId is { } seasonId)
         {
@@ -531,29 +540,35 @@ public sealed partial class LibraryStore
         {
             var changes = Prune(roots, excluded);
             var seen = new HashSet<string>();
+            // Files new to the library this scan; one may be a known video that moved.
+            var found = new List<MediaItem>();
             foreach (var folder in roots)
             {
                 if (!Directory.Exists(folder.Path)) continue;
                 var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.System };
-                foreach (var path in Directory.EnumerateFiles(folder.Path, "*", options))
+                foreach (var file in new DirectoryInfo(folder.Path).EnumerateFiles("*", options))
                 {
                     cancellation.ThrowIfCancellationRequested();
+                    var path = file.FullName;
                     if (excluded.Any(f => IsWithin(path, f))) continue;
                     if (!FileNames.Extensions.Contains(System.IO.Path.GetExtension(path))) continue;
                     if (FileNames.IsExtra(path)) continue;
-                    var parsed = FileNames.Parse(path, folder.Kind, folder.Path); seen.Add(parsed.Id);
+                    var parsed = FileNames.Parse(path, folder.Kind, folder.Path) with { FileSize = file.Length };
                     // Merge into the record as stored now: edits and fetches can land while a scan runs.
                     MediaItem item;
                     lock (writeGate)
                     {
-                        var previous = ByIds([parsed.Id]).FirstOrDefault();
-                        item = MergeScanned(parsed, previous);
+                        var previous = ByIds([parsed.Id]).FirstOrDefault() ?? ByPath(parsed.Path);
+                        item = previous is null ? MergeScanned(parsed, null) : MergeScanned(parsed with { Id = previous.Id }, previous) with { FileSize = parsed.FileSize };
                         // Records compare collections by reference, so compare the stored form to skip unchanged files.
                         if (previous is null || Wire.Serialize(LibraryIdentity.Ensure(TmdbRetention.TrackLegacy(item))) != Wire.Serialize(previous)) { Save(item); changes++; }
+                        if (previous is null) found.Add(item);
                     }
+                    seen.Add(item.Id);
                     progress?.Report($"Found {seen.Count} videos · {item.Title}");
                 }
             }
+            changes += RecoverMoved(found, seen, progress);
             foreach (var id in All().Where(x => !seen.Contains(x.Id) && !x.IsVirtual).Select(x => x.Id).ToArray())
                 lock (writeGate)
                 {
@@ -567,9 +582,53 @@ public sealed partial class LibraryStore
             return All();
         }, cancellation);
     }
+    // A file missing from its stored path and found at a new one keeps its original record, so its ID,
+    // watch progress, queue entries and metadata carry over. Matches must be unambiguous both ways.
+    private int RecoverMoved(List<MediaItem> found, HashSet<string> seen, IProgress<string>? progress)
+    {
+        if (found.Count == 0) return 0;
+        var all = All();
+        var gone = all.Where(x => !x.IsVirtual && !x.IsExtra && !seen.Contains(x.Id) && !File.Exists(x.Path)).ToArray();
+        if (gone.Length == 0) return 0;
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        static string Name(MediaItem x) => System.IO.Path.GetFileName(x.Path);
+        static string Folder(MediaItem x) => System.IO.Path.GetDirectoryName(x.Path) ?? "";
+        // A matching size confirms a move under the same name or a rename within one folder. Records
+        // stored before sizes were kept need the same name.
+        bool Moved(MediaItem old, MediaItem now) => old.FileSize is { } size
+            ? size == now.FileSize && (comparer.Equals(Name(old), Name(now)) || comparer.Equals(Folder(old), Folder(now)))
+            : comparer.Equals(Name(old), Name(now));
+        var goneByName = gone.ToLookup(Name, comparer); var goneByFolder = gone.Where(x => x.FileSize is not null).ToLookup(Folder, comparer);
+        var foundByName = found.ToLookup(Name, comparer); var foundByFolder = found.ToLookup(Folder, comparer);
+        var changes = 0;
+        foreach (var now in found)
+        {
+            var olds = goneByName[Name(now)].Concat(goneByFolder[Folder(now)]).Distinct().Where(old => Moved(old, now)).Take(2).ToArray();
+            if (olds.Length != 1 || foundByName[Name(olds[0])].Concat(foundByFolder[Folder(olds[0])]).Distinct().Count(other => Moved(olds[0], other)) != 1) continue;
+            lock (writeGate)
+            {
+                if (ByIds([olds[0].Id]).FirstOrDefault() is not { IsVirtual: false } stored || File.Exists(stored.Path) || ByIds([now.Id]).Count == 0) continue;
+                var parsed = now with { Id = stored.Id };
+                var moved = MergeScanned(parsed, stored) with { FileSize = now.FileSize };
+                // Joining a folder that already holds the show groups the file with its new siblings.
+                if (CanRepairGrouping(stored) && parsed.SeriesPath is not null && !comparer.Equals(stored.SeriesPath, parsed.SeriesPath) &&
+                    all.FirstOrDefault(x => x.Id != now.Id && x.Available && !x.IsVirtual && seen.Contains(x.Id) && comparer.Equals(x.SeriesPath, parsed.SeriesPath)) is { ShowId: { } showId })
+                    moved = moved with { ShowId = showId };
+                // The record created for the new path this scan gives way, freeing the path for the original.
+                using (var db = Open()) using (var command = db.CreateCommand())
+                {
+                    command.CommandText = "DELETE FROM media WHERE id=$id"; command.Parameters.AddWithValue("$id", now.Id); command.ExecuteNonQuery();
+                }
+                Save(moved); seen.Remove(now.Id); seen.Add(stored.Id); changes++;
+                progress?.Report("Moved video found · " + moved.Title);
+            }
+        }
+        if (changes > 0) CleanHierarchy();
+        return changes;
+    }
     private static MediaItem MergeScanned(MediaItem parsed, MediaItem? previous)
     {
-        var item = previous is not null ? previous with { Available = true, Year = previous.Matched || previous.MetadataType is not null ? previous.Year : parsed.Year, Kind = previous.MetadataKind ?? parsed.Kind, Series = previous.MetadataType == "movie" ? null : previous.MetadataType == "tv" || previous.Matched ? previous.Series : parsed.Series ?? previous.Series, Season = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Season : parsed.Season ?? previous.Season, Episode = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Episode : parsed.Episode ?? previous.Episode, SeriesPoster = parsed.SeriesPoster ?? previous.SeriesPoster, SeasonPoster = parsed.SeasonPoster ?? previous.SeasonPoster, Poster = previous.Matched && File.Exists(previous.Poster) ? previous.Poster : parsed.Poster ?? (File.Exists(previous.Poster) ? previous.Poster : null) } : parsed;
+        var item = previous is not null ? previous with { Path = parsed.Path, Available = true, Year = previous.Matched || previous.MetadataType is not null ? previous.Year : parsed.Year, Kind = previous.MetadataKind ?? parsed.Kind, Series = previous.MetadataType == "movie" ? null : previous.MetadataType == "tv" || previous.Matched ? previous.Series : parsed.Series ?? previous.Series, Season = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Season : parsed.Season ?? previous.Season, Episode = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Episode : parsed.Episode ?? previous.Episode, SeriesPoster = parsed.SeriesPoster ?? previous.SeriesPoster, SeasonPoster = parsed.SeasonPoster ?? previous.SeasonPoster, Poster = previous.Matched && File.Exists(previous.Poster) ? previous.Poster : parsed.Poster ?? (File.Exists(previous.Poster) ? previous.Poster : null) } : parsed;
         item = item with { ShowId = previous?.ShowId ?? parsed.ShowId, SeriesPath = parsed.SeriesPath ?? previous?.SeriesPath,
             EpisodeTitle = LibraryIdentity.Locked(item, "EpisodeTitle") ? item.EpisodeTitle : item.EpisodeTitle ?? parsed.EpisodeTitle,
             AirDate = LibraryIdentity.Locked(item, "AirDate") ? item.AirDate : parsed.AirDate ?? item.AirDate,

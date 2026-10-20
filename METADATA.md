@@ -84,7 +84,7 @@ Aired season/episode numbering is the default. Absolute anime numbers map throug
 
 DVD order uses a unique TMDB DVD episode group. If the group is unavailable or ambiguous, the show remains unresolved; TVmaze aired order is not substituted. Choose numbering from the Windows show context menu or `displayorder` in `tvshow.nfo`.
 
-**Show missing episodes** and **Show upcoming episodes** are opt-in and default off. Placeholders have metadata but cannot play or enter queues. Disabling imports removes them on the next fetch, even if normal metadata is fresh. **Show specials within their aired seasons** uses known NFO `airsbefore_season`, `airsbefore_episode`, and `airsafter_season` placement for both browsing and Windows season queues.
+**Show missing episodes** and **Show upcoming episodes** are opt-in and default off. Placeholders have metadata but cannot play or enter queues. They browse inside shows that have a playable file and are not listed under **Unavailable**, which holds only files that have gone missing. Disabling imports removes them on the next fetch, even if normal metadata is fresh. **Show specials within their aired seasons** uses known NFO `airsbefore_season`, `airsbefore_episode`, and `airsafter_season` placement for both browsing and Windows season queues.
 
 ## NFO files
 

@@ -346,7 +346,7 @@ public partial class MainWindow : Window
     private static string SeasonName(int season) => season < 0 ? "Season unknown" : season == 0 ? "Specials" : $"Season {season}";
     private void UpdateLibraryCategorySelection(bool active)
     {
-        UnavailableLibraryNav.Visibility = !GuestLibrary && items.Any(item => !item.Available && !item.IsExtra)
+        UnavailableLibraryNav.Visibility = !GuestLibrary && items.Any(item => !item.Available && !item.IsExtra && !item.IsVirtual)
             ? Visibility.Visible : Visibility.Collapsed;
         foreach (var button in new[] { AllLibraryNav, AnimeLibraryNav, ShowsLibraryNav, MoviesLibraryNav, UnavailableLibraryNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, active && int.Parse((string)button.Tag) == libraryCategory ? "Selected" : "");
@@ -381,7 +381,7 @@ public partial class MainWindow : Window
         if (GuestLibrary) { UpdateHostBreadcrumbs(); return; }
         var detail = Details.Visibility == Visibility.Visible ? selected : null;
         var show = detail?.Series is not null ? detail : browseSeries is null ? null : items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind));
-        var category = detail is not null ? detail.Available ? CategoryFor(detail) : 4 : libraryCategory;
+        var category = detail is not null ? detail.Available || detail.IsVirtual ? CategoryFor(detail) : 4 : libraryCategory;
         var crumbs = new List<LibraryBreadcrumb> { new("All", "category", Separator: "") };
         if (category != 0) crumbs.Add(new(CategoryName(category), "category", category));
         if (show?.Series is not null)
@@ -520,7 +520,10 @@ public partial class MainWindow : Window
         var cancellation = request.Token;
         // Capture one immutable library and navigation state before leaving the UI thread.
         var status = LibraryStatusFilter.SelectedIndex;
-        var source = items.Where(x => libraryCategory == 4 ? !x.Available : x.Available).ToList();
+        // Missing and upcoming episode placeholders browse inside shows that still have a playable file;
+        // Unavailable lists only files that have gone missing.
+        var playableShows = items.Where(x => x.Available && x.Series is not null).Select(LibraryIdentity.ShowKey).ToHashSet();
+        var source = items.Where(x => libraryCategory == 4 ? !x.Available && !x.IsVirtual : x.Available || x.IsVirtual && playableShows.Contains(LibraryIdentity.ShowKey(x))).ToList();
         var series = browseSeries; var kind = browseKind; var season = browseSeason;
         var showTitle = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind))?.Series ?? browseSeries;
         SearchHint.Text = browseSeries is null ? "Search your library" : browseSeason is null ? "Search seasons" : "Search episodes";

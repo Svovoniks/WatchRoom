@@ -27,7 +27,8 @@ static class UnavailableLibraryChecks
         var available = missing with { Id = "removal-available", Path = file + ".available", Episode = 2, Available = true };
         var otherSeason = missing with { Id = "removal-other-season", Path = file + ".other", Season = 2 };
         var movie = new MediaItem("removal-movie", file + ".movie", "Removal movie", "Movie", Available: false);
-        foreach (var item in new[] { missing, available, otherSeason, movie }) store.Save(item);
+        var placeholder = missing with { Id = "removal-placeholder", Path = file + ".placeholder", Episode = 3, IsVirtual = true };
+        foreach (var item in new[] { missing, available, otherSeason, movie, placeholder }) store.Save(item);
         store.Setting("position:" + missing.Id, "10000"); store.Setting("watched:" + missing.Id, "true");
         Await(Call("RefreshLibrary"));
         var card = new LibraryCard(missing.DisplayTitle, "", null, missing, "season", 1);
@@ -36,6 +37,7 @@ static class UnavailableLibraryChecks
         Await(Call("RemoveUnavailableItems", targets));
         check(!store.All().Any(item => item.Id == missing.Id) && store.All().Any(item => item.Id == available.Id) && store.All().Any(item => item.Id == otherSeason.Id),
             "removing an unavailable season entry preserves playable videos and other seasons");
+        check(store.All().Any(item => item.Id == placeholder.Id), "removing unavailable videos keeps missing-episode placeholders");
         check(File.ReadAllText(file) == "keep this file", "library removal leaves media files untouched");
         check(store.Setting("position:" + missing.Id) is null && store.Setting("watched:" + missing.Id) is null,
             "removed entries lose their saved playback history");
@@ -52,6 +54,13 @@ static class UnavailableLibraryChecks
         check(remove.Visibility == Visibility.Collapsed, "available video details hide library removal");
         Await(Call("RemoveUnavailableItems", (object)new[] { otherSeason }));
         check(!new LibraryStore(directory).All().Any(item => item.Id == movie.Id), "unavailable entry removal persists across reopening the library");
+        // Other fixtures share this library, so judge the section against a library of only these entries.
+        var itemsField = typeof(MainWindow).GetField("items", flags)!; var library = itemsField.GetValue(window);
+        itemsField.SetValue(window, new List<MediaItem> { available, placeholder }); Call("UpdateLibraryCategorySelection", true);
+        check(((Button)window.FindName("UnavailableLibraryNav")).Visibility == Visibility.Collapsed,
+            "missing-episode placeholders alone do not make the Unavailable section appear");
+        itemsField.SetValue(window, library); Call("UpdateLibraryCategorySelection", true);
+        store.RemoveVirtual([placeholder.Id]);
         Call("ShowPage", "Library");
     }
 }

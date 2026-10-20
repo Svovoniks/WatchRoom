@@ -5,7 +5,7 @@ namespace Watchroom.Desktop;
 
 public partial class MainWindow
 {
-    private IEnumerable<MediaItem> UnavailableCardItems(LibraryCard card) => items.Where(item => !item.Available &&
+    private IEnumerable<MediaItem> UnavailableCardItems(LibraryCard card) => items.Where(item => !item.Available && !item.IsVirtual &&
         (card.Level is "series" or "season"
             ? LibraryIdentity.SameShow(item, card.Media) && (card.Level == "series" || (item.Season ?? -1) == card.Season)
             : item.Id == card.Media.Id));
@@ -18,7 +18,7 @@ public partial class MainWindow
     private async Task RemoveUnavailableItems(IEnumerable<MediaItem> source)
     {
         if (GuestLibrary || scanning) return;
-        var ids = source.Where(item => !item.Available).Select(item => item.Id).ToArray();
+        var ids = source.Where(item => !item.Available && !item.IsVirtual).Select(item => item.Id).ToArray();
         var removed = library.RemoveUnavailable(ids);
         foreach (var id in ids) watchedState.Remove(id);
         await RefreshLibrary();
