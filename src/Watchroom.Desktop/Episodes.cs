@@ -52,7 +52,7 @@ public partial class MainWindow
         if (episodeActionItem != item || episodeActionLibrary != items || Environment.TickCount64 - episodeActionCheckedAt > 5000)
         {
             episodeActionItem = item; episodeActionLibrary = items; episodeActionCheckedAt = Environment.TickCount64;
-            episodeActionNext = EpisodePlayback.Next(items, item!, false, next => File.Exists(next.Path));
+            episodeActionNext = EpisodePlayback.Next(items, item!, false, next => RecentlyExists(next.Path));
         }
         EpisodeEndButton.Content = episodeActionNext is null ? "Finish ✓" : "Next episode →";
         EpisodeEndButton.ToolTip = episodeActionNext is null ? item!.Series is null ? "Mark this movie as watched" : "Mark this episode as watched" :
@@ -123,7 +123,9 @@ public partial class MainWindow
             ? items.Where(candidate => LibraryIdentity.SameShow(candidate, item) && candidate.Season == item.Season && candidate.NumberingConflict is null &&
                 LibraryIdentity.EpisodeNumbers(candidate).Intersect(LibraryIdentity.EpisodeNumbers(item)).Any()).ToArray()
             : [item];
-        foreach (var entry in affected.Append(item)) { library.Setting("watched:" + entry.Id, watched ? "true" : "false"); watchedState[entry.Id] = watched; }
+        var marked = affected.Append(item).Select(entry => entry.Id).Distinct().ToArray();
+        library.SetSettings(marked.Select(id => KeyValuePair.Create("watched:" + id, watched ? "true" : "false")));
+        foreach (var id in marked) watchedState[id] = watched;
         foreach (var card in libraryCards.Where(card => card.Card.Media.Id == item.Id || LibraryIdentity.SameShow(card.Card.Media, item)))
             UpdateCardPlayback(card);
         SetStatus(watched ? "Marked as watched." : "Marked as unwatched.");

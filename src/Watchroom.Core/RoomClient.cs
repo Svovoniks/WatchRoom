@@ -624,31 +624,44 @@ public sealed partial class RoomClient : IAsyncDisposable
             PlaybackDiagnostics.Record("host-command-accepted", new { sender, message.Type, playback = coordinator.Playback,
                 waiting = coordinator.Snapshot.People.Where(p => p.Approved && !p.Ready && coordinator.IsConnected(p.Id)).Select(p => p.Id).ToArray() });
     }
-    private void ApplySnapshot(RoomSnapshot snapshot)
+    private void ApplySnapshot(RoomSnapshot snapshot, string? json = null)
     {
         var previous = Snapshot; Snapshot = snapshot;
+        // A snapshot applied outside PublishHostState replaces what the host last published locally.
+        if (json is null) publishedSnapshot = null;
         if (snapshot.Playback is { } playback && previous?.Playback is { } before && before.MediaId == playback.MediaId && before.Revision != playback.Revision)
             Message?.Invoke(new("playback", Data: Wire.Serialize(playback)));
-        Message?.Invoke(new("snapshot", Data: Wire.Serialize(snapshot)));
+        Message?.Invoke(new("snapshot", Data: json ?? Wire.Serialize(snapshot)));
     }
+    private string? publishedSnapshot, publishedRecipients;
     private void PublishHostState()
     {
         var snapshot = coordinator!.Snapshot;
-        ApplySnapshot(snapshot);
+        // Chat, library renewals and other commands often leave the room unchanged; skip republishing
+        // unless the state or the set of peers receiving it changed.
+        var json = Wire.Serialize(snapshot);
+        // Include each peer's transport so a reconnected peer always receives the current state.
+        var recipients = string.Join(",", negotiated.Keys.Where(coordinator.Approved).Order(StringComparer.Ordinal)
+            .Select(id => id + ":" + peers.GetValueOrDefault(id)?.DiagnosticId));
+        if (json == publishedSnapshot && recipients == publishedRecipients) return;
+        publishedSnapshot = json; publishedRecipients = recipients;
+        ApplySnapshot(snapshot, json);
         var publicSnapshot = snapshot with { People = snapshot.People.Where(p => p.Approved).Select(p => p with { GuestId = null }).ToArray(), AdmittedGuests = null };
         Broadcast(new("host-state", Data: Wire.Serialize(new HostRoomState(++stateSequence, clock.Now, publicSnapshot))));
     }
     private void Broadcast(WireMessage message)
     {
+        // Serialize once for every peer.
+        var text = Wire.Serialize(message);
         foreach (var id in negotiated.Keys.ToArray())
-            if (coordinator!.Approved(id)) SendPeer(id, message);
+            if (coordinator!.Approved(id)) SendPeer(id, message, text);
     }
-    private void SendPeer(string id, WireMessage message)
+    private void SendPeer(string id, WireMessage message, string? serialized = null)
     {
         if (!peers.TryGetValue(id, out var peer) || !peer.IsControlOpen) { DepartPeer(id); return; }
         try
         {
-            peer.SendControl(message);
+            peer.SendControl(message, serialized);
             if (message.Type is "playback" or "ready" or "buffering")
                 PlaybackDiagnostics.Record("control-transmitted", new { room = diagnosticId, transport = peer.DiagnosticId, message.Type, message.Data });
         }

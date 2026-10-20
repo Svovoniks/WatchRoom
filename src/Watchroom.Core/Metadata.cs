@@ -237,9 +237,10 @@ public sealed partial class MetadataClient : IDisposable
     {
         using var json = await Get($"tv/{showId}", ct);
         if (!json.RootElement.TryGetProperty("seasons", out var list)) return [];
-        var result = new List<MetadataSeason>();
-        foreach (var season in list.EnumerateArray()) if (await SeasonAsync(showId, season.GetProperty("season_number").GetInt32(), ct) is { } details) result.Add(details);
-        return result.ToArray();
+        // The provider gate bounds concurrency and spacing; requesting seasons together lets it use both slots.
+        var numbers = list.EnumerateArray().Select(season => season.GetProperty("season_number").GetInt32()).ToArray();
+        var seasons = await Task.WhenAll(numbers.Select(number => SeasonAsync(showId, number, ct)));
+        return seasons.OfType<MetadataSeason>().ToArray();
     }
     public async Task<MetadataSeason[]> DvdSeasonsAsync(int showId, CancellationToken ct)
     {

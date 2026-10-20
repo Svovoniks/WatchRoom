@@ -84,6 +84,13 @@ static class UiFindingsChecks
             File.Delete(file); Call("UpdateSavedQueueActions");
             Check(!Control<Button>("PlaySavedQueueButton").IsEnabled && Control<TextBlock>("SavedQueueFeedback").Text.Contains("No available videos"), "disappeared file disables playback and provides inline recovery");
             Call("AddQueueVideos", window, new RoutedEventArgs());
+            // File checks for Add videos run in the background; let them finish.
+            for (var until = DateTime.UtcNow.AddSeconds(5); Control<FrameworkElement>("FoldersPage").Visibility != Visibility.Visible && DateTime.UtcNow < until;)
+            {
+                var frame = new System.Windows.Threading.DispatcherFrame();
+                window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () => frame.Continue = false);
+                System.Windows.Threading.Dispatcher.PushFrame(frame); Thread.Sleep(10);
+            }
             Check(Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Visible, "adding videos with no available files opens useful folder setup");
             Call("ShowPage", "Queues");
 
@@ -94,6 +101,21 @@ static class UiFindingsChecks
             Call("ShowPage", "Folders");
             Check(Control<TextBlock>("StatusText").Text == "Scanning test fixtures", "ongoing scan feedback survives navigation");
             typeof(MainWindow).GetField("scanning", flags)!.SetValue(window, false);
+            // The status bar's indeterminate progress uses the app's ProgressBar template; show one for real.
+            var sweepBar = new ProgressBar { IsIndeterminate = true, Width = 96, Height = 3 };
+            var sweepHost = new Window { Width = 200, Height = 80, ShowActivated = false, ShowInTaskbar = false, WindowStartupLocation = WindowStartupLocation.Manual, Left = -2000, Top = -2000, Content = sweepBar };
+            void Settle()
+            {
+                var frame = new System.Windows.Threading.DispatcherFrame();
+                window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle, () => frame.Continue = false);
+                System.Windows.Threading.Dispatcher.PushFrame(frame);
+            }
+            sweepHost.Show(); Settle();
+            var sweep = (TranslateTransform)sweepBar.Template.FindName("SweepOffset", sweepBar);
+            Check(sweepBar.IsVisible && sweep.HasAnimatedProperties, "indeterminate progress sweeps while it is shown");
+            sweepBar.Visibility = Visibility.Collapsed; Settle();
+            Check(!sweep.HasAnimatedProperties, "hidden progress stops its sweep instead of rendering frames for the rest of the session");
+            sweepHost.Close();
 
             var rooms = (ObservableCollection<SavedRoom>)Field("savedRooms"); rooms.Clear(); Call("ShowPage", "Rooms");
             Check(Control<FrameworkElement>("RoomsEmptyState").Visibility == Visibility.Visible && Control<FrameworkElement>("SavedRoomsContent").Visibility == Visibility.Collapsed,

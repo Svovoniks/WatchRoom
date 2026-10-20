@@ -65,19 +65,45 @@ public partial class MainWindow
         if (room.Identity.Host) libraryWindow.ShowAccess();
         libraryWindow.Show(); libraryWindow.Activate();
     }
-    private void PublishRoomLibrary(string[] kinds)
+    private int roomLibraryPublish;
+    private readonly Dictionary<string, (long Length, long Modified, string? Data)> sharedThumbnails = new();
+    private async void PublishRoomLibrary(string[] kinds) => await Guard(async () =>
     {
         if (roomLibrary is null || room?.Identity?.Host != true) return;
+        var session = roomLibrary; var publish = ++roomLibraryPublish;
         sharedKinds = kinds; sharedItems.Clear();
-        var catalog = new List<SharedLibraryItem>();
+        var shared = new List<(string Id, MediaItem Item)>();
         foreach (var item in items.Where(i => kinds.Contains(i.Kind) && !i.IsExtra && !i.IsVirtual).Take(RoomLibrary.MaxCatalog))
         {
             if (!sharedIds.TryGetValue(item.Id, out var id)) sharedIds[item.Id] = id = Guid.NewGuid().ToString("N");
-            sharedItems[id] = item;
-            catalog.Add(new(id, item.Title, item.Kind, item.Year, item.Series, item.Season, item.Episode,
-                item.Overview is { Length: > 2000 } summary ? summary[..2000] : item.Overview, item.Available, MakeThumbnail(item.Poster)));
+            sharedItems[id] = item; shared.Add((id, item));
         }
-        roomLibrary.Publish(catalog);
+        // Decoding and encoding thousands of posters would freeze the window; build them in the background
+        // and reuse thumbnails of posters that have not changed since the last publish.
+        var catalog = await Task.Run(() => shared.Select(entry => new SharedLibraryItem(entry.Id, entry.Item.Title, entry.Item.Kind, entry.Item.Year,
+            entry.Item.Series, entry.Item.Season, entry.Item.Episode, entry.Item.Overview is { Length: > 2000 } summary ? summary[..2000] : entry.Item.Overview,
+            entry.Item.Available, SharedThumbnail(entry.Item.Poster))).ToList());
+        if (closing || publish != roomLibraryPublish || roomLibrary != session || room?.Identity?.Host != true) return;
+        session.Publish(catalog);
+    });
+    private string? SharedThumbnail(string? path)
+    {
+        if (path is null) return null;
+        try
+        {
+            var file = new FileInfo(path);
+            if (!file.Exists) return null;
+            lock (sharedThumbnails)
+                if (sharedThumbnails.TryGetValue(path, out var cached) && cached.Length == file.Length && cached.Modified == file.LastWriteTimeUtc.Ticks) return cached.Data;
+            var data = MakeThumbnail(path);
+            lock (sharedThumbnails)
+            {
+                if (sharedThumbnails.Count >= 2048) sharedThumbnails.Clear();
+                sharedThumbnails[path] = (file.Length, file.LastWriteTimeUtc.Ticks, data);
+            }
+            return data;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
     private static string? MakeThumbnail(string? path, int maximumBytes = 12000, bool highResolution = false)
     {

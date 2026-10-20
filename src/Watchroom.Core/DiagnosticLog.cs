@@ -72,7 +72,9 @@ public sealed class DiagnosticLog : IAsyncDisposable
                     if (retainedFiles == 1) File.Delete(path);
                     stream = Open();
                 }
-                await stream.WriteAsync(bytes); await stream.FlushAsync();
+                await stream.WriteAsync(bytes);
+                // Flush once a burst has been written rather than after every entry.
+                if (!entries.Reader.TryPeek(out _)) await stream.FlushAsync();
             }
         }
         catch { entries.Writer.TryComplete(); }
@@ -89,6 +91,8 @@ public sealed class DiagnosticLog : IAsyncDisposable
         foreach (var file in new DirectoryInfo(DirectoryPath).EnumerateFiles("diagnostics.jsonl*")
             .Where(x => System.Text.RegularExpressions.Regex.IsMatch(x.Name, @"^diagnostics\.jsonl(?:\.\d+)?$")))
         {
+            // Entries are appended in time order, so a file whose first entry is newer than the cutoff has nothing to expire.
+            if (FirstEntryAt(file.FullName) is { } first && first > cutoff) continue;
             string[] lines;
             try { lines = File.ReadAllLines(file.FullName); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
@@ -110,6 +114,17 @@ public sealed class DiagnosticLog : IAsyncDisposable
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
             finally { try { if (File.Exists(temporary)) File.Delete(temporary); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } }
         }
+    }
+    private static long? FirstEntryAt(string path)
+    {
+        try
+        {
+            using var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+            if (reader.ReadLine() is not { } line) return null;
+            using var json = JsonDocument.Parse(line);
+            return json.RootElement.TryGetProperty("utcMs", out var at) && at.TryGetInt64(out var timestamp) ? timestamp : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
     }
     public async ValueTask DisposeAsync() { entries.Writer.TryComplete(); await writer; }
 }

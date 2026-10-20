@@ -6,15 +6,25 @@ namespace Watchroom.Core;
 
 public static class LocalMetadata
 {
+    // Every episode reads its show's tvshow.nfo, so parsed files are reused until they change on disk.
+    // Cached documents are only read, never modified.
+    private static readonly Dictionary<string, (long Length, long Modified, XDocument? Document)> parsed = new(StringComparer.OrdinalIgnoreCase);
     private static XDocument? Read(string path)
     {
-        if (!File.Exists(path)) return null;
+        FileInfo file;
+        try { file = new FileInfo(path); if (!file.Exists) return null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return null; }
+        var (length, modified) = (file.Length, file.LastWriteTimeUtc.Ticks);
+        lock (parsed) if (parsed.TryGetValue(path, out var cached) && cached.Length == length && cached.Modified == modified) return cached.Document;
+        XDocument? document;
         try
         {
             using var reader = XmlReader.Create(path, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, MaxCharactersInDocument = 2_000_000 });
-            return XDocument.Load(reader);
+            document = XDocument.Load(reader);
         }
         catch (Exception ex) when (ex is IOException or XmlException or UnauthorizedAccessException) { return null; }
+        lock (parsed) { if (parsed.Count >= 512) parsed.Clear(); parsed[path] = (length, modified, document); }
+        return document;
     }
     public static MediaItem Apply(MediaItem item)
     {

@@ -8,14 +8,21 @@ namespace Watchroom.Core;
 public sealed partial class LibraryStore
 {
     public event Action<MediaItem>? MediaSaved;
+    // Filename parsing and metadata matching cycle through more static Regex patterns than the default
+    // cache of 15 holds, which would rebuild patterns for every scanned file.
+    static LibraryStore() { if (Regex.CacheSize < 256) Regex.CacheSize = 256; }
     private readonly string connection;
     internal string MetadataCacheDirectory => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(new SqliteConnectionStringBuilder(connection).DataSource))!, "metadata-http-cache");
-    public LibraryStore(string directory)
+    // The desktop app defers the startup retention sweep until its library has rendered; see DeferRetention.
+    public LibraryStore(string directory, bool deferRetention = false)
     {
         Directory.CreateDirectory(directory);
         connection = new SqliteConnectionStringBuilder { DataSource = System.IO.Path.Combine(directory, "library.db") }.ToString();
         using var db = Open();
         using var cmd = db.CreateCommand();
+        // WAL lets UI reads proceed during background writes and avoids a full sync per commit.
+        cmd.CommandText = "PRAGMA journal_mode=WAL;";
+        cmd.ExecuteNonQuery();
         cmd.CommandText = "CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY, path TEXT UNIQUE NOT NULL, json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS shows(id TEXT PRIMARY KEY, json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS seasons(id TEXT PRIMARY KEY, show_id TEXT NOT NULL, json TEXT NOT NULL);";
         cmd.ExecuteNonQuery();
         cmd.CommandText = "CREATE INDEX IF NOT EXISTS media_show_id ON media(json_extract(json, '$.showId'));";
@@ -73,7 +80,8 @@ public sealed partial class LibraryStore
             foreach (var item in All()) Save(TmdbRetention.TrackLegacy(item));
             Setting("tmdb-retention-version", "1");
         }
-        ExpireTmdbContent(force: true);
+        if (deferRetention) lastRetentionCheck = Wire.Now;
+        else ExpireTmdbContent(force: true);
     }
     private void RepairMetadataIdentity(string directory)
     {
@@ -168,7 +176,12 @@ public sealed partial class LibraryStore
         File.WriteAllText(System.IO.Path.Combine(directory, "grouping-repair-v1.json"), Wire.Serialize(repairs));
         Setting("grouping-audit-repair", "1");
     }
-    private SqliteConnection Open() { var db = new SqliteConnection(connection); db.Open(); return db; }
+    private SqliteConnection Open()
+    {
+        var db = new SqliteConnection(connection); db.Open();
+        using var pragma = db.CreateCommand(); pragma.CommandText = "PRAGMA synchronous=NORMAL;"; pragma.ExecuteNonQuery();
+        return db;
+    }
     private void RepairReleaseFolderHierarchy()
     {
         LibraryFolder[] roots;
@@ -237,6 +250,24 @@ public sealed partial class LibraryStore
         using var db = Open(); using var c = db.CreateCommand();
         c.CommandText = "INSERT INTO settings VALUES($k,$v) ON CONFLICT(key) DO UPDATE SET value=$v";
         c.Parameters.AddWithValue("$k", key); c.Parameters.AddWithValue("$v", value); c.ExecuteNonQuery();
+    }
+    public Dictionary<string, string> SettingsWithPrefix(string prefix)
+    {
+        using var db = Open(); using var command = db.CreateCommand();
+        command.CommandText = "SELECT key, value FROM settings WHERE substr(key, 1, length($p))=$p"; command.Parameters.AddWithValue("$p", prefix);
+        using var rows = command.ExecuteReader(); var result = new Dictionary<string, string>();
+        while (rows.Read()) result[rows.GetString(0)] = rows.GetString(1);
+        return result;
+    }
+    // Writes several settings in one transaction instead of one commit each.
+    public void SetSettings(IEnumerable<KeyValuePair<string, string>> values)
+    {
+        using var db = Open(); using var transaction = db.BeginTransaction();
+        using var c = db.CreateCommand(); c.Transaction = transaction;
+        c.CommandText = "INSERT INTO settings VALUES($k,$v) ON CONFLICT(key) DO UPDATE SET value=$v";
+        var key = c.Parameters.Add("$k", SqliteType.Text); var value = c.Parameters.Add("$v", SqliteType.Text);
+        foreach (var entry in values) { key.Value = entry.Key; value.Value = entry.Value; c.ExecuteNonQuery(); }
+        transaction.Commit();
     }
     public List<MediaItem> All()
     {
@@ -431,17 +462,21 @@ public sealed partial class LibraryStore
     public void GroupShowsByProvider()
     {
         if (!MetadataOptions.Load(this).GroupShowsByProvider) return;
+        MediaItem[]? items = null;
         foreach (var provider in new[] { "tmdb", "tvdb", "imdb" })
         {
-            var items = All().Where(x => x.Series is not null && !x.IsExtra).ToArray();
+            // Re-read only after a provider's grouping changed records.
+            items ??= All().Where(x => x.Series is not null && !x.IsExtra).ToArray();
+            var merged = false;
             foreach (var group in items.Where(x => LibraryIdentity.ProviderId(x, provider) is not null).GroupBy(x => LibraryIdentity.ProviderId(x, provider)))
             {
                 if (group.Select(x => x.MetadataKind ?? x.Kind).Distinct().Count() > 1) continue;
                 if (provider != "tmdb" && group.Select(x => LibraryIdentity.ProviderId(x, "tmdb")).OfType<string>().Distinct().Count() > 1) continue;
                 var ids = group.Select(LibraryIdentity.ShowKey).Distinct().Order(StringComparer.Ordinal).ToArray();
                 if (ids.Length < 2) continue;
-                foreach (var entry in items.Where(x => ids.Contains(LibraryIdentity.ShowKey(x)))) Save(entry with { ShowId = ids[0] });
+                foreach (var entry in items.Where(x => ids.Contains(LibraryIdentity.ShowKey(x)))) { Save(entry with { ShowId = ids[0] }); merged = true; }
             }
+            if (merged) items = null;
         }
         CleanHierarchy();
     }
@@ -458,10 +493,14 @@ public sealed partial class LibraryStore
         var full = System.IO.Path.GetFullPath(path);
         return full.Equals(root, comparison) || full.StartsWith(System.IO.Path.EndsInDirectorySeparator(root) ? root : root + System.IO.Path.DirectorySeparatorChar, comparison);
     }
-    public void Prune(IEnumerable<LibraryFolder> folders, IEnumerable<string>? exclusions = null)
+    public int Prune(IEnumerable<LibraryFolder> folders, IEnumerable<string>? exclusions = null) => Prune(folders, exclusions, All()).Removed;
+    // Prunes and returns the remaining catalog from a single read. Only orphaned shows and seasons are
+    // deleted alongside removed files, so the remaining items are unchanged.
+    public List<MediaItem> PruneAndLoad(IEnumerable<LibraryFolder> folders, IEnumerable<string>? exclusions = null) => Prune(folders, exclusions, All()).Remaining;
+    public MediaItem? Get(string id) => ByIds([id]).FirstOrDefault();
+    private (int Removed, List<MediaItem> Remaining) Prune(IEnumerable<LibraryFolder> folders, IEnumerable<string>? exclusions, List<MediaItem> all)
     {
         var roots = folders.ToArray(); var excluded = exclusions?.ToArray() ?? [];
-        var all = All();
         bool Retained(MediaItem item) => roots.Any(f => IsWithin(item.Path, f.Path)) && !excluded.Any(f => IsWithin(item.Path, f));
         var retainedShows = all.Where(x => !x.IsVirtual && Retained(x)).Select(LibraryIdentity.ShowKey).ToHashSet();
         var removed = all.Where(x => x.IsVirtual ? !retainedShows.Contains(LibraryIdentity.ShowKey(x)) : !Retained(x)).ToArray();
@@ -473,6 +512,9 @@ public sealed partial class LibraryStore
         }
         transaction.Commit();
         CleanHierarchy();
+        if (removed.Length == 0) return (0, all);
+        var gone = removed.Select(x => x.Id).ToHashSet();
+        return (removed.Length, all.Where(x => !gone.Contains(x.Id)).ToList());
     }
     private void CleanHierarchy()
     {
@@ -480,12 +522,14 @@ public sealed partial class LibraryStore
         command.CommandText = "DELETE FROM seasons WHERE id NOT IN (SELECT json_extract(json, '$.seasonId') FROM media WHERE json_extract(json, '$.seasonId') IS NOT NULL); DELETE FROM shows WHERE id NOT IN (SELECT json_extract(json, '$.showId') FROM media WHERE json_extract(json, '$.showId') IS NOT NULL);";
         command.ExecuteNonQuery();
     }
+    // Files added, changed or removed by the most recent completed scan.
+    public int LastScanChanges { get; private set; }
     public async Task<List<MediaItem>> ScanAsync(IEnumerable<LibraryFolder> folders, IProgress<string>? progress = null, CancellationToken cancellation = default, IEnumerable<string>? exclusions = null)
     {
         var roots = folders.ToArray(); var excluded = exclusions?.ToArray() ?? [];
         return await Task.Run(() =>
         {
-            Prune(roots, excluded);
+            var changes = Prune(roots, excluded);
             var seen = new HashSet<string>();
             foreach (var folder in roots)
             {
@@ -500,7 +544,13 @@ public sealed partial class LibraryStore
                     var parsed = FileNames.Parse(path, folder.Kind, folder.Path); seen.Add(parsed.Id);
                     // Merge into the record as stored now: edits and fetches can land while a scan runs.
                     MediaItem item;
-                    lock (writeGate) { item = MergeScanned(parsed, ByIds([parsed.Id]).FirstOrDefault()); Save(item); }
+                    lock (writeGate)
+                    {
+                        var previous = ByIds([parsed.Id]).FirstOrDefault();
+                        item = MergeScanned(parsed, previous);
+                        // Records compare collections by reference, so compare the stored form to skip unchanged files.
+                        if (previous is null || Wire.Serialize(LibraryIdentity.Ensure(TmdbRetention.TrackLegacy(item))) != Wire.Serialize(previous)) { Save(item); changes++; }
+                    }
                     progress?.Report($"Found {seen.Count} videos · {item.Title}");
                 }
             }
@@ -509,10 +559,11 @@ public sealed partial class LibraryStore
                 {
                     if (ByIds([id]).FirstOrDefault() is not { IsVirtual: false } stored) continue;
                     var missing = stored with { IsExtra = FileNames.IsExtra(stored.Path), Available = FileNames.IsExtra(stored.Path) && File.Exists(stored.Path) };
-                    if (missing != stored) Save(missing);
+                    if (missing != stored) { Save(missing); changes++; }
                 }
             AttachLooseReleases();
             GroupShowsByProvider();
+            LastScanChanges = changes;
             return All();
         }, cancellation);
     }
@@ -559,6 +610,18 @@ public sealed partial class LibraryStore
 public static partial class FileNames
 {
     public static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase) { ".mkv", ".mp4", ".m4v", ".avi", ".mov", ".webm", ".mpeg", ".mpg", ".ts", ".m2ts", ".wmv", ".flv", ".ogv" };
+    // Sidecar, artwork and partial-download files never change the catalog, so watcher events for them are ignored.
+    private static readonly HashSet<string> IgnoredChanges = new(StringComparer.OrdinalIgnoreCase)
+    { ".nfo", ".tmp", ".part", ".crdownload", ".download", ".partial", ".!qb", ".!ut", ".aria2", ".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt", ".sup",
+      ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tbn", ".txt", ".url", ".ini", ".db", ".json", ".xml", ".log", ".torrent", ".parts" };
+    public static bool AffectsLibrary(string path, bool deleted)
+    {
+        var extension = System.IO.Path.GetExtension(path);
+        if (Extensions.Contains(extension)) return true;
+        // A deleted folder can no longer be checked, so only skip names that look like a known non-video file.
+        if (deleted) return !IgnoredChanges.Contains(extension);
+        return Directory.Exists(path);
+    }
     public static bool IsExtra(string path) => (path.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar)
         .SkipLast(1).Any(part => Regex.IsMatch(part, @"(?i)^(?:extras|trailers|featurettes|behind the scenes|samples)$")) ||
         Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path), @"(?i)(?:^|[-._ ])(?:trailer|sample|featurette)\d*$")) &&

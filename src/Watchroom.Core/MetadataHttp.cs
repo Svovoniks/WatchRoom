@@ -23,9 +23,11 @@ internal static class MetadataHttp
         return new Scope(() => Current.Value = previous);
     }
     private sealed class Scope(Action close) : IDisposable { public void Dispose() => close(); }
+    // Clients are created per fetch, but share one pooled handler so connections and TLS sessions are reused.
+    private static readonly SocketsHttpHandler SharedHandler = new() { AllowAutoRedirect = false, UseCookies = false, PooledConnectionLifetime = TimeSpan.FromMinutes(10) };
     internal static HttpClient CreateClient()
     {
-        var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(20) };
+        var client = new HttpClient(SharedHandler, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(20) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Watchroom/0.3 (+https://github.com/Svovoniks/WatchRoom; metadata)");
         return client;
     }

@@ -63,6 +63,8 @@ public sealed class PlayerMenuPopup : Popup
     protected override void OnOpened(EventArgs e)
     {
         base.OnOpened(e);
+        // Menus open over the native video; keep them on the software surface like the video overlay.
+        if (Child is { } child) App.UseSoftwareSurface(child);
         // The window and its layout exist now, so the pill's position inside it is known. Start on the
         // next frame: building a large menu can block a frame, and a motion begun before that stall
         // would jump straight to its end.

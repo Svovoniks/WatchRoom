@@ -10,7 +10,7 @@ public sealed class PlaybackSettling
         this.playing = playing;
         this.revision = revision; requested = position; started = monotonicMs;
         until = monotonicMs + 2000; observed = advancing = false;
-        if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("settle-start", new { revision, position });
+        if (PlaybackDiagnostics.Detailed) PlaybackDiagnostics.Record("settle-start", new { revision, position });
     }
     // Called from the UI dispatch of native TimeChanged events. A setter echo
     // alone is insufficient while playing: wait for timeline advancement.
@@ -25,7 +25,7 @@ public sealed class PlaybackSettling
     {
         if (currentRevision != revision || monotonicMs >= until || (advancing || !playing && observed && Math.Abs(actualPosition - requested) <= 200) && monotonicMs - started >= 300)
         {
-            if (until != 0 && PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("settle-end", new { revision, elapsedMs = monotonicMs - started, reason = currentRevision != revision ? "superseded" : monotonicMs >= until ? "timeout" : playing ? "advancing" : "position", actualPosition });
+            if (until != 0 && PlaybackDiagnostics.Detailed) PlaybackDiagnostics.Record("settle-end", new { revision, elapsedMs = monotonicMs - started, reason = currentRevision != revision ? "superseded" : monotonicMs >= until ? "timeout" : playing ? "advancing" : "position", actualPosition });
             until = 0; return false;
         }
         return true;

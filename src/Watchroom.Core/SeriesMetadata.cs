@@ -20,14 +20,22 @@ public static class SeriesMetadata
         using var requests = MetadataHttp.BeginScope(library, force || refresh is not null, options);
         using var owned = metadata is null && TmdbCredentials.Resolve(token) is not null ? new MetadataClient(token, options: options) : null;
         var tmdb = metadata ?? owned;
-        foreach (var compilation in library.All().Where(x => mode != MetadataRefresh.RetryArtwork && x.Series is not null && MetadataTitles.IsUnverifiedCompilation(x)))
+        var catalog = library.All(); var catalogChanged = false;
+        foreach (var compilation in catalog.Where(x => mode != MetadataRefresh.RetryArtwork && x.Series is not null && MetadataTitles.IsUnverifiedCompilation(x)))
+        {
+            catalogChanged = true;
             library.Save(compilation with { EpisodeTitle = LibraryIdentity.Locked(compilation, "EpisodeTitle") ? compilation.EpisodeTitle : null,
                 EpisodeOverview = LibraryIdentity.Locked(compilation, "EpisodeOverview") ? compilation.EpisodeOverview : null,
                 EpisodePoster = LibraryIdentity.Locked(compilation, "EpisodePoster") ? compilation.EpisodePoster : null,
                 AirDate = LibraryIdentity.Locked(compilation, "AirDate") ? compilation.AirDate : null, EpisodeSource = null,
                 NumberingConflict = "Compilation file numbers are not verified episode numbers; identify the contained episode range before fetching episode details." });
-        if (mode != MetadataRefresh.RetryArtwork) library.RemoveVirtual(library.All().Where(x => x.IsVirtual &&
-            (DateOnly.TryParse(x.AirDate, out var date) && date > DateOnly.FromDateTime(DateTime.UtcNow) ? !options.ImportUpcoming : !options.ImportMissing)).Select(x => x.Id));
+        }
+        if (mode != MetadataRefresh.RetryArtwork)
+        {
+            var stale = catalog.Where(x => x.IsVirtual &&
+                (DateOnly.TryParse(x.AirDate, out var date) && date > DateOnly.FromDateTime(DateTime.UtcNow) ? !options.ImportUpcoming : !options.ImportMissing)).Select(x => x.Id).ToArray();
+            library.RemoveVirtual(stale); catalogChanged |= stale.Length > 0;
+        }
         int seasons = 0, episodes = 0, failed = 0, unmatched = 0, incomplete = 0, artworkFailed = 0, deferred = 0;
         var failedImages = new Dictionary<string, Exception>();
         async Task<(string? Path, bool Failed)> Artwork(MediaItem entry, string stage, string image, Func<Task<string?>> fetch)
@@ -43,7 +51,7 @@ public static class SeriesMetadata
                 outstanding.Set(stage, entry, "artwork-failure", AutomaticArtwork.FailureReason(failure), failure);
             return (null, true);
         }
-        var groups = library.All().Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Series is not null && !x.MetadataLocked && !MetadataTitles.IsUnverifiedCompilation(x) &&
+        var groups = (catalogChanged ? library.All() : catalog).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Series is not null && !x.MetadataLocked && !MetadataTitles.IsUnverifiedCompilation(x) &&
             (x.Matched || !MetadataMatching.HasMovieEvidence(x))).GroupBy(LibraryIdentity.ShowKey).ToArray();
         foreach (var group in groups)
         {

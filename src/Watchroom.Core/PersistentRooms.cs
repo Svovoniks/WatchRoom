@@ -9,11 +9,24 @@ public sealed class PersistentRooms
     private readonly LibraryStore store;
     private readonly List<PersistentRoom> rooms;
     private readonly object gate = new();
+    // Each room is its own settings row, so a change rewrites one room instead of every saved room.
+    private const string Prefix = "persistentRoom:";
     public PersistentRooms(string directory)
     {
         store = new(directory);
-        rooms = Wire.Read<List<PersistentRoom>>(store.Setting("persistentRooms") ?? "[]");
+        rooms = store.SettingsWithPrefix(Prefix).Values.Select(Wire.Read<PersistentRoom>).ToList();
+        // Move rooms saved by older servers as one list into their own rows.
+        var legacy = Wire.Read<List<PersistentRoom>>(store.Setting("persistentRooms") ?? "[]");
+        if (legacy.Count > 0)
+        {
+            var known = rooms.Select(x => x.Code).ToHashSet();
+            var moved = legacy.Where(x => known.Add(x.Code)).ToArray();
+            store.SetSettings(moved.Select(room => KeyValuePair.Create(Prefix + room.Code, Wire.Serialize(room))));
+            rooms.AddRange(moved);
+            store.Setting("persistentRooms", "[]");
+        }
     }
+    private void Save(PersistentRoom room) => store.Setting(Prefix + room.Code, Wire.Serialize(room));
     public PersistentRoom[] All() { lock (gate) return rooms.ToArray(); }
     public int Count { get { lock (gate) return rooms.Count; } }
     public void Update(string code, AdmittedGuest[] guests, bool sharedControls, string? name = null)
@@ -23,7 +36,7 @@ public sealed class PersistentRooms
             var index = rooms.FindIndex(x => x.Code == code);
             if (index < 0) return;
             rooms[index] = rooms[index] with { ApprovedGuests = guests.Select(x => x.Id).ToArray(), Guests = guests, SharedControls = sharedControls, Name = name ?? rooms[index].Name };
-            store.Setting("persistentRooms", Wire.Serialize(rooms));
+            Save(rooms[index]);
         }
     }
     public string Create(string code)
@@ -32,7 +45,7 @@ public sealed class PersistentRooms
         {
             var key = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
             rooms.Add(new(code, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))));
-            store.Setting("persistentRooms", Wire.Serialize(rooms));
+            Save(rooms[^1]);
             return key;
         }
     }

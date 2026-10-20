@@ -43,7 +43,7 @@ public sealed class ServerClock
             var best = samples.OrderBy(s => s.Rtt).ThenByDescending(s => s.At).First();
             var before = serverAnchor + Elapsed(anchor, now);
             anchor = now; serverAnchor = best.Server + Elapsed(best.At, now);
-            if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("clock", new { id, rtt, selectedRtt = best.Rtt, sampleAgeMs = Elapsed(best.At, now), correctionMs = serverAnchor - before, serverMs = serverAnchor });
+            if (PlaybackDiagnostics.Detailed) PlaybackDiagnostics.Record("clock", new { id, rtt, selectedRtt = best.Rtt, sampleAgeMs = Elapsed(best.At, now), correctionMs = serverAnchor - before, serverMs = serverAnchor });
             return true;
         }
     }

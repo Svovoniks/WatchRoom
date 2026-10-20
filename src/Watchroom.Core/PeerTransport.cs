@@ -29,19 +29,49 @@ public sealed class FileMediaSource : ILocalMediaSource
         this.path = Path.GetFullPath(path);
         Media = new(id ?? Guid.NewGuid().ToString("N"), title ?? Path.GetFileNameWithoutExtension(path), new FileInfo(path).Length, Path.GetExtension(path));
     }
+    // Streams read many small ranges, so one handle is shared while reads keep coming and closed once
+    // they stop, leaving the file free to move or delete. Positional reads are safe on a shared handle.
+    private readonly object handleGate = new();
+    private Microsoft.Win32.SafeHandles.SafeFileHandle? handle;
+    private Timer? idleClose;
+    private int readers;
+    private long lastRead;
+    private Microsoft.Win32.SafeHandles.SafeFileHandle AcquireHandle()
+    {
+        lock (handleGate)
+        {
+            handle ??= File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            idleClose ??= new Timer(_ => CloseIdleHandle(), null, 5000, 5000);
+            readers++;
+            return handle;
+        }
+    }
+    private void ReleaseHandle() { lock (handleGate) { readers--; lastRead = Environment.TickCount64; } }
+    private void CloseIdleHandle()
+    {
+        lock (handleGate)
+        {
+            if (handle is null || readers > 0 || Environment.TickCount64 - lastRead < 10000) return;
+            handle.Dispose(); handle = null; idleClose?.Dispose(); idleClose = null;
+        }
+    }
     public async Task<byte[]> ReadAsync(long offset, int count, CancellationToken ct)
     {
         if (offset < 0 || offset >= Media.Length || count is < 1 or > 262144) throw new InvalidDataException("Invalid media range");
-        using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.Asynchronous | FileOptions.RandomAccess);
-        var result = new byte[(int)Math.Min(count, Media.Length - offset)];
-        int read = 0;
-        while (read < result.Length)
+        var file = AcquireHandle();
+        try
         {
-            int n = await RandomAccess.ReadAsync(handle, result.AsMemory(read), offset + read, ct);
-            if (n == 0) throw new EndOfStreamException("Source file changed while streaming");
-            read += n;
+            var result = new byte[(int)Math.Min(count, Media.Length - offset)];
+            int read = 0;
+            while (read < result.Length)
+            {
+                int n = await RandomAccess.ReadAsync(file, result.AsMemory(read), offset + read, ct);
+                if (n == 0) throw new EndOfStreamException("Source file changed while streaming");
+                read += n;
+            }
+            return result;
         }
-        return result;
+        finally { ReleaseHandle(); }
     }
 }
 
@@ -309,10 +339,10 @@ public sealed class PeerTransport : IDisposable
         controlOpened.TrySetException(new IOException("Room control channel closed"));
         if (disposed == 0 && Interlocked.Exchange(ref controlClosed, 1) == 0) ControlClosed?.Invoke();
     }
-    public void SendControl(WireMessage message)
+    public void SendControl(WireMessage message, string? serialized = null)
     {
         if (!IsControlOpen) throw new IOException("Room controls are not connected. Rejoin the room.");
-        var text = Wire.Serialize(message);
+        var text = serialized ?? Wire.Serialize(message);
         if (System.Text.Encoding.UTF8.GetByteCount(text) > 65536) throw new InvalidDataException("Room control message is too large");
         if (message.Type is "library-item" or "library-page-end")
         {
@@ -326,14 +356,25 @@ public sealed class PeerTransport : IDisposable
     {
         try
         {
-            await foreach (var request in requests.Reader.ReadAllAsync(lifetime.Token))
+            // Read a few queued ranges ahead so disk latency overlaps with sending; replies still go out in request order.
+            var reading = new Queue<(RangeRequest Request, Task<byte[]?> Bytes)>();
+            async Task<byte[]?> Read(RangeRequest request)
             {
-                if (!serving.ContainsKey(request.Id)) continue;
+                if (!serving.ContainsKey(request.Id)) return null;
+                if (request.Count is < 1 or > 32768) throw new InvalidDataException();
+                var source = ResolveMedia?.Invoke(request.Media) ?? throw new UnauthorizedAccessException();
+                return await source.ReadAsync(request.Offset, request.Count, lifetime.Token);
+            }
+            while (true)
+            {
+                if (reading.Count == 0 && !await requests.Reader.WaitToReadAsync(lifetime.Token)) break;
+                while (reading.Count < 4 && requests.Reader.TryRead(out var queued)) reading.Enqueue((queued, Read(queued)));
+                if (reading.Count == 0) continue;
+                var (request, read) = reading.Dequeue();
+                if (!serving.ContainsKey(request.Id)) { _ = read.ContinueWith(static t => _ = t.Exception, TaskScheduler.Default); continue; }
                 try
                 {
-                    if (request.Count is < 1 or > 32768) throw new InvalidDataException();
-                    var source = ResolveMedia?.Invoke(request.Media) ?? throw new UnauthorizedAccessException();
-                    var bytes = await source.ReadAsync(request.Offset, request.Count, lifetime.Token);
+                    if (await read is not { } bytes) continue;
                     if (bytes.Length != request.Count) throw new IOException("Incomplete source range");
                     if (request.Binary)
                     {

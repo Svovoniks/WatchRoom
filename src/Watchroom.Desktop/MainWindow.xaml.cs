@@ -90,7 +90,7 @@ public partial class MainWindow : Window
     private PlaybackState? target;
     private string? loadedMedia;
     private bool scanning, seeking, tracksUpdating, ready, closing, fullscreen, light;
-    private long tick, appliedRevision = -1;
+    private long appliedRevision = -1;
     private readonly PlaybackSettling settling = new();
     private readonly PlaybackIntent playbackIntent = new();
     private long appliedGeneration = -1, readyGeneration = -1;
@@ -140,7 +140,8 @@ public partial class MainWindow : Window
         // Keep the initial window inside the usable desktop on smaller displays.
         Height = Math.Min(Height, SystemParameters.WorkArea.Height);
         Width = Math.Min(Width, SystemParameters.WorkArea.Width);
-        library = new LibraryStore(App.DataDirectory);
+        // The TMDB retention sweep reads every record; it runs in the background once the library has rendered.
+        library = new LibraryStore(App.DataDirectory, deferRetention: true);
         InitializeUpdates();
         light = library.Setting("theme") == "light";
         ApplyTheme();
@@ -178,9 +179,9 @@ public partial class MainWindow : Window
         if (int.TryParse(library.Setting("volume"), out var savedVolume)) Volume.Value = Math.Clamp(savedVolume, 0, 100);
         timer.Tick += (_, _) => PlaybackTick(); timer.Start();
         metadataRetentionTimer.Tick += async (_, _) => await Guard(async () =>
-        { if (await Task.Run(() => library.ExpireTmdbContent())) RefreshLibrary(); });
+        { if (await Task.Run(() => library.ExpireTmdbContent())) await RefreshLibrary(); });
         metadataRetentionTimer.Start();
-        scanDelay.Tick += async (_, _) => { scanDelay.Stop(); if (!scanning) await Guard(Scan); };
+        scanDelay.Tick += async (_, _) => { scanDelay.Stop(); if (!scanning) await Guard(() => Scan(fromWatcher: true)); };
         Loaded += async (_, _) =>
         {
             await Guard(async () =>
@@ -188,7 +189,7 @@ public partial class MainWindow : Window
                 SetStatus("Loading library…"); ResultCount.Text = "Loading library…";
                 EmptyLibrary.Visibility = Visibility.Collapsed;
                 var roots = folders.ToArray(); var excluded = exclusions.ToArray();
-                var loaded = await Task.Run(() => { library.Prune(roots, excluded); return library.All(); });
+                var loaded = await Task.Run(() => library.PruneAndLoad(roots, excluded));
                 if (closing) return;
                 // Restore the saved queue before refresh persists any queue edits.
                 items = loaded;
@@ -199,6 +200,7 @@ public partial class MainWindow : Window
                 libraryLoaded = true;
                 RefreshLibraryFromItems(loaded); WatchFolders(); BackfillRuntimes();
             });
+            _ = Guard(async () => { if (!closing && await Task.Run(() => library.ExpireTmdbContent(force: true)) && !closing) await RefreshLibrary(); });
             if (closing) return;
             // Starting the native player loads hundreds of DLLs under the process loader lock, which
             // stalls the UI thread's own first-frame work. Wait until the library has rendered unless
@@ -222,16 +224,23 @@ public partial class MainWindow : Window
                 player.TimeChanged += (_, e) =>
                 {
                     var mono = Environment.TickCount64; playbackPosition.Observe(e.Time, mono);
-                    if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("native-time", new { position = e.Time });
+                    if (PlaybackDiagnostics.Detailed) PlaybackDiagnostics.Record("native-time", new { position = e.Time });
                     Dispatcher.BeginInvoke(() => { if (!closing) settling.Observe(e.Time, mono); });
                 };
                 RefreshTracks();
+                // Track lists change only when streams are added, removed or selected; refresh once per burst.
+                void TracksChanged()
+                {
+                    if (Interlocked.Exchange(ref trackRefreshQueued, 1) == 0)
+                        Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { trackRefreshQueued = 0; if (!closing && ready) RefreshTracks(); });
+                }
+                player.ESAdded += (_, _) => TracksChanged(); player.ESDeleted += (_, _) => TracksChanged(); player.ESSelected += (_, _) => TracksChanged();
                 player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); ReportReady(); if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
                 player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus(room?.IsPeerRecovering == true ? "Connection interrupted · Reconnecting…" : "Playback failed. Check that the file is available and the connection is active."); });
                 player.Buffering += (_, e) => Dispatcher.BeginInvoke(() =>
                 {
                     if (closing) return;
-                    if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("buffer", new { cache = e.Cache, position = player?.Time, revision = target?.Revision });
+                    if (PlaybackDiagnostics.Detailed) PlaybackDiagnostics.Record("buffer", new { cache = e.Cache, position = player?.Time, revision = target?.Revision });
                     if (buffering.Cache(e.Cache, Environment.TickCount64)) { readyGeneration = -1; ReportReady(); }
                 });
                 player.EndReached += (_, _) =>
@@ -397,12 +406,16 @@ public partial class MainWindow : Window
         else NavigateLibrary(crumb.Category, crumb.Series, crumb.Kind, crumb.Season);
         e.Handled = true;
     }
-    private void RefreshLibrary()
+    private int libraryRefresh;
+    // Reads the catalog off the UI thread; when refreshes overlap, only the latest one is applied.
+    private async Task RefreshLibrary()
     {
-        library.Prune(folders, exclusions);
+        var refresh = ++libraryRefresh;
+        var roots = folders.ToArray(); var excluded = exclusions.ToArray();
         libraryUpdates.Clear();
-        items = library.All();
-        RefreshLibraryFromItems(items);
+        var loaded = await Task.Run(() => library.PruneAndLoad(roots, excluded));
+        if (closing || refresh != libraryRefresh) return;
+        RefreshLibraryFromItems(loaded);
         BackfillRuntimes();
     }
     private bool runtimeBackfillRunning, runtimeBackfillAgain;
@@ -458,6 +471,9 @@ public partial class MainWindow : Window
     private void ApplyLibraryUpdates()
     {
         if (closing) return;
+        // Scans and metadata passes save many records; rebuild the views less often while they run.
+        var interval = TimeSpan.FromMilliseconds(scanning || artworkBusy ? 1000 : 250);
+        if (libraryUpdateTimer.Interval != interval) libraryUpdateTimer.Interval = interval;
         if (Interlocked.Exchange(ref pendingScanStatus, null) is { } progress && scanning)
         { ScanStatus.Text = progress; SetStatus(progress); }
         if (libraryUpdates.IsEmpty)
@@ -687,7 +703,7 @@ public partial class MainWindow : Window
     }
     private void RemoveFolder(object sender, RoutedEventArgs e)
     {
-        if (FolderList.SelectedItem is LibraryFolder folder) { folders.Remove(folder); SaveFolders(); RefreshLibrary(); scanDelay.Stop(); scanDelay.Start(); SetStatus("Folder removed from library."); }
+        if (FolderList.SelectedItem is LibraryFolder folder) { folders.Remove(folder); SaveFolders(); scanDelay.Stop(); scanDelay.Start(); _ = Guard(async () => { await RefreshLibrary(); SetStatus("Folder removed from library."); }); }
     }
     private void ChangeFolderKind(object sender, RoutedEventArgs e)
     {
@@ -712,8 +728,10 @@ public partial class MainWindow : Window
             try
             {
                 var watcher = new FileSystemWatcher(folder.Path) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName, EnableRaisingEvents = true };
-                void Changed(object? s, FileSystemEventArgs e) => Dispatcher.BeginInvoke(() => { scanDelay.Stop(); scanDelay.Start(); });
-                watcher.Created += Changed; watcher.Deleted += Changed; watcher.Renamed += (s, e) => Changed(s, e);
+                void Changed() => Dispatcher.BeginInvoke(() => { scanDelay.Stop(); scanDelay.Start(); });
+                watcher.Created += (_, e) => { if (FileNames.AffectsLibrary(e.FullPath, false)) Changed(); };
+                watcher.Deleted += (_, e) => { if (FileNames.AffectsLibrary(e.FullPath, true)) Changed(); };
+                watcher.Renamed += (_, e) => { if (FileNames.AffectsLibrary(e.OldFullPath, true) || FileNames.AffectsLibrary(e.FullPath, false)) Changed(); };
                 watchers.Add(watcher);
             }
             catch (IOException) { }
@@ -724,7 +742,8 @@ public partial class MainWindow : Window
         if (scanning) { scanCancellation?.Cancel(); return; }
         await Guard(Scan);
     }
-    private async Task Scan()
+    private Task Scan() => Scan(fromWatcher: false);
+    private async Task Scan(bool fromWatcher)
     {
         if (scanning) return; scanning = true;
         ScanButton.IsEnabled = false;
@@ -741,7 +760,8 @@ public partial class MainWindow : Window
             Interlocked.Exchange(ref pendingScanStatus, null);
             RefreshLibraryFromItems(scannedItems);
             ScanStatus.Text = $"Scan complete · {items.Count} videos indexed.";
-            if (SavedAutoArtwork && !scanCancellation.IsCancellationRequested) await FetchArtwork(scanCancellation.Token);
+            // A watcher scan that changed nothing has nothing new to identify.
+            if (SavedAutoArtwork && !scanCancellation.IsCancellationRequested && (!fromWatcher || library.LastScanChanges > 0)) await FetchArtwork(scanCancellation.Token);
         }
         catch (OperationCanceledException) when (!lifetime.IsCancellationRequested) { var partial = await Task.Run(library.All); RefreshLibraryFromItems(partial); ScanStatus.Text = "Scan cancelled. Videos already indexed remain in your library."; SetStatus(ScanStatus.Text); }
         finally
@@ -802,7 +822,7 @@ public partial class MainWindow : Window
         {
             var report = await Task.Run(() => AutomaticArtwork.FetchAsync(library, App.DataDirectory, token, progress, cancellation, force: force, refresh: refresh), cancellation);
             var roots = folders.ToArray(); var excluded = exclusions.ToArray();
-            var refreshed = await Task.Run(() => { library.Prune(roots, excluded); return library.All(); }, cancellation);
+            var refreshed = await Task.Run(() => library.PruneAndLoad(roots, excluded), cancellation);
             if (closing) return;
             RefreshLibraryFromItems(refreshed); SetStatus(report);
         }
@@ -810,7 +830,7 @@ public partial class MainWindow : Window
         finally
         {
             ApplyLibraryUpdates(); artworkBusy = false;
-            if (artworkRerun && !closing) { artworkRerun = false; _ = Guard(async () => { await FetchArtwork(lifetime.Token, true); RefreshLibrary(); }); }
+            if (artworkRerun && !closing) { artworkRerun = false; _ = Guard(async () => { await FetchArtwork(lifetime.Token, true); await RefreshLibrary(); }); }
         }
     }
     private async void MatchClick(object sender, RoutedEventArgs e) => await Guard(async () =>
@@ -836,10 +856,10 @@ public partial class MainWindow : Window
             using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(20) };
             await SeriesMetadata.FetchAsync(library, App.DataDirectory, savedMetadataToken, new Progress<string>(SetStatus), lifetime.Token, http, true);
         }
-        RefreshLibrary(); Select(items.First(x => x.Id == item.Id));
+        await RefreshLibrary(); if (items.FirstOrDefault(x => x.Id == item.Id) is { } matched) Select(matched);
         SetStatus(poster is null ? "Title matched. Poster unavailable; use Retry missing artwork to try again." : "Title matched with " + match.Provider + ".");
     });
-    private void EditTitle(object sender, RoutedEventArgs e)
+    private async void EditTitle(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (selected is null) return;
         var item = selected;
@@ -849,8 +869,9 @@ public partial class MainWindow : Window
         foreach (var entry in items.Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item)))
             library.Save(entry with { Title = title, Series = entry.Series is null ? null : title, Matched = true, LockedFields = (entry.LockedFields ?? []).Append("Title").Distinct().ToArray() });
         if (item.Series is not null && LibraryIdentity.InShow(item, browseSeries, browseKind)) browseSeries = LibraryIdentity.ShowKey(item);
-        RefreshLibrary(); Select(items.First(x => x.Id == item.Id)); SetStatus("Title corrected. Rescanning will preserve your changes.");
-    }
+        await RefreshLibrary(); if (items.FirstOrDefault(x => x.Id == item.Id) is { } corrected) Select(corrected);
+        SetStatus("Title corrected. Rescanning will preserve your changes.");
+    });
     private void LocalPoster(object sender, RoutedEventArgs e)
     {
         if (selected is null) return;
@@ -859,7 +880,7 @@ public partial class MainWindow : Window
         var dir = Path.Combine(App.DataDirectory, "posters"); Directory.CreateDirectory(dir);
         var dest = Path.Combine(dir, selected.Id + "-" + Guid.NewGuid().ToString("N") + Path.GetExtension(picker.FileName)); File.Copy(picker.FileName, dest, true);
         foreach (var entry in items.Where(x => x.Id == selected.Id || LibraryIdentity.SameShow(x, selected))) library.Save(entry with { Poster = dest, SeriesPoster = entry.Series is null ? null : dest, Matched = true, PosterSource = "Local artwork", LockedFields = (entry.LockedFields ?? []).Append("Poster").Distinct().ToArray() });
-        RefreshLibrary();
+        _ = Guard(RefreshLibrary);
     }
     private async void PlayLocal(object sender, RoutedEventArgs e) => await Guard(async () => { if (GuestLibrary) { WatchGuestVideo(); return; } if (selected is not null) { queuePosition = -1; await PlayLocalItem(selected); PublishQueue(); } });
     private async Task PlayLocalItem(MediaItem item)
@@ -893,9 +914,11 @@ public partial class MainWindow : Window
     {
         if (nativeStopCount == 0 && (room is null || room.Identity?.Host == true) && playingItem is not null && player is not null && player.Time >= 0)
         {
-            library.Setting("position:" + playingItem.Id, WasWatched(playingItem.Id) || player.Length > 0 && player.Time >= player.Length - 2000 ? "0" : Math.Max(0, player.Time).ToString());
+            var time = player.Time; var length = player.Length;
+            var saved = new List<KeyValuePair<string, string>> { KeyValuePair.Create("position:" + playingItem.Id, WasWatched(playingItem.Id) || length > 0 && time >= length - 2000 ? "0" : Math.Max(0, time).ToString()) };
             // Home orders unfinished titles by when they were last played.
-            if (player.Time >= 10000) library.Setting("played:" + playingItem.Id, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString());
+            if (time >= 10000) saved.Add(KeyValuePair.Create("played:" + playingItem.Id, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()));
+            library.SetSettings(saved);
             foreach (var card in libraryCards.Where(x => x.Card.Media.Id == playingItem.Id)) UpdateCardPlayback(card);
         }
     }
@@ -963,7 +986,21 @@ public partial class MainWindow : Window
         ResetGuestMirror();
         guestLibraryCache.Clear(); guestLibraryCards.Clear();
         client.SetHostedLibrary(items);
-        client.Message += msg => Dispatcher.BeginInvoke(async () => { if (room == client) await Guard(() => OnRoomMessage(msg)); });
+        // A burst of snapshots only needs the latest one; other messages are handled one by one, in order.
+        var pendingSnapshot = new System.Runtime.CompilerServices.StrongBox<WireMessage?>();
+        client.Message += msg =>
+        {
+            if (msg.Type == "snapshot")
+            {
+                if (Interlocked.Exchange(ref pendingSnapshot.Value, msg) is not null) return;
+                Dispatcher.BeginInvoke(async () =>
+                {
+                    if (Interlocked.Exchange(ref pendingSnapshot.Value, null) is { } latest && room == client) await Guard(() => OnRoomMessage(latest));
+                });
+                return;
+            }
+            Dispatcher.BeginInvoke(async () => { if (room == client) await Guard(() => OnRoomMessage(msg)); });
+        };
         client.LibraryPeerReady += id => Dispatcher.BeginInvoke(() =>
         {
             if (room != client) return; EnsureRoomLibrary();
@@ -985,6 +1022,8 @@ public partial class MainWindow : Window
         });
         return client;
     }
+    private string[] guestQueueTitles = [];
+    private System.Collections.IEnumerable? guestQueueSource;
     private async Task OnRoomMessage(WireMessage message)
     {
         if (room is null) return;
@@ -1034,7 +1073,8 @@ public partial class MainWindow : Window
                 {
                     QueueStatus.Text = $"{snapshot.Queue?.Length ?? 0} videos in the host's queue";
                     SetQueuePill("Queue", snapshot.Queue?.Length > 0 ? $"{snapshot.Queue.Length} videos" : "Off");
-                    QueueList.ItemsSource = (snapshot.Queue ?? []).Select(title => new { QueueTitle = title }).ToArray();
+                    if (guestQueueSource is null || !ReferenceEquals(QueueList.ItemsSource, guestQueueSource) || !(snapshot.Queue ?? []).SequenceEqual(guestQueueTitles))
+                    { guestQueueTitles = snapshot.Queue ?? []; QueueList.ItemsSource = guestQueueSource = guestQueueTitles.Select(title => new { QueueTitle = title }).ToArray(); }
                 }
                 foreach (var id in pendingAdmissions.Keys.ToArray())
                 {
@@ -1045,7 +1085,7 @@ public partial class MainWindow : Window
                         ShowRoomFeedback(participant is null ? "The guest left the room." : $"{participant.Name} admitted.");
                     }
                 }
-                RefreshPeople(snapshot);
+                RefreshPeople(snapshot, settings: false); RefreshSavedRooms();
                 SharedControls.IsEnabled = room.Identity?.Host == true; SharedControls.IsChecked = snapshot.SharedControls; RefreshSharedControlsChip();
                 if (room.Identity?.Host != true && !snapshot.SharedControls) { playbackPause.Clear(); playbackIntent.Clear(); }
                 if (snapshot.Playback is not null) AcceptState(snapshot.Playback);
@@ -1099,7 +1139,7 @@ public partial class MainWindow : Window
         {
             var improved = await Task.Run(() => episodeArtwork.ImproveAsync(item, App.DataDirectory, token, ffmpeg, lifetime.Token, options));
             if (closing || improved == item) return;
-            var current = await Task.Run(() => library.All().FirstOrDefault(x => x.Id == item.Id));
+            var current = await Task.Run(() => library.Get(item.Id));
             if (current is null || current.EpisodeSource != item.EpisodeSource || current.Path != item.Path ||
                 current.EpisodePoster != item.EpisodePoster || current.Season != item.Season || current.Episode != item.Episode ||
                 current.ShowId != item.ShowId || current.MetadataId != item.MetadataId || current.MetadataProvider != item.MetadataProvider ||
@@ -1188,6 +1228,17 @@ public partial class MainWindow : Window
     }
     private void PlaybackTick()
     {
+        PlaybackTickCore();
+        // Nothing on screen depends on the player at 250 ms while it is idle behind the library.
+        var active = upNextChoice is not null || room is not null || fullscreen || RoomPage.Visibility == Visibility.Visible ||
+            HasMediaPlayback && player?.IsPlaying == true;
+        var interval = TimeSpan.FromMilliseconds(active ? 250 : 1000);
+        if (timer.Interval != interval) timer.Interval = interval;
+    }
+    private long lastTrackRefresh, lastPositionSave, lastDiagnosticSample;
+    private int trackRefreshQueued;
+    private void PlaybackTickCore()
+    {
         UpdateSystemMediaControls();
         roomLibrary?.ExpireViews(Wire.Now);
         // The bars float over the video, so they fade when idle: always in fullscreen, and while playing in the window.
@@ -1222,10 +1273,14 @@ public partial class MainWindow : Window
         var wantsPlayback = WantsMediaPlayback;
         PlayButton.Content = wantsPlayback ? "\uF8AE" : "\uF5B0";
         PlayButton.ToolTip = wantsPlayback ? "Pause (Space)" : "Play (Space)";
-        if (++tick % 8 == 0 && ready) RefreshTracks();
-        if (tick % 20 == 0 && ready) SavePlaybackPosition();
-        if (PlaybackDiagnostics.Enabled)
+        var mono = Environment.TickCount64;
+        // Stream events drive track refreshes; this slow poll only catches anything they miss.
+        if (ready && mono - lastTrackRefresh >= 10000) { lastTrackRefresh = mono; RefreshTracks(); }
+        if (ready && mono - lastPositionSave >= 5000) { lastPositionSave = mono; SavePlaybackPosition(); }
+        // Without detailed diagnostics, sample every 2 s and only while something is playing or a room is open.
+        if (PlaybackDiagnostics.Detailed || PlaybackDiagnostics.Enabled && mono - lastDiagnosticSample >= 2000 && (room is not null || wantsPlayback))
         {
+            lastDiagnosticSample = mono;
             var serverMs = room?.ServerNowMs ?? Wire.Now;
             PlaybackDiagnostics.Record("sample", new { serverMs, position = player.Time,
                 estimated = playbackPosition.Estimate(player.Time, player.IsPlaying, player.Rate, Environment.TickCount64), rate = player.Rate, policy = SyncMath.UseTunedPolicy ? "experimental" : "stable",
@@ -1466,11 +1521,11 @@ public partial class MainWindow : Window
     {
         RoomFeedback.Text = text; RoomFeedback.Visibility = Visibility.Visible;
     }
-    private void RefreshPeople(RoomSnapshot? snapshot = null)
+    private void RefreshPeople(RoomSnapshot? snapshot = null, bool settings = true)
     {
         snapshot ??= room?.Snapshot;
         if (snapshot is null) return;
-        PeopleList.ItemsSource = snapshot.People.Select(p => new
+        var people = snapshot.People.Select(p => new
         {
             p.Id, p.Name,
             Status = !p.Approved ? (pendingAdmissions.ContainsKey(p.Id) ? "Waiting for admission confirmation…" : "Waiting for approval")
@@ -1480,7 +1535,9 @@ public partial class MainWindow : Window
             AdmitLabel = pendingAdmissions.ContainsKey(p.Id) ? "Admitting…" : "Admit",
             CanAdmit = !pendingAdmissions.ContainsKey(p.Id)
         }).ToList();
-        RefreshRoomSettings();
+        // Unchanged rows keep their containers instead of being rebuilt on every snapshot.
+        if (PeopleList.ItemsSource is not System.Collections.IEnumerable shown || !shown.Cast<object>().SequenceEqual(people)) PeopleList.ItemsSource = people;
+        if (settings) RefreshRoomSettings();
     }
     private async void Admit(object sender, RoutedEventArgs e)
     {

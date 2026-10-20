@@ -10,18 +10,18 @@ public partial class MainWindow
             ? LibraryIdentity.SameShow(item, card.Media) && (card.Level == "series" || (item.Season ?? -1) == card.Season)
             : item.Id == card.Media.Id));
 
-    private void RemoveUnavailableVideo(object sender, RoutedEventArgs e)
+    private async void RemoveUnavailableVideo(object sender, RoutedEventArgs e)
     {
-        if (selected is { Available: false } item) RemoveUnavailableItems([item]);
+        if (selected is { Available: false } item) await Guard(() => RemoveUnavailableItems([item]));
     }
 
-    private void RemoveUnavailableItems(IEnumerable<MediaItem> source)
+    private async Task RemoveUnavailableItems(IEnumerable<MediaItem> source)
     {
         if (GuestLibrary || scanning) return;
         var ids = source.Where(item => !item.Available).Select(item => item.Id).ToArray();
         var removed = library.RemoveUnavailable(ids);
         foreach (var id in ids) watchedState.Remove(id);
-        RefreshLibrary();
+        await RefreshLibrary();
         SetStatus(removed == 1 ? "Unavailable video removed from library." : $"{removed} unavailable videos removed from library.");
     }
 }

@@ -34,11 +34,12 @@ internal sealed class SitesRoomConnection : IRoomConnection
     private long cursor;
     private bool disposed;
     private readonly bool idempotentRequests;
-    private const int FastPollMs = 100, IdlePollMs = 1000, SignalingWindowMs = 5000;
-    private int pollingIntervalMs = FastPollMs;
+    private const int FastPollMs = 100, IdlePollMs = 1000, DiscoveryPollMs = 2000, SignalingWindowMs = 5000;
+    // Poll quickly only while signaling is active (including the first seconds after joining); waiting alone
+    // polls once a second, and once peers are negotiated media and control travel over the peer channel.
+    private int pollingIntervalMs = IdlePollMs;
     private long lastSignalingMs = Environment.TickCount64;
-    // Back off only once peers are negotiated and signaling has been quiet for a few seconds.
-    public void UseDiscoveryPolling() => Volatile.Write(ref pollingIntervalMs, IdlePollMs);
+    public void UseDiscoveryPolling() => Volatile.Write(ref pollingIntervalMs, DiscoveryPollMs);
     public void SignalingActivity()
     {
         var idle = Environment.TickCount64 - Interlocked.Exchange(ref lastSignalingMs, Environment.TickCount64) >= SignalingWindowMs;

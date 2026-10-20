@@ -19,7 +19,7 @@ static class Program
             // Uses the library in WATCHROOM_DATA; point it at a copy, never at a live profile.
             if (Environment.GetEnvironmentVariable("WATCHROOM_DATA") is null) throw new InvalidOperationException("Set WATCHROOM_DATA to a library copy.");
             Environment.SetEnvironmentVariable("WATCHROOM_DISABLE_UPDATES", "1");
-            System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly; // as in App.OnStartup
+            System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly; // deterministic captures; App.OnStartup uses this only as a fallback
             new LibraryStore(Environment.GetEnvironmentVariable("WATCHROOM_DATA")!).Setting("artwork", "false");
             var renderApp = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown, Resources = LoadAppResources() };
             SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));

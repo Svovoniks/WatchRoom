@@ -22,7 +22,8 @@ public static class AutomaticArtwork
         using var ownedTmdb = metadata is null && TmdbCredentials.Resolve(token) is not null ? new MetadataClient(token, options: options) : null;
         var tmdb = metadata ?? ownedTmdb;
         PlaybackDiagnostics.Record("metadata-fetch-start", new { Mode = mode.ToString(), Providers = options.ProviderOrder, TmdbAvailable = tmdb is not null });
-        foreach (var entry in library.All().Where(x => mode != MetadataRefresh.RetryArtwork && x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus))
+        var catalog = library.All(); var localChanged = false;
+        foreach (var entry in catalog.Where(x => mode != MetadataRefresh.RetryArtwork && x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus))
         {
             using var context = MetadataDiagnostics.BeginItem("nfo-artwork", entry);
             var local = LocalMetadata.Apply(entry);
@@ -34,9 +35,10 @@ public static class AutomaticArtwork
             }
             catch (Exception ex) when (ex is IOException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
             { MetadataDiagnostics.Failure("nfo-artwork", entry.DisplayTitle, null, ex); progress?.Report("NFO artwork unavailable · " + entry.DisplayTitle); }
-            if (Wire.Serialize(local) != Wire.Serialize(entry)) library.Save(local);
+            if (Wire.Serialize(local) != Wire.Serialize(entry)) { library.Save(local); localChanged = true; }
         }
-        var snapshot = library.All();
+        // Re-read the catalog only when local metadata changed it.
+        var snapshot = localChanged ? library.All() : catalog;
         var folderIds = snapshot.ToLookup(x => Path.GetDirectoryName(x.Path) ?? "", x => x.Id,
             OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         IEnumerable<MediaItem> CurrentSiblings(MediaItem item)

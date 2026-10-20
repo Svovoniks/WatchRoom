@@ -32,6 +32,7 @@ public partial class MainWindow
         ForgetSavedRoomButton.IsEnabled = CopySavedInviteButton.IsEnabled = SavedRoomsList.SelectedItem is SavedRoom;
         RefreshRoomSettings();
     }
+    private readonly Dictionary<string, string> savedGuestLists = [];
     private string SavedRoomSetting(SavedRoom saved, string field) => "room:" + saved.Server + ":" + saved.Code.ToUpperInvariant() + ":" + field;
     private void RefreshRoomSettings()
     {
@@ -59,13 +60,19 @@ public partial class MainWindow
         AdmittedGuest[] remembered = [];
         if (saved is not null && host)
         {
-            if (connected) { remembered = room!.Snapshot?.AdmittedGuests ?? []; library.Setting(SavedRoomSetting(saved, "guests"), Wire.Serialize(remembered)); }
+            if (connected)
+            {
+                remembered = room!.Snapshot?.AdmittedGuests ?? [];
+                // Snapshots arrive for every guest command; write the guest list only when it changes.
+                var key = SavedRoomSetting(saved, "guests"); var json = Wire.Serialize(remembered);
+                if (savedGuestLists.GetValueOrDefault(key) != json) { library.Setting(key, json); savedGuestLists[key] = json; }
+            }
             else try { remembered = Wire.Read<AdmittedGuest[]>(library.Setting(SavedRoomSetting(saved, "guests")) ?? "[]"); } catch (System.Text.Json.JsonException) { }
         }
         var active = connected && host ? room!.Snapshot?.People.Where(p => !p.IsHost).ToArray() ?? [] : [];
         var rows = active.Select(p => new RoomGuestRow(p.Id, p.Name, p.Approved ? "Admitted · Connected" : "Waiting for approval", !p.Approved, connected && host, pendingAdmissions.ContainsKey(p.Id))).ToList();
         rows.AddRange(remembered.Where(p => !active.Any(a => a.GuestId == p.Id)).Select(p => new RoomGuestRow(p.Id, p.Name, "Admitted · Remembered", false, connected && host, false)));
-        SavedRoomGuests.ItemsSource = rows;
+        if (SavedRoomGuests.ItemsSource is not IEnumerable<RoomGuestRow> shown || !shown.SequenceEqual(rows)) SavedRoomGuests.ItemsSource = rows;
         SavedRoomGuestHint.Text = !host ? "Connect as the host to manage guests." : connected ? "Admitted guests can reconnect. Remove revokes access." : "Connect to admit or remove guests.";
     }
     private sealed record RoomGuestRow(string Id, string Name, string Status, bool Waiting, bool CanRemove, bool Pending)
@@ -109,7 +116,6 @@ public partial class MainWindow
             savedRooms[savedRooms.IndexOf(saved)] = updated; SaveRooms();
             if (selected) SavedRoomsList.SelectedItem = updated;
         }
-        RefreshSavedRooms();
     }
     private static string? ValidateRoomName(string name) => name.Length > 100 || name.Any(char.IsControl)
         ? "Use at most 100 characters without control characters." : null;

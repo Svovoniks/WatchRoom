@@ -7,6 +7,10 @@ public static class PlaybackDiagnostics
     private static readonly string? overrideDirectory = Environment.GetEnvironmentVariable("WATCHROOM_DIAGNOSTICS");
     static PlaybackDiagnostics() { if (!string.IsNullOrWhiteSpace(overrideDirectory)) Initialize(overrideDirectory); }
     public static bool Enabled => log is not null;
+    // Per-frame and per-tick records (positions, samples, range reads, buffering, settling, clock) are only
+    // kept when diagnostics are redirected for a test run or WATCHROOM_DIAGNOSTICS_DETAIL=1 is set.
+    public static bool Detailed => Enabled && detailed;
+    private static readonly bool detailed = !string.IsNullOrWhiteSpace(overrideDirectory) || Environment.GetEnvironmentVariable("WATCHROOM_DIAGNOSTICS_DETAIL") == "1";
     public static string? DirectoryPath => log?.DirectoryPath;
     public static void Initialize(string directory)
     {

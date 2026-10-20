@@ -367,10 +367,13 @@ public partial class MainWindow
         var insertion = QueueDropLocation(e).Index;
         MoveSavedEntry(drag.Queue, drag.Index, insertion > drag.Index ? insertion - 1 : insertion);
     }
-    private void AddQueueVideos(object sender, RoutedEventArgs e)
+    private async void AddQueueVideos(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (QueuePicker.SelectedItem is not SavedQueue saved || !CanEditQueue()) return;
-        var available = items.Where(x => x.Available && File.Exists(x.Path)).ToArray();
+        // Checking every file can block on a sleeping or network drive, so it runs off the UI thread.
+        var library = items;
+        var available = await Task.Run(() => library.Where(x => x.Available && File.Exists(x.Path)).ToArray());
+        if (closing || !ReferenceEquals(QueuePicker.SelectedItem, saved) || !CanEditQueue()) return;
         if (available.Length == 0)
         {
             ShowPage("Folders");
@@ -388,7 +391,7 @@ public partial class MainWindow
         add.Click += (_, _) => { if (list.SelectedItems.Count > 0) win.DialogResult = true; };
         win.Content = panel;
         if (win.ShowDialog() == true) AddToSavedQueue(saved, list.SelectedItems.Cast<MediaItem>());
-    }
+    });
     private void AddToSavedQueue(SavedQueue saved, IEnumerable<MediaItem> source)
     {
         if (!CanEditQueue()) return;
@@ -437,12 +440,12 @@ public partial class MainWindow
         if (unavailable.Length > 0)
         {
             var remove = new MenuItem { Header = card.Level is "series" or "season" ? "Remove unavailable videos from library" : "Remove from library", IsEnabled = !scanning };
-            remove.Click += (_, _) => RemoveUnavailableItems(unavailable);
+            remove.Click += async (_, _) => await Guard(() => RemoveUnavailableItems(unavailable));
             menu.Items.Add(new Separator()); menu.Items.Add(remove);
         }
         var members = items.Where(x => x.Id == card.Media.Id || card.Level is "series" or "season" && LibraryIdentity.SameShow(x, card.Media)).ToArray();
         var locked = new MenuItem { Header = "Lock metadata", IsCheckable = true, IsChecked = members.All(x => x.MetadataLocked) };
-        locked.Click += (_, _) => { foreach (var item in members) library.Save(item with { MetadataLocked = locked.IsChecked }); RefreshLibrary(); };
+        locked.Click += (_, _) => { foreach (var item in members) library.Save(item with { MetadataLocked = locked.IsChecked }); _ = Guard(RefreshLibrary); };
         menu.Items.Add(locked);
         if (card.Media.Series is not null)
         {
@@ -453,7 +456,7 @@ public partial class MainWindow
                 choice.Click += async (_, _) => await Guard(async () =>
                 {
                     foreach (var item in items.Where(x => LibraryIdentity.SameShow(x, card.Media)).ToArray()) library.Save(item with { NumberingOrder = order, MetadataFetchedAt = 0 });
-                    await FetchArtwork(lifetime.Token, true); RefreshLibrary();
+                    await FetchArtwork(lifetime.Token, true); await RefreshLibrary();
                 });
                 ordering.Items.Add(choice);
             }
@@ -496,6 +499,7 @@ public partial class MainWindow
     }
     private void SaveExclusions()
     {
-        library.Setting("exclusions", Wire.Serialize(exclusions)); RefreshLibrary(); scanDelay.Stop(); scanDelay.Start(); SetStatus("Folder exclusions updated.");
+        library.Setting("exclusions", Wire.Serialize(exclusions)); scanDelay.Stop(); scanDelay.Start();
+        _ = Guard(async () => { await RefreshLibrary(); SetStatus("Folder exclusions updated."); });
     }
 }
