@@ -326,6 +326,8 @@ static class Program
         Navigate(2, LibraryIdentity.ShowKey(show), "Show", 1); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == show.Id);
         Call("Select", show);
         check(Crumbs(true).Select(x => x.Label).SequenceEqual(["All", "Shows", "Navigation Show", "Season 1", "Episode 1 · The Beginning"]), "episode details display the complete hierarchy");
+        window.UpdateLayout(); var clipped = BorderAudit.Find((System.Windows.Media.Visual)window.Content);
+        check(clipped.Count == 0, "details breadcrumbs and disclosure outlines are not clipped" + string.Concat(clipped.Select(x => Environment.NewLine + "  " + x)));
         ClickCrumb(Crumbs(true).Single(x => x.Level == "season"));
         await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == show.Id);
         check(((FrameworkElement)window.FindName("LibraryPage")).Visibility == Visibility.Visible && Crumbs().Last().Level == "season", "season breadcrumb returns from episode details to its grid");

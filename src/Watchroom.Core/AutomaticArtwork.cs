@@ -83,10 +83,13 @@ public static class AutomaticArtwork
             var sharedPoster = entries.SelectMany(x => new[] { x.SeriesPoster, x.Poster }).FirstOrDefault(ArtworkCache.IsUsable);
             // A season image or a prior match does not prove the show poster exists.
             var needsPoster = sharedPoster is null || mode == MetadataRefresh.ReplaceArtwork;
+            // Shared posters keep their source so episode cards still prefer their own stills.
+            var sharedSource = entries.FirstOrDefault(x => x.Poster == sharedPoster && x.PosterSource is not null)?.PosterSource;
             if (sharedPoster is not null)
                 entries = entries.Select(entry =>
                 {
-                    var updated = entry with { Poster = ArtworkCache.IsUsable(entry.Poster) ? entry.Poster : sharedPoster,
+                    var keep = ArtworkCache.IsUsable(entry.Poster);
+                    var updated = entry with { Poster = keep ? entry.Poster : sharedPoster, PosterSource = keep ? entry.PosterSource : entry.PosterSource ?? sharedSource,
                         SeriesPoster = entry.Series is null ? entry.SeriesPoster : ArtworkCache.IsUsable(entry.SeriesPoster) ? entry.SeriesPoster : sharedPoster };
                     if (updated != entry) library.Save(updated);
                     return updated;

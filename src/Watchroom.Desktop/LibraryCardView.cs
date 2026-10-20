@@ -58,11 +58,18 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     }
     public string EpisodeMeta => (Card.Media.Season is { } season ? $"S{season:00} · " : "") +
         (Card.Media.Episode is { } episode ? $"E{episode:00}" + (Card.Media.EpisodeEnd > episode ? $"–{Card.Media.EpisodeEnd:00}" : "") : "Episode unknown") +
-        (Card.Media.RuntimeMinutes is > 0 ? $" · {Card.Media.RuntimeMinutes} min" : "") + (Card.Media.IsVirtual ? " · Missing" : Card.Media.Available ? "" : " · Unavailable");
+        (Card.Media.RuntimeMinutes is > 0 ? $" · {Card.Media.RuntimeMinutes} min" : "");
+    // Shown in red beside the episode details and as a badge on the artwork.
+    public string EpisodeStatus => IsRemote ? "" : Card.Media.IsVirtual ? "Missing" : Card.Media.Available ? "" : "Unavailable";
+    public string EpisodeStatusSuffix => EpisodeStatus.Length > 0 ? " · " + EpisodeStatus : "";
+    public bool HasEpisodeStatus => IsEpisode && EpisodeStatus.Length > 0;
     public double Progress { get; private set; }
     public bool IsWatched { get; private set; }
     public string PlaybackLabel { get; private set; } = "";
     public BitmapSource? Poster { get; private set; }
+    // Landscape stills fill the episode frame; portrait fallback posters fit inside it uncropped.
+    public bool PosterFills => Poster is { PixelWidth: > 0 } image && image.PixelWidth >= image.PixelHeight;
+    private void SetPoster(BitmapSource? image) { Poster = image; Changed(nameof(Poster)); Changed(nameof(PosterFills)); }
     public string Key => Identity(Card);
     public static string Identity(LibraryCard card) => card.Level is "series" or "season"
         ? $"{card.Level}:{LibraryIdentity.ShowKey(card.Media)}:{card.Season}"
@@ -90,7 +97,8 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         if (previous.Media.DisplayTitle != card.Media.DisplayTitle || previous.DisplayTitle != card.DisplayTitle) Changed(nameof(HomeTitle));
         if (previous.Caption != card.Caption) Changed(nameof(Caption));
         if (previous.Media.Season != card.Media.Season || previous.Media.Episode != card.Media.Episode || previous.Media.EpisodeEnd != card.Media.EpisodeEnd ||
-            previous.Media.RuntimeMinutes != card.Media.RuntimeMinutes || previous.Media.IsVirtual != card.Media.IsVirtual || previous.Media.Available != card.Media.Available) Changed(nameof(EpisodeMeta));
+            previous.Media.RuntimeMinutes != card.Media.RuntimeMinutes || previous.Media.IsVirtual != card.Media.IsVirtual || previous.Media.Available != card.Media.Available)
+        { Changed(nameof(EpisodeMeta)); Changed(nameof(EpisodeStatus)); Changed(nameof(EpisodeStatusSuffix)); Changed(nameof(HasEpisodeStatus)); }
         var version = posterFile ?? Version(card.Poster);
         var changed = previous.Poster != card.Poster || posterVersion != version;
         if (changed) { imageGeneration++; requestedPath = null; }
@@ -137,11 +145,11 @@ public sealed class LibraryCardView : INotifyPropertyChanged
             catch (Exception ex) when (ex is FormatException or IOException or NotSupportedException or ArgumentException) { return null; }
             finally { imageWorkers.Release(); }
         });
-        if (image is not null) { Poster = image; Changed(nameof(Poster)); }
+        if (image is not null) SetPoster(image);
     }
     private async Task LoadPosterCoreAsync()
     {
-        if (Card.Poster is not { } path) { if (Poster is not null) { Poster = null; Changed(nameof(Poster)); } return; }
+        if (Card.Poster is not { } path) { if (Poster is not null) SetPoster(null); return; }
         if (requestedPath == path) return;
         requestedPath = path;
         var generation = ++imageGeneration; var version = posterVersion;
@@ -170,6 +178,6 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         if (generation != imageGeneration || path != Card.Poster) return;
         // A failed refresh keeps the image already on screen; successful replacements
         // publish once, after decoding, without a null/placeholder frame in between.
-        if (image is not null && !ReferenceEquals(Poster, image)) { Poster = image; Changed(nameof(Poster)); }
+        if (image is not null && !ReferenceEquals(Poster, image)) SetPoster(image);
     }
 }

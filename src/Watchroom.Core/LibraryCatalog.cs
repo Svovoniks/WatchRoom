@@ -38,7 +38,9 @@ public static class LibraryCatalog
         cancellation.ThrowIfCancellationRequested();
         return ArtworkCache.IsUsable(p);
     });
-    public static string? EpisodeArtwork(MediaItem item, CancellationToken cancellation = default) => Existing(item.PosterSource is null or "Local artwork"
+    // A poster shared from the show or season is not episode art, whatever its recorded source.
+    public static string? EpisodeArtwork(MediaItem item, CancellationToken cancellation = default) => Existing(item.PosterSource is null or "Local artwork" &&
+        !string.Equals(item.Poster, item.SeriesPoster, StringComparison.OrdinalIgnoreCase) && !string.Equals(item.Poster, item.SeasonPoster, StringComparison.OrdinalIgnoreCase)
         ? [item.Poster, item.EpisodePoster, item.GeneratedEpisodePoster, item.SeasonPoster, item.SeriesPoster]
         : [item.EpisodePoster, item.GeneratedEpisodePoster, item.SeasonPoster, item.SeriesPoster, item.Poster], cancellation);
     public static IEnumerable<MediaItem> PreferredFiles(IEnumerable<MediaItem> source)

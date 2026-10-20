@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Input;
 using Watchroom.Core;
 
 namespace Watchroom.Desktop;
@@ -28,6 +29,11 @@ public partial class App : Application
             File.AppendAllText(Path.Combine(DataDirectory, "errors.log"), DateTime.UtcNow + " " + args.Exception + Environment.NewLine);
             MessageBox.Show(args.Exception.Message, "Watchroom", MessageBoxButton.OK, MessageBoxImage.Warning); args.Handled = true;
         };
+        // Only the app's own focus ring marks keyboard focus; WPF's dotted rectangles never draw.
+        EventManager.RegisterClassHandler(typeof(FrameworkElement), Keyboard.PreviewGotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((sender, _) =>
+        {
+            if (sender is FrameworkElement { FocusVisualStyle: { } style } element && !ReferenceEquals(style, Resources["FocusRing"])) element.FocusVisualStyle = null;
+        }));
         base.OnStartup(e);
         if (e.Args.Contains("--updated"))
         {

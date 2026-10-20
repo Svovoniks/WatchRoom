@@ -1913,9 +1913,9 @@ public partial class MainWindow : Window
     {
         if (ThemeStatus is not null) ThemeStatus.Text = light ? "Current theme: Light" : "Current theme: Dark";
         var colors = light
-            ? new[] { "#F5F5F8", "#FFFFFF", "#ECECF2", "#1B1C24", "#5C5F70", "#E0E1E9", "#6A47DE", "#FFFFFF", "#E6E6EE", "#EEE9FD", "#1F9D5C", "#C8F5F5F8" }
-            : new[] { "#0F1015", "#16171E", "#20212B", "#EEEEF3", "#9A9CAB", "#2A2C37", "#A991FF", "#160E2E", "#272935", "#2A2442", "#3FB97A", "#C80F1015" };
-        var keys = new[] { "Canvas", "Surface", "Elevated", "Ink", "Muted", "Line", "Accent", "AccentInk", "Hover", "AccentSoft", "Success", "Scrim" };
+            ? new[] { "#F5F5F8", "#FFFFFF", "#ECECF2", "#1B1C24", "#5C5F70", "#E0E1E9", "#6A47DE", "#FFFFFF", "#E6E6EE", "#EEE9FD", "#1F9D5C", "#C8F5F5F8", "#D33A47" }
+            : new[] { "#0F1015", "#16171E", "#20212B", "#EEEEF3", "#9A9CAB", "#2A2C37", "#A991FF", "#160E2E", "#272935", "#2A2442", "#3FB97A", "#C80F1015", "#F0616D" };
+        var keys = new[] { "Canvas", "Surface", "Elevated", "Ink", "Muted", "Line", "Accent", "AccentInk", "Hover", "AccentSoft", "Success", "Scrim", "Danger" };
         for (int i = 0; i < keys.Length; i++) Application.Current.Resources[keys[i]] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(colors[i]));
         var canvas = (Color)ColorConverter.ConvertFromString(colors[0]);
         var fade = new LinearGradientBrush([new(Color.FromArgb(0, canvas.R, canvas.G, canvas.B), 0),

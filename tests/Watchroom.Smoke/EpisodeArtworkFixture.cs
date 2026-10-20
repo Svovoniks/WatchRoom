@@ -27,6 +27,12 @@ internal static class EpisodeArtworkFixture
         check(ArtworkCache.IsUsable(result.GeneratedEpisodePoster), "short video gets a local thumbnail after unknown-duration seek fallback");
         check(seeks.SequenceEqual([180d, 1d]), "thumbnail capture skips opening credits, then retries near the start");
         check(LibraryCatalog.EpisodeArtwork(result) == result.GeneratedEpisodePoster, "generated episode frame takes priority over series fallback");
+        var still = Path.Combine(directory, "still.png"); var showPoster = Path.Combine(directory, "show.png");
+        File.WriteAllBytes(still, ArtworkFixture.Png); File.WriteAllBytes(showPoster, ArtworkFixture.Png);
+        var shared = item with { Poster = showPoster, SeriesPoster = showPoster, EpisodePoster = still };
+        check(LibraryCatalog.EpisodeArtwork(shared) == still, "episode stills outrank a show poster shared without its source");
+        check(LibraryCatalog.EpisodeArtwork(shared with { PosterSource = "Local artwork", Poster = result.GeneratedEpisodePoster }) == result.GeneratedEpisodePoster,
+            "local per-episode artwork still outranks fetched stills");
         seeks.Clear();
         var repeated = await service.ImproveAsync(result, directory, null, default);
         check(repeated == result && seeks.Count == 0, "local episode thumbnail is reused without decoding the video again");

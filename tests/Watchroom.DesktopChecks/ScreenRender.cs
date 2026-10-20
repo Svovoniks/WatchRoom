@@ -23,6 +23,14 @@ static class ScreenRender
             var until = DateTime.UtcNow.AddMilliseconds(milliseconds);
             while (DateTime.UtcNow < until) await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
         }
+        static IEnumerable<DependencyObject> Descendants(DependencyObject node)
+        {
+            for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+            {
+                var child = VisualTreeHelper.GetChild(node, i); yield return child;
+                foreach (var nested in Descendants(child)) yield return nested;
+            }
+        }
         Directory.CreateDirectory(output);
         async Task Capture(string name)
         {
@@ -32,6 +40,24 @@ static class ScreenRender
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
             await using var file = File.Create(Path.Combine(output, name + ".png")); encoder.Save(file);
             Console.WriteLine("Saved " + name);
+            foreach (var finding in BorderAudit.Find(root)) Console.WriteLine($"CLIPPED {name}: {finding}");
+            // Audit the rest of long pages scrolled into view.
+            var scrolled = Descendants(root).OfType<ScrollViewer>().Where(x => x.IsVisible && x.ScrollableHeight > 0 && x.VerticalOffset == 0).ToList();
+            if (scrolled.Count > 0)
+            {
+                foreach (var scroll in scrolled) scroll.ScrollToEnd();
+                await Settle(500);
+                foreach (var finding in BorderAudit.Find(root)) Console.WriteLine($"CLIPPED {name} (scrolled): {finding}");
+                foreach (var scroll in scrolled) scroll.ScrollToHome();
+                await Settle(300);
+            }
+            // Audit collapsed sections opened as well, then restore them.
+            var closed = Descendants(root).OfType<Expander>().Where(x => x.IsVisible && !x.IsExpanded).ToList();
+            if (closed.Count == 0) return;
+            foreach (var expander in closed) expander.IsExpanded = true;
+            await Settle(300);
+            foreach (var finding in BorderAudit.Find(root)) Console.WriteLine($"CLIPPED {name} (expanded): {finding}");
+            foreach (var expander in closed) expander.IsExpanded = false;
         }
         window.Width = width; window.Height = height;
         var deadline = DateTime.UtcNow.AddSeconds(60);
@@ -58,5 +84,7 @@ static class ScreenRender
             foreach (var section in new[] { "Profile", "Metadata", "Playback", "Appearance", "Updates" })
             { Call("ShowPreferenceSection", section); await Capture($"{theme}-settings-{section.ToLowerInvariant()}"); }
         }
+        Set("light", false); Call("ApplyTheme");
+        await SurfaceAudit.Run(window, Settle, (name, finding) => Console.WriteLine($"CLIPPED {name}: {finding}"));
     }
 }
