@@ -6,8 +6,38 @@ public record SharedLibraryEntry(string Id, string Title, string Caption, string
     string? HomeSection = null, long PositionMs = 0);
 public record LibraryBrowsePage(SharedLibraryEntry[] Entries, int Total, int Page, string Location);
 public record LibraryBrowseView(LibraryBrowseRequest Browse, int LoadedCount, double ScrollFraction = 0, string? HoveredId = null, string? SelectedId = null);
-public record LibraryArtworkRequest(string Id, string Level, int? Season = null);
-public record LibraryArtworkChunk(string Key, int Index, int Count, string Data);
+// FullHd asks for the large copy; older hosts ignore it and send the 600 px copy.
+public record LibraryArtworkRequest(string Id, string Level, int? Season = null, bool FullHd = false);
+// Paced chunks belong to a full HD transfer: the guest acknowledges each one before the host sends more.
+public record LibraryArtworkChunk(string Key, int Index, int Count, string Data, bool Paced = false);
+
+public static class ArtworkTransfer
+{
+    // The original 600 px copy is pushed in one burst; it stays small enough not to delay room commands.
+    public const int ChunkSize = 8000, MaxChunks = 25;
+    // Full HD copies are larger, so at most Window chunks wait on the connection ahead of playback commands.
+    public const int PacedChunkSize = 24000, PacedMaxChunks = 80, Window = 2;
+    public const int MaxFullHdBytes = 1_400_000;
+    public static bool ValidChunk(LibraryArtworkChunk chunk) => chunk.Paced
+        ? chunk.Count is >= 1 and <= PacedMaxChunks && chunk.Index >= 0 && chunk.Index < chunk.Count && chunk.Data.Length <= PacedChunkSize
+        : chunk.Count is >= 1 and <= MaxChunks && chunk.Index >= 0 && chunk.Index < chunk.Count && chunk.Data.Length <= ChunkSize;
+}
+
+// Estimates artwork throughput from completed transfers so large copies are only fetched when the link has room.
+public sealed class ArtworkBandwidth
+{
+    private double? charactersPerSecond;
+    public double? CharactersPerSecond => charactersPerSecond;
+    public void Record(long characters, long elapsedMs)
+    {
+        if (characters < 20000 || elapsedMs <= 0) return;
+        var rate = characters * 1000d / elapsedMs;
+        charactersPerSecond = charactersPerSecond is { } previous ? previous * .6 + rate * .4 : rate;
+    }
+    // A full HD copy is about 1 MB on the wire; fetch it only if that takes a few seconds at most.
+    public bool AllowsFullHd(double seconds = 4, long expectedCharacters = 1_000_000) => charactersPerSecond is { } rate && rate * seconds >= expectedCharacters;
+    public void Slowed() => charactersPerSecond = charactersPerSecond is { } rate ? rate / 2 : null;
+}
 public record LibraryBrowseActivity(string Peer, string Name, string Location, string Query, long UpdatedAt, LibraryBrowseView? View = null);
 
 public static class SharedLibrary

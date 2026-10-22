@@ -135,6 +135,7 @@ public partial class MainWindow
                     if (resumedItem is not null && (!identity.Host || source is not null && File.Exists(source.LocalPath)))
                         playingItem = items.FirstOrDefault(item => item.Id == resumedItem.Id) ?? resumedItem;
                     RememberCurrentRoom();
+                    if (ConnectedSavedRoom is { } saved) PublishRoomSession(candidate, saved);
                     RoomSubtitle.Text = identity.Host ? "Reconnected · You are the host" : "Reconnected · Waiting for the host";
                     SetStatus("Room connection restored."); UpdateSessionControls(); return;
                 }

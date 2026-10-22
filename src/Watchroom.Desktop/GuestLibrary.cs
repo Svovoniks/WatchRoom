@@ -29,6 +29,29 @@ public partial class MainWindow
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
     private string? HighResolutionLibraryArtwork(string? path) => MakeThumbnail(path, 100000, true);
+    // Fits artwork inside 1920x1080 without enlarging it, lowering JPEG quality until it fits the transfer limit.
+    private static string? FullHdLibraryArtwork(string? path)
+    {
+        if (path is null || !File.Exists(path)) return null;
+        try
+        {
+            using var file = File.OpenRead(path);
+            var frame = System.Windows.Media.Imaging.BitmapDecoder.Create(file, System.Windows.Media.Imaging.BitmapCreateOptions.DelayCreation, System.Windows.Media.Imaging.BitmapCacheOption.None).Frames[0];
+            var scale = Math.Min(1, Math.Min(1920d / frame.PixelWidth, 1080d / frame.PixelHeight));
+            var width = Math.Max(1, (int)Math.Round(frame.PixelWidth * scale));
+            file.Position = 0;
+            var bitmap = new System.Windows.Media.Imaging.BitmapImage(); bitmap.BeginInit();
+            bitmap.DecodePixelWidth = width; bitmap.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad; bitmap.StreamSource = file; bitmap.EndInit(); bitmap.Freeze();
+            foreach (var quality in new[] { 88, 80, 70, 60 })
+            {
+                var encoder = new System.Windows.Media.Imaging.JpegBitmapEncoder { QualityLevel = quality };
+                encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap)); using var output = new MemoryStream(); encoder.Save(output);
+                if (output.Length <= ArtworkTransfer.MaxFullHdBytes) return Convert.ToBase64String(output.ToArray());
+            }
+            return MakeThumbnail(path, 100000, true);
+        }
+        catch (Exception) { return null; }
+    }
     private string HostPeerId() => room?.Snapshot?.People.FirstOrDefault(p => p.IsHost)?.Id ?? room?.Identity?.Peer ?? "";
     private void EnsureRoomLibrary()
     {

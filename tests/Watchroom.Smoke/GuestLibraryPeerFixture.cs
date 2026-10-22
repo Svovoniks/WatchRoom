@@ -82,6 +82,56 @@ static class GuestLibraryPeerFixture
         await AwaitDirect(() => guest.Snapshot?.LibraryBrowsing == false, "host revokes guest Home browsing over the peer connection");
         guest.Send(new("catalog-browse", Number: 1006, Data: Wire.Serialize(new LibraryBrowseRequest(Home: true))));
         await AwaitDirect(() => homeDenied, "guest Home requests are denied after host revocation");
+        // The room's current video artwork stays available for the hero without library browsing; nothing else is.
+        var sessionParts = new ConcurrentDictionary<long, ConcurrentDictionary<int, string>>();
+        var sessionErrors = new ConcurrentBag<long>();
+        guest.Message += message =>
+        {
+            if (message.Type == "session-artwork-chunk")
+            { var part = Wire.Read<LibraryArtworkChunk>(message.Data!); sessionParts.GetOrAdd(message.Number, _ => new())[part.Index] = part.Data; }
+            if (message.Type == "error" && message.Number < 0) sessionErrors.Add(message.Number);
+        };
+        host.SetSessionArtwork("Direct browsing fixture", video);
+        guest.Send(new("session-artwork", Number: -2001, Text: "Direct browsing fixture"));
+        await AwaitDirect(() => sessionParts.GetValueOrDefault(-2001)?.Values.Sum(part => part.Length) == artworkBytes.Length,
+            "guests fetch the room video's artwork for the hero without library browsing");
+        check(string.Concat(sessionParts[-2001].OrderBy(pair => pair.Key).Select(pair => pair.Value)) == artworkBytes && sessionErrors.IsEmpty, "hero artwork chunks reconstruct the host's artwork");
+        guest.Send(new("session-artwork", Number: -2002, Text: "Some other title"));
+        await AwaitDirect(() => sessionParts.GetValueOrDefault(-2002) is { Count: 1 } parts && parts[0] == "", "the host returns no artwork for titles the room is not watching");
+        // Full HD copies are paced: only a window of chunks is in flight until the guest acknowledges them.
+        var fullBytes = Convert.ToBase64String(Enumerable.Range(0, 600000).Select(index => (byte)(index * 7 % 253)).ToArray());
+        host.FullHdArtwork = _ => fullBytes;
+        var fullParts = new ConcurrentDictionary<int, string>();
+        var acknowledge = false; var pacedOnly = true;
+        guest.Message += message =>
+        {
+            if (message.Type != "session-artwork-chunk" || message.Number != -2003) return;
+            var part = Wire.Read<LibraryArtworkChunk>(message.Data!); fullParts[part.Index] = part.Data;
+            pacedOnly &= part.Paced && ArtworkTransfer.ValidChunk(part);
+            if (acknowledge) guest.Send(new("artwork-ack", Number: message.Number));
+        };
+        // While the room wants playback and the guest has not loaded the video, the host keeps its upload for video.
+        var declined = new ConcurrentBag<LibraryArtworkChunk>();
+        guest.Message += message => { if (message.Type == "session-artwork-chunk" && message.Number == -2004) declined.Add(Wire.Read<LibraryArtworkChunk>(message.Data!)); };
+        if (host.Snapshot?.Playback?.WantsPlayback == true)
+        {
+            guest.Send(new("session-artwork", Number: -2004, Text: "Direct browsing fixture", Data: "full"));
+            await AwaitDirect(() => declined.Count == 1, "the host answers full HD requests while a guest is buffering");
+            check(declined.Single() is { Paced: true, Count: 1, Data: "" }, "full HD artwork is declined while someone is still buffering");
+        }
+        host.Send(new("playback", Data: Wire.Serialize(new PlaybackState(0, host.Snapshot!.Media!.Id, false, 15000, 0))));
+        await AwaitDirect(() => host.Snapshot?.Playback?.WantsPlayback == false, "pausing frees the host's upload for artwork");
+        guest.Send(new("session-artwork", Number: -2003, Text: "Direct browsing fixture", Data: "full"));
+        await AwaitDirect(() => fullParts.Count >= ArtworkTransfer.Window, "a full HD transfer starts with its first window of chunks");
+        await Task.Delay(700);
+        check(fullParts.Count == ArtworkTransfer.Window, "the host waits for acknowledgements before sending more full HD chunks");
+        acknowledge = true;
+        foreach (var _ in Enumerable.Range(0, ArtworkTransfer.Window)) guest.Send(new("artwork-ack", Number: -2003));
+        await AwaitDirect(() => fullParts.Values.Sum(part => part.Length) == fullBytes.Length, "acknowledged full HD chunks complete the transfer");
+        check(pacedOnly && string.Concat(fullParts.OrderBy(pair => pair.Key).Select(pair => pair.Value)) == fullBytes, "full HD chunks are paced, bounded and reconstruct the original bytes");
+        check(sessionErrors.IsEmpty, "acknowledgements never count as rejected room commands");
+        host.Send(new("last-session", Data: Wire.Serialize(new RoomSession("Direct browsing fixture", 15000, 60000, false, 1, ["Library Guest"], "Library Host", "direct-video"))));
+        await AwaitDirect(() => guest.Snapshot?.LastSession is { Title: "Direct browsing fixture", LibraryId: null }, "the host's last session reaches guests without its library id");
         var owned = new RoomLibrary(true, host.Identity.Peer); var remote = new RoomLibrary(false, guest.Identity.Peer);
         var traffic = new ConcurrentQueue<Action>();
         host.LibraryMessage += (id, message) => traffic.Enqueue(() => owned.Receive(id, message));

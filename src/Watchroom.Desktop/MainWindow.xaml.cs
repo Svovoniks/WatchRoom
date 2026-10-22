@@ -982,11 +982,12 @@ public partial class MainWindow : Window
     });
     private RoomClient NewRoom()
     {
-        var client = new RoomClient(library); room = client;
+        var client = new RoomClient(library); room = client; ResetHeroArtworkRequests();
         guestBrowse = new(); guestLibraryNotice = null; guestBrowsePending = false; ++guestBrowseRequest;
         guestCurrentBrowse = null; guestHadLibraryLease = false; guestParentTitle = null;
         client.LibraryThumbnail = CachedLibraryThumbnail;
         client.LibraryArtwork = HighResolutionLibraryArtwork;
+        client.FullHdArtwork = FullHdLibraryArtwork;
         ResetGuestMirror();
         guestLibraryCache.Clear(); guestLibraryCards.Clear();
         client.SetHostedLibrary(items);
@@ -1053,6 +1054,7 @@ public partial class MainWindow : Window
                 UpdateSessionControls();
                 break;
             case "catalog-artwork-chunk": ReceiveHostArtwork(message); break;
+            case "session-artwork-chunk": ReceiveHeroArtwork(message); break;
             case "catalog-started":
                 if (!GuestLibrary) selected = playingItem = items.FirstOrDefault(item => item.Id == message.Target);
                 ShowPage("Room"); break;
@@ -1089,6 +1091,7 @@ public partial class MainWindow : Window
                         ShowRoomFeedback(participant is null ? "The guest left the room." : $"{participant.Name} admitted.");
                     }
                 }
+                RecordRoomSession();
                 RefreshPeople(snapshot, settings: false); RefreshSavedRooms();
                 SharedControls.IsEnabled = room.Identity?.Host == true; SharedControls.IsChecked = snapshot.SharedControls; RefreshSharedControlsChip();
                 if (room.Identity?.Host != true && !snapshot.SharedControls) { playbackPause.Clear(); playbackIntent.Clear(); }
@@ -1103,6 +1106,7 @@ public partial class MainWindow : Window
                 chat.Add(message.Text ?? ""); if (chat.Count > 150) chat.RemoveAt(0); ChatList.ScrollIntoView(chat.Last());
                 if (message.Type == "chat") ChatArrived(message.Text ?? "");
                 break;
+            case "error" when ReceiveHeroArtworkError(message): break;
             case "error": ShowRoomFeedback(message.Text ?? "Room error"); SetStatus(message.Text ?? "Room error"); break;
         }
         UpdateRoomPlaybackStatus();
@@ -1240,6 +1244,7 @@ public partial class MainWindow : Window
     private void PlaybackTick()
     {
         PlaybackTickCore();
+        RoomSessionTick();
         // Nothing on screen depends on the player at 250 ms while it is idle behind the library.
         var active = upNextChoice is not null || room is not null || fullscreen || RoomPage.Visibility == Visibility.Visible ||
             HasMediaPlayback && player?.IsPlaying == true;
@@ -1648,6 +1653,7 @@ public partial class MainWindow : Window
         libraryWindow?.Shutdown(); libraryWindow = null; roomLibrary = null; sharedItems.Clear(); sharedIds.Clear(); sharedKinds = [];
         videoClickDelay.Stop();
         SavePlaybackPosition(); localResume = 0;
+        RecordRoomSession(force: true);
         if (fullscreen && !preserveFullscreen) SetFullscreen(false);
         PlayerEmpty.Visibility = Visibility.Visible;
         UpdateSystemMediaControls();

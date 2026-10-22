@@ -553,28 +553,165 @@
 
    <!-- Saved watch rooms -->
    <Grid x:Name="RoomsPage" Visibility="Collapsed">
-    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
     <Grid Margin="0,0,0,20"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Margin="0,0,16,0"><TextBlock Text="Watch rooms" Style="{StaticResource PageHeading}"/><TextBlock Text="Watch in sync with friends. Only the host needs the video." Style="{StaticResource MutedText}" Margin="0,4,0,0"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="ReturnToRoomButton" Content="Return to player" ContentTemplate="{StaticResource PlayContent}" Tag="Room" Click="Navigate" Margin="0,0,8,0"/><Button x:Name="AddSavedInvitationButton" Content="Join a room" Click="JoinClick" Margin="0,0,8,0" ToolTip="Paste an invitation link or room code to add it to your saved rooms"/><Button x:Name="CreateSavedRoomButton" Content="Create room" ContentTemplate="{StaticResource AddContent}" Click="CreatePersistentRoom" Style="{StaticResource Primary}" Margin="0"/></StackPanel></Grid>
-    <Grid Grid.Row="1"><StackPanel x:Name="RoomsEmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="500"><Border Width="76" Height="76" CornerRadius="38" Background="{DynamicResource AccentSoft}" Margin="0,0,0,22"><TextBlock Text="&#xE716;" Style="{StaticResource Icon}" FontSize="30" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><TextBlock Text="Watch together" FontSize="24" FontWeight="SemiBold" TextAlignment="Center"/><TextBlock Text="Create a room and invite friends, or paste an invitation to join theirs." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,24"/><WrapPanel HorizontalAlignment="Center"><Button Content="Create room" ContentTemplate="{StaticResource AddContent}" Click="CreatePersistentRoom" Style="{StaticResource Primary}"/><Button Content="Join a room" Click="JoinClick" Margin="0,0,0,8"/></WrapPanel></StackPanel><Grid x:Name="SavedRoomsContent" Visibility="Collapsed"><Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-     <DockPanel><ListBox x:Name="SavedRoomsList" Background="Transparent" BorderThickness="0" Padding="0" SelectionChanged="SavedRoomSelectionChanged" AutomationProperties.Name="Saved watch rooms" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4,4"><TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Caption}" Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel>
-     <Border x:Name="SavedRoomDetails" Grid.Column="2" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="12" Padding="22,20,10,12">
-      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel Margin="0,0,12,0">
-       <TextBlock x:Name="SavedRoomHeading" Text="Choose a room" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap"/>
-       <TextBlock x:Name="SavedRoomStatus" Text="Create a room or save an invitation to get started." Style="{StaticResource MutedText}" Margin="0,4,0,16"/>
-       <WrapPanel><Button x:Name="ConnectSavedRoomButton" Content="Connect" Click="ConnectSavedRoom" Style="{StaticResource Primary}"/><Button x:Name="DisconnectSavedRoomButton" Content="Disconnect" Click="LeaveRoom" Visibility="Collapsed" AutomationProperties.Name="Disconnect from room"/><Button x:Name="CopySavedInviteButton" Content="Copy invitation" Click="CopySavedInvitation"/></WrapPanel>
-       <StackPanel x:Name="SavedRoomHostControls"><TextBlock Text="Permissions" Style="{StaticResource SectionHeading}"/>
-        <ToggleButton x:Name="SavedRoomSharedControls" Content="Guest playback controls" ToolTip="Guests can play, pause and seek. Changes save immediately." Click="SavedRoomControlsChanged" AutomationProperties.Name="Saved room shared controls" Style="{StaticResource Switch}"/>
-        <CheckBox x:Name="SavedRoomLibraryBrowsing" Content="Allow guests to browse my library" ToolTip="One admitted guest can browse at a time. Turning this off ends the active session." Checked="SavedRoomLibraryChanged" Unchecked="SavedRoomLibraryChanged"/>
-       </StackPanel><Button x:Name="SavedRoomLibraryButton" Content="Room library" Click="OpenRoomLibrary" HorizontalAlignment="Left" IsEnabled="False" Margin="0,12,0,0"/>
-       <StackPanel x:Name="SavedRoomGuestManagement"><TextBlock Text="Guests" Style="{StaticResource SectionHeading}"/>
-        <TextBlock x:Name="SavedRoomGuestHint" Text="Connect as the host to manage guests. Admitted guests are remembered when they reconnect." Style="{StaticResource MutedText}" Margin="0,0,0,12"/>
-        <ItemsControl x:Name="SavedRoomGuests" AutomationProperties.Name="Saved room guests"><ItemsControl.ItemTemplate><DataTemplate>
-         <Border Background="{DynamicResource Elevated}" CornerRadius="10" Padding="12,8" Margin="0,0,0,6"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Border Width="32" Height="32" CornerRadius="16" Background="{DynamicResource AccentSoft}" Margin="0,0,12,0" VerticalAlignment="Center"><TextBlock Text="&#xE77B;" Style="{StaticResource Icon}" FontSize="13" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><StackPanel Grid.Column="1" Margin="0,0,10,0" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Status}" Style="{StaticResource MutedText}" FontSize="11"/></StackPanel><WrapPanel Grid.Column="2" VerticalAlignment="Center"><Button Content="{Binding AdmitLabel}" Tag="{Binding Id}" Click="Admit" Visibility="{Binding AdmitVisibility}" IsEnabled="{Binding CanAdmit}" Style="{StaticResource Primary}" Padding="10,0" MinHeight="32" Height="32" Margin="0,0,6,0"/><Button Content="Remove" Tag="{Binding Id}" Click="RemovePeer" IsEnabled="{Binding CanRemove}" Style="{StaticResource QuietButton}" Padding="10,0" MinHeight="32" Height="32" Margin="0"/></WrapPanel></Grid></Border>
-        </DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-       <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Margin="0,24,0,0" Padding="0,12,0,0"><WrapPanel><Button x:Name="RenameSavedRoomButton" Content="Rename" Style="{StaticResource QuietButton}" Click="RenameSavedRoom"/><Button x:Name="ForgetSavedRoomButton" Content="Forget room" Style="{StaticResource QuietButton}" Click="ForgetSavedRoom"/></WrapPanel></Border>
-      </StackPanel></ScrollViewer>
-     </Border>
-    </Grid></Grid>
+    <!-- Hero: what the connected room is playing, or what the most recent room watched last time. -->
+    <Border x:Name="RoomHero" Grid.Row="1" Height="200" CornerRadius="14" local:RoundedClip.Radius="14" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" Margin="0,0,0,20" Visibility="Collapsed">
+     <Grid>
+      <!-- Without a saved picture: a room badge before anything is chosen, a title card otherwise, and a shimmer while the picture downloads. -->
+      <Grid HorizontalAlignment="Right" Width="460" ClipToBounds="True">
+       <Grid.OpacityMask><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#FF000000" Offset="0.45"/></LinearGradientBrush></Grid.OpacityMask>
+       <Grid x:Name="RoomHeroBadge">
+        <Rectangle><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#1C1A2B" Offset="0"/><GradientStop Color="#2A2442" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
+        <Rectangle><Rectangle.Fill><RadialGradientBrush Center="0.78,0.3" GradientOrigin="0.78,0.3" RadiusX="0.55" RadiusY="0.9"><GradientStop Color="#47A991FF" Offset="0"/><GradientStop Color="#00A991FF" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
+        <Grid HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,64,0">
+         <Ellipse x:Name="RoomHeroBadgeHalo" Width="160" Height="160" Fill="#0DA991FF"/>
+         <Ellipse x:Name="RoomHeroBadgeHaloInner" Width="132" Height="132" Fill="#14A991FF"/>
+         <Ellipse Width="112" Height="112" Fill="{DynamicResource AccentSoft}" Stroke="#59A991FF" StrokeThickness="1"/>
+         <TextBlock x:Name="RoomHeroBadgeText" FontSize="44" FontWeight="Bold" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Grid>
+       </Grid>
+       <Grid x:Name="RoomHeroTitleCard" Visibility="Collapsed">
+        <Rectangle x:Name="RoomHeroTitleCardFill"/>
+        <Rectangle><Rectangle.Fill><LinearGradientBrush MappingMode="Absolute" StartPoint="0,0" EndPoint="14,6" SpreadMethod="Repeat"><GradientStop Color="#09FFFFFF" Offset="0"/><GradientStop Color="#09FFFFFF" Offset="0.15"/><GradientStop Color="#00FFFFFF" Offset="0.15"/><GradientStop Color="#00FFFFFF" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
+        <TextBlock x:Name="RoomHeroTitleCardText" FontSize="170" FontWeight="ExtraBold" Foreground="#21FFFFFF" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,-48"/>
+       </Grid>
+       <Rectangle x:Name="RoomHeroShimmer" Visibility="Collapsed"><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,0.3"><LinearGradientBrush.RelativeTransform><TranslateTransform x:Name="RoomHeroShimmerShift"/></LinearGradientBrush.RelativeTransform><GradientStop Color="#1D1E27" Offset="0.3"/><GradientStop Color="#2A2C38" Offset="0.5"/><GradientStop Color="#1D1E27" Offset="0.7"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
+       <Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill"/>
+      </Grid>
+      <Rectangle Fill="{DynamicResource HeroFade}"/>
+      <StackPanel Margin="28,0,28,0" VerticalAlignment="Center" HorizontalAlignment="Left" MaxWidth="560">
+       <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+        <Border x:Name="RoomHeroLive" Background="{DynamicResource Success}" CornerRadius="4" Padding="7,1" Margin="0,0,8,0" VerticalAlignment="Center"><TextBlock x:Name="RoomHeroLiveText" Text="LIVE" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource Canvas}"/></Border>
+        <TextBlock x:Name="RoomHeroKicker" FontSize="13" Foreground="{DynamicResource Accent}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+       </StackPanel>
+       <TextBlock x:Name="RoomHeroTitle" FontSize="28" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+       <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+        <ProgressBar x:Name="RoomHeroProgress" Height="4" Width="260" Maximum="100" VerticalAlignment="Center"/>
+        <TextBlock x:Name="RoomHeroTime" Style="{StaticResource MutedText}" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular"/>
+       </StackPanel>
+       <StackPanel Orientation="Horizontal" Margin="0,10,0,14">
+        <Ellipse x:Name="RoomHeroPresenceDot" Width="8" Height="8" Fill="{DynamicResource Muted}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <TextBlock x:Name="RoomHeroPresence" Style="{StaticResource MutedText}" TextTrimming="CharacterEllipsis" MaxWidth="520" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"/>
+       </StackPanel>
+       <StackPanel Orientation="Horizontal">
+        <Button x:Name="RoomHeroResume" Content="Return to player" Click="ResumeRoomHero" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" Padding="20,8"/>
+        <Button x:Name="RoomHeroSecondary" Click="RoomHeroSecondaryClick" Visibility="Collapsed"/>
+        <Button x:Name="RoomHeroDisconnect" Content="Disconnect" Click="LeaveRoom" Style="{StaticResource QuietButton}" AutomationProperties.Name="Disconnect from room"/>
+       </StackPanel>
+      </StackPanel>
+     </Grid>
+    </Border>
+    <Grid Grid.Row="2"><StackPanel x:Name="RoomsEmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="500"><Border Width="76" Height="76" CornerRadius="38" Background="{DynamicResource AccentSoft}" Margin="0,0,0,22"><TextBlock Text="&#xE716;" Style="{StaticResource Icon}" FontSize="30" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><TextBlock Text="Watch together" FontSize="24" FontWeight="SemiBold" TextAlignment="Center"/><TextBlock Text="Create a room and invite friends, or paste an invitation to join theirs." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,24"/><WrapPanel HorizontalAlignment="Center"><Button Content="Create room" ContentTemplate="{StaticResource AddContent}" Click="CreatePersistentRoom" Style="{StaticResource Primary}"/><Button Content="Join a room" Click="JoinClick" Margin="0,0,0,8"/></WrapPanel></StackPanel>
+     <!-- Saved rooms: a row of room pills, then tiles for the selected room. -->
+     <DockPanel x:Name="SavedRoomsContent" Visibility="Collapsed">
+      <DockPanel.Resources>
+       <Style x:Key="TileLabel" TargetType="TextBlock"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Margin" Value="0,0,0,10"/></Style>
+       <Style x:Key="Tile" TargetType="Border"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="18,16"/></Style>
+      </DockPanel.Resources>
+      <ListBox x:Name="SavedRoomsList" DockPanel.Dock="Top" Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,0,14" SelectionChanged="SavedRoomSelectionChanged" AutomationProperties.Name="Saved watch rooms" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+       <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
+       <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem">
+        <Setter Property="Margin" Value="0,0,8,8"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+        <Setter Property="ToolTip" Value="{Binding Caption}"/><Setter Property="AutomationProperties.Name" Value="{Binding Name}"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
+         <Border x:Name="Pill" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="16" Padding="14,6">
+          <StackPanel Orientation="Horizontal">
+           <Ellipse x:Name="LiveDot" Width="7" Height="7" Fill="{DynamicResource Success}" VerticalAlignment="Center" Margin="0,0,8,0" Visibility="Collapsed"/>
+           <TextBlock x:Name="PillText" Text="{Binding Name}" FontSize="13" Foreground="{DynamicResource Muted}" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+          </StackPanel>
+         </Border>
+         <ControlTemplate.Triggers>
+          <Trigger Property="Tag" Value="live"><Setter TargetName="LiveDot" Property="Visibility" Value="Visible"/><Setter TargetName="PillText" Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger>
+          <Trigger Property="IsSelected" Value="True"><Setter TargetName="Pill" Property="Background" Value="{DynamicResource AccentSoft}"/><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Accent}"/><Setter TargetName="PillText" Property="Foreground" Value="{DynamicResource Ink}"/><Setter TargetName="PillText" Property="FontWeight" Value="SemiBold"/></Trigger>
+         </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+       </Style></ListBox.ItemContainerStyle>
+      </ListBox>
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+       <Grid x:Name="SavedRoomDetails" Margin="0,0,0,4">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="11*" MinWidth="280"/><ColumnDefinition Width="12"/><ColumnDefinition Width="10*" MinWidth="220"/><ColumnDefinition Width="12"/><ColumnDefinition Width="10*" MinWidth="220"/></Grid.ColumnDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <!-- The room: its state, the invitation, and what it watched last. -->
+        <Border Grid.RowSpan="3" Style="{StaticResource Tile}" Padding="0" local:RoundedClip.Radius="12">
+         <Grid>
+          <Rectangle IsHitTestVisible="False"><Rectangle.Fill><RadialGradientBrush Center="0.9,0" GradientOrigin="0.9,0" RadiusX="0.75" RadiusY="0.6"><GradientStop Color="#33A991FF" Offset="0"/><GradientStop Color="#00A991FF" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
+          <StackPanel Margin="20,18,20,18">
+           <DockPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0"><Button x:Name="ConnectSavedRoomButton" Content="Connect" Click="ConnectSavedRoom" Style="{StaticResource Primary}"/><Button x:Name="DisconnectSavedRoomButton" Content="Disconnect" Click="LeaveRoom" Visibility="Collapsed" AutomationProperties.Name="Disconnect from room" Margin="0"/></StackPanel>
+            <StackPanel>
+             <TextBlock x:Name="SavedRoomHeading" Text="Choose a room" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+              <Ellipse x:Name="SavedRoomStatusDot" Width="7" Height="7" Fill="{DynamicResource Muted}" VerticalAlignment="Center" Margin="0,0,7,0"/>
+              <TextBlock x:Name="SavedRoomStatus" Text="Create a room or save an invitation to get started." Style="{StaticResource MutedText}" FontSize="12.5" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
+             </StackPanel>
+            </StackPanel>
+           </DockPanel>
+           <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Margin="0,14,0,0" Padding="0,12,0,0">
+            <StackPanel>
+             <TextBlock Text="INVITE FRIENDS" Style="{StaticResource TileLabel}" Margin="0,0,0,6"/>
+             <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left"><TextBlock x:Name="SavedRoomCode" FontFamily="Consolas" FontSize="22" Foreground="{DynamicResource Ink}" AutomationProperties.Name="Room code"/></Viewbox>
+             <TextBlock x:Name="SavedRoomInviteHint" Style="{StaticResource MutedText}" FontSize="11.5" Margin="0,4,0,12"/>
+             <WrapPanel><Button x:Name="CopySavedInviteButton" Content="Copy invitation" Click="CopySavedInvitation" Style="{StaticResource Primary}"/><Button x:Name="CopySavedCodeButton" Content="Copy code" Click="CopySavedCode" ToolTip="Friends on the same room server can paste just the code"/></WrapPanel>
+            </StackPanel>
+           </Border>
+           <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Margin="0,14,0,0" Padding="0,12,0,0">
+            <StackPanel>
+             <TextBlock Text="LAST SESSION" Style="{StaticResource TileLabel}"/>
+             <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Border x:Name="SavedRoomSessionThumb" Width="72" Height="44" CornerRadius="6" local:RoundedClip.Radius="6" Margin="0,0,12,0" VerticalAlignment="Center">
+               <Grid><TextBlock x:Name="SavedRoomSessionInitials" FontSize="18" FontWeight="ExtraBold" Foreground="#40FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/><Image x:Name="SavedRoomSessionImage" Stretch="UniformToFill"/></Grid>
+              </Border>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center">
+               <TextBlock x:Name="SavedRoomSessionTitle" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+               <TextBlock x:Name="SavedRoomSessionDetail" Style="{StaticResource MutedText}" FontSize="11.5" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="0,2,0,0"/>
+              </StackPanel>
+             </Grid>
+            </StackPanel>
+           </Border>
+          </StackPanel>
+         </Grid>
+        </Border>
+        <!-- People: the host admits and removes guests here; guests see who is in the room. -->
+        <Border x:Name="SavedRoomGuestManagement" Grid.Column="2" Grid.RowSpan="3" Style="{StaticResource Tile}">
+         <DockPanel>
+          <DockPanel DockPanel.Dock="Top"><TextBlock x:Name="SavedRoomGuestCount" DockPanel.Dock="Right" Style="{StaticResource MutedText}" FontSize="11.5"/><TextBlock x:Name="SavedRoomGuestHeading" Text="GUESTS" Style="{StaticResource TileLabel}"/></DockPanel>
+          <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+          <!-- With nobody to list, the hint becomes an empty state in the middle of the tile. -->
+          <StackPanel x:Name="SavedRoomGuestHintPanel" Margin="0,0,0,12">
+           <Border x:Name="SavedRoomGuestEmptyIcon" Width="52" Height="52" CornerRadius="26" Background="{DynamicResource AccentSoft}" HorizontalAlignment="Center" Margin="0,0,0,12" Visibility="Collapsed"><TextBlock Text="&#xE716;" Style="{StaticResource Icon}" FontSize="20" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border>
+           <TextBlock x:Name="SavedRoomGuestHint" Text="Connect as the host to manage guests." Style="{StaticResource MutedText}" FontSize="11.5"/>
+          </StackPanel>
+          <ItemsControl x:Name="SavedRoomGuests" Grid.Row="1" AutomationProperties.Name="Saved room guests"><ItemsControl.ItemTemplate><DataTemplate>
+           <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <Border Width="32" Height="32" CornerRadius="16" Background="{Binding Tint}" Opacity="{Binding Presence}" Margin="0,0,10,0" VerticalAlignment="Center"><TextBlock Text="{Binding Initial}" FontWeight="Bold" FontSize="13" Foreground="#14121F" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+            <StackPanel Grid.Column="1" Margin="0,0,8,0" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Status}" Style="{StaticResource MutedText}" FontSize="11"/></StackPanel>
+            <WrapPanel Grid.Column="2" VerticalAlignment="Center"><Button Content="{Binding AdmitLabel}" Tag="{Binding Id}" Click="Admit" Visibility="{Binding AdmitVisibility}" IsEnabled="{Binding CanAdmit}" Style="{StaticResource Primary}" Padding="10,0" MinHeight="30" Height="30" Margin="0,0,4,0"/><Button Content="Remove" Tag="{Binding Id}" Click="RemovePeer" Visibility="{Binding ManageVisibility}" IsEnabled="{Binding CanRemove}" Style="{StaticResource QuietButton}" Padding="8,0" MinHeight="30" Height="30" Margin="0"/></WrapPanel>
+           </Grid>
+          </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+          </Grid>
+         </DockPanel>
+        </Border>
+        <!-- What guests may do; only the host sees this tile. -->
+        <Border x:Name="SavedRoomHostControls" Grid.Column="4" Style="{StaticResource Tile}">
+         <StackPanel>
+          <TextBlock Text="GUESTS CAN" Style="{StaticResource TileLabel}" Margin="0,0,0,4"/>
+          <ToggleButton x:Name="SavedRoomSharedControls" Content="Play, pause and seek" ToolTip="Guests can play, pause and seek. Changes save immediately." Click="SavedRoomControlsChanged" AutomationProperties.Name="Saved room shared controls" Style="{StaticResource Switch}"/>
+          <CheckBox x:Name="SavedRoomLibraryBrowsing" Content="Browse my library" ToolTip="One admitted guest can browse at a time. Turning this off ends the active session." Checked="SavedRoomLibraryChanged" Unchecked="SavedRoomLibraryChanged" AutomationProperties.Name="Allow guests to browse my library" Style="{StaticResource Switch}"/>
+         </StackPanel>
+        </Border>
+        <Border x:Name="SavedRoomActions" Grid.Column="4" Grid.Row="2" Style="{StaticResource Tile}">
+         <StackPanel>
+          <TextBlock Text="ROOM" Style="{StaticResource TileLabel}"/>
+          <WrapPanel><Button x:Name="SavedRoomLibraryButton" Content="Room library" Click="OpenRoomLibrary" IsEnabled="False" Margin="0,0,8,8"/><Button x:Name="RenameSavedRoomButton" Content="Rename" Style="{StaticResource QuietButton}" Click="RenameSavedRoom" Margin="0,0,4,8"/><Button x:Name="ForgetSavedRoomButton" Content="Forget room" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Danger}" Click="ForgetSavedRoom" Margin="0,0,0,8"/></WrapPanel>
+         </StackPanel>
+        </Border>
+       </Grid>
+      </ScrollViewer>
+     </DockPanel>
+    </Grid>
    </Grid>
 
    <!-- Player. Always dark: the app palette keys are remapped for everything inside it. -->

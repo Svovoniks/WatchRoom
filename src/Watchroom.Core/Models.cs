@@ -51,7 +51,7 @@ public record WireMessage(string Type, string? Target = null, string? Sender = n
 public record Welcome(string Room, string Peer, bool Host, string[] IceServers, bool ForceRelay, string? HostKey = null, string? GuestKey = null);
 public record AdmittedGuest(string Id, string Name);
 public record RoomSnapshot(Participant[] People, SharedMedia? Media, PlaybackState? Playback, bool SharedControls, string[]? Queue = null, AdmittedGuest[]? AdmittedGuests = null, string? Name = null,
-    bool LibraryBrowsing = false, LibraryBrowseActivity? LibraryActivity = null, RoomTracks? Tracks = null);
+    bool LibraryBrowsing = false, LibraryBrowseActivity? LibraryActivity = null, RoomTracks? Tracks = null, RoomSession? LastSession = null);
 
 public static class Wire
 {

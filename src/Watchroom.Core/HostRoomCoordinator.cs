@@ -15,7 +15,9 @@ internal sealed class HostRoomCoordinator(string host)
     private long revision, generation;
     private bool resumeWhenReady;
     public AdmittedGuest[] AdmittedGuests { get; set; } = [];
-    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name, LibraryBrowsing, LibraryActivity, Tracks);
+    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name, LibraryBrowsing, LibraryActivity, Tracks, LastSession);
+    // The host's record of what the room watched last, shown to guests while nothing is playing.
+    public RoomSession? LastSession { get; private set; }
     public RoomTracks? Tracks { get; private set; }
     private long trackRevision;
     public bool LibraryBrowsing { get; private set; }
@@ -66,6 +68,8 @@ internal sealed class HostRoomCoordinator(string host)
         var before = Playback; TryResume(now); return !ReferenceEquals(before, Playback);
     }
     private bool Waiting(Participant p) => p.Approved && !p.Ready && IsConnected(p.Id);
+    // While someone is still loading playing video, the host keeps its upload for the video.
+    public bool AnyoneBuffering => Playback?.WantsPlayback == true && people.Values.Any(Waiting);
     public bool Apply(string sender, WireMessage message, long now, out WireMessage? announcement)
     {
         announcement = null;
@@ -96,6 +100,12 @@ internal sealed class HostRoomCoordinator(string host)
             case "catalog-browse" when sender != host && LibraryBrowsing:
                 if (LibraryActivity is not null && LibraryActivity.Peer != sender) return false;
                 LibraryActivity = LibraryActivity is { } owned ? owned with { UpdatedAt = now } : new(sender, people[sender].Name, "All titles", "", now); return true;
+            // Any admitted guest may ask for the artwork of the room's current or last video; RoomClient answers it.
+            case "session-artwork" when sender != host: return true;
+            case "last-session" when sender == host:
+                var session = message.Data is null ? null : Wire.Read<RoomSession>(message.Data);
+                if (session is not null && !RoomSessions.Valid(session)) return false;
+                LastSession = session is null ? null : session with { LibraryId = null }; return true;
             case "room-name" when sender == host:
                 if (!ValidName(message.Text)) return false;
                 Name = message.Text!.Trim(); return true;

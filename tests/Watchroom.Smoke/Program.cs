@@ -31,6 +31,8 @@ if (args.FirstOrDefault() == "--room-playback-status")
     { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
     RoomPlaybackStatusFixture.Run((condition, name) =>
     { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    RoomSessionFixture.Run((condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
     Console.WriteLine($"{checks} room playback status checks passed."); return;
 }
 
@@ -343,6 +345,7 @@ await FilenameSchemaFixture.Run(Path.Combine(root, "filename-schemas"), Check);
 await GroupingAuditFixture.Run(Path.Combine(root, "grouping-audit"), Check);
 HostRoomFixture.Run(Check);
 RoomPlaybackStatusFixture.Run(Check);
+RoomSessionFixture.Run(Check);
 RoomResilienceFixture.Run(Check);
 RoomTrackFixture.Run(Check);
 SharedLibraryFixture.Run(Check);

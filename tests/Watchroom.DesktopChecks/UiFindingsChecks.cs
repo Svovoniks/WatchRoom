@@ -127,8 +127,8 @@ static class UiFindingsChecks
             rooms.Add(host); rooms.Add(guest); Control<ListBox>("SavedRoomsList").SelectedItem = host;
             Check(Control<FrameworkElement>("SavedRoomHostControls").Visibility == Visibility.Visible, "selected host room exposes its own permissions");
             Control<ListBox>("SavedRoomsList").SelectedItem = guest;
-            Check(Control<FrameworkElement>("SavedRoomHostControls").Visibility == Visibility.Collapsed && Control<FrameworkElement>("SavedRoomGuestManagement").Visibility == Visibility.Collapsed,
-                "guest room hides host-only controls");
+            Check(Control<FrameworkElement>("SavedRoomHostControls").Visibility == Visibility.Collapsed && Control<TextBlock>("SavedRoomGuestHeading").Text == "PEOPLE",
+                "guest room hides host-only controls and lists people instead of managing guests");
 
             var folders = (ObservableCollection<LibraryFolder>)Field("folders"); folders.Clear();
             folders.Add(new(App.DataDirectory, "Anime")); Control<ListBox>("FolderList").SelectedIndex = 0;

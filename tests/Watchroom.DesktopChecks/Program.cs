@@ -508,6 +508,27 @@ static class Program
         var list = (System.Windows.Controls.ListBox)window.FindName("SavedRoomsList");
         var controls = (System.Windows.Controls.Primitives.ToggleButton)window.FindName("SavedRoomSharedControls");
         list.SelectedItem = first;
+        // With nothing watched yet, the hero still shows the selected room with a placeholder instead of hiding.
+        string HeroText(string name) => ((System.Windows.Controls.TextBlock)window.FindName(name)).Text;
+        FrameworkElement HeroPart(string name) => (FrameworkElement)window.FindName(name);
+        Check(HeroPart("RoomHero").Visibility == Visibility.Visible && HeroText("RoomHeroLiveText") == "CLOSED" && HeroText("RoomHeroTitle") == "Nothing watched here yet" &&
+            ((System.Windows.Controls.Button)window.FindName("RoomHeroResume")).Content as string == "Open room" &&
+            ((System.Windows.Controls.Button)window.FindName("RoomHeroSecondary")).Content as string == "Copy invite" && HeroPart("RoomHeroSecondary").Visibility == Visibility.Visible &&
+            HeroPart("RoomHeroBadge").Visibility == Visibility.Visible && HeroText("RoomHeroBadgeText") == "M", "an unused host room shows a closed hero with Open room, Copy invite and its initial");
+        list.SelectedItem = guest;
+        Check(HeroText("RoomHeroLiveText") == "OFFLINE" && ((System.Windows.Controls.Button)window.FindName("RoomHeroResume")).Content as string == "Connect" &&
+            HeroPart("RoomHeroSecondary").Visibility == Visibility.Collapsed && HeroText("RoomHeroBadgeText") == "F", "an unused guest room shows an offline hero with Connect");
+        Check(HeroPart("SavedRoomHostControls").Visibility == Visibility.Collapsed && System.Windows.Controls.Grid.GetRow(HeroPart("SavedRoomActions")) == 0 &&
+            HeroText("SavedRoomGuestHeading") == "PEOPLE" && HeroText("SavedRoomSessionTitle") == "Nothing watched here yet", "a guest room drops the permissions tile and lists people instead of guests");
+        list.SelectedItem = first;
+        Check(HeroText("SavedRoomCode") == "AAAAAA AAAAAA AAAAAA AAAAAA" && HeroPart("SavedRoomHostControls").Visibility == Visibility.Visible &&
+            System.Windows.Controls.Grid.GetRow(HeroPart("SavedRoomActions")) == 2 && HeroText("SavedRoomGuestHeading") == "GUESTS", "a host room shows its grouped code and the permissions tile");
+        string Initials(string text, int count) => (string)typeof(MainWindow).GetMethod("Initials", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [text, count])!;
+        Check(Initials("Spy x Family · S1E4", 2) == "SF" && Initials("The Office", 2) == "O" && Initials("holiday_video_2019 mkv", 2) == "HV" && Initials("!!!", 2) == "?",
+            "title cards use the leading words' initials");
+        int Hue(string title) => (int)typeof(MainWindow).GetMethod("TitleHue", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [title])!;
+        Check(Hue("Dune") == Hue("Dune") && Hue("Dune") is >= 0 and < 360, "a title keeps the same card colour");
+        list.SelectedItem = first;
         Check(controls.IsEnabled && controls.IsChecked == false, "saved host room exposes its playback-control setting");
         controls.IsChecked = true;
         var browsing = (System.Windows.Controls.CheckBox)window.FindName("SavedRoomLibraryBrowsing");

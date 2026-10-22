@@ -77,6 +77,13 @@ public sealed partial class RoomClient : IAsyncDisposable
     private MediaItem[] hostedLibrary = [];
     public Func<string?, string?>? LibraryThumbnail { get; set; }
     public Func<string?, string?>? LibraryArtwork { get; set; }
+    // Encodes artwork to fit 1920x1080 for guests' large views.
+    public Func<string?, string?>? FullHdArtwork { get; set; }
+    // The only artwork guests may request without library browsing: the room's current or last video.
+    private SessionArtwork? sessionArtwork;
+    public void SetSessionArtwork(string? title, string? path) =>
+        Volatile.Write(ref sessionArtwork, title is null ? null : new(title, path));
+    private sealed record SessionArtwork(string Title, string? Path);
     public void SetHostedLibrary(IEnumerable<MediaItem> items) => Volatile.Write(ref hostedLibrary, items.ToArray());
     private readonly ConcurrentDictionary<string, IMediaSource> assets = new();
     public void SetHostedFile(string path, string title)
@@ -192,7 +199,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     {
         if (!IsConnected) throw new IOException("Room connection is closed. Rejoin the room to reconnect.");
         if (message.Type == "remove" && !DiscoveryOnline) throw new IOException("Reconnect to the room service before revoking saved guest access.");
-        if (message.Type is "tracks" or "catalog-follow" or "catalog-artwork" or "catalog-watch" or "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
+        if (message.Type is "tracks" or "catalog-follow" or "catalog-artwork" or "catalog-watch" or "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "last-session" or "session-artwork" or "artwork-ack" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
         {
             if (Identity?.Host != true && !directConnected.Task.IsCompletedSuccessfully)
                 throw new IOException("Waiting for the host's direct control connection. All participants need the updated app.");
@@ -506,6 +513,8 @@ public sealed partial class RoomClient : IAsyncDisposable
         }
         if (Identity?.Host == true)
         {
+            // Acknowledgements pace a transfer the host started; they bypass the command budget, and each releases at most one chunk.
+            if (message.Type == "artwork-ack") { if (coordinator!.Approved(sender)) ContinueArtwork(sender, message.Number); return; }
             if (message.Type == "clock-ping") { SendPeer(sender, new("clock-pong", Number: message.Number, Data: clock.Now.ToString())); return; }
             if (message.Type == "bye") { DepartPeer(sender); return; }
             ApplyHostCommand(sender, message);
@@ -531,7 +540,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                     }
                     break;
                 case "clock-pong": if (long.TryParse(message.Data, out var now)) clock.Receive(message.Number, now); break;
-                case "catalog-artwork-chunk": case "catalog-started": case "catalog-page": case "catalog-error": case "chat": case "notice": case "error": Message?.Invoke(message); break;
+                case "catalog-artwork-chunk": case "session-artwork-chunk": case "catalog-started": case "catalog-page": case "catalog-error": case "chat": case "notice": case "error": Message?.Invoke(message); break;
             }
         }
     }
@@ -681,6 +690,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     }
     private void DepartPeer(string id, string? reason = null, bool recover = true)
     {
+        artworkTransfers.Remove(id);
         var name = Snapshot?.People.FirstOrDefault(p => p.Id == id)?.Name;
         var present = negotiated.ContainsKey(id) || peers.ContainsKey(id) || name is not null;
         PlaybackDiagnostics.Record("peer-departed", new { room = diagnosticId, transport = peers.GetValueOrDefault(id)?.DiagnosticId,

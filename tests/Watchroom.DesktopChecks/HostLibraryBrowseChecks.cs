@@ -25,13 +25,17 @@ static class HostLibraryBrowseChecks
             {
                 if (artworkData is not null)
                 {
-                    var pending = Field<Dictionary<long, (TaskCompletionSource<string?> Completion, string Key, SortedDictionary<int, string> Chunks)>>("hostArtworkPending");
-                    foreach (var entry in pending.ToArray())
+                    // Pending downloads are a private class; read each one's number and key by reflection.
+                    var pending = Field<System.Collections.IDictionary>("hostArtworkPending");
+                    var entries = new List<System.Collections.DictionaryEntry>();
+                    foreach (System.Collections.DictionaryEntry item in pending) entries.Add(item);
+                    foreach (var entry in entries)
                     {
+                        var key = (string)entry.Value!.GetType().GetProperty("Key")!.GetValue(entry.Value)!;
                         var count = (artworkData.Length + 7999) / 8000;
                         for (var index = 0; index < count; index++)
-                            Call("ReceiveHostArtwork", new WireMessage("catalog-artwork-chunk", Number: entry.Key,
-                                Data: Wire.Serialize(new LibraryArtworkChunk(entry.Value.Key, index, count,
+                            Call("ReceiveHostArtwork", new WireMessage("catalog-artwork-chunk", Number: (long)entry.Key,
+                                Data: Wire.Serialize(new LibraryArtworkChunk(key, index, count,
                                     artworkData.Substring(index * 8000, Math.Min(8000, artworkData.Length - index * 8000))))));
                     }
                 }

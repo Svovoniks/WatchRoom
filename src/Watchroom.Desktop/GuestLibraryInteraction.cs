@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -47,6 +48,7 @@ public partial class MainWindow
         ScheduleGuestView();
         var view = guestLibraryCards.FirstOrDefault(view => view.Card == card);
         if (view is not null) { await view.LoadPosterAsync(); if (selected?.Id == card.Media.Id && GuestLibrary) DetailPoster.Source = view.Poster; }
+        if (selected?.Id == card.Media.Id && GuestLibrary) await UpgradeGuestDetailArtwork(card);
     }
     private void WatchGuestVideo()
     {
@@ -57,34 +59,61 @@ public partial class MainWindow
     private long hostArtworkSequence;
     private readonly SemaphoreSlim hostArtworkWorkers = new(2);
     private readonly Dictionary<string, Task<string?>> hostArtworkCache = [];
-    private readonly Dictionary<long, (TaskCompletionSource<string?> Completion, string Key, SortedDictionary<int, string> Chunks)> hostArtworkPending = [];
+    // Full HD copies are large; keep only the most recent few.
+    private readonly Dictionary<string, Task<string?>> hostFullArtworkCache = [];
+    private readonly Queue<string> hostFullArtworkOrder = new();
+    private sealed class ArtworkDownload(string key)
+    {
+        public TaskCompletionSource<string?> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public string Key { get; } = key;
+        public SortedDictionary<int, string> Chunks { get; } = [];
+        public long Started { get; } = Environment.TickCount64;
+    }
+    private readonly Dictionary<long, ArtworkDownload> hostArtworkPending = [];
     private Task<string?> LoadHostArtwork(LibraryCard card)
     {
         var key = card.Media.Id + ":" + card.Level + ":" + card.Season;
         if (hostArtworkCache.TryGetValue(key, out var cached)) return cached;
-        return hostArtworkCache[key] = FetchHostArtwork(card, key);
+        return hostArtworkCache[key] = FetchHostArtwork(card, key, false);
     }
-    private async Task<string?> FetchHostArtwork(LibraryCard card, string key)
+    private Task<string?> LoadHostFullArtwork(LibraryCard card)
+    {
+        var key = card.Media.Id + ":" + card.Level + ":" + card.Season;
+        if (hostFullArtworkCache.TryGetValue(key, out var cached)) return cached;
+        while (hostFullArtworkOrder.Count >= 6) hostFullArtworkCache.Remove(hostFullArtworkOrder.Dequeue());
+        hostFullArtworkOrder.Enqueue(key);
+        return hostFullArtworkCache[key] = FetchHostArtwork(card, key, true);
+    }
+    private async Task<string?> FetchHostArtwork(LibraryCard card, string key, bool fullHd)
     {
         await hostArtworkWorkers.WaitAsync();
         var sequence = -++hostArtworkSequence;
         try
         {
             if (!OwnsLibrary) return null;
-            var completion = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            hostArtworkPending[sequence] = (completion, key, []);
-            TryLibraryCommand(new("catalog-artwork", Number: sequence, Data: Wire.Serialize(new LibraryArtworkRequest(card.Media.Id, card.Level, card.Season))));
-            try { return await completion.Task.WaitAsync(TimeSpan.FromSeconds(15)); }
-            catch (TimeoutException) { hostArtworkCache.Remove(key); return null; }
+            var download = new ArtworkDownload(key);
+            hostArtworkPending[sequence] = download;
+            TryLibraryCommand(new("catalog-artwork", Number: sequence, Data: Wire.Serialize(new LibraryArtworkRequest(card.Media.Id, card.Level, card.Season, fullHd))));
+            try
+            {
+                var data = await download.Completion.Task.WaitAsync(TimeSpan.FromSeconds(fullHd ? 30 : 15));
+                if (data is { Length: > 0 }) artworkBandwidth.Record(data.Length, Environment.TickCount64 - download.Started);
+                // An empty full HD reply means the host is busy with video; try again later.
+                else if (fullHd) { fullArtworkDeclinedUntil = Environment.TickCount64 + 30000; RemoveFullArtwork(key); }
+                return data is { Length: > 0 } ? data : null;
+            }
+            catch (TimeoutException) { if (fullHd) { artworkBandwidth.Slowed(); RemoveFullArtwork(key); } else hostArtworkCache.Remove(key); return null; }
         }
         finally { hostArtworkPending.Remove(sequence); hostArtworkWorkers.Release(); }
     }
+    private void RemoveFullArtwork(string key) => hostFullArtworkCache.Remove(key);
     private void ReceiveHostArtwork(WireMessage message)
     {
         if (!OwnsLibrary || !hostArtworkPending.TryGetValue(message.Number, out var pending)) return;
         var chunk = Wire.Read<LibraryArtworkChunk>(message.Data!);
-        if (chunk.Key != pending.Key || chunk.Count is < 1 or > 25 || chunk.Index < 0 || chunk.Index >= chunk.Count || chunk.Data.Length > 8000) return;
+        if (chunk.Key != pending.Key || !ArtworkTransfer.ValidChunk(chunk)) return;
         pending.Chunks[chunk.Index] = chunk.Data;
+        if (chunk.Paced) AcknowledgeArtwork(message.Number);
         if (pending.Chunks.Count == chunk.Count) pending.Completion.TrySetResult(string.Concat(pending.Chunks.Values));
     }
     private bool ReceiveArtworkError(WireMessage message)
@@ -96,7 +125,43 @@ public partial class MainWindow
     {
         guestViewDelay.Stop();
         foreach (var pending in hostArtworkPending.Values) pending.Completion.TrySetResult(null);
-        hostArtworkPending.Clear(); hostArtworkCache.Clear();
+        hostArtworkPending.Clear(); hostArtworkCache.Clear(); hostFullArtworkCache.Clear(); hostFullArtworkOrder.Clear();
+    }
+
+    // Large artwork is an upgrade: fetch it only when earlier transfers were fast and the room's video has buffer to spare.
+    private readonly ArtworkBandwidth artworkBandwidth = new();
+    private long fullArtworkDeclinedUntil;
+    private bool CanUpgradeArtwork()
+    {
+        if (room?.IsConnected != true || Environment.TickCount64 < fullArtworkDeclinedUntil || !artworkBandwidth.AllowsFullHd()) return false;
+        if (bridge is not { } stream || target?.WantsPlayback != true) return true;
+        if (room.Snapshot?.Media is not { } media || player is not { Length: > 0 } native) return false;
+        var wanted = StreamingBufferOptions.ReadAheadBytes(activeStreamingBufferSeconds, media.Length, native.Length);
+        return stream.BufferedAheadBytes >= wanted / 2;
+    }
+    private void AcknowledgeArtwork(long number)
+    {
+        try { room?.Send(new("artwork-ack", Number: number)); }
+        catch (IOException) { }
+    }
+    private async Task UpgradeGuestDetailArtwork(LibraryCard card)
+    {
+        if (!CanUpgradeArtwork()) return;
+        var data = await LoadHostFullArtwork(card);
+        if (data is null) return;
+        var image = await Task.Run(() => DecodeArtwork(data));
+        if (image is not null && GuestLibrary && currentPage == "Details" && selected?.Id == card.Media.Id) DetailPoster.Source = image;
+    }
+    private static System.Windows.Media.Imaging.BitmapSource? DecodeArtwork(string data)
+    {
+        try
+        {
+            using var stream = new System.IO.MemoryStream(Convert.FromBase64String(data));
+            var bitmap = new System.Windows.Media.Imaging.BitmapImage(); bitmap.BeginInit();
+            bitmap.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze();
+            return bitmap;
+        }
+        catch (Exception ex) when (ex is FormatException or System.IO.IOException or NotSupportedException or ArgumentException) { return null; }
     }
 
     private bool followGuest = true, applyingGuestMirror;
