@@ -419,7 +419,7 @@ static class Program
         var saved = (List<SavedQueue>)Field("savedQueues");
         var media = ((IEnumerable<MediaItem>)Field("items")).Take(2).ToArray();
         var fixture = new SavedQueue("queue-edit-fixture", "Test queue", [media[0].Id, "missing-media", media[0].Id, media[1].Id]);
-        saved.Add(fixture); Call("SelectPlaybackQueue", fixture); Set("queuePosition", 1);
+        saved.Add(fixture); Call("SelectPlaybackQueue", fixture); Call("OpenQueue", fixture.Id); Set("queuePosition", 1);
         var list = (System.Windows.Controls.ListBox)window.FindName("SavedQueueItems");
         check(list.Items.Count == 4, "queue cards retain missing entries and duplicate occurrences");
         Call("MoveSavedEntry", fixture, 2, 0);
@@ -439,6 +439,11 @@ static class Program
         check(persisted.MediaIds.SequenceEqual([media[0].Id, media[1].Id]), "queue reordering and per-card deletion persist immediately");
         Call("ShowPage", "Queues"); window.UpdateLayout();
         check(list.ActualHeight > 100 && list.AllowDrop, "redesigned queue keeps a usable drag-and-drop list");
+        Call("ShowAllQueues");
+        check(((FrameworkElement)window.FindName("QueueGalleryView")).Visibility == Visibility.Visible, "the queue page returns to the gallery of queues");
+        Call("BrowseHistory", true);
+        check(Field("openQueueId") as string == fixture.Id && ((FrameworkElement)window.FindName("QueueDetailView")).Visibility == Visibility.Visible,
+            "Back from the gallery reopens the queue that was open");
         var picker = (System.Windows.Controls.ComboBox)window.FindName("PlayerQueuePicker");
         check(picker.Items.Cast<SavedQueue>().All(item => item.Name != "No queue"), "the player queue picker lists only queues; the switch turns the queue off");
         Call("QueueModeOffClicked", window, new RoutedEventArgs());

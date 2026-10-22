@@ -58,7 +58,7 @@ static class QueuePlaybackChecks
             Field<int>("queuePosition") == position && player.IsPlaying;
         try
         {
-            Call("RefreshQueuePickers", saved.Id); Call("ShowPage", "Queues");
+            Call("OpenQueue", saved.Id); Call("ShowPage", "Queues");
             var list = Control<ListBox>("SavedQueueItems"); list.SelectedIndex = 1;
             check(!Control<Button>("PlaySelectedSavedQueueButton").IsEnabled, "a missing saved queue reference cannot be played");
             list.SelectedIndex = 2;
@@ -137,7 +137,7 @@ static class QueuePlaybackChecks
             queues.Remove(saved); items.RemoveAll(x => x.Id == first.Id || x.Id == last.Id || x.Id == unavailable.Id);
             var queue = Field<List<MediaItem>>("queue"); queue.Clear(); queue.AddRange(previousQueue);
             Set("activeQueueId", previousId); Set("queuePosition", previousPosition);
-            Call("SaveQueues"); Call("RefreshQueuePickers", previousId!); Call("PublishQueue"); Call("ShowPage", "Library");
+            Call("SaveQueues"); Call("RefreshQueuePickers"); Call("PublishQueue"); Call("ShowPage", "Library");
             File.Delete(firstPath); File.Delete(lastPath); Directory.Delete(fixtureDirectory);
             foreach (var watcher in watched) watcher.EnableRaisingEvents = true;
         }

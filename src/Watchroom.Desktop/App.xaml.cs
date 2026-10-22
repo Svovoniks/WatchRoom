@@ -27,7 +27,11 @@ public partial class App : Application
         {
             PlaybackDiagnostics.Record("ui-error", new { error = args.Exception.GetType().Name, stack = args.Exception.StackTrace });
             File.AppendAllText(Path.Combine(DataDirectory, "errors.log"), DateTime.UtcNow + " " + args.Exception + Environment.NewLine);
-            MessageBox.Show(args.Exception.Message, "Watchroom", MessageBoxButton.OK, MessageBoxImage.Warning); args.Handled = true;
+            args.Handled = true;
+            // One notice at a time: an error that repeats while the notice is open is only logged.
+            if (InAppDialog.Open.Any(dialog => dialog.Title == "Something went wrong")) return;
+            if (MainWindow is { IsLoaded: true } window) Dialogs.Alert(window, "Something went wrong", args.Exception.Message);
+            else MessageBox.Show(args.Exception.Message, "Watchroom", MessageBoxButton.OK, MessageBoxImage.Warning);
         };
         // Only the app's own focus ring marks keyboard focus; WPF's dotted rectangles never draw.
         EventManager.RegisterClassHandler(typeof(FrameworkElement), Keyboard.PreviewGotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((sender, _) =>

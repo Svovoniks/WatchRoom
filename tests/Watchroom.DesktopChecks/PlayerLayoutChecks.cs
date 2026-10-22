@@ -107,12 +107,26 @@ static class PlayerLayoutChecks
         Check(queueList.ItemContainerGenerator.ContainerFromIndex(longSeason.Length - 1) is not null && Realized(queueList, longSeason.Length) < 40,
             "the queue menu scrolls to the last of 1500 episodes while staying virtualized");
         queueList.ItemsSource = populatedQueue; Invoke(window, "UpdateSessionControls"); LayoutMenu();
+        var layoutQueues = (List<Watchroom.Core.SavedQueue>)typeof(MainWindow).GetField("savedQueues", flags)!.GetValue(window)!;
+        layoutQueues.Add(new("layout-queue", "Layout queue", [])); Invoke(window, "OpenQueue", "layout-queue");
         Invoke(window, "ShowPage", "Queues"); Layout(1280, 810);
+        // A tall poster behind the queue header must not set the header's height.
+        var backdrop = (Border)window.FindName("QueueHeroBackdrop");
+        var tallPoster = BitmapSource.Create(400, 1200, 96, 96, PixelFormats.Gray8, null, new byte[400 * 1200], 400);
+        backdrop.Background = new ImageBrush(tallPoster) { Stretch = Stretch.UniformToFill }; Layout(1280, 810);
+        var heroHeight = ((FrameworkElement)backdrop.Parent).ActualHeight;
+        Check(heroHeight is > 100 and < 260, $"the queue header keeps its height with a tall poster behind it ({heroHeight:F0})");
+        backdrop.ClearValue(Border.BackgroundProperty);
         var savedItems = (ListBox)window.FindName("SavedQueueItems"); var savedSource = savedItems.ItemsSource;
         savedItems.ItemsSource = longSeason; Layout(1280, 810);
         var savedRealized = Realized(savedItems, longSeason.Length);
         Check(savedRealized is > 0 and < 60, $"the queue editor builds only its visible rows for a 1500-video queue ({savedRealized})");
-        savedItems.ItemsSource = savedSource; Invoke(window, "ShowPage", "Room");
+        var addPanel = (FrameworkElement)window.FindName("QueueAddPanel"); var addResults = (ListBox)window.FindName("QueueAddResults");
+        addPanel.Visibility = Visibility.Visible; ((ColumnDefinition)window.FindName("QueueAddColumn")).Width = new GridLength(380); addResults.ItemsSource = longSeason; Layout(1280, 810);
+        var addRealized = Realized(addResults, longSeason.Length);
+        Check(addRealized is > 0 and < 60 && Realized(savedItems, longSeason.Length) < 60, $"Add videos builds only its visible results beside the queue ({addRealized})");
+        addResults.ItemsSource = null; addPanel.Visibility = Visibility.Collapsed; ((ColumnDefinition)window.FindName("QueueAddColumn")).Width = new GridLength(0);
+        savedItems.ItemsSource = savedSource; layoutQueues.RemoveAll(x => x.Id == "layout-queue"); Invoke(window, "ShowPage", "Room");
         // The playback tick refreshes the player chrome four times a second; keep that cheap with a long queue whose files are offline.
         var longQueue = Enumerable.Range(1, 1500).Select(i => episode with { Id = "long-" + i, Path = Path.Combine(App.DataDirectory, $"offline-{i}.mp4"), Episode = i }).ToList();
         var activeQueue = (List<Watchroom.Core.MediaItem>)typeof(MainWindow).GetField("queue", flags)!.GetValue(window)!;

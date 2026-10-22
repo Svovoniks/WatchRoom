@@ -60,27 +60,40 @@ static class UiFindingsChecks
         {
             var queues = (List<SavedQueue>)Field("savedQueues");
             queues.Clear(); queues.Add(new("empty", "Empty queue", []));
-            Call("RefreshQueuePickers", "empty"); Call("ShowPage", "Queues"); Layout();
-            Check(!Control<Button>("PlaySavedQueueButton").IsEnabled && !Control<Button>("SavedQueueEarlier").IsEnabled && !Control<Button>("SavedQueueLater").IsEnabled,
-                "empty queue disables playback and both reorder actions");
+            Call("ShowPage", "Queues"); Call("ShowAllQueues"); Layout();
+            var galleryNames = new List<string>();
+            void CollectNames(DependencyObject node)
+            {
+                if (node is Button button) galleryNames.Add(System.Windows.Automation.AutomationProperties.GetName(button));
+                for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) CollectNames(VisualTreeHelper.GetChild(node, i));
+            }
+            CollectNames(Control<ItemsControl>("QueueGallery"));
+            Check(galleryNames.SequenceEqual(["Empty queue, 0 videos", "New queue"]), $"queue gallery names each queue in readable words ({string.Join(" | ", galleryNames)})");
+            Capture("queues-gallery-900");
+            Call("OpenQueue", "empty"); Layout();
+            Check(Control<FrameworkElement>("QueueDetailView").Visibility == Visibility.Visible && Control<FrameworkElement>("QueueGalleryView").Visibility == Visibility.Collapsed,
+                "opening a queue replaces the gallery with its videos");
+            Check(!Control<Button>("PlaySavedQueueButton").IsEnabled, "empty queue disables playback");
             Check(Control<Button>("AddQueueVideosButton").Style == window.FindResource("Primary"), "empty queue promotes adding videos");
             Check(Control<ListBox>("SavedQueueItems").ActualHeight >= 120, "smallest queue layout leaves room for entries without clipped empty-state text");
-            var picker = Control<ListBox>("QueuePicker");
-            var queuePeer = UIElementAutomationPeer.CreatePeerForElement(picker)!;
-            Check(queuePeer.GetChildren().Any(p => p.GetName() == "Empty queue, 0 videos"), "queue accessible name is human-readable without record internals");
             Capture("queues-empty-900");
             var file = Path.Combine(App.DataDirectory, "ui-queue-fixture.mp4"); File.WriteAllText(file, "UI-only fixture");
             var media = new MediaItem("ui-available", file, "Available video", "Movie");
             ((List<MediaItem>)Field("items")).Add(media);
             queues.Add(new("filled", "Mixed availability", [media.Id, "absent", media.Id]));
-            Call("RefreshQueuePickers", "filled");
+            Call("OpenQueue", "filled");
             Check(Control<Button>("PlaySavedQueueButton").IsEnabled, "one available file enables playback despite missing queue entries");
-            var entries = Control<ListBox>("SavedQueueItems"); entries.SelectedIndex = 0;
-            Check(!Control<Button>("SavedQueueEarlier").IsEnabled && Control<Button>("SavedQueueLater").IsEnabled, "first entry can only move later");
-            entries.SelectedIndex = 2;
-            Check(Control<Button>("SavedQueueEarlier").IsEnabled && !Control<Button>("SavedQueueLater").IsEnabled, "last entry can only move earlier");
-            entries.SelectedIndex = -1;
-            Check(!Control<Button>("SavedQueueEarlier").IsEnabled && !Control<Button>("SavedQueueLater").IsEnabled, "clearing selection disables reordering");
+            var entries = Control<ListBox>("SavedQueueItems"); entries.SelectedIndex = 1;
+            Call("RemoveSavedEntry", queues.Single(x => x.Id == "filled"), entries.SelectedItem!);
+            Check(queues.Single(x => x.Id == "filled").MediaIds.SequenceEqual([media.Id, media.Id]) && entries.SelectedIndex == 1,
+                "removing the selected queue entry keeps the selection in place");
+            var addButton = Control<Button>("DetailQueue");
+            Call("ShowAddToQueueMenu", addButton, new[] { media });
+            var addChoices = addButton.ContextMenu!.Items.Cast<object>().ToArray();
+            Check(addChoices.OfType<MenuItem>().Select(item => (string)item.Header).SequenceEqual(["Empty queue", "Mixed availability", "New queue…"]) &&
+                addChoices[0] is MenuItem && addChoices[^2] is Separator && addChoices.OfType<Separator>().Count() == 1,
+                "Add to queue lists the queues directly, with one divider before New queue");
+            addButton.ContextMenu.IsOpen = false;
             File.Delete(file); Call("UpdateSavedQueueActions");
             Check(!Control<Button>("PlaySavedQueueButton").IsEnabled && Control<TextBlock>("SavedQueueFeedback").Text.Contains("No available videos"), "disappeared file disables playback and provides inline recovery");
             Call("AddQueueVideos", window, new RoutedEventArgs());

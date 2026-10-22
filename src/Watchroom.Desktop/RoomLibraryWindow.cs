@@ -12,7 +12,8 @@ namespace Watchroom.Desktop;
 
 // Both views use the same paged grid. The guest reports explicit IDs, never an
 // inferred scroll range; the preview scales the entire grid rather than clipping it.
-public sealed class RoomLibraryWindow : Window
+// The host's room library, shown over the app like the other in-app dialogs.
+public sealed class RoomLibraryWindow : InAppDialog
 {
     private readonly RoomLibrary session;
     private readonly bool host;
@@ -55,12 +56,11 @@ public sealed class RoomLibraryWindow : Window
         Func<Participant[]> people, Action<string[]> share)
     {
         this.session = session; this.host = host; this.hostId = hostId; this.people = people; this.share = share;
-        SetResourceReference(StyleProperty, typeof(Window));
         Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri("/Watchroom;component/RoomLibraryStyles.xaml", UriKind.Relative) });
         Title = host ? "Room library" : "Host library";
-        Width = 1050; Height = 780; MinWidth = 700; MinHeight = 540;
-        var root = new DockPanel { Margin = new Thickness(16) };
-        root.SetResourceReference(Panel.BackgroundProperty, "Canvas"); root.SetResourceReference(TextElement.ForegroundProperty, "Ink");
+        Width = 1050; Height = 780; CloseOnOutsideClick = true;
+        var root = new DockPanel();
+        root.SetResourceReference(TextElement.ForegroundProperty, "Ink");
         DockPanel.SetDock(status, Dock.Bottom); root.Children.Add(status); root.Children.Add(tabs); Content = root;
         var browser = new DockPanel();
         var top = new StackPanel(); DockPanel.SetDock(top, Dock.Top); browser.Children.Add(top);
@@ -192,8 +192,8 @@ public sealed class RoomLibraryWindow : Window
     }
     private void ChooseCollections()
     {
-        var dialog = new Window { Owner = this, Title = "Share collections for this room", Width = 370, Height = 320, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-        var panel = new StackPanel { Margin = new Thickness(20) }; dialog.Content = panel;
+        var dialog = new InAppDialog { Owner = Owner, Title = "Share collections for this room", Width = 340 };
+        var panel = new StackPanel(); dialog.Content = panel;
         panel.Children.Add(new TextBlock { Text = "Only enabled categories are shared with guests.", TextWrapping = TextWrapping.Wrap });
         var choices = new[] { "Movie", "Show", "Anime", "Mixed" }.Select(kind => new CheckBox { Content = kind, Margin = new Thickness(5) }).ToArray();
         foreach (var choice in choices) { choice.IsChecked = session.Catalog.Values.Any(i => i.Kind == (string)choice.Content); panel.Children.Add(choice); }
@@ -204,7 +204,7 @@ public sealed class RoomLibraryWindow : Window
     private void PlayNow()
     {
         if (selected is null) return;
-        if (MessageBox.Show(this, "Start this title for everyone and replace the current video?", "Play now", MessageBoxButton.YesNo) == MessageBoxResult.Yes) Command("play", selected);
+        if (Dialogs.Confirm(Owner ?? Application.Current.MainWindow, "Play now", "Start this title for everyone and replace the current video?", "Play for everyone")) Command("play", selected);
     }
     private void EditQueue(string action)
     {

@@ -21,7 +21,7 @@ static class PreferenceNavigationChecks
             var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
             timer.Tick += (_, _) =>
             {
-                var dialog = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.Title == "Unsaved settings");
+                var dialog = InAppDialog.Open.FirstOrDefault(d => d.Title == "Unsaved settings");
                 if (dialog is null) return;
                 timer.Stop(); answered = true;
                 if (choice == "Close") { dialog.Close(); return; }

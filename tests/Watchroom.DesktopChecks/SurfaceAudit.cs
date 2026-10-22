@@ -23,15 +23,15 @@ static class SurfaceAudit
                     foreach (var finding in BorderAudit.Find(root)) report(name, finding);
         }
 
-        // Dialogs: audit each window as it appears, then dismiss it so ShowDialog returns.
+        // Dialogs: audit each in-app dialog as it appears, then dismiss it so ShowDialog returns.
         var dialog = "";
         var hook = new RoutedEventHandler(async (sender, _) =>
         {
-            if (sender is not Window shown || ReferenceEquals(shown, window)) return;
+            if (sender is not InAppDialog shown || !shown.IsOpen) return;
             await Audit(dialog);
             shown.Close();
         });
-        EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent, hook);
+        EventManager.RegisterClassHandler(typeof(InAppDialog), FrameworkElement.LoadedEvent, hook);
         dialog = "dialog-unsaved-settings"; Dialogs.ConfirmUnsavedSettings(window);
         dialog = "dialog-prompt"; Dialogs.Prompt(window, "Create queue", "Queue name", "Saturday night", help: "Queues stay on this computer.");
         SavedRoom[] rooms = [new("room-1", "Movie night", "https://rooms.example", "ABCD", "host-key"), new("room-2", "Anime club", "https://rooms.example", "EFGH")];

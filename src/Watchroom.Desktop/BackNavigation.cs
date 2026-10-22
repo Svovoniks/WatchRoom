@@ -11,13 +11,13 @@ namespace Watchroom.Desktop;
 public partial class MainWindow
 {
     private sealed record BrowseLocation(string Page, int Category, string? Series, string? Kind, int? Season,
-        string? MediaId, string Search, int Filter, double LibraryOffset, double DetailOffset);
+        string? MediaId, string Search, int Filter, double LibraryOffset, double DetailOffset, string? QueueId);
     private readonly List<BrowseLocation> backLocations = [], forwardLocations = [];
     private string currentPage = "";
     private bool restoringNavigation;
     private int navigationGeneration;
     private BrowseLocation CaptureLocation() => new(currentPage, libraryCategory, browseSeries, browseKind, browseSeason,
-        selected?.Id, SearchBox.Text, LibraryStatusFilter.SelectedIndex, LibraryScroll.VerticalOffset, Details.VerticalOffset);
+        selected?.Id, SearchBox.Text, LibraryStatusFilter.SelectedIndex, LibraryScroll.VerticalOffset, Details.VerticalOffset, openQueueId);
     private void RememberLocation()
     {
         if (restoringNavigation || currentPage.Length == 0) return;
@@ -38,6 +38,7 @@ public partial class MainWindow
         {
             libraryCategory = location.Category; browseSeries = location.Series; browseKind = location.Kind; browseSeason = location.Season;
             SearchBox.Text = location.Search; LibraryStatusFilter.SelectedIndex = location.Filter;
+            if (openQueueId != location.QueueId) { CloseQueueAddPanel(); openQueueId = location.QueueId; }
             if (location.Page == "Details" && items.FirstOrDefault(x => x.Id == location.MediaId) is { } item) Select(item);
             else ShowPage(location.Page == "Details" ? "Library" : location.Page);
             UpdateBreadcrumbs();

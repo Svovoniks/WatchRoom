@@ -6,17 +6,38 @@ using Watchroom.Core;
 
 namespace Watchroom.Desktop;
 
+// Questions and pickers shown inside the app window; each waits for an answer like a modal window.
 public static class Dialogs
 {
+    public static void Alert(Window owner, string title, string message)
+    {
+        var win = new InAppDialog { Owner = owner, Title = title, Width = 460 };
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) });
+        var ok = new Button { Content = "OK", IsDefault = true, IsCancel = true, HorizontalAlignment = HorizontalAlignment.Right };
+        ok.SetResourceReference(FrameworkElement.StyleProperty, "Primary");
+        panel.Children.Add(ok); win.Content = panel;
+        win.ShowDialog();
+    }
+    public static bool Confirm(Window owner, string title, string message, string action, string cancelLabel = "Cancel")
+    {
+        var win = new InAppDialog { Owner = owner, Title = title, Width = 460 };
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) });
+        var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = new Button { Content = cancelLabel, IsCancel = true };
+        var confirm = new Button { Content = action, IsDefault = true };
+        confirm.SetResourceReference(FrameworkElement.StyleProperty, "Primary");
+        confirm.Click += (_, _) => win.DialogResult = true;
+        actions.Children.Add(cancel); actions.Children.Add(confirm); panel.Children.Add(actions); win.Content = panel;
+        return win.ShowDialog() == true;
+    }
     public static MessageBoxResult ConfirmUnsavedSettings(Window owner)
     {
         var result = MessageBoxResult.Cancel;
-        var win = new Window { Owner = owner, Title = "Unsaved settings", Width = 530, SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
-        var panel = new StackPanel { Margin = new Thickness(24) };
-        panel.Children.Add(new TextBlock { Text = "Save your settings before switching tabs?", FontSize = 20,
-            FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) });
-        panel.Children.Add(new TextBlock { Text = "You have unsaved changes.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) });
+        var win = new InAppDialog { Owner = owner, Title = "Unsaved settings", Width = 500 };
+        var panel = new StackPanel();
+        panel.Children.Add(new TextBlock { Text = "You have unsaved changes. Save them before switching tabs?", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) });
         var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Keep editing", IsCancel = true };
         var discard = new Button { Content = "Discard changes" };
@@ -36,9 +57,8 @@ public static class Dialogs
     public static WatchRoomChoice? ChooseWatchRoom(Window owner, IEnumerable<SavedRoom> rooms, SavedRoom? current,
         Func<string, string?> validateName)
     {
-        var win = new Window { Owner = owner, Title = "Watch together", Width = 560, SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
-        var panel = new StackPanel { Margin = new Thickness(24) };
+        var win = new InAppDialog { Owner = owner, Title = "Watch together", Width = 500 };
+        var panel = new StackPanel();
         panel.Children.Add(new TextBlock { Text = "Room", Margin = new Thickness(0, 0, 0, 4) });
         var choices = rooms.Select(room => new WatchRoomOption(room.Name + (room.Id == current?.Id ? " · Current room" : ""), room)).ToList();
         choices.Add(new("Create new room", null));
@@ -82,12 +102,10 @@ public static class Dialogs
 
     public static string? Prompt(Window owner, string title, string label, string initial = "", Func<string, string?>? validate = null, string action = "Continue", string? help = null)
     {
-        var win = new Window { Owner = owner, Title = title, Width = 530, SizeToContent = SizeToContent.Height, WindowStartupLocation = WindowStartupLocation.CenterOwner, ResizeMode = ResizeMode.NoResize };
-        var panel = new StackPanel { Margin = new Thickness(24) };
-        panel.Children.Add(new TextBlock { Text = title, FontSize = 24, FontWeight = FontWeights.SemiBold,
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) });
+        var win = new InAppDialog { Owner = owner, Title = title, Width = 460 };
+        var panel = new StackPanel();
         panel.Children.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap });
-        var input = new TextBox { Text = initial, MinWidth = 400 }; panel.Children.Add(input);
+        var input = new TextBox { Text = initial }; panel.Children.Add(input);
         if (help is not null)
         {
             var hint = new TextBlock { Text = help, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 16) };
@@ -117,12 +135,11 @@ public static class Dialogs
         var win = MetadataPicker(owner, matches, loadPoster, message);
         return win.ShowDialog() == true ? ((ListBox)win.FindName("MetadataChoices")).SelectedItem as MetadataMatch : null;
     }
-    internal static Window MetadataPicker(Window owner, List<MetadataMatch> matches, Func<MetadataMatch, Task<string?>>? loadPoster, string? message)
+    internal static InAppDialog MetadataPicker(Window owner, List<MetadataMatch> matches, Func<MetadataMatch, Task<string?>>? loadPoster, string? message)
     {
-        var win = new Window { Owner = owner, Title = "Choose the correct title", Width = 760, Height = 520, MinWidth = 600, MinHeight = 360,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var win = new InAppDialog { Owner = owner, Title = "Choose the correct title", Width = 720, Height = 440 };
         NameScope.SetNameScope(win, new NameScope());
-        var panel = new DockPanel { Margin = new Thickness(20) };
+        var panel = new DockPanel();
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Cancel", IsCancel = true };
         var button = new Button { Content = "Use this match", IsDefault = true, IsEnabled = false };

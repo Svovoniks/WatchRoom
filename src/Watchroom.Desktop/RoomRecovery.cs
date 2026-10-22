@@ -10,7 +10,7 @@ namespace Watchroom.Desktop;
 public partial class MainWindow
 {
     private CancellationTokenSource? roomReconnect;
-    private Window? disconnectToast;
+    private Action? disconnectToast;
     private readonly Dictionary<string, CancellationTokenSource> peerNotices = [];
     private readonly PlaybackRecovery playbackRecovery = new();
     private int activeStreamingBufferSeconds = StreamingBufferOptions.DefaultSeconds;
@@ -73,27 +73,8 @@ public partial class MainWindow
     private void NotifyDisconnected(string name)
     {
         System.Media.SystemSounds.Exclamation.Play();
-        disconnectToast?.Close();
-        var area = SystemParameters.WorkArea;
-        var toast = new Window
-        {
-            Title = "Watchroom · Participant disconnected", Width = 360, Height = 110,
-            WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
-            ShowInTaskbar = false, ShowActivated = false, Topmost = true,
-            Left = area.Right - 380, Top = area.Bottom - 130,
-            Content = new Border
-            {
-                Background = (Brush)FindResource("Surface"), BorderBrush = (Brush)FindResource("Accent"),
-                BorderThickness = new Thickness(1), Padding = new Thickness(20),
-                Child = new TextBlock { Text = name + " disconnected", Foreground = (Brush)FindResource("Ink"),
-                    FontSize = 18, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center }
-            }
-        };
-        disconnectToast = toast;
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(7) };
-        timer.Tick += (_, _) => { timer.Stop(); toast.Close(); };
-        toast.Closed += (_, _) => { timer.Stop(); if (disconnectToast == toast) disconnectToast = null; };
-        toast.Show(); timer.Start();
+        disconnectToast?.Invoke();
+        disconnectToast = InAppDialog.Toast(this, name + " disconnected", TimeSpan.FromSeconds(7));
     }
 
     private async Task ReconnectRoomAsync(RoomClient previous)

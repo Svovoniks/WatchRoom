@@ -21,7 +21,7 @@ static class MetadataPickerChecks
             new(1719, "tv", "Mr. Bean", "1990", "fixture", "", "Show", Animated: false, Provider: "tvmaze", Evidence: "Already identified in another local release"),
             new(5251, "tv", "Mr. Bean", "2002", "fixture", "", "Show", Animated: true, Provider: "tvmaze")
         };
-        var owner = new Window { Left = -20000, Top = 0, Width = 800, Height = 600, WindowStartupLocation = WindowStartupLocation.Manual };
+        var owner = new Window { Left = -20000, Top = 0, Width = 1000, Height = 700, WindowStartupLocation = WindowStartupLocation.Manual, Content = new Grid() };
         owner.Show();
         try
         {
@@ -29,9 +29,9 @@ static class MetadataPickerChecks
             {
                 var pending = matches.ToDictionary(m => m.Id, _ => new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously));
                 Func<MetadataMatch, Task<string?>> loader = m => pending[m.Id].Task;
-                var picker = (Window)typeof(Dialogs).GetMethod("MetadataPicker", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null,
+                var picker = (InAppDialog)typeof(Dialogs).GetMethod("MetadataPicker", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null,
                     [owner, matches, loader, "TMDB needs a saved key; TVmaze is available."])!;
-                picker.WindowStartupLocation = WindowStartupLocation.Manual; picker.Left = -20000; picker.Top = 0; picker.Width = width;
+                picker.Width = width;
                 picker.Show();
                 try
                 {
@@ -56,14 +56,45 @@ static class MetadataPickerChecks
             }
             _ = owner.Dispatcher.BeginInvoke(() =>
             {
-                var picker = Application.Current.Windows.Cast<Window>().Single(w => w.Title == "Choose the correct title");
+                var picker = InAppDialog.Open.Single(d => d.Title == "Choose the correct title");
                 ((ListBox)picker.FindName("MetadataChoices")).SelectedIndex = 1;
                 ((Button)picker.FindName("UseMetadataMatch")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             }, DispatcherPriority.ApplicationIdle);
             Check(Dialogs.Choose(owner, matches)?.Id == 5251, "the picker returns the exact provider identity selected by the user");
+
+            // Questions open inside the owner window and answer like modal windows.
+            var windows = Application.Current.Windows.Count; var inApp = false;
+            _ = owner.Dispatcher.BeginInvoke(() =>
+            {
+                var prompt = InAppDialog.Open.Single(d => d.Title == "Rename queue");
+                inApp = prompt.IsOpen && Application.Current.Windows.Count == windows;
+                if (PresentationSource.FromVisual(prompt)?.RootVisual is FrameworkElement layer)
+                {
+                    var shot = new RenderTargetBitmap((int)layer.ActualWidth, (int)layer.ActualHeight, 96, 96, PixelFormats.Pbgra32); shot.Render(layer);
+                    var png = new PngBitmapEncoder(); png.Frames.Add(BitmapFrame.Create(shot));
+                    using var file = File.Create(Path.Combine(directory, "in-app-prompt.png")); png.Save(file);
+                }
+                Descendants(prompt).OfType<TextBox>().Single().Text = "Late show";
+                Descendants(prompt).OfType<Button>().Single(b => b.IsDefault).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            }, DispatcherPriority.ApplicationIdle);
+            Check(Dialogs.Prompt(owner, "Rename queue", "Queue name", "Friday") == "Late show" && inApp, "a prompt opens inside the app window and returns the entered name");
+            _ = owner.Dispatcher.BeginInvoke(() => Descendants(InAppDialog.Open.Single()).OfType<Button>().Single(b => b.IsCancel).RaiseEvent(new RoutedEventArgs(Button.ClickEvent)),
+                DispatcherPriority.ApplicationIdle);
+            Check(Dialogs.Prompt(owner, "Rename queue", "Queue name", "Friday") is null && InAppDialog.Open.Count == 0, "Cancel closes an in-app prompt without an answer");
+            _ = owner.Dispatcher.BeginInvoke(() => InAppDialog.Open.Single().Close(), DispatcherPriority.ApplicationIdle);
+            Check(!Dialogs.Confirm(owner, "Play now", "Start this title for everyone?", "Play for everyone") && InAppDialog.Open.Count == 0,
+                "closing an in-app question counts as declining it");
         }
         finally { owner.Close(); }
         Console.WriteLine($"{checks} metadata picker checks passed. Renders: {directory}");
+    }
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject element)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(element); i++)
+        {
+            var child = VisualTreeHelper.GetChild(element, i); yield return child;
+            foreach (var descendant in Descendants(child)) yield return descendant;
+        }
     }
     private static IEnumerable<string> Text(DependencyObject element)
     {

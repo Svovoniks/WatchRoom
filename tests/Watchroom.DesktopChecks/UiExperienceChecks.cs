@@ -111,9 +111,9 @@ static class UiExperienceChecks
             Check(Control<TextBox>("DetailFile").IsReadOnly && Control<TextBox>("DetailFile").Text == media[0].Path,
                 "file location can be selected and copied without being edited");
             var queues = (List<SavedQueue>)Field("savedQueues"); queues.Clear(); queues.Add(new("ux-queue", "Movie night", [media[0].Id, media[1].Id, episode.Id]));
-            Call("RefreshQueuePickers", "ux-queue");
+            Call("OpenQueue", "ux-queue");
             Check(Control<Button>("PlaySavedQueueButton").Visibility == Visibility.Visible, "filled queue exposes playback actions");
-            queues[0] = queues[0] with { MediaIds = [] }; Call("RefreshQueuePickers", "ux-queue");
+            queues[0] = queues[0] with { MediaIds = [] }; Call("RefreshQueuePickers");
             Check(Control<Button>("PlaySavedQueueButton").Visibility == Visibility.Collapsed && Control<Button>("AddQueueVideosButton").IsEnabled,
                 "empty queue removes disabled playback actions and leaves Add videos available");
             var rooms = (ObservableCollection<SavedRoom>)Field("savedRooms"); rooms.Clear();
@@ -128,8 +128,8 @@ static class UiExperienceChecks
                     Call("ShowPage", "Library"); Filter(0); Capture("library-" + theme, size.Item1, size.Item2);
                     Call("Select", media[0]); Capture("details-" + theme, size.Item1, size.Item2);
                     Call("ShowPage", "Queues"); Capture("queue-empty-" + theme, size.Item1, size.Item2);
-                    queues[0] = queues[0] with { MediaIds = [media[0].Id, media[1].Id, episode.Id] }; Call("RefreshQueuePickers", "ux-queue"); Capture("queue-" + theme, size.Item1, size.Item2);
-                    queues[0] = queues[0] with { MediaIds = [] }; Call("RefreshQueuePickers", "ux-queue");
+                    queues[0] = queues[0] with { MediaIds = [media[0].Id, media[1].Id, episode.Id] }; Call("RefreshQueuePickers"); Capture("queue-" + theme, size.Item1, size.Item2);
+                    queues[0] = queues[0] with { MediaIds = [] }; Call("RefreshQueuePickers");
                     foreach (var page in new[] { "Folders", "Rooms", "Welcome" }) { Call("ShowPage", page); Capture(page.ToLowerInvariant() + "-" + theme, size.Item1, size.Item2); }
                     Call("ShowPage", "Settings");
                     foreach (var section in new[] { "Profile", "Metadata", "Playback", "Appearance", "Updates" })

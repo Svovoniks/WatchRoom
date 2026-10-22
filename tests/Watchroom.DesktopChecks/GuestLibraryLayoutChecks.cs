@@ -28,7 +28,7 @@ static class GuestLibraryLayoutChecks
         host.SetAccess("guest", new(true, true, true)); Pump();
         var guestWindow = new RoomLibraryWindow(guest, false, () => "host", () => people, _ => { });
         var hostWindow = new RoomLibraryWindow(host, true, () => "host", () => people, _ => { });
-        void Layout(Window window, int width, int height)
+        void Layout(InAppDialog window, int width, int height)
         {
             var content = (FrameworkElement)window.Content; content.Measure(new Size(width, height)); content.Arrange(new Rect(0, 0, width, height)); content.UpdateLayout();
         }
@@ -84,7 +84,7 @@ static class GuestLibraryLayoutChecks
     static T Field<T>(object target, string name) => (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target)!;
     static void Invoke(object target, string name, params object[] args) => target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(target, args);
     static void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); }
-    static void Save(Window window, string name)
+    static void Save(InAppDialog window, string name)
     {
         var content = (FrameworkElement)window.Content;
         var bitmap = new RenderTargetBitmap((int)content.ActualWidth, (int)content.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(content);

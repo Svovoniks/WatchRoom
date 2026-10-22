@@ -382,34 +382,143 @@
     </StackPanel></Grid>
    </ScrollViewer>
 
-   <!-- Queues -->
+   <!-- Queues: a gallery of queue covers. Opening one shows its videos, with library search beside them while adding. -->
    <Grid x:Name="QueuesPage" Visibility="Collapsed">
-    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-    <DockPanel Margin="0,0,0,20"><Button DockPanel.Dock="Right" Content="Create queue" Click="CreateQueue" ContentTemplate="{StaticResource AddContent}" VerticalAlignment="Center" Style="{StaticResource Primary}" Margin="12,0,0,0"/><StackPanel><TextBlock Text="Queues" Style="{StaticResource PageHeading}"/><TextBlock Text="Line up movies and episodes to play back to back." Style="{StaticResource MutedText}" Margin="0,4,0,0"/></StackPanel></DockPanel>
-    <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-      <ListBox Grid.Row="1" x:Name="QueuePicker" Background="Transparent" BorderThickness="0" Padding="0" SelectionChanged="SavedQueueChanged" AutomationProperties.Name="Saved queues" VerticalAlignment="Top" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-       <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="AutomationProperties.Name"><Setter.Value><MultiBinding StringFormat="{}{0}, {1} videos"><Binding Path="Name"/><Binding Path="MediaIds.Length"/></MultiBinding></Setter.Value></Setter></Style></ListBox.ItemContainerStyle><ListBox.ItemTemplate><DataTemplate><StackPanel Margin="4,4"><TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding MediaIds.Length, StringFormat={}{0} videos}" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,3,0,0"/></StackPanel></DataTemplate></ListBox.ItemTemplate>
-      </ListBox>
-     </Grid>
-     <Border Grid.Column="2" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="12" Padding="22,20,22,10">
-      <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-       <StackPanel><TextBlock x:Name="QueueDetailTitle" FontSize="22" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock x:Name="QueueDetailCaption" Style="{StaticResource MutedText}" Margin="0,4,0,14"/></StackPanel>
-       <StackPanel Grid.Row="1" Margin="0,0,0,10"><WrapPanel><Button x:Name="PlaySavedQueueButton" Content="Play queue" Click="PlaySavedQueue" Style="{StaticResource Primary}" IsEnabled="False"/><Button x:Name="PlaySelectedSavedQueueButton" Content="Play selected" Click="PlaySelectedSavedQueue" IsEnabled="False"/><Button x:Name="AddQueueVideosButton" Content="Add videos" Click="AddQueueVideos"/></WrapPanel><TextBlock x:Name="SavedQueueFeedback" AutomationProperties.LiveSetting="Polite"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock></StackPanel>
-       <Grid Grid.Row="2">
-        <ListBox x:Name="SavedQueueItems" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel" SelectionChanged="SavedQueueSelectionChanged" MouseDoubleClick="QueueItemDoubleClicked" PreviewKeyDown="QueueItemKeyDown" AutomationProperties.Name="Queue videos" AutomationProperties.HelpText="Select a video and choose Play selected, double-click it, or press Enter to play from that point in the queue." Background="Transparent" BorderThickness="0" Padding="0" AllowDrop="True" PreviewMouseMove="QueueDragMove" PreviewDragOver="QueueDragOver" DragLeave="QueueDragLeave" PreviewDrop="QueueDrop" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
-         <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="AutomationProperties.Name" Value="{Binding Title}"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,4"/></Style></ListBox.ItemContainerStyle>
-         <ListBox.ItemTemplate><DataTemplate><Grid Margin="8,6"><Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="36"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-          <Border Background="Transparent" Cursor="SizeAll" ToolTip="Drag to reorder" PreviewMouseLeftButtonDown="QueueDragDown"><TextBlock Text="&#xE700;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Muted}"/></Border>
-          <TextBlock Grid.Column="1" Text="{Binding Number}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
-          <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,2,12,2"><TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Caption}" Foreground="{DynamicResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/></StackPanel>
-          <Button Grid.Column="3" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="12" Width="36" Height="36" Margin="0" VerticalAlignment="Center" Tag="{Binding}" Click="RemoveSavedItem" ToolTip="Remove from queue" AutomationProperties.Name="Remove video from queue"/>
-         </Grid></DataTemplate></ListBox.ItemTemplate>
-        </ListBox>
-        <StackPanel x:Name="QueueEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="340" Margin="16"><StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Items.Count, ElementName=SavedQueueItems}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></StackPanel.Style><TextBlock Text="&#xE8FD;" Style="{StaticResource EmptyStateIcon}"/><TextBlock Text="Nothing queued yet" FontSize="21" FontWeight="SemiBold" TextAlignment="Center"/><TextBlock Text="Add movies or episodes from your library, then arrange them in the order you want to watch." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,0"/></StackPanel><Border x:Name="QueueDropMarker" Height="3" CornerRadius="1.5" Background="{DynamicResource Accent}" VerticalAlignment="Top" IsHitTestVisible="False" Visibility="Collapsed"/>
+    <Grid.Resources>
+     <Style x:Key="QueueCover" TargetType="Border"><Setter Property="Width" Value="68"/><Setter Property="Height" Value="100"/><Setter Property="CornerRadius" Value="6"/><Setter Property="local:RoundedClip.Radius" Value="6"/><Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="RenderTransformOrigin" Value="0.5,1"/><Setter Property="Effect"><Setter.Value><DropShadowEffect BlurRadius="12" ShadowDepth="3" Direction="270" Opacity="0.45" Color="#000000"/></Setter.Value></Setter></Style>
+     <Style x:Key="QueuePill" TargetType="Border"><Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="8,2"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="Margin" Value="0,0,12,0"/><Setter Property="BorderThickness" Value="1"/></Style>
+    </Grid.Resources>
+
+    <Grid x:Name="QueueGalleryView">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+     <DockPanel Margin="0,0,0,20"><Button DockPanel.Dock="Right" Content="New queue" Click="CreateQueue" ContentTemplate="{StaticResource AddContent}" VerticalAlignment="Center" Style="{StaticResource Primary}" Margin="12,0,0,0"/><StackPanel><TextBlock Text="Queues" Style="{StaticResource PageHeading}"/><TextBlock Text="Line up movies and episodes to play back to back." Style="{StaticResource MutedText}" Margin="0,4,0,0"/></StackPanel></DockPanel>
+     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="-6,0,0,0" Focusable="False">
+      <ItemsControl x:Name="QueueGallery" AutomationProperties.Name="Saved queues" Focusable="False">
+       <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+       <ItemsControl.ItemTemplate><DataTemplate>
+        <Button Style="{StaticResource PosterCard}" Width="214" Height="Auto" Tag="{Binding}" Click="QueueCardClick" ContextMenuOpening="QueueCardContextMenu" ToolTip="{Binding Name}" AutomationProperties.Name="{Binding AccessibleName}"><Button.ContextMenu><ContextMenu/></Button.ContextMenu>
+         <StackPanel>
+          <Border Style="{StaticResource ArtworkFrame}" Height="150" Background="{DynamicResource Surface}">
+           <Grid>
+            <Rectangle Visibility="{Binding CreateVisibility}" Stroke="{DynamicResource Muted}" StrokeThickness="1" StrokeDashArray="4 3" RadiusX="10" RadiusY="10" Margin="-1" Opacity="0.6"/>
+            <TextBlock Visibility="{Binding PlaceholderVisibility}" Text="{Binding PlaceholderIcon}" Style="{StaticResource Icon}" FontSize="28" HorizontalAlignment="Center" Foreground="{DynamicResource Muted}"/>
+            <Border Style="{StaticResource QueueCover}" DataContext="{Binding Cover2}" Visibility="{Binding Visibility}" Margin="0,22,0,0" VerticalAlignment="Top"><Border.RenderTransform><TransformGroup><RotateTransform Angle="-9"/><TranslateTransform X="-46" Y="6"/></TransformGroup></Border.RenderTransform><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></Border>
+            <Border Style="{StaticResource QueueCover}" DataContext="{Binding Cover3}" Visibility="{Binding Visibility}" Margin="0,22,0,0" VerticalAlignment="Top"><Border.RenderTransform><TransformGroup><RotateTransform Angle="9"/><TranslateTransform X="46" Y="6"/></TransformGroup></Border.RenderTransform><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></Border>
+            <Border Style="{StaticResource QueueCover}" DataContext="{Binding Cover1}" Visibility="{Binding Visibility}" Margin="0,18,0,0" VerticalAlignment="Top"><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></Border>
+            <Border Visibility="{Binding PlayingVisibility}" Background="{DynamicResource AccentSoft}" CornerRadius="10" Padding="8,2" Margin="8" HorizontalAlignment="Left" VerticalAlignment="Top"><TextBlock Text="Playing" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/></Border>
+            <Grid Visibility="{Binding RingVisibility}" Width="30" Height="30" Margin="8" HorizontalAlignment="Right" VerticalAlignment="Bottom" ToolTip="{Binding WatchedText}">
+             <Ellipse Fill="{DynamicResource Canvas}" Opacity="0.85"/>
+             <Ellipse Stroke="{DynamicResource Line}" StrokeThickness="3" Margin="3"/>
+             <Ellipse Stroke="{DynamicResource Accent}" StrokeThickness="3" Margin="3" StrokeDashArray="{Binding RingDash}" RenderTransformOrigin="0.5,0.5"><Ellipse.RenderTransform><RotateTransform Angle="-90"/></Ellipse.RenderTransform></Ellipse>
+            </Grid>
+           </Grid>
+          </Border>
+          <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="2,10,2,0"/>
+          <TextBlock Text="{Binding Caption}" Foreground="{DynamicResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="2,3,2,4"/>
+         </StackPanel>
+        </Button>
+       </DataTemplate></ItemsControl.ItemTemplate>
+      </ItemsControl>
+     </ScrollViewer>
+    </Grid>
+
+    <Grid x:Name="QueueDetailView" Visibility="Collapsed">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+     <!-- Add videos opens by widening its column. A fixed width keeps the results list virtualized; an Auto column would measure every row. -->
+     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition x:Name="QueueAddColumn" Width="0"/></Grid.ColumnDefinitions>
+     <Button Grid.ColumnSpan="2" Style="{StaticResource BreadcrumbButton}" Click="ShowQueueGallery" HorizontalAlignment="Left" Margin="-8,0,0,10" ToolTip="All queues" AutomationProperties.Name="Back to all queues"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72B;" Style="{StaticResource Icon}" FontSize="12" Margin="0,0,8,0"/><TextBlock Text="Queues"/></StackPanel></Button>
+
+     <!-- The header and videos share a nested grid; a list spanning the header's Auto row would measure every row. -->
+     <Grid Grid.Row="1"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+     <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="14" local:RoundedClip.Radius="14" Margin="0,0,0,14">
+      <Grid>
+       <!-- A brush, unlike an Image, never sizes the header to the poster. -->
+       <Border x:Name="QueueHeroBackdrop" Opacity="0.3" IsHitTestVisible="False"><Border.Background><ImageBrush ImageSource="{Binding View.Poster}" Stretch="UniformToFill"/></Border.Background><Border.Effect><BlurEffect Radius="40" KernelType="Gaussian"/></Border.Effect></Border>
+       <Border Background="{DynamicResource HeroFade}" IsHitTestVisible="False"/>
+       <Grid Margin="20"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <UniformGrid x:Name="QueueHeroCollage" Rows="2" Columns="2" Width="132" Height="132" Margin="0,0,22,0" VerticalAlignment="Center">
+         <UniformGrid.Resources><Style TargetType="Border"><Setter Property="Margin" Value="2"/><Setter Property="CornerRadius" Value="6"/><Setter Property="local:RoundedClip.Radius" Value="6"/><Setter Property="Background" Value="{DynamicResource Elevated}"/></Style></UniformGrid.Resources>
+         <Border x:Name="QueueHeroCover0"><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></Border>
+         <Border x:Name="QueueHeroCover1"><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></Border>
+         <Border x:Name="QueueHeroCover2"><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></Border>
+         <Border x:Name="QueueHeroCover3"><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></Border>
+        </UniformGrid>
+        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+         <TextBlock Text="QUEUE" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Muted}"/>
+         <TextBlock x:Name="QueueDetailTitle" FontSize="28" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+         <TextBlock x:Name="QueueDetailCaption" Style="{StaticResource MutedText}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="0,4,0,14"/>
+         <WrapPanel>
+          <Button x:Name="PlaySavedQueueButton" Content="Play" Click="PlaySavedQueue" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" MaxWidth="340" IsEnabled="False"/>
+          <Button x:Name="PlayQueueFromStartButton" Content="Play from start" Click="PlayQueueFromStart" Visibility="Collapsed"/>
+          <Button x:Name="PlaySelectedSavedQueueButton" Content="Play selected" Click="PlaySelectedSavedQueue" IsEnabled="False" Visibility="Collapsed"/>
+          <Button x:Name="AddQueueVideosButton" Content="Add videos" Click="AddQueueVideos" ContentTemplate="{StaticResource AddContent}"/>
+          <Button x:Name="QueueMoreButton" Content="&#xE712;" Style="{StaticResource IconButton}" Click="QueueMoreClick" ToolTip="More queue actions" AutomationProperties.Name="More queue actions"><Button.ContextMenu><ContextMenu/></Button.ContextMenu></Button>
+         </WrapPanel>
+         <TextBlock x:Name="SavedQueueFeedback" AutomationProperties.LiveSetting="Polite" Margin="0,6,0,0"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+        </StackPanel>
        </Grid>
-       <Border Grid.Row="3" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Margin="0,12,0,0" Padding="0,12,0,0"><WrapPanel><Button x:Name="SavedQueueEarlier" Content="&#xE70E;" Style="{StaticResource IconButton}" FontSize="12" ToolTip="Move earlier" AutomationProperties.Name="Move earlier" Tag="Earlier" Click="EditQueueOrder" IsEnabled="False"/><Button x:Name="SavedQueueLater" Content="&#xE70D;" Style="{StaticResource IconButton}" FontSize="12" ToolTip="Move later" AutomationProperties.Name="Move later" Tag="Later" Click="EditQueueOrder" IsEnabled="False"/><Button Content="Rename" Style="{StaticResource QuietButton}" Click="RenameQueue"/><Button Content="Delete queue" Style="{StaticResource QuietButton}" Click="DeleteQueue"/></WrapPanel></Border>
       </Grid>
+     </Border>
+
+     <Grid Grid.Row="1">
+      <ListBox x:Name="SavedQueueItems" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel" SelectionChanged="SavedQueueSelectionChanged" MouseDoubleClick="QueueItemDoubleClicked" PreviewKeyDown="QueueItemKeyDown" ContextMenuOpening="QueueItemContextMenu" AutomationProperties.Name="Queue videos" AutomationProperties.HelpText="Press Enter or double-click to play from a video. Ctrl+Up and Ctrl+Down move it, Delete removes it." Background="Transparent" BorderThickness="0" Padding="0" AllowDrop="True" PreviewMouseMove="QueueDragMove" PreviewDragOver="QueueDragOver" DragLeave="QueueDragLeave" PreviewDrop="QueueDrop" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
+       <ListBox.ContextMenu><ContextMenu/></ListBox.ContextMenu>
+       <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,2"/></Style></ListBox.ItemContainerStyle>
+       <ListBox.ItemTemplate><DataTemplate><Grid Margin="6,6"><Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="34"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <Border Background="Transparent" Cursor="SizeAll" ToolTip="Drag to reorder" PreviewMouseLeftButtonDown="QueueDragDown"><TextBlock Text="&#xE700;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Muted}"/></Border>
+        <TextBlock Grid.Column="1" Text="{Binding Number}" Visibility="{Binding NumberVisibility}" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular"/>
+        <TextBlock Grid.Column="1" Text="&#xE768;" Visibility="{Binding CurrentVisibility}" Style="{StaticResource Icon}" FontSize="13" Foreground="{DynamicResource Accent}" ToolTip="Playing now"/>
+        <Border Grid.Column="2" Width="112" Height="63" CornerRadius="6" local:RoundedClip.Radius="6" Background="{DynamicResource Elevated}" Margin="0,0,14,0">
+         <Grid>
+          <TextBlock Text="&#xE714;" Style="{StaticResource Icon}" FontSize="18" HorizontalAlignment="Center" Foreground="{DynamicResource Muted}"/>
+          <Image Source="{Binding View.Poster}"><Image.Style><Style TargetType="Image"><Setter Property="Stretch" Value="UniformToFill"/><Style.Triggers><DataTrigger Binding="{Binding View.PosterFills}" Value="False"><Setter Property="Stretch" Value="Uniform"/></DataTrigger><DataTrigger Binding="{Binding HasProblem}" Value="True"><Setter Property="Opacity" Value="0.5"/></DataTrigger></Style.Triggers></Style></Image.Style></Image>
+          <ProgressBar Value="{Binding Progress, Mode=OneWay}" Maximum="100" Height="3" MinHeight="0" VerticalAlignment="Bottom" Style="{StaticResource CardProgress}" DataContext="{Binding View}" IsHitTestVisible="False"/>
+         </Grid>
+        </Border>
+        <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="0,2,12,2">
+         <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding HasProblem}" Value="True"><Setter Property="Foreground" Value="{DynamicResource Danger}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+         <TextBlock Text="{Binding Caption}" Foreground="{DynamicResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
+        </StackPanel>
+        <Border Grid.Column="4" Style="{StaticResource QueuePill}" BorderBrush="{DynamicResource Danger}" Visibility="{Binding ProblemVisibility}"><TextBlock Text="{Binding Problem}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Danger}"/></Border>
+        <Border Grid.Column="4" BorderBrush="{DynamicResource Line}" Background="{DynamicResource Elevated}" DataContext="{Binding View}"><Border.Style><Style TargetType="Border" BasedOn="{StaticResource QueuePill}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsWatched}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="Watched" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Muted}"/></Border>
+        <TextBlock Grid.Column="5" Text="{Binding Runtime}" Foreground="{DynamicResource Muted}" FontSize="12" Width="56" TextAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0" Typography.NumeralAlignment="Tabular"/>
+        <Button Grid.Column="6" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="12" Width="36" Height="36" Margin="0" VerticalAlignment="Center" Tag="{Binding}" Click="RemoveSavedItem" ToolTip="Remove from queue" AutomationProperties.Name="Remove video from queue"/>
+       </Grid></DataTemplate></ListBox.ItemTemplate>
+      </ListBox>
+      <StackPanel x:Name="QueueEmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360" Margin="16"><StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Items.Count, ElementName=SavedQueueItems}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></StackPanel.Style><TextBlock Text="&#xE8FD;" Style="{StaticResource EmptyStateIcon}"/><TextBlock Text="Nothing queued yet" FontSize="21" FontWeight="SemiBold" TextAlignment="Center"/><TextBlock Text="Choose Add videos to search your library, or right-click any title in the library and add it to this queue." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,0"/></StackPanel>
+      <Border x:Name="QueueDropMarker" Height="3" CornerRadius="1.5" Background="{DynamicResource Accent}" VerticalAlignment="Top" IsHitTestVisible="False" Visibility="Collapsed"/>
+     </Grid>
+     </Grid>
+
+     <!-- Add videos: search the library and add without leaving the queue. -->
+     <Border x:Name="QueueAddPanel" Grid.Column="1" Grid.Row="1" Margin="20,0,0,0" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="14" Padding="16,14,10,10" Visibility="Collapsed">
+      <DockPanel>
+       <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12"><Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="12" Margin="0" Click="CloseQueueAdd" ToolTip="Done adding (Esc)" AutomationProperties.Name="Close Add videos"/><TextBlock Text="Add videos" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
+       <Border DockPanel.Dock="Top" Background="{DynamicResource Canvas}" BorderThickness="1" CornerRadius="10" Padding="12,0,8,0" Height="38" Margin="0,0,6,10" Cursor="IBeam">
+        <Border.Style><Style TargetType="Border"><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger></Style.Triggers></Style></Border.Style>
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+         <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="13" Foreground="{DynamicResource Muted}" Margin="0,0,10,0" IsHitTestVisible="False"/>
+         <TextBox x:Name="QueueAddSearch" Grid.Column="1" MinHeight="0" TextChanged="QueueAddSearchChanged" PreviewKeyDown="QueueAddSearchKeyDown" AutomationProperties.Name="Search videos to add" VerticalContentAlignment="Center" Margin="0" Padding="0" Background="Transparent" BorderThickness="0">
+          <TextBox.Template><ControlTemplate TargetType="TextBox"><Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center"/></Border></ControlTemplate></TextBox.Template>
+         </TextBox>
+         <TextBlock Grid.Column="1" Text="Search movies and episodes" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=QueueAddSearch}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+        </Grid>
+       </Border>
+       <ComboBox x:Name="QueueAddFilter" DockPanel.Dock="Top" SelectedIndex="0" SelectionChanged="QueueAddFilterChanged" HorizontalAlignment="Left" MinWidth="150" Margin="0,0,6,8" AutomationProperties.Name="Show"><ComboBoxItem Content="Everything"/><ComboBoxItem Content="Movies"/><ComboBoxItem Content="Shows"/><ComboBoxItem Content="Anime"/></ComboBox>
+       <TextBlock x:Name="QueueAddStatus" DockPanel.Dock="Top" Foreground="{DynamicResource Muted}" FontSize="12" Margin="2,0,6,6" AutomationProperties.LiveSetting="Polite"/>
+       <ListBox x:Name="QueueAddResults" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel" SelectionMode="Extended" MouseDoubleClick="QueueAddDoubleClicked" PreviewKeyDown="QueueAddKeyDown" AutomationProperties.Name="Videos to add" AutomationProperties.HelpText="Press Enter or double-click to add the selected videos to the queue." Background="Transparent" BorderThickness="0" Padding="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
+        <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,1"/></Style></ListBox.ItemContainerStyle>
+        <ListBox.ItemTemplate><DataTemplate><Grid Margin="4,4" MinHeight="40"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+         <Border Width="72" Height="40" CornerRadius="5" local:RoundedClip.Radius="5" Background="{DynamicResource Elevated}" Margin="0,0,10,0" Visibility="{Binding ThumbnailVisibility}"><Image Source="{Binding View.Poster}"><Image.Style><Style TargetType="Image"><Setter Property="Stretch" Value="UniformToFill"/><Style.Triggers><DataTrigger Binding="{Binding View.PosterFills}" Value="False"><Setter Property="Stretch" Value="Uniform"/></DataTrigger></Style.Triggers></Style></Image.Style></Image></Border>
+         <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,8,0">
+          <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="FontSize" Value="13"/><Setter Property="FontWeight" Value="SemiBold"/><Style.Triggers><DataTrigger Binding="{Binding IsGroup}" Value="True"><Setter Property="FontSize" Value="14"/><Setter Property="FontWeight" Value="Bold"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+          <TextBlock Text="{Binding Caption}" Foreground="{DynamicResource Muted}" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+         </StackPanel>
+         <TextBlock Grid.Column="2" Text="&#xE73E;" Visibility="{Binding QueuedVisibility}" Style="{StaticResource Icon}" FontSize="13" Foreground="{DynamicResource Success}" Width="34" TextAlignment="Center" ToolTip="Already in this queue"/>
+         <Button Grid.Column="2" Visibility="{Binding AddVisibility}" Content="{Binding AddLabel}" Tag="{Binding}" Click="QueueAddRowClick" Style="{StaticResource QuietButton}" FontSize="12" MinWidth="34" Padding="10,4" Margin="0" VerticalAlignment="Center" ToolTip="{Binding AddHint}" AutomationProperties.Name="{Binding AddHint}"/>
+        </Grid></DataTemplate></ListBox.ItemTemplate>
+       </ListBox>
+      </DockPanel>
      </Border>
     </Grid>
    </Grid>

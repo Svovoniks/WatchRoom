@@ -161,14 +161,14 @@ public partial class MainWindow : Window
         ExcludedFolderList.ItemsSource = exclusions;
         try { savedQueues.AddRange(Wire.Read<List<SavedQueue>>(library.Setting("queues") ?? "[]")); }
         catch (System.Text.Json.JsonException) { }
-        if (savedQueues.Count == 0)
+        if (savedQueues.Count == 0 && library.Setting("queues") is null)
         {
             string[] legacyIds = [];
             try { legacyIds = Wire.Read<string[]>(library.Setting("queue") ?? "[]"); } catch (System.Text.Json.JsonException) { }
-            savedQueues.Add(new(Guid.NewGuid().ToString("N"), "Default queue", legacyIds));
+            if (legacyIds.Length > 0) savedQueues.Add(new(Guid.NewGuid().ToString("N"), "Default queue", legacyIds));
         }
         var savedActiveQueue = library.Setting("activeQueue");
-        activeQueueId = savedActiveQueue == "" ? null : savedQueues.FirstOrDefault(x => x.Id == savedActiveQueue)?.Id ?? savedQueues[0].Id;
+        activeQueueId = savedActiveQueue == "" ? null : savedQueues.FirstOrDefault(x => x.Id == savedActiveQueue)?.Id ?? savedQueues.FirstOrDefault()?.Id;
         var savedQueue = library.Setting("queue") ?? (activeQueueId is null ? "[]" : Wire.Serialize(savedQueues.First(x => x.Id == activeQueueId).MediaIds));
         // Read the catalog after the window has appeared, without blocking input.
         library.MediaSaved += QueueLibraryUpdate;
@@ -283,7 +283,7 @@ public partial class MainWindow : Window
     {
         try { await action(); }
         catch (OperationCanceledException) { SetStatus("Operation cancelled or timed out."); }
-        catch (Exception ex) { PlaybackDiagnostics.Record("action-failed", new { error = ex.GetType().Name, stack = ex.StackTrace }); SetStatus(ex.Message); MessageBox.Show(this, ex.Message, "Watchroom", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        catch (Exception ex) { PlaybackDiagnostics.Record("action-failed", new { error = ex.GetType().Name, stack = ex.StackTrace }); SetStatus(ex.Message); Dialogs.Alert(this, "Something went wrong", ex.Message); }
     }
     private void ShowPage(string name)
     {
@@ -340,7 +340,14 @@ public partial class MainWindow : Window
             System.Windows.Automation.AutomationProperties.SetItemStatus(button,
                 (string)button.Tag == (name == "Details" ? "Library" : name == "Room" ? "Rooms" : name) ? "Selected" : "");
     }
-    private void Navigate(object sender, RoutedEventArgs e) => ShowPage((string)((Button)sender).Tag);
+    private void Navigate(object sender, RoutedEventArgs e)
+    {
+        var page = (string)((Button)sender).Tag;
+        // The sidebar opens the gallery of queues; Manage queues in the player opens the queue in use.
+        if (page == "Queues" && sender == QueuesNav) { if (currentPage == "Queues") ShowAllQueues(); else { CloseQueueAddPanel(); openQueueId = null; } }
+        else if (page == "Queues" && activeQueueId is not null && openQueueId != activeQueueId) { CloseQueueAddPanel(); openQueueId = activeQueueId; }
+        ShowPage(page);
+    }
     private static int CategoryFor(MediaItem item) => item.Kind == "Anime" ? 3 : item.Series is not null ? 2 : 1;
     private static string CategoryName(int category) => category switch { 1 => "Movies", 2 => "Shows", 3 => "Anime", 4 => "Unavailable", _ => "All" };
     private static string SeasonName(int season) => season < 0 ? "Season unknown" : season == 0 ? "Specials" : $"Season {season}";
@@ -1971,7 +1978,7 @@ public partial class MainWindow : Window
     {
         if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop(); videoClickDelay.Stop();
         DisableSystemMediaControls();
-        disconnectToast?.Close();
+        disconnectToast?.Invoke();
         guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); metadataRetentionTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
         library.Setting("volume", ((int)Volume.Value).ToString());
         await Task.Yield(); // Let WPF finish the first Closing event before calling Close again.
