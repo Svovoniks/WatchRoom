@@ -37,7 +37,7 @@ public partial class MainWindow
     // Fullscreen and picture-in-picture video have no caption; the player gets the dark caption that matches its header.
     private void ApplyCaptionLayout(bool inPlayer)
     {
-        var captionless = fullscreen || pictureInPicture;
+        var captionless = fullscreen;
         TitleRow.Height = new GridLength(captionless ? 0 : CaptionHeight);
         CaptionBar.Visibility = captionless ? Visibility.Collapsed : Visibility.Visible;
         if (WindowChrome.GetWindowChrome(this) is { } chrome) chrome.CaptionHeight = captionless ? 0 : CaptionHeight;
@@ -57,7 +57,7 @@ public partial class MainWindow
 
     private bool OverMaximizeButton(IntPtr lParam)
     {
-        if (fullscreen || pictureInPicture || !MaximizeButton.IsVisible || PresentationSource.FromVisual(MaximizeButton) is null) return false;
+        if (fullscreen || !MaximizeButton.IsVisible || PresentationSource.FromVisual(MaximizeButton) is null) return false;
         var point = MaximizeButton.PointFromScreen(new Point((short)(lParam.ToInt64() & 0xffff), (short)((lParam.ToInt64() >> 16) & 0xffff)));
         return point.X >= 0 && point.Y >= 0 && point.X < MaximizeButton.ActualWidth && point.Y < MaximizeButton.ActualHeight;
     }

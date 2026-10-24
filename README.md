@@ -25,7 +25,7 @@ The app includes a default HTTPS room-service address. Its availability and publ
 
 The Windows **Home** tab opens with **Continue watching**, suggestions for unstarted movies, shows, and anime, and a **Mystery pick** from available titles. Continue watching resumes paused movies or opens the next unwatched episode of a started show. **Refresh picks** reshuffles suggestions and the mystery card. Guests see the same Home sections for the host's library and saved progress while the host permits library browsing; their playback starts in the room.
 
-Local playback remembers your position and volume. Details offer **Resume** and **Start over**; a **Return to player** strip keeps playback reachable while browsing. The player's queue menu includes an editable, persistent queue with episode labels, reordering, removal, and automatic advancement; with no queue loaded, it lists the playing show's episodes so you can jump to another. Room invitation and chat actions appear when connected to a room.
+Local playback remembers your position and volume. Details offer **Resume** and **Start over**; **Return to player** in the sidebar keeps playback reachable while browsing. The player's queue menu includes an editable, persistent queue with episode labels, reordering, removal, and automatic advancement; with no queue loaded, it lists the playing show's episodes so you can jump to another. Room invitation and chat actions appear when connected to a room.
 
 Headset and keyboard media buttons can play or pause the current video, including while Watchroom is minimized or another app has focus. Windows media controls show the current title and playback state. Room playback buttons follow the host's shared-controls setting.
 

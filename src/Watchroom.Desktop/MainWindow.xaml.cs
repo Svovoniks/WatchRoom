@@ -102,6 +102,8 @@ public partial class MainWindow : Window
     private CancellationTokenSource? mediaLoadCancellation;
     private int nativeStopCount;
     private long? pendingSeek;
+    // A finished local video ignores seeks, so the chosen position waits here until it plays again.
+    private long? endedSeek;
     private long seekExpires, seekRevision;
     private WindowState previousState;
     private Rect previousBounds;
@@ -312,12 +314,13 @@ public partial class MainWindow : Window
         currentPage = name;
         if (name != "Room") videoClickDelay.Stop();
         if (fullscreen && name != "Room") SetFullscreen(false);
-        if (pictureInPicture && name != "Room") SetPictureInPicture(false);
+        if (pictureInPicture && name == "Room") SetPictureInPicture(false, openPlayer: false);
         // VideoView hosts its content in a separate native overlay window. Collapsing
         // only RoomPage does not update that window's visibility or hit testing.
         // Hide the view itself before changing the shell layout, and restore both
         // the view and its overlay content when returning to the player.
-        var playerVisibility = name == "Room" ? Visibility.Visible : Visibility.Collapsed;
+        // Picture in picture keeps showing the video in its own window while the app shows another page.
+        var playerVisibility = name == "Room" || pictureInPicture ? Visibility.Visible : Visibility.Collapsed;
         PlayerOverlay.Visibility = playerVisibility;
         Video.Visibility = playerVisibility;
         WelcomePage.Visibility = name == "Welcome" ? Visibility.Visible : Visibility.Collapsed;
@@ -899,7 +902,7 @@ public partial class MainWindow : Window
     {
         if (!await EnsurePlayer()) return;
         if (!File.Exists(item.Path)) throw new FileNotFoundException("Movie file is unavailable. Reconnect its drive and rescan.");
-        await Disconnect(preserveFullscreen: fullscreen && room is null); target = null; loadedMedia = null; playingItem = item;
+        await Disconnect(preserveFullscreen: (fullscreen || pictureInPicture) && room is null); target = null; loadedMedia = null; playingItem = item;
         var generation = loadGeneration;
         localResume = !WasWatched(item.Id) && long.TryParse(library.Setting("position:" + item.Id), out var saved) ? saved : 0;
         using var media = new Media(vlc!, item.Path, FromType.FromPath);
@@ -1244,7 +1247,8 @@ public partial class MainWindow : Window
     {
         PlayerEmpty.Visibility = Visibility.Collapsed;
         roomPanelVisible = room is not null;
-        if (!openPlayer) return;
+        // A video started while picture in picture is open plays there; the app stays on its page.
+        if (!openPlayer || pictureInPicture) return;
         ShowPage("Room");
         await Dispatcher.InvokeAsync(() => Video.UpdateLayout(), DispatcherPriority.Render);
         PlayerOverlay.Focus();
@@ -1254,7 +1258,7 @@ public partial class MainWindow : Window
         PlaybackTickCore();
         RoomSessionTick();
         // Nothing on screen depends on the player at 250 ms while it is idle behind the library.
-        var active = upNextChoice is not null || room is not null || fullscreen || RoomPage.Visibility == Visibility.Visible ||
+        var active = upNextChoice is not null || room is not null || fullscreen || pictureInPicture || RoomPage.Visibility == Visibility.Visible ||
             HasMediaPlayback && player?.IsPlaying == true;
         var interval = TimeSpan.FromMilliseconds(active ? 250 : 1000);
         if (timer.Interval != interval) timer.Interval = interval;
@@ -1292,8 +1296,9 @@ public partial class MainWindow : Window
         if (pendingSeek is { } requested && (Wire.Now >= seekExpires || (room is null || target?.Revision > seekRevision) && Math.Abs(player.Time - requested) < 1500)) pendingSeek = null;
         if (!seeking)
         {
-            Timeline.Maximum = Math.Max(1, player.Length); Timeline.Value = pendingSeek ?? Math.Max(0, player.Time);
-            PlaybackTime.Text = FormatTime(player.Time) + " / " + FormatTime(player.Length);
+            Timeline.Maximum = Math.Max(1, player.Length); var shown = pendingSeek ?? endedSeek ?? Math.Max(0, player.Time);
+            Timeline.Value = shown;
+            PlaybackTime.Text = FormatTime(shown) + " / " + FormatTime(player.Length);
         }
         var wantsPlayback = WantsMediaPlayback;
         PlayButton.Content = wantsPlayback ? "\uF8AE" : "\uF5B0";
@@ -1419,7 +1424,14 @@ public partial class MainWindow : Window
         if (!playing && UpNextCounting) { PauseUpNext(); return; }
         if (!HasMediaPlayback) return;
         if (room is not null) SendPlayback(playing, player!.Length > 0 && player.Time >= player.Length - 250 ? 0 : Math.Max(0, player.Time));
-        else if (!playing) player!.SetPause(true); else { if (player!.State == VLCState.Ended) player.Stop(); player.Play(); }
+        else if (!playing) player!.SetPause(true);
+        else
+        {
+            // Playing again after the end starts from the timeline position chosen meanwhile, or the beginning.
+            if (player!.State == VLCState.Ended) { player.Stop(); localResume = endedSeek ?? 0; }
+            endedSeek = null;
+            player.Play();
+        }
     }
     private bool CanSeek() => player is not null && player.Length > 0 && (room is null || room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
     private void SeekStarted(object sender, MouseButtonEventArgs e)
@@ -1444,9 +1456,14 @@ public partial class MainWindow : Window
         {
             var position = (long)Timeline.Value;
             pendingSeek = position; seekRevision = target?.Revision ?? -1; seekExpires = Wire.Now + 5000;
-            if (room is null) player!.Time = position; else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true);
+            if (room is null) SeekLocal(position); else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true);
         }
         if (Timeline.IsMouseCaptured) Timeline.ReleaseMouseCapture();
+    }
+    private void SeekLocal(long position)
+    {
+        if (player!.State == VLCState.Ended) { endedSeek = position; pendingSeek = null; }
+        else { endedSeek = null; player.Time = position; }
     }
     private void SeekFinished(object sender, MouseButtonEventArgs e) { if (seeking) { UpdateScrub(e.GetPosition(Timeline).X); CommitSeek(); e.Handled = true; } }
     private void SeekCaptureLost(object sender, MouseEventArgs e) => CommitSeek();
@@ -1457,7 +1474,7 @@ public partial class MainWindow : Window
         Timeline.Value = e.Key switch { Key.Home => 0, Key.End => Timeline.Maximum, Key.Left => Math.Max(0, Timeline.Value - 5000), _ => Math.Min(Timeline.Maximum, Timeline.Value + 5000) };
     }
     private void SeekKeyFinished(object sender, KeyEventArgs e) { if (e.Key is Key.Left or Key.Right or Key.Home or Key.End) { CommitSeek(); e.Handled = true; } }
-    private void MovePlayback(long offset) { if (player is null || player.Length <= 0) return; var position = Math.Clamp((room is null ? player.Time : playbackIntent.Position(target, player.Time, room.ServerNowMs)) + offset, 0, player.Length); if (room is null) player.Time = position; else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true); }
+    private void MovePlayback(long offset) { if (player is null || player.Length <= 0) return; var position = Math.Clamp((room is null ? endedSeek ?? player.Time : playbackIntent.Position(target, player.Time, room.ServerNowMs)) + offset, 0, player.Length); if (room is null) SeekLocal(position); else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true); }
     private async void StopPlayback(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (player is null || nativeStopCount > 0) return;
@@ -1485,7 +1502,7 @@ public partial class MainWindow : Window
         e.Handled = true;
         if (!CanSeek() || seeking) return;
         var position = pendingSeek is { } pending && Wire.Now < seekExpires ? pending :
-            room is null ? Math.Max(0, player!.Time) : playbackIntent.Position(target, player!.Time, room.ServerNowMs);
+            room is null ? endedSeek ?? Math.Max(0, player!.Time) : playbackIntent.Position(target, player!.Time, room.ServerNowMs);
         Timeline.Maximum = player!.Length;
         Timeline.Value = Math.Clamp(position + e.Delta * 5000d / 120, 0, player.Length);
         seeking = true; CommitSeek();
@@ -1661,10 +1678,10 @@ public partial class MainWindow : Window
         if (!reconnecting) { roomReconnect?.Cancel(); roomReconnect = null; }
         libraryWindow?.Shutdown(); libraryWindow = null; roomLibrary = null; sharedItems.Clear(); sharedIds.Clear(); sharedKinds = [];
         videoClickDelay.Stop();
-        SavePlaybackPosition(); localResume = 0;
+        SavePlaybackPosition(); localResume = 0; endedSeek = null;
         RecordRoomSession(force: true);
         if (fullscreen && !preserveFullscreen) SetFullscreen(false);
-        if (pictureInPicture && !preserveFullscreen) SetPictureInPicture(false);
+        if (pictureInPicture && !preserveFullscreen) SetPictureInPicture(false, openPlayer: false);
         PlayerEmpty.Visibility = Visibility.Visible;
         UpdateSystemMediaControls();
         RoomPlaybackNotice.Visibility = Visibility.Collapsed;
@@ -1720,7 +1737,7 @@ public partial class MainWindow : Window
         SharedControls.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
         SharedControls.IsEnabled = connectedRoom && room!.Identity?.Host == true;
         RefreshSharedControlsChip(); RefreshRoomStatusDot();
-        NowPlayingStrip.Visibility = ready || room is not null ? Visibility.Visible : Visibility.Collapsed;
+        NowPlayingButton.Visibility = ready || room is not null ? Visibility.Visible : Visibility.Collapsed;
         NowPlayingLabel.Text = playingItem is not null ? PlaybackTitle(playingItem) : room?.Snapshot?.Media?.Title ?? RoomHeading.Text;
         var canControl = room is null || connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
         InviteButton.Visibility = RoomToggle.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
@@ -1771,7 +1788,7 @@ public partial class MainWindow : Window
         ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(28, 22, 28, 16);
         AppStatusBar.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
         StatusRow.Height = new GridLength(inPlayer ? 0 : 30);
-        var showRoomPanel = roomPanelVisible && !fullscreen && !pictureInPicture;
+        var showRoomPanel = roomPanelVisible && !fullscreen;
         RoomSide.Visibility = showRoomPanel ? Visibility.Visible : Visibility.Collapsed;
         RoomSplitter.Visibility = showRoomPanel ? Visibility.Visible : Visibility.Collapsed;
         RoomSplitterWidth.Width = new GridLength(showRoomPanel ? 6 : 0);
@@ -1783,13 +1800,13 @@ public partial class MainWindow : Window
     }
     private void RoomPanelSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (roomPanelVisible && !fullscreen && !pictureInPicture && RoomSideWidth.ActualWidth >= 280)
+        if (roomPanelVisible && !fullscreen && RoomSideWidth.ActualWidth >= 280)
             roomPanelWidth = Math.Clamp(RoomSideWidth.ActualWidth, 280, 600);
     }
     private void SetFullscreen(bool value)
     {
-        if (fullscreen == value || RoomPage.Visibility != Visibility.Visible) return;
         if (value && pictureInPicture) SetPictureInPicture(false);
+        if (fullscreen == value || RoomPage.Visibility != Visibility.Visible) return;
         ClosePlayerMenusNow();
         var handle = new WindowInteropHelper(this).Handle;
         if (value)
@@ -1903,7 +1920,9 @@ public partial class MainWindow : Window
         if (e.Key == Key.Escape && upNextChoice is not null) { EndUpNext(false); e.Handled = true; return; }
         if (e.Key == Key.Escape && fullscreen) { SetFullscreen(false); e.Handled = true; return; }
         if (e.Key == Key.Escape && pictureInPicture) { SetPictureInPicture(false); e.Handled = true; return; }
-        if (RoomPage.Visibility == Visibility.Visible && e.Key == Key.Tab) ShowPlayerControls();
+        // The main window and the player overlay share this handler; picture in picture keys come only from the overlay.
+        var inPlayer = RoomPage.Visibility == Visibility.Visible || pictureInPicture && sender == PlayerOverlay;
+        if (inPlayer && e.Key == Key.Tab) ShowPlayerControls();
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen)
         {
             if (!ConfirmPageNavigation("Library")) { e.Handled = true; return; }
@@ -1913,7 +1932,7 @@ public partial class MainWindow : Window
         }
         if (e.Key == Key.Escape && LibraryPage.Visibility == Visibility.Visible && SearchBox.IsKeyboardFocused)
         { SearchBox.Clear(); e.Handled = true; return; }
-        if (Keyboard.FocusedElement is TextBox or PasswordBox or ComboBox or ListBox or ListBoxItem || RoomPage.Visibility != Visibility.Visible) return;
+        if (Keyboard.FocusedElement is TextBox or PasswordBox or ComboBox or ListBox or ListBoxItem || !inPlayer) return;
         if (e.Key == Key.Space && Keyboard.FocusedElement is Button) return;
         if (e.Key is Key.F or Key.F11) { Fullscreen(sender, e); e.Handled = true; }
         else if (e.Key == Key.I) { SetPictureInPicture(!pictureInPicture); e.Handled = true; }
@@ -1997,6 +2016,7 @@ public partial class MainWindow : Window
         try { await Disconnect(); }
         finally
         {
+            pictureInPictureWindow?.Close();
             Video.MediaPlayer = null;
             var native = player; var engine = vlc; player = null; vlc = null;
             await Task.Run(() => { native?.Dispose(); engine?.Dispose(); });

@@ -78,7 +78,7 @@ public partial class MainWindow
         else
         {
             StartHostedVideo(next);
-            ShowPage("Room");
+            if (!pictureInPicture) ShowPage("Room");
         }
     }
     private void ToggleCardWatched(object sender, RoutedEventArgs e)
@@ -161,7 +161,7 @@ public partial class MainWindow
         {
             // Restarting, replacing or leaving the video, or losing room hosting, cancels the countdown.
             bool Stale() => closing || generation != loadGeneration || room != endedRoom || playingItem?.Id != endedItem.Id ||
-                roomLibrary?.Queue.Entries.Length > 0 || player?.IsPlaying == true || RoomPage.Visibility != Visibility.Visible ||
+                roomLibrary?.Queue.Entries.Length > 0 || player?.IsPlaying == true || RoomPage.Visibility != Visibility.Visible && !pictureInPicture ||
                 room is not null && (room.Identity?.Host != true || !room.IsConnected);
             if (!await OfferNextEpisode(next, Stale) || Stale()) return;
             await PlayFollowingEpisode(next);
@@ -198,6 +198,12 @@ public partial class MainWindow
         return choice.Task;
     }
     private long upNextDeadline;
+    // The card and the compact picture-in-picture strip drain together.
+    private void AnimateUpNextFill(System.Windows.Media.Animation.AnimationTimeline? animation)
+    {
+        UpNextFillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, animation);
+        PictureInPictureUpNextFillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, animation);
+    }
     private Action? upNextUpdate;
     // Starts the full countdown and its time bar; Play after a pause restarts it from the beginning.
     private void StartUpNextCountdown()
@@ -205,7 +211,7 @@ public partial class MainWindow
         upNextPaused = false;
         upNextDeadline = Environment.TickCount64 + UpNextCountdownMs;
         UpNextProgress.Visibility = Visibility.Visible;
-        UpNextFillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty,
+        AnimateUpNextFill(
             new System.Windows.Media.Animation.DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(UpNextCountdownMs)));
         PlayButton.Content = "";
         upNextUpdate?.Invoke();
@@ -215,7 +221,7 @@ public partial class MainWindow
     {
         upNextTimer?.Stop(); upNextTimer = null; upNextUpdate = null; upNextPaused = false;
         if (upNextChoice is not null) PlayButton.Content = "";
-        UpNextFillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, null);
+        AnimateUpNextFill(null);
         UpNextCard.Visibility = Visibility.Collapsed;
         var choice = upNextChoice; upNextChoice = null;
         choice?.TrySetResult(play);
@@ -224,7 +230,7 @@ public partial class MainWindow
     private void PauseUpNext()
     {
         upNextPaused = true;
-        UpNextFillScale.BeginAnimation(System.Windows.Media.ScaleTransform.ScaleXProperty, null);
+        AnimateUpNextFill(null);
         UpNextProgress.Visibility = Visibility.Collapsed;
         UpNextCountdown.Text = "Autoplay paused";
         PlayButton.Content = "";
