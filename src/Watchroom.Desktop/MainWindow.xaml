@@ -747,16 +747,13 @@
          <Grid>
           <Rectangle IsHitTestVisible="False"><Rectangle.Fill><RadialGradientBrush Center="0.9,0" GradientOrigin="0.9,0" RadiusX="0.75" RadiusY="0.6"><GradientStop Color="#33A991FF" Offset="0"/><GradientStop Color="#00A991FF" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
           <StackPanel Margin="20,18,20,18">
-           <DockPanel>
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0"><Button x:Name="ConnectSavedRoomButton" Content="Connect" Click="ConnectSavedRoom" Style="{StaticResource Primary}"/><Button x:Name="DisconnectSavedRoomButton" Content="Disconnect" Click="LeaveRoom" Visibility="Collapsed" AutomationProperties.Name="Disconnect from room" Margin="0"/></StackPanel>
-            <StackPanel>
-             <TextBlock x:Name="SavedRoomHeading" Text="Choose a room" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-             <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-              <Ellipse x:Name="SavedRoomStatusDot" Width="7" Height="7" Fill="{DynamicResource Muted}" VerticalAlignment="Center" Margin="0,0,7,0"/>
-              <TextBlock x:Name="SavedRoomStatus" Text="Create a room or save an invitation to get started." Style="{StaticResource MutedText}" FontSize="12.5" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
-             </StackPanel>
-            </StackPanel>
+           <TextBlock x:Name="SavedRoomHeading" Text="Choose a room" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+           <DockPanel Margin="0,4,0,0">
+            <Ellipse x:Name="SavedRoomStatusDot" Width="7" Height="7" Fill="{DynamicResource Muted}" VerticalAlignment="Center" Margin="0,0,7,0"/>
+            <TextBlock x:Name="SavedRoomStatus" Text="Create a room or save an invitation to get started." Style="{StaticResource MutedText}" FontSize="12.5" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/>
            </DockPanel>
+           <!-- Actions sit on their own row so the status beside the heading is never squeezed. -->
+           <WrapPanel Margin="0,12,0,0"><Button x:Name="ConnectSavedRoomButton" Content="Connect" Click="ConnectSavedRoom" Style="{StaticResource Primary}" VerticalAlignment="Center" Margin="0,0,8,0"/><Button x:Name="DisconnectSavedRoomButton" Content="Disconnect" Click="LeaveRoom" Visibility="Collapsed" AutomationProperties.Name="Disconnect from room" VerticalAlignment="Center" Margin="0"/></WrapPanel>
            <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Margin="0,14,0,0" Padding="0,12,0,0">
             <StackPanel>
              <TextBlock Text="INVITE FRIENDS" Style="{StaticResource TileLabel}" Margin="0,0,0,6"/>
@@ -828,13 +825,13 @@
     <Grid.Resources>
      <SolidColorBrush x:Key="Canvas" Color="#0B0B0E"/><SolidColorBrush x:Key="Surface" Color="#17181F"/><SolidColorBrush x:Key="Elevated" Color="#23242E"/><SolidColorBrush x:Key="Ink" Color="#F4F4F7"/><SolidColorBrush x:Key="Muted" Color="#B4B6C2"/><SolidColorBrush x:Key="Line" Color="#2E303B"/><SolidColorBrush x:Key="Accent" Color="#A991FF"/><SolidColorBrush x:Key="AccentInk" Color="#160E2E"/><SolidColorBrush x:Key="Hover" Color="#2A2C37"/><SolidColorBrush x:Key="AccentSoft" Color="#2A2442"/>
     </Grid.Resources>
-    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" MinWidth="320"/><ColumnDefinition Width="0" x:Name="RoomSplitterWidth"/><ColumnDefinition Width="0" x:Name="RoomSideWidth" MaxWidth="600"/></Grid.ColumnDefinitions>
+    <Grid><Grid.ColumnDefinitions><ColumnDefinition x:Name="VideoColumn" Width="*" MinWidth="320"/><ColumnDefinition Width="0" x:Name="RoomSplitterWidth"/><ColumnDefinition Width="0" x:Name="RoomSideWidth" MaxWidth="600"/></Grid.ColumnDefinitions>
      <Border x:Name="VideoFrame" Background="Black">
       <vlc:VideoView x:Name="Video">
        <!-- A nonzero alpha keeps the native overlay hit-testable over the video. -->
-       <Grid x:Name="PlayerOverlay" Background="#01000000" Focusable="True" MouseMove="PlayerMouseMoved" MouseLeftButtonDown="VideoClicked" MouseWheel="VideoWheel" PreviewKeyDown="KeyPressed">
+       <Grid x:Name="PlayerOverlay" Background="#01000000" Focusable="True" MouseMove="PlayerMouseMoved" MouseLeftButtonDown="VideoClicked" MouseLeave="PlayerMouseLeft" MouseWheel="VideoWheel" PreviewKeyDown="KeyPressed">
         <Border x:Name="PlayerEmpty" Background="#0B0B0E"><Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="16"><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"><Border Width="76" Height="76" CornerRadius="38" Background="#2A2442" HorizontalAlignment="Center"><TextBlock Text="&#xF5B0;" FontFamily="{StaticResource IconFont}" FontSize="28" Foreground="#A991FF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0,0,0"/></Border><TextBlock Text="Choose a video to play" FontSize="21" FontWeight="SemiBold" Foreground="#F4F4F7" HorizontalAlignment="Center" Margin="0,20,0,20"/><Button Content="Browse library" Tag="Library" Click="Navigate" Style="{StaticResource PlayerButton}" HorizontalAlignment="Center" Margin="0"/></StackPanel></Viewbox></Border>
-        <StackPanel VerticalAlignment="Top">
+        <StackPanel x:Name="PlayerTopChrome" VerticalAlignment="Top">
          <!-- Top bar: back, title, room status and room actions. It hides and shows together with the bottom bar. -->
          <Border x:Name="RoomHeader" Background="{StaticResource PlayerHeaderFade}" Padding="14,12,14,30" PreviewMouseMove="ControlsMouseMoved" PreviewKeyDown="ControlsKeyPressed">
           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -866,7 +863,7 @@
         </Border>
         <!-- Offers the next episode in the player and plays it when the countdown ends.
              It stacks on the fullscreen controls host so the controls never cover it. -->
-        <StackPanel VerticalAlignment="Bottom">
+        <StackPanel x:Name="PlayerBottomChrome" VerticalAlignment="Bottom">
          <!-- The update card moves here while the player is open; native video draws over the main window. -->
          <Grid x:Name="PlayerUpdateHost"/>
          <Border x:Name="UpNextCard" Visibility="Collapsed" HorizontalAlignment="Right" Margin="0,0,24,24" Width="360" Background="#F217181F" BorderBrush="#2E303B" BorderThickness="1" CornerRadius="12" Padding="18,16" Effect="{StaticResource PopupShadow}" MouseLeftButtonDown="UpNextCardClicked" AutomationProperties.Name="Up next">
@@ -944,11 +941,18 @@
               </StackPanel></ContentControl></local:MenuSizer>
              </local:PlayerMenuPopup>
             </StackPanel>
-            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0"><Button x:Name="MuteButton" Content="&#xE767;" Click="MutePlayback" Style="{StaticResource PlayerIconButton}" ToolTip="Mute (M)" AutomationProperties.Name="Mute"/><Slider x:Name="Volume" PreviewMouseWheel="VolumeWheel" IsMoveToPointEnabled="True" Style="{StaticResource PlayerSlider}" Width="90" Minimum="0" Maximum="100" Value="80" ValueChanged="VolumeChanged" AutomationProperties.Name="Volume" Margin="2,0,8,0"/><TextBlock x:Name="VolumeText" Text="80%" Foreground="#D9DAE2" Width="38" VerticalAlignment="Center" FontSize="12" Typography.NumeralAlignment="Tabular"/><Button x:Name="FullscreenButton" Content="&#xE740;" Click="Fullscreen" Style="{StaticResource PlayerIconButton}" Margin="0" ToolTip="Fullscreen (F or double-click video)" AutomationProperties.Name="Fullscreen"/></StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0"><Button x:Name="MuteButton" Content="&#xE767;" Click="MutePlayback" Style="{StaticResource PlayerIconButton}" ToolTip="Mute (M)" AutomationProperties.Name="Mute"/><Slider x:Name="Volume" PreviewMouseWheel="VolumeWheel" IsMoveToPointEnabled="True" Style="{StaticResource PlayerSlider}" Width="90" Minimum="0" Maximum="100" Value="80" ValueChanged="VolumeChanged" AutomationProperties.Name="Volume" Margin="2,0,8,0"/><TextBlock x:Name="VolumeText" Text="80%" Foreground="#D9DAE2" Width="38" VerticalAlignment="Center" FontSize="12" Typography.NumeralAlignment="Tabular"/><Button x:Name="PictureInPictureButton" Content="&#xE8A7;" Click="EnterPictureInPicture" Style="{StaticResource PlayerIconButton}" ToolTip="Picture in picture (I)" AutomationProperties.Name="Picture in picture"/><Button x:Name="FullscreenButton" Content="&#xE740;" Click="Fullscreen" Style="{StaticResource PlayerIconButton}" Margin="0" ToolTip="Fullscreen (F or double-click video)" AutomationProperties.Name="Fullscreen"/></StackPanel>
            </Grid>
           </StackPanel>
          </Border>
         </StackPanel>
+        <!-- Picture in picture keeps only play/pause and a way back; they appear while the pointer is over the video.
+             The panel has no background, so pressing on the video still reaches the overlay to move or resize the window. -->
+        <Grid x:Name="PictureInPictureControls" Visibility="Collapsed">
+         <Border Background="#66000000" IsHitTestVisible="False"/>
+         <Button x:Name="PictureInPicturePlayButton" Click="TogglePlayback" Style="{StaticResource PlayerPlayButton}" Width="52" Height="52" Margin="0" HorizontalAlignment="Center" VerticalAlignment="Center" AutomationProperties.Name="Play or pause"/>
+         <Button Content="&#xE740;" Click="ExitPictureInPicture" Style="{StaticResource PlayerIconButton}" Margin="6" HorizontalAlignment="Right" VerticalAlignment="Top" ToolTip="Back to the full player (Esc or double-click)" AutomationProperties.Name="Exit picture in picture"/>
+        </Grid>
        </Grid>
       </vlc:VideoView>
      </Border>

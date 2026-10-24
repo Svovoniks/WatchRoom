@@ -312,6 +312,7 @@ public partial class MainWindow : Window
         currentPage = name;
         if (name != "Room") videoClickDelay.Stop();
         if (fullscreen && name != "Room") SetFullscreen(false);
+        if (pictureInPicture && name != "Room") SetPictureInPicture(false);
         // VideoView hosts its content in a separate native overlay window. Collapsing
         // only RoomPage does not update that window's visibility or hit testing.
         // Hide the view itself before changing the shell layout, and restore both
@@ -1266,7 +1267,7 @@ public partial class MainWindow : Window
         roomLibrary?.ExpireViews(Wire.Now);
         // The bars float over the video, so they fade when idle: always in fullscreen, and while playing in the window.
         // Cheap managed checks run first; the native playing state is read only once the bars are idle.
-        if (PlaybackControls.Visibility == Visibility.Visible && Environment.TickCount64 - lastPlayerInteraction > 2600 &&
+        if (!pictureInPicture && PlaybackControls.Visibility == Visibility.Visible && Environment.TickCount64 - lastPlayerInteraction > 2600 &&
             !seeking && !PlayerMenuOpen && !PlaybackControls.IsMouseOver && !RoomHeader.IsMouseOver &&
             (fullscreen || RoomPage.Visibility == Visibility.Visible && player?.IsPlaying == true))
         {
@@ -1276,6 +1277,7 @@ public partial class MainWindow : Window
         }
         UpdateRoomPlaybackStatus();
         if (player is null || nativeStopCount > 0) return;
+        FitPictureInPictureToVideo();
         PollBufferedRecovery();
         StartReadAhead();
         buffering.Recover(Environment.TickCount64);
@@ -1662,6 +1664,7 @@ public partial class MainWindow : Window
         SavePlaybackPosition(); localResume = 0;
         RecordRoomSession(force: true);
         if (fullscreen && !preserveFullscreen) SetFullscreen(false);
+        if (pictureInPicture && !preserveFullscreen) SetPictureInPicture(false);
         PlayerEmpty.Visibility = Visibility.Visible;
         UpdateSystemMediaControls();
         RoomPlaybackNotice.Visibility = Visibility.Collapsed;
@@ -1768,8 +1771,8 @@ public partial class MainWindow : Window
         ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(28, 22, 28, 16);
         AppStatusBar.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
         StatusRow.Height = new GridLength(inPlayer ? 0 : 30);
-        RoomSide.Visibility = roomPanelVisible && !fullscreen ? Visibility.Visible : Visibility.Collapsed;
-        var showRoomPanel = roomPanelVisible && !fullscreen;
+        var showRoomPanel = roomPanelVisible && !fullscreen && !pictureInPicture;
+        RoomSide.Visibility = showRoomPanel ? Visibility.Visible : Visibility.Collapsed;
         RoomSplitter.Visibility = showRoomPanel ? Visibility.Visible : Visibility.Collapsed;
         RoomSplitterWidth.Width = new GridLength(showRoomPanel ? 6 : 0);
         RoomSideWidth.MinWidth = showRoomPanel ? 280 : 0;
@@ -1780,12 +1783,13 @@ public partial class MainWindow : Window
     }
     private void RoomPanelSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (roomPanelVisible && !fullscreen && RoomSideWidth.ActualWidth >= 280)
+        if (roomPanelVisible && !fullscreen && !pictureInPicture && RoomSideWidth.ActualWidth >= 280)
             roomPanelWidth = Math.Clamp(RoomSideWidth.ActualWidth, 280, 600);
     }
     private void SetFullscreen(bool value)
     {
         if (fullscreen == value || RoomPage.Visibility != Visibility.Visible) return;
+        if (value && pictureInPicture) SetPictureInPicture(false);
         ClosePlayerMenusNow();
         var handle = new WindowInteropHelper(this).Handle;
         if (value)
@@ -1858,6 +1862,7 @@ public partial class MainWindow : Window
         lastPlayerMouse = Mouse.GetPosition(this);
         lastPlayerInteraction = Environment.TickCount64;
         PlaybackControls.Visibility = Visibility.Visible;
+        if (pictureInPicture) PictureInPictureControls.Visibility = Visibility.Visible;
         FullscreenHint.Visibility = fullscreen ? Visibility.Visible : Visibility.Collapsed;
         PlayerOverlay.Cursor = Cursors.Arrow;
     }
@@ -1867,6 +1872,7 @@ public partial class MainWindow : Window
         if ((position - lastPlayerMouse).Length < 2) return;
         lastPlayerMouse = position;
         ShowPlayerControls();
+        if (pictureInPicture) PictureInPictureMouseMoved(e);
     }
     private void ControlsMouseMoved(object sender, MouseEventArgs e) => PlayerMouseMoved(sender, e);
     private void ControlsKeyPressed(object sender, KeyEventArgs e) => ShowPlayerControls();
@@ -1877,6 +1883,7 @@ public partial class MainWindow : Window
         PlayerOverlay.Focus();
         ShowPlayerControls();
         videoClickDelay.Stop();
+        if (pictureInPicture) { PictureInPicturePressed(e); e.Handled = true; return; }
         if (e.ClickCount == 2) SetFullscreen(!fullscreen);
         else if (e.ClickCount == 1)
         {
@@ -1895,6 +1902,7 @@ public partial class MainWindow : Window
         { BrowseHistory(e.Key == Key.BrowserBack || e.SystemKey == Key.Left); e.Handled = true; return; }
         if (e.Key == Key.Escape && upNextChoice is not null) { EndUpNext(false); e.Handled = true; return; }
         if (e.Key == Key.Escape && fullscreen) { SetFullscreen(false); e.Handled = true; return; }
+        if (e.Key == Key.Escape && pictureInPicture) { SetPictureInPicture(false); e.Handled = true; return; }
         if (RoomPage.Visibility == Visibility.Visible && e.Key == Key.Tab) ShowPlayerControls();
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen)
         {
@@ -1908,6 +1916,7 @@ public partial class MainWindow : Window
         if (Keyboard.FocusedElement is TextBox or PasswordBox or ComboBox or ListBox or ListBoxItem || RoomPage.Visibility != Visibility.Visible) return;
         if (e.Key == Key.Space && Keyboard.FocusedElement is Button) return;
         if (e.Key is Key.F or Key.F11) { Fullscreen(sender, e); e.Handled = true; }
+        else if (e.Key == Key.I) { SetPictureInPicture(!pictureInPicture); e.Handled = true; }
         else if (e.Key == Key.Space) { TogglePlayback(sender, e); e.Handled = true; }
         else if (Keyboard.FocusedElement is not Slider && e.Key is Key.Left or Key.Right) { MovePlayback(e.Key == Key.Left ? -10000 : 10000); e.Handled = true; }
         else if (e.Key == Key.M) { MutePlayback(sender, e); e.Handled = true; }
@@ -1948,6 +1957,7 @@ public partial class MainWindow : Window
         base.OnSourceInitialized(e);
         HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(NavigationWindowMessage);
         InitializeCaption(new WindowInteropHelper(this).Handle);
+        InitializePictureInPicture(new WindowInteropHelper(this).Handle);
         InitializeMediaControls();
         ApplyTitleBarTheme();
         Activated += (_, _) => ApplyTitleBarTheme();

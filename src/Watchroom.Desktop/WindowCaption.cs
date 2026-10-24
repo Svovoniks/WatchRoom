@@ -34,12 +34,13 @@ public partial class MainWindow
         }
         else WindowRoot.Margin = new Thickness(0);
     }
-    // Fullscreen video has no caption; the player gets the dark caption that matches its header.
+    // Fullscreen and picture-in-picture video have no caption; the player gets the dark caption that matches its header.
     private void ApplyCaptionLayout(bool inPlayer)
     {
-        TitleRow.Height = new GridLength(fullscreen ? 0 : CaptionHeight);
-        CaptionBar.Visibility = fullscreen ? Visibility.Collapsed : Visibility.Visible;
-        if (WindowChrome.GetWindowChrome(this) is { } chrome) chrome.CaptionHeight = fullscreen ? 0 : CaptionHeight;
+        var captionless = fullscreen || pictureInPicture;
+        TitleRow.Height = new GridLength(captionless ? 0 : CaptionHeight);
+        CaptionBar.Visibility = captionless ? Visibility.Collapsed : Visibility.Visible;
+        if (WindowChrome.GetWindowChrome(this) is { } chrome) chrome.CaptionHeight = captionless ? 0 : CaptionHeight;
         CaptionIdentity.Visibility = inPlayer ? Visibility.Visible : Visibility.Collapsed;
         CaptionBar.Background = inPlayer ? (System.Windows.Media.Brush)FindResource("PlayerSurface") : null;
         if (inPlayer) { CaptionBar.Resources["Ink"] = FindResource("PlayerInk"); CaptionBar.Resources["Muted"] = FindResource("PlayerMuted"); }
@@ -56,7 +57,7 @@ public partial class MainWindow
 
     private bool OverMaximizeButton(IntPtr lParam)
     {
-        if (fullscreen || !MaximizeButton.IsVisible || PresentationSource.FromVisual(MaximizeButton) is null) return false;
+        if (fullscreen || pictureInPicture || !MaximizeButton.IsVisible || PresentationSource.FromVisual(MaximizeButton) is null) return false;
         var point = MaximizeButton.PointFromScreen(new Point((short)(lParam.ToInt64() & 0xffff), (short)((lParam.ToInt64() >> 16) & 0xffff)));
         return point.X >= 0 && point.Y >= 0 && point.X < MaximizeButton.ActualWidth && point.Y < MaximizeButton.ActualHeight;
     }
