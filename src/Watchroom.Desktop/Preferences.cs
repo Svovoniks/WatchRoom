@@ -55,10 +55,11 @@ public partial class MainWindow
         { box.Checked += PreferencesChanged; box.Unchecked += PreferencesChanged; }
         MetadataLanguage.SelectionChanged += PreferencesChanged;
         MetadataCountry.SelectionChanged += PreferencesChanged;
-        foreach (var box in new[] { VoiceEchoCancellation, VoicePushToTalk, VoiceDucking, VoiceAutoJoin })
+        foreach (var box in new[] { VoicePushToTalk, VoiceAlwaysOn, VoiceDucking, VoiceAutoJoin })
         { box.Checked += PreferencesChanged; box.Unchecked += PreferencesChanged; }
-        VoiceInputPicker.SelectionChanged += PreferencesChanged; VoiceOutputPicker.SelectionChanged += PreferencesChanged;
-        VoiceVolumeSlider.ValueChanged += (sender, _) => PreferencesChanged(sender, new RoutedEventArgs());
+        VoiceInputPicker.SelectionChanged += PreferencesChanged; VoiceOutputPicker.SelectionChanged += PreferencesChanged; VoiceProcessingPicker.SelectionChanged += PreferencesChanged;
+        // The voice volume is heard as it moves, whether or not it is saved afterwards.
+        VoiceVolumeSlider.ValueChanged += (sender, e) => { PreviewVoiceVolume(e.NewValue); PreferencesChanged(sender, new RoutedEventArgs()); };
         preferencesReady = true;
         ShowPreferenceSection("Profile");
     }
@@ -121,8 +122,8 @@ public partial class MainWindow
         ClearPreferenceErrors();
         ValidateRefreshDays();
         ValidateStreamingBuffer();
-        // The microphone test follows the chosen microphone and echo setting before they are saved.
-        if (sender == VoiceInputPicker || sender == VoiceEchoCancellation) _ = Guard(RestartVoiceTest);
+        // The microphone test follows the chosen microphone and processing before they are saved.
+        if (sender == VoiceInputPicker || sender == VoiceProcessingPicker) _ = Guard(RestartVoiceTest);
     }
     private bool ValidateStreamingBuffer()
     {

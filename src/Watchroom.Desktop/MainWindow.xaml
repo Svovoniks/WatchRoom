@@ -658,10 +658,13 @@
       </StackPanel></Border>
       <Border Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Talking" Style="{StaticResource CardTitle}"/>
-       <CheckBox x:Name="VoiceEchoCancellation" Content="Reduce echo and background noise"/>
-       <TextBlock Text="Keeps the movie and other people's voices coming from your speakers out of your microphone. Turn it off only if your voice sounds wrong." Style="{StaticResource Hint}" Margin="28,0,0,10"/>
+       <TextBlock Text="Microphone processing" Style="{StaticResource FieldLabel}"/>
+       <ComboBox x:Name="VoiceProcessingPicker" DisplayMemberPath="Name" SelectedValuePath="Id" AutomationProperties.Name="Microphone processing" Margin="0,6,0,6" MaxWidth="460" HorizontalAlignment="Left" MinWidth="320"/>
+       <TextBlock Text="Windows voice processing keeps the movie and other people's voices coming from your speakers out of your microphone, and also suppresses noise and evens out your level. If it swallows quiet words or makes your voice sound wrong, try Standard; Raw bypasses every effect, including any the microphone's own software adds." Style="{StaticResource Hint}" Margin="0,0,0,12"/>
        <CheckBox x:Name="VoicePushToTalk" Content="Push to talk: hold V to speak"/>
        <TextBlock Text="Otherwise Watchroom sends your voice when you speak, and V mutes or unmutes you. Keys work while Watchroom is the active window." Style="{StaticResource Hint}" Margin="28,0,0,10"/>
+       <CheckBox x:Name="VoiceAlwaysOn" Content="Send my microphone continuously"/>
+       <TextBlock Text="Nothing is ever held back waiting for speech to be detected. Uses a little more bandwidth, and people on older versions of Watchroom see you as always talking." Style="{StaticResource Hint}" Margin="28,0,0,10"/>
        <CheckBox x:Name="VoiceAutoJoin" Content="Join voice automatically when I enter a room"/>
       </StackPanel></Border>
       <Border Style="{StaticResource Card}"><StackPanel>
@@ -1013,6 +1016,12 @@
                   <TextBlock Text="Voice chat" FontWeight="SemiBold"/>
                   <TextBlock x:Name="VoiceCardStatus" Foreground="{DynamicResource Muted}" FontSize="11.5" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
                   <Border x:Name="VoiceLevelTrack" Height="3" CornerRadius="1.5" Background="{DynamicResource Line}" Margin="0,6,0,2" Visibility="Collapsed" ToolTip="Your microphone level"><Border x:Name="VoiceLevelFill" CornerRadius="1.5" Background="#3FB97A" HorizontalAlignment="Left" Width="0"/></Border>
+                  <!-- Everyone's voice volume, applied as it moves; each person's row has their own level. -->
+                  <StackPanel x:Name="VoiceCardVolumeRow" Orientation="Horizontal" Visibility="Collapsed" Margin="0,6,0,0">
+                   <TextBlock Text="&#xE767;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Margin="0,0,8,0" ToolTip="Voice volume"/>
+                   <Slider x:Name="VoiceCardVolume" Width="150" Minimum="0" Maximum="200" Value="100" SmallChange="5" LargeChange="10" IsMoveToPointEnabled="True" Style="{StaticResource PlayerSlider}" ValueChanged="VoiceCardVolumeChanged" ToolTip="Voice volume for everyone" AutomationProperties.Name="Voice volume"/>
+                   <TextBlock x:Name="VoiceCardVolumeText" Text="100%" Foreground="{DynamicResource Muted}" FontSize="11" MinWidth="34" TextAlignment="Right" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                  </StackPanel>
                   <TextBlock x:Name="VoiceCardProblem" Foreground="#F0616D" FontSize="11.5" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,4,0,0"><Run x:Name="VoiceCardProblemText"/><Hyperlink x:Name="VoicePrivacyLink" NavigateUri="ms-settings:privacy-microphone" RequestNavigate="OpenMicrophonePrivacy" Foreground="{DynamicResource Accent}"><Run x:Name="VoicePrivacyLinkText"/></Hyperlink></TextBlock>
                  </StackPanel>
                  <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
@@ -1029,6 +1038,8 @@
                  <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding Voice.Visibility}" Margin="0,0,6,0">
                   <TextBlock Text="{Binding Voice.Icon}" Foreground="{Binding Voice.IconBrush}" ToolTip="{Binding Voice.Description}" FontFamily="{StaticResource IconFont}" FontSize="13" VerticalAlignment="Center" Margin="0,0,4,0" AutomationProperties.Name="{Binding Voice.Description}"/>
                   <Button Content="{Binding Voice.LocalMuteIcon}" Visibility="{Binding Voice.LocalMuteVisibility}" Tag="{Binding Id}" Click="ToggleLocalVoiceMute" ToolTip="{Binding Voice.LocalMuteHelp}" AutomationProperties.Name="{Binding Voice.LocalMuteHelp}" Style="{StaticResource QuietIcon}" FontSize="12" Width="28" Height="28" MinHeight="28" Margin="0"/>
+                  <!-- This person's level for you, up to twice as loud. -->
+                  <Slider Width="70" Minimum="0" Maximum="200" SmallChange="5" LargeChange="10" IsMoveToPointEnabled="True" Style="{StaticResource PlayerSlider}" Value="{Binding Voice.Level, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Visibility="{Binding Voice.LocalMuteVisibility}" ToolTip="{Binding Voice.LevelHelp}" AutomationProperties.Name="{Binding Voice.LevelHelp}" Margin="4,0,0,0"/>
                  </StackPanel>
                  <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding Actions}"><Button Content="{Binding AdmitLabel}" Visibility="{Binding AdmitVisibility}" IsEnabled="{Binding CanAdmit}" Tag="{Binding Id}" Click="Admit" Style="{StaticResource Primary}" Padding="10,0" Height="30" MinHeight="30" FontSize="12" Margin="0,0,6,0"/><Button Content="Remove" Tag="{Binding Id}" Click="RemovePeer" Style="{StaticResource QuietButton}" Padding="8,0" Height="30" MinHeight="30" FontSize="12" Margin="0"/></StackPanel>
                 </Grid>

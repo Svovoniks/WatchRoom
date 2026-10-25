@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
@@ -10,7 +11,10 @@ namespace Watchroom.Desktop;
 internal sealed class VoiceAudio : IAsyncDisposable
 {
     public sealed record Device(string Id, string Name);
-    public sealed record Settings(string? Input, string? Output, bool EchoCancellation);
+    // How Windows treats the microphone: its communications pipeline (echo cancellation, noise suppression and
+    // gain control together; Windows offers no separate switches), the device's standard processing, or raw.
+    public enum Processing { Windows, Standard, Raw }
+    public sealed record Settings(string? Input, string? Output, Processing Processing);
     // Automated checks set WATCHROOM_SIMULATED_AUDIO=1 so voice never opens Windows audio devices, which would ask
     // for microphone access: a test microphone sends silence and test speakers take the room's mix.
     internal static bool Simulated { get; } = Environment.GetEnvironmentVariable("WATCHROOM_SIMULATED_AUDIO") == "1";
@@ -89,12 +93,15 @@ internal sealed class VoiceAudio : IAsyncDisposable
 
     private void OpenAll()
     {
+        var opened = Stopwatch.StartNew();
         string? problem = null;
         var outputFailed = false;
-        if (mixer is not null)
+        // The speakers and the microphone open side by side: Windows' voice pipeline can take seconds to start,
+        // and nothing about either device depends on the other.
+        var output = mixer is null ? Task.CompletedTask : Task.Run(() =>
         {
             try { OpenOutput(); }
-            catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or UnauthorizedAccessException or NotSupportedException)
             {
                 problem = OutputName is null ? "No speakers or headphones found. Connect some to hear the room."
                     : "Voice can't play on " + OutputName + ". Choose another output in Settings › Voice chat.";
@@ -102,43 +109,62 @@ internal sealed class VoiceAudio : IAsyncDisposable
                 PlaybackDiagnostics.Record("voice-output-failed", new { error = ex.GetType().Name, code = ex.HResult });
                 CloseOutput();
             }
-        }
+        });
+        Exception? inputError = null;
         try { OpenInput(); }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or UnauthorizedAccessException or NotSupportedException)
         {
             CloseInput();
-            MicrophoneBlocked = ex.HResult == unchecked((int)0x80070005) || ex is UnauthorizedAccessException;
+            inputError = ex;
+        }
+        output.Wait();
+        if (inputError is { } failure)
+        {
+            MicrophoneBlocked = failure.HResult == unchecked((int)0x80070005) || failure is UnauthorizedAccessException;
             problem = MicrophoneBlocked ? "Windows is blocking the microphone. Allow desktop apps in Settings › Privacy & security › Microphone."
                 // Both directions failing points at Windows audio itself rather than one device.
                 : outputFailed ? "Windows audio isn't working right now. Restarting your PC usually fixes it."
                 : "Your microphone could not be opened. Check that it is connected, or choose another in Settings › Voice chat.";
-            PlaybackDiagnostics.Record("voice-input-failed", new { error = ex.GetType().Name, code = ex.HResult });
+            PlaybackDiagnostics.Record("voice-input-failed", new { error = failure.GetType().Name, code = failure.HResult });
         }
         // No devices at all is a setup problem, not a broken device.
         Problem = !MicrophoneReady && InputName is null && mixer is not null && player is null && OutputName is null ? "No microphone or speakers found. Connect a headset or check Windows sound settings."
             : problem ?? (MicrophoneReady ? null : mixer is null || player is not null ? "No microphone found. You can still listen." : "No microphone found.");
+        PlaybackDiagnostics.Record("voice-devices-opened", new { ms = opened.ElapsedMilliseconds, microphone = MicrophoneReady, speakers = player is not null || simulatedOutput, processing = settings.Processing.ToString() });
         Changed?.Invoke();
     }
-    private MMDevice? Find(DataFlow flow, string? id)
+    // Each opener uses its own enumerator so the two can run on different threads.
+    private static MMDevice? Find(MMDeviceEnumerator enumerator, DataFlow flow, string? id)
     {
         if (id is not null)
-            try { var chosen = devices!.GetDevice(id); if (chosen.State == DeviceState.Active) return chosen; chosen.Dispose(); }
+            try { var chosen = enumerator.GetDevice(id); if (chosen.State == DeviceState.Active) return chosen; chosen.Dispose(); }
             catch (COMException) { }
         // A chosen device that is unplugged falls back to the Windows default until it returns.
-        return devices!.TryGetDefaultAudioEndpoint(flow, Role.Console, out var fallback) ? fallback : null;
+        return enumerator.TryGetDefaultAudioEndpoint(flow, Role.Console, out var fallback) ? fallback : null;
     }
     private void OpenInput()
     {
         MicrophoneBlocked = false; MicrophoneReady = false; InputName = null;
         if (Simulated) { InputName = SimulatedInput.Name; simulatedInput = true; Simulate(); MicrophoneReady = true; return; }
-        using var device = Find(DataFlow.Capture, settings.Input);
+        using var enumerator = new MMDeviceEnumerator();
+        using var device = Find(enumerator, DataFlow.Capture, settings.Input);
         if (device is null) return;
         InputName = device.FriendlyName;
-        var builder = new WasapiRecorderBuilder().WithDevice(device).WithFormat(new WaveFormat(VoicePacket.SampleRate, 16, 1)).WithBufferLength(20);
-        // Communications mode turns on Windows echo cancellation, noise suppression and gain control where available,
-        // so speakers playing the movie do not feed it back to the room.
-        if (settings.EchoCancellation) builder = builder.WithCommunicationsMode();
-        var created = builder.Build();
+        WasapiRecorder Build(Processing processing)
+        {
+            var builder = new WasapiRecorderBuilder().WithDevice(device).WithFormat(new WaveFormat(VoicePacket.SampleRate, 16, 1)).WithBufferLength(20);
+            // Communications mode turns on Windows echo cancellation, noise suppression and gain control where available,
+            // so speakers playing the movie do not feed it back to the room. Raw mode bypasses all of the device's effects.
+            return (processing switch { Processing.Windows => builder.WithCommunicationsMode(), Processing.Raw => builder.WithRawMode(), _ => builder }).Build();
+        }
+        WasapiRecorder created;
+        try { created = Build(settings.Processing); }
+        catch (Exception ex) when (settings.Processing != Processing.Standard && (ex is COMException or InvalidOperationException or NotSupportedException) && ex.HResult != unchecked((int)0x80070005))
+        {
+            // A device without the requested mode still works with its standard processing.
+            PlaybackDiagnostics.Record("voice-input-mode-unavailable", new { mode = settings.Processing.ToString(), error = ex.GetType().Name, code = ex.HResult });
+            created = Build(Processing.Standard);
+        }
         created.DataAvailable += (buffer, flags, _, _) =>
         {
             if ((flags & AudioClientBufferFlags.Silent) != 0) { Span<short> silence = stackalloc short[buffer.Length / 2]; silence.Clear(); capture.Write(silence); }
@@ -160,7 +186,8 @@ internal sealed class VoiceAudio : IAsyncDisposable
     {
         OutputName = null;
         if (Simulated) { OutputName = SimulatedOutput.Name; provider ??= new MixerProvider(mixer!); simulatedOutput = true; Simulate(); return; }
-        using var device = Find(DataFlow.Render, settings.Output);
+        using var enumerator = new MMDeviceEnumerator();
+        using var device = Find(enumerator, DataFlow.Render, settings.Output);
         if (device is null) throw new InvalidOperationException("No audio output");
         OutputName = device.FriendlyName;
         // Voice is not marked as communications audio, which would make Windows lower other apps such as the movie.
@@ -188,11 +215,17 @@ internal sealed class VoiceAudio : IAsyncDisposable
         });
     }
     // Runs the simulated devices in real time: 20 ms of microphone silence in, 20 ms of the mix out.
-    private void Simulate() => simulation ??= new Timer(_ =>
+    // The microphone and speakers open on different threads; one timer serves both.
+    private readonly object simulationGate = new();
+    private void Simulate()
     {
-        if (simulatedInput) { Span<short> silence = stackalloc short[VoicePacket.FrameSamples]; silence.Clear(); capture.Write(silence); }
-        if (simulatedOutput && provider is { } played) played.Read(new byte[VoicePacket.FrameSamples * 8]);
-    }, null, 0, 20);
+        lock (simulationGate)
+            simulation ??= new Timer(_ =>
+            {
+                if (simulatedInput) { Span<short> silence = stackalloc short[VoicePacket.FrameSamples]; silence.Clear(); capture.Write(silence); }
+                if (simulatedOutput && provider is { } played) played.Read(new byte[VoicePacket.FrameSamples * 8]);
+            }, null, 0, 20);
+    }
     private void CloseInput()
     {
         simulatedInput = false;

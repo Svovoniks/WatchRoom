@@ -65,10 +65,37 @@ static class VoiceFixture
         var steadyFrames = new List<int>(); var index = 0;
         steady.Frame += _ => steadyFrames.Add(index);
         for (index = 0; index < 1000; index++) steady.Write(Noise(Frame, 0.008f, index));
-        check(steadyFrames.Count > 0 && steadyFrames.Max() < 500, $"a constant fan or hum is learned as background and stops transmitting (last frame {steadyFrames.DefaultIfEmpty().Max()})");
+        check(steadyFrames.Count == 0 || steadyFrames.Max() < 500, $"a constant fan or hum is background, not speech, and stops transmitting at once (frames sent {steadyFrames.Count}, last {steadyFrames.DefaultIfEmpty(-1).Max()})");
         var afterNoise = steadyFrames.Count;
         for (var i = 0; i < 10; i++) steady.Write(Mix(Noise(Frame, 0.008f, 2000 + i), Tone(i * Frame, Frame, 200, 0.12f)));
         check(steadyFrames.Count > afterNoise + 5, "speech over that background still opens the gate");
+        // Hiss as loud as quiet speech is spread across the spectrum, so it stays private where speech would not.
+        var hiss = new VoiceCapture { Transmitting = true }; var hissFrames = 0; hiss.Frame += _ => hissFrames++;
+        for (var i = 0; i < 50; i++) hiss.Write(Noise(Frame, 0.02f, 500 + i));
+        check(hissFrames == 0, $"loud broadband hiss at {hiss.LevelDb:F0} dBFS is not mistaken for speech");
+        hiss.Write(Tone(0, 10 * Frame, 220, 0.06f));
+        check(hissFrames >= 10, "a voice a few decibels above that hiss is sent");
+
+        // A long sentence must not raise the bar on its own quiet ending.
+        var monologue = new VoiceCapture { Transmitting = true }; var monologueFrames = 0; monologue.Frame += _ => monologueFrames++;
+        for (var i = 0; i < 3000; i++) monologue.Write(Tone(i * Frame, Frame, 220, 0.1f));
+        var loudPart = monologueFrames;
+        for (var i = 0; i < 60; i++) monologue.Write(Tone(i * Frame, Frame, 220, 0.02f));
+        check(monologueFrames == loudPart + 60 && monologue.NoiseFloorDb <= -49, $"after a minute of talking, a quiet tail at -37 dBFS is still sent (floor {monologue.NoiseFloorDb:F1} dBFS)");
+
+        // Always on: every frame goes out, with frames between sentences marked silent, and muting ends the stream.
+        var always = new VoiceCapture { Transmitting = true, AlwaysOn = true };
+        var alwaysFlags = new List<byte>();
+        always.Frame += frame => { VoicePacket.TryRead(frame, out _, out _, out var f, out _); alwaysFlags.Add(f); };
+        always.Write(Tone(0, 10 * Frame, 440, 0));
+        check(alwaysFlags.Count == 10 && alwaysFlags.All(f => f == VoicePacket.Silent), "sending continuously, silence goes out marked silent");
+        always.Write(Tone(0, 5 * Frame, 220, 0.1f));
+        check(alwaysFlags.Count == 15 && alwaysFlags.Skip(10).All(f => f == 0), "speech frames are sent as speech");
+        always.Write(Tone(0, 40 * Frame, 440, 0));
+        check(alwaysFlags.Count == 55 && alwaysFlags.Skip(15).Take(VoiceCapture.HangoverFrames - 1).All(f => f == 0) && alwaysFlags.Skip(14 + VoiceCapture.HangoverFrames).All(f => f == VoicePacket.Silent)
+            && !alwaysFlags.Contains(VoicePacket.EndOfSpeech), "after the hangover the stream continues marked silent instead of ending");
+        always.Transmitting = false; always.Write(Tone(0, Frame, 440, 0));
+        check(alwaysFlags.Count == 56 && alwaysFlags[^1] == VoicePacket.EndOfSpeech, "muting a continuous microphone sends one end marker");
 
         // Opus round trip through the jitter buffer keeps the pitch and level of speech.
         var encoder = OpusCodecFactory.CreateEncoder(48000, 1, OpusApplication.OPUS_APPLICATION_VOIP);
@@ -130,8 +157,8 @@ static class VoiceFixture
         for (ushort s = 3; s < 6; s++) jitter.Push(s, 0, encoded[s], now);
         Pull(3);
         check(jitter.Late == 0 && jitter.Buffered == 0, "frames delayed by a stall still play instead of being discarded as late");
-        Pull(10);
-        check(!jitter.Playing && jitter.Concealed == 2 + 5, "a speaker who vanishes without an end marker fades out after 100 ms of concealment");
+        Pull(VoiceJitterBuffer.MaxConcealed + 5);
+        check(!jitter.Playing && jitter.Concealed == 2 + VoiceJitterBuffer.MaxConcealed, "a speaker who vanishes without an end marker fades out after 200 ms of concealment");
 
         // The end-of-speech marker stops playback cleanly, and the next talk spurt starts with a new prebuffer.
         jitter = new VoiceJitterBuffer();
@@ -162,8 +189,8 @@ static class VoiceFixture
         check(jitter.Concealed == 0 && jitter.Late == 0, "sequence numbers wrap from 65535 to 0 without a glitch");
         now += 5000;
         for (ushort s = 30000; s < 30003; s++) jitter.Push(s, 0, encoded[s - 30000], now);
-        output.Clear(); Pull(3);
-        check(output.Any(x => Math.Abs(x) > 0.1), "a speaker who rejoins with a new sequence is heard immediately");
+        output.Clear(); Pull(VoiceJitterBuffer.MaxTargetFrames);
+        check(output.Any(x => Math.Abs(x) > 0.1), "a speaker who rejoins with a new sequence is heard within the prebuffer");
         jitter.Push(30001, 0, encoded[1], now);
         check(jitter.Late == 1, "a duplicate of a frame already played is ignored");
 
@@ -237,6 +264,49 @@ static class VoiceFixture
         check(peaks.All(x => x == 0), "voice volume at zero silences everyone");
         var idle = new VoiceMixer(); var silence = new float[Frame];
         check(idle.Read(silence) == Frame && silence.All(x => x == 0) && !idle.AnyoneSpeaking, "an empty voice room plays silence");
+
+        // Each person's own level scales only them, on top of the overall volume.
+        static double Rms(float[] samples) => Math.Sqrt(samples.Average(x => (double)x * x));
+        var levels = new VoiceMixer(); levels.SetGain(1, 2f); levels.SetGain(2, 0.5f);
+        var quietMixer = new VoiceMixer(); quietMixer.SetGain(2, 0.5f);
+        var loudTenor = Play(levels, 20, (1, tenor)); var quietSoprano = Play(quietMixer, 20, (2, soprano));
+        var plainTenor = Play(new VoiceMixer(), 20, (1, tenor)); var plainSoprano = Play(new VoiceMixer(), 20, (2, soprano));
+        var doubled = Rms(loudTenor[(Frame * 5)..]) / Rms(plainTenor[(Frame * 5)..]); var halved = Rms(quietSoprano[(Frame * 5)..]) / Rms(plainSoprano[(Frame * 5)..]);
+        check(doubled is > 1.8 and < 2.2 && halved is > 0.45 and < 0.55 && levels.Gain(1) == 2f && levels.Gain(3) == 1f, $"a person's level makes only them louder or quieter (x{doubled:F2}, x{halved:F2})");
+        var overall = new VoiceMixer { Volume = 0.5f }; overall.SetGain(1, 2f);
+        var combined = Rms(Play(overall, 20, (1, tenor))[(Frame * 5)..]) / Rms(plainTenor[(Frame * 5)..]);
+        check(combined is > 0.9 and < 1.1, $"the overall volume and a person's level combine (x{combined:F2})");
+
+        // Frames marked silent from a continuously sending microphone play but never count as talking.
+        var continuous = new VoiceMixer(); var continuousOut = new float[20 * Frame];
+        for (var i = 0; i < 20; i++) { continuous.Receive(1, (ushort)i, VoicePacket.Silent, tenor[i]); continuous.Read(continuousOut.AsSpan(i * Frame, Frame)); }
+        check(!continuous.IsSpeaking(1) && !continuous.AnyoneSpeaking && Goertzel(continuousOut[(Frame * 5)..], 220) > 0.05, "silent-marked frames are heard but light nothing up and never lower the video");
+        continuous.Receive(1, 20, 0, tenor[0]);
+        check(continuous.IsSpeaking(1) && continuous.AnyoneSpeaking, "a speech frame from the same person counts as talking again");
+
+        // Catching up after a burst drops the quiet between words before any speech.
+        var hush = Encode(440, 0, 20);
+        jitter = new VoiceJitterBuffer();
+        for (ushort s = 0; s < 20; s++) jitter.Push(s, 0, hush[s], now);
+        for (ushort s = 20; s < 30; s++) jitter.Push(s, 0, encoded[s], now);
+        output.Clear(); Pull(2);
+        check(jitter.Dropped == 20 && Goertzel(output.Skip(Frame).ToArray(), 440) > 0.05, $"a burst is trimmed by skipping silence first and the speech after it plays ({jitter.Dropped} dropped)");
+
+        // Jittery arrivals teach the buffer to hold more before playing the next sentence; steady ones keep it short.
+        jitter = new VoiceJitterBuffer();
+        var arrival = now;
+        for (ushort s = 0; s < 40; s++) { jitter.Push(s, s == 39 ? VoicePacket.EndOfSpeech : (byte)0, encoded[s % 100], arrival + (s % 2 == 0 ? 0 : 90)); arrival += 20; }
+        Pull(60);
+        check(jitter.JitterMs > 30, $"arrival jitter is measured ({jitter.JitterMs:F0} ms)");
+        now = arrival + 500;
+        jitter.Push(100, 0, encoded[0], now);
+        check(jitter.TargetFrames is > 3 and <= VoiceJitterBuffer.MaxTargetFrames, $"the next sentence prebuffers more on a jittery connection ({jitter.TargetFrames} frames)");
+        var steadyBuffer = new VoiceJitterBuffer();
+        arrival = now;
+        for (ushort s = 0; s < 40; s++) { steadyBuffer.Push(s, s == 39 ? VoicePacket.EndOfSpeech : (byte)0, encoded[s % 100], arrival); arrival += 20; }
+        now = arrival + 500;
+        steadyBuffer.Push(100, 0, encoded[0], now);
+        check(steadyBuffer.TargetFrames == VoiceJitterBuffer.MinTargetFrames, $"a steady connection keeps the shortest prebuffer ({steadyBuffer.TargetFrames} frames)");
     }
 
     public static async Task RunIsolated(string sdk, string serverDll, string root, Action<bool, string> check)
@@ -324,8 +394,10 @@ static class VoiceFixture
         await Task.Delay(300);
         check(hostSink.Frames.IsEmpty && bSink.Frames.IsEmpty, "nobody outside voice hears a guest talking");
 
+        var joining = Stopwatch.StartNew();
         b.SetVoice(true, false); host.SetVoice(true, false);
         await Wait(() => host.VoiceState(b.Identity.Peer)?.Joined == true && host.VoiceState(host.Identity.Peer)?.Joined == true, "host and second guest join voice");
+        check(joining.ElapsedMilliseconds < 1500, $"the host confirms a guest's join within one round trip ({joining.ElapsedMilliseconds} ms)");
         await Wait(() => a.VoiceState(b.Identity.Peer)?.Joined == true && a.VoiceState(host.Identity.Peer)?.Joined == true);
         await talkerA.Speak(30, 440);
         await Wait(() => bSink.From(Slot(a)) >= 28 && hostSink.From(Slot(a)) >= 28, "the host and the other guest both hear a guest talking");

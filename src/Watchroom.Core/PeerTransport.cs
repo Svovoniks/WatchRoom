@@ -96,7 +96,7 @@ public sealed class PeerTransport : IDisposable
     private IRtcDataChannel? channel;
     private IRtcDataChannel? controls;
     private IRtcDataChannel? catalogChannel;
-    // Voice frames are useless once late, so they are never retransmitted past a quarter second
+    // Voice frames are useless once late, so they are never retransmitted past 400 ms
     // and never wait behind each other.
     private IRtcDataChannel? voiceChannel;
     public const string VoiceLabel = "voice-v1";
@@ -200,7 +200,8 @@ public sealed class PeerTransport : IDisposable
         // holding later bytes behind retransmission of an earlier range.
         Attach(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = "media", Unordered = true }));
         // Older apps close channels they do not recognize; the room then treats them as unable to use voice.
-        Attach(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = VoiceLabel, Unordered = true, Unreliable = true, MaxPacketLifetime = 250 }));
+        // Frames older than the deepest prebuffer plus a little are useless, so they are never retransmitted past that.
+        Attach(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = VoiceLabel, Unordered = true, Unreliable = true, MaxPacketLifetime = 400 }));
     }
     private void IsolateMedia()
     {
@@ -238,10 +239,13 @@ public sealed class PeerTransport : IDisposable
     }
     private void Attach(IRtcDataChannel data)
     {
-        PlaybackDiagnostics.Record("channel-created", new { transport = DiagnosticId, label = data.Label });
-        data.OnOpen += _ => PlaybackDiagnostics.Record("channel-open", new { transport = DiagnosticId, label = data.Label });
-        data.OnClose += _ => PlaybackDiagnostics.Record("channel-closed", new { transport = DiagnosticId, label = data.Label });
-        if (data.Label == "room-catalog-v1")
+        // Read the label once: the close callback runs on a native thread while Dispose holds the channel's
+        // lock on another, and asking the channel for its label from inside the callback deadlocks them.
+        var label = data.Label;
+        PlaybackDiagnostics.Record("channel-created", new { transport = DiagnosticId, label });
+        data.OnOpen += _ => PlaybackDiagnostics.Record("channel-open", new { transport = DiagnosticId, label });
+        data.OnClose += _ => PlaybackDiagnostics.Record("channel-closed", new { transport = DiagnosticId, label });
+        if (label == "room-catalog-v1")
         {
             if (catalogChannel is not null) { data.Dispose(); return; }
             catalogChannel = data;
@@ -254,8 +258,8 @@ public sealed class PeerTransport : IDisposable
             };
             return;
         }
-        if (data.Label == "watchroom-control-v2") { AttachControls(data); return; }
-        if (data.Label == VoiceLabel)
+        if (label == "watchroom-control-v2") { AttachControls(data); return; }
+        if (label == VoiceLabel)
         {
             if (voiceChannel is not null) { data.Dispose(); return; }
             voiceChannel = data;
@@ -269,7 +273,7 @@ public sealed class PeerTransport : IDisposable
             return;
         }
         Action markOpen;
-        if (data.Label == "media-v2")
+        if (label == "media-v2")
         {
             if (isolatedChannelAttached) { data.Dispose(); return; }
             isolatedChannelAttached = true;
@@ -278,7 +282,7 @@ public sealed class PeerTransport : IDisposable
         }
         else
         {
-            if (data.Label != "media" || channel is not null) { data.Dispose(); return; }
+            if (label != "media" || channel is not null) { data.Dispose(); return; }
             channel = data;
             markOpen = () => opened.TrySetResult();
         }

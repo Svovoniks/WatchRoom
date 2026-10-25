@@ -14,14 +14,25 @@ namespace Watchroom.Desktop;
 // and lowering the movie while people speak.
 public partial class MainWindow
 {
-    private sealed record VoiceSession(VoiceCapture Capture, VoiceMixer Mixer, VoiceAudio Audio);
-    private sealed record VoiceOptions(string? Input, string? Output, bool EchoCancellation, bool PushToTalk, bool Ducking, bool AutoJoin, int Volume)
+    private sealed class VoiceSession(VoiceCapture capture, VoiceMixer mixer, VoiceAudio audio)
     {
-        public VoiceAudio.Settings Devices => new(Input, Output, EchoCancellation);
+        public VoiceCapture Capture => capture;
+        public VoiceMixer Mixer => mixer;
+        public VoiceAudio Audio => audio;
+        public Stopwatch Started { get; } = Stopwatch.StartNew();
+        // The microphone and speakers have opened; joining then only waits for the host's confirmation.
+        public bool DevicesReady { get; set; }
+    }
+    private sealed record VoiceOptions(string? Input, string? Output, VoiceAudio.Processing Processing, bool PushToTalk, bool AlwaysOn, bool Ducking, bool AutoJoin, int Volume)
+    {
+        public VoiceAudio.Settings Devices => new(Input, Output, Processing);
     }
     private VoiceSession? voice;
-    private VoiceOptions voicePreferences = new(null, null, true, false, true, false, 100);
+    private VoiceOptions voicePreferences = new(null, null, VoiceAudio.Processing.Windows, false, false, true, false, 100);
     private bool voiceJoining, voiceMuted, pushToTalkHeld;
+    // Each person's level for you, by their connection; remembered by name for the next room.
+    private readonly Dictionary<string, int> voiceLevels = [];
+    private Dictionary<string, int> rememberedVoiceLevels = [];
     // Capture frames go to whichever room connection is current, including after a reconnect.
     private RoomClient? voiceRoom;
     // The room code voice was automatically joined in, so leaving voice by hand sticks through reconnects.
@@ -58,10 +69,29 @@ public partial class MainWindow
         public Visibility LocalMuteVisibility => InVoice && !Me && Listening ? Visibility.Visible : Visibility.Collapsed;
         public string LocalMuteIcon => LocallyMuted ? "" : "";
         public string LocalMuteHelp => LocallyMuted ? "Unmute " + Name + " for you" : "Mute " + Name + " for you";
-        public event PropertyChangedEventHandler? PropertyChanged;
-        public void Update(bool inVoice, bool muted, bool me, bool locallyMuted, bool listening)
+        // This person's volume for you, 0 to 200%; the slider binds both ways and the window applies changes.
+        public string Id { get; set; } = "";
+        public Action<VoicePresence>? LevelChanged { get; set; }
+        private int level = 100;
+        public int Level
         {
-            if (InVoice == inVoice && Muted == muted && Me == me && LocallyMuted == locallyMuted && Listening == listening) return;
+            get => level;
+            set
+            {
+                var clamped = Math.Clamp(value, 0, 200);
+                if (level == clamped) return;
+                level = clamped;
+                PropertyChanged?.Invoke(this, new(nameof(Level))); PropertyChanged?.Invoke(this, new(nameof(LevelHelp)));
+                LevelChanged?.Invoke(this);
+            }
+        }
+        public string LevelHelp => Name + "'s volume for you: " + level + "%";
+        public event PropertyChangedEventHandler? PropertyChanged;
+        public void Update(bool inVoice, bool muted, bool me, bool locallyMuted, bool listening, int level)
+        {
+            var levelChanged = this.level != Math.Clamp(level, 0, 200);
+            this.level = Math.Clamp(level, 0, 200);
+            if (!levelChanged && InVoice == inVoice && Muted == muted && Me == me && LocallyMuted == locallyMuted && Listening == listening) return;
             InVoice = inVoice; Muted = muted; Me = me; LocallyMuted = locallyMuted; Listening = listening;
             if (!inVoice) Speaking = false;
             PropertyChanged?.Invoke(this, new(string.Empty));
@@ -74,15 +104,52 @@ public partial class MainWindow
     }
     private VoicePresence PresenceFor(string id, string name)
     {
-        if (!voicePresence.TryGetValue(id, out var presence)) voicePresence[id] = presence = new();
+        if (!voicePresence.TryGetValue(id, out var presence))
+        {
+            voicePresence[id] = presence = new() { Id = id, LevelChanged = ParticipantVoiceLevelChanged };
+            // A friend's level from an earlier room, matched by name since connections get new ids each time.
+            if (!voiceLevels.ContainsKey(id) && rememberedVoiceLevels.TryGetValue(name, out var remembered)) voiceLevels[id] = remembered;
+        }
         presence.Name = name;
         return presence;
+    }
+    private int VoiceLevel(string id) => voiceLevels.GetValueOrDefault(id, 100);
+    private void ParticipantVoiceLevelChanged(VoicePresence presence)
+    {
+        voiceLevels[presence.Id] = presence.Level;
+        if (presence.Name.Length > 0)
+        {
+            rememberedVoiceLevels[presence.Name] = presence.Level;
+            // Keep the list short: the most recent fifty names.
+            if (rememberedVoiceLevels.Count > 50) rememberedVoiceLevels.Remove(rememberedVoiceLevels.Keys.First());
+            voiceLevelsChanged = true; voiceSettingsSave.Stop(); voiceSettingsSave.Start();
+        }
+        ApplyVoiceGains();
+    }
+    // Sliders change many times a second while dragged; their values are written once they settle.
+    private readonly DispatcherTimer voiceSettingsSave = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private bool voiceLevelsChanged, voiceVolumeChanged;
+    private void SaveVoiceSliders()
+    {
+        voiceSettingsSave.Stop();
+        if (voiceLevelsChanged) { voiceLevelsChanged = false; library.Setting("voiceLevels", Wire.Serialize(rememberedVoiceLevels)); }
+        if (voiceVolumeChanged) { voiceVolumeChanged = false; library.Setting("voiceVolume", voicePreferences.Volume.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+    }
+    // Everyone's level in the mixer, by their current slot: muted for you is zero, otherwise their own level.
+    private void ApplyVoiceGains()
+    {
+        if (voice is not { } session) return;
+        foreach (var member in room?.Snapshot?.Voice ?? [])
+            session.Mixer.SetGain(member.Slot, voiceLocallyMuted.Contains(member.Peer) ? 0 : VoiceLevel(member.Peer) / 100f);
     }
 
     private void InitializeVoice()
     {
         voicePreferences = LoadVoicePreferences();
+        try { rememberedVoiceLevels = library.Setting("voiceLevels") is { Length: > 0 } saved ? Wire.Read<Dictionary<string, int>>(saved) : []; }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or System.IO.InvalidDataException) { rememberedVoiceLevels = []; }
         voiceTimer.Tick += (_, _) => VoiceTick();
+        voiceSettingsSave.Tick += (_, _) => SaveVoiceSliders();
         voiceTestTimer.Tick += (_, _) => UpdateVoiceTest();
         Deactivated += (_, _) => ReleasePushToTalk();
         RefreshVoice();
@@ -90,8 +157,14 @@ public partial class MainWindow
     private VoiceOptions LoadVoicePreferences()
     {
         static string? Device(string? id) => string.IsNullOrEmpty(id) ? null : id;
-        return new(Device(library.Setting("voiceInput")), Device(library.Setting("voiceOutput")), library.Setting("voiceEcho") != "false",
-            library.Setting("voicePushToTalk") == "true", library.Setting("voiceDucking") != "false", library.Setting("voiceAutoJoin") == "true",
+        // Apps before the processing choice stored only whether Windows echo cancellation was on.
+        var processing = library.Setting("voiceProcessing") switch
+        {
+            "standard" => VoiceAudio.Processing.Standard, "raw" => VoiceAudio.Processing.Raw, "windows" => VoiceAudio.Processing.Windows,
+            _ => library.Setting("voiceEcho") == "false" ? VoiceAudio.Processing.Standard : VoiceAudio.Processing.Windows
+        };
+        return new(Device(library.Setting("voiceInput")), Device(library.Setting("voiceOutput")), processing,
+            library.Setting("voicePushToTalk") == "true", library.Setting("voiceAlwaysOn") == "true", library.Setting("voiceDucking") != "false", library.Setting("voiceAutoJoin") == "true",
             int.TryParse(library.Setting("voiceVolume"), out var volume) ? Math.Clamp(volume, 0, 200) : 100);
     }
 
@@ -116,36 +189,60 @@ public partial class MainWindow
         var session = new VoiceSession(capture, mixer, audio);
         capture.Frame += frame => Volatile.Read(ref voiceRoom)?.TransmitVoice(frame);
         audio.Changed += () => Dispatcher.BeginInvoke(() => { if (voice == session) { ApplyVoiceTransmit(); RefreshVoice(); } });
-        voiceJoining = true; voice = session; voiceMuted = false; RefreshVoice();
+        voiceJoining = true; voice = session; voiceMuted = false;
+        // Tell the host at once, with the microphone shown muted until it opens: the room hears the join and this
+        // app starts receiving everyone while Windows is still starting the devices.
+        AttachVoice();
+        RefreshVoice();
         try { await audio.StartAsync(); }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            if (voice == session) voice = null;
+            if (voice == session)
+            {
+                voice = null; voiceJoining = false; Volatile.Write(ref voiceRoom, null);
+                if (room is { } failed) { failed.VoiceOutput = null; failed.SetVoice(false, false); }
+            }
             await audio.DisposeAsync();
             VoiceToast("Windows audio isn't working right now, so voice chat could not start. Restarting your PC usually fixes it.", 7);
+            RefreshVoice();
             return;
         }
-        finally { voiceJoining = false; RefreshVoice(); }
         // Leaving voice or the room while devices were opening ends this session; LeaveVoiceAsync has already cleaned up.
         if (voice != session) { await audio.DisposeAsync(); return; }
         var current = room;
         if (current is null || current == voiceClosingRoom)
         {
-            voice = null; Volatile.Write(ref voiceRoom, null);
+            voice = null; voiceJoining = false; Volatile.Write(ref voiceRoom, null);
             foreach (var stale in new[] { client, current }) if (stale is not null) { stale.VoiceOutput = null; stale.SetVoice(false, false); }
             RefreshVoice(); await audio.DisposeAsync(); return;
         }
+        session.DevicesReady = true;
+        PlaybackDiagnostics.Record("voice-join-devices", new { ms = session.Started.ElapsedMilliseconds, confirmed = VoiceConfirmed(current), problem = audio.Problem });
         // The room may have reconnected while the devices opened; voice continues on the new connection.
         AttachVoice();
         mixer.Cue(VoiceCues.Join);
         voiceTimer.Start();
+        FinishJoining();
         RefreshVoice();
+    }
+    // The host's roster lists this app as joined.
+    private bool VoiceConfirmed(RoomClient? client) => client?.Identity?.Peer is { } me && client.VoiceState(me)?.Joined == true;
+    // Joining ends once the devices are open and the host has confirmed the join, so "Joining…" tells the truth.
+    private void FinishJoining()
+    {
+        if (!voiceJoining || voice is not { } session || !session.DevicesReady) return;
+        // After a long wait the card's own status explains what the host connection is doing instead.
+        if (!VoiceConfirmed(room) && session.Started.ElapsedMilliseconds < 10000) return;
+        voiceJoining = false;
+        PlaybackDiagnostics.Record("voice-joined", new { ms = session.Started.ElapsedMilliseconds, confirmed = VoiceConfirmed(room) });
+        var audio = session.Audio;
         VoiceToast(audio.Problem ?? (voicePreferences.PushToTalk ? "You joined voice. Hold V to talk." : "You joined voice. Press V to mute or unmute."), audio.Problem is null ? 3 : 7);
     }
     private async Task LeaveVoiceAsync()
     {
         if (voice is not { } session) return;
         voice = null; pushToTalkHeld = false; voiceJoining = false;
+        if (voiceSettingsSave.IsEnabled) SaveVoiceSliders();
         Volatile.Write(ref voiceRoom, null);
         if (room is { } client) { client.VoiceOutput = null; client.SetVoice(false, false); }
         voiceTimer.Stop(); videoDuck = 1; ApplyPlayerVolume();
@@ -167,6 +264,8 @@ public partial class MainWindow
         if (voice is not { } session) return;
         var microphoneOn = !voiceMuted && session.Audio.MicrophoneReady;
         session.Capture.PushToTalk = voicePreferences.PushToTalk;
+        // Push-to-talk already sends everything while the key is held.
+        session.Capture.AlwaysOn = voicePreferences.AlwaysOn && !voicePreferences.PushToTalk;
         session.Capture.Transmitting = microphoneOn && (!voicePreferences.PushToTalk || pushToTalkHeld);
         // Others see a muted microphone when there is none, so nobody waits to hear them.
         room?.SetVoice(true, !microphoneOn);
@@ -244,16 +343,18 @@ public partial class MainWindow
 
         VoiceButton.Visibility = VoiceCard.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
         VoiceButtonText.Text = voiceJoining ? "Joining…" : inVoice ? "Leave voice" : "Voice";
+        var joiningStage = !voiceJoining ? "" : voice?.DevicesReady != true ? "Opening your microphone and speakers…" : "Waiting for the host to confirm…";
         VoiceButtonIcon.Text = inVoice ? "" : "";
-        var action = inVoice ? "Leave voice chat" : "Join voice chat";
+        var action = voiceJoining ? "Cancel joining voice chat" : inVoice ? "Leave voice chat" : "Join voice chat";
         // Still clickable while unavailable, so a click explains why instead of doing nothing.
         var unavailable = connected && !inVoice && !voiceJoining && !client!.VoiceAvailable;
         VoiceButton.Opacity = unavailable ? 0.55 : 1;
         var waiting = unavailable && voiceWaitingRoom is not null && voiceWaitingRoom == client!.Identity?.Room;
         VoiceButton.ToolTip = waiting ? VoiceUnavailableReason(client!) + " You'll join automatically. Click to cancel."
-            : unavailable ? VoiceUnavailableReason(client!) : inVoice ? action : others.Length > 0 ? Names(others) + (others.Length == 1 ? " is" : " are") + " in voice. Join to talk while you watch." : "Join voice chat to talk while you watch";
+            : unavailable ? VoiceUnavailableReason(client!) : voiceJoining ? joiningStage + " Click to cancel." : inVoice ? action : others.Length > 0 ? Names(others) + (others.Length == 1 ? " is" : " are") + " in voice. Join to talk while you watch." : "Join voice chat to talk while you watch";
         System.Windows.Automation.AutomationProperties.SetName(VoiceButton, action);
-        VoiceButton.IsEnabled = VoiceCardJoin.IsEnabled = connected && !voiceJoining;
+        // Joining can be cancelled, so the buttons stay enabled throughout.
+        VoiceButton.IsEnabled = VoiceCardJoin.IsEnabled = connected;
         VoiceCountBadge.Visibility = others.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         VoiceCountText.Text = others.Length.ToString();
         var muteHelp = !inVoice ? "" : voice!.Audio.MicrophoneReady ? (voiceMuted ? "Unmute microphone (V)" : "Mute microphone (V)") : voice.Audio.Problem ?? "No microphone";
@@ -265,14 +366,19 @@ public partial class MainWindow
             System.Windows.Automation.AutomationProperties.SetName(button, muteHelp);
             if (microphoneOn) button.ClearValue(ForegroundProperty); else button.Foreground = VoiceOff;
         }
-        VoiceCardJoin.Content = voiceJoining ? "Joining…" : inVoice ? "Leave" : waiting ? "Cancel" : "Join";
+        VoiceCardJoin.Content = voiceJoining ? "Cancel" : inVoice ? "Leave" : waiting ? "Cancel" : "Join";
         // The accent invites joining; leaving is a quieter choice.
         VoiceCardJoin.Style = (Style)FindResource(inVoice || waiting ? "QuietButton" : "Primary");
         System.Windows.Automation.AutomationProperties.SetName(VoiceCardJoin, action);
+        // The overall voice volume sits with the voice controls while listening; it applies at once and is kept.
+        VoiceCardVolumeRow.Visibility = inVoice ? Visibility.Visible : Visibility.Collapsed;
+        if (inVoice && Math.Abs(VoiceCardVolume.Value - voicePreferences.Volume) >= 0.5) { syncingVoiceVolume = true; try { VoiceCardVolume.Value = voicePreferences.Volume; } finally { syncingVoiceVolume = false; } }
+        VoiceCardVolumeText.Text = voicePreferences.Volume + "%";
         VoiceCardIcon.Text = inVoice ? (microphoneOn ? "" : "") : "";
         VoiceCardStatus.Text = !connected ? ""
             // In voice while the host is away: say what voice is waiting for, not that you're alone.
             : inVoice && !client!.VoiceAvailable ? VoiceUnavailableReason(client)
+            : voiceJoining ? joiningStage
             : inVoice ? (others.Length == 0 ? "You're the only one in voice. Others hear you when they join." : "Talking with " + Names(others) + ".")
                 + (!voice!.Audio.MicrophoneReady ? "" : voicePreferences.PushToTalk ? (pushToTalkHeld && !voiceMuted ? " Sending your voice…" : " Hold V to talk.") : voiceMuted ? " Your microphone is off." : "")
             : !client!.VoiceAvailable ? VoiceUnavailableReason(client) + (waiting ? " You'll join automatically." : "")
@@ -287,14 +393,42 @@ public partial class MainWindow
         {
             var member = members.FirstOrDefault(v => v.Peer == id);
             var mine = id == me;
-            presence.Update(member?.Joined == true || mine && inVoice, mine && inVoice ? !microphoneOn : member?.Muted == true, mine, voiceLocallyMuted.Contains(id), inVoice);
+            presence.Update(member?.Joined == true || mine && inVoice, mine && inVoice ? !microphoneOn : member?.Muted == true, mine, voiceLocallyMuted.Contains(id), inVoice, VoiceLevel(id));
         }
-        if (voice is { } session)
-            foreach (var member in members) session.Mixer.SetGain(member.Slot, voiceLocallyMuted.Contains(member.Peer) ? 0 : 1);
+        ApplyVoiceGains();
+    }
+    private bool syncingVoiceVolume;
+    // The slider in the participants panel: applied to the mixer at once, saved, and mirrored in Settings.
+    private void VoiceCardVolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (syncingVoiceVolume || VoiceCardVolumeText is null) return;
+        SetVoiceVolume((int)Math.Round(e.NewValue));
+    }
+    private void SetVoiceVolume(int volume)
+    {
+        volume = Math.Clamp(volume, 0, 200);
+        if (voicePreferences.Volume != volume)
+        {
+            voicePreferences = voicePreferences with { Volume = volume };
+            voiceVolumeChanged = true; voiceSettingsSave.Stop(); voiceSettingsSave.Start();
+            // Settings shows the same value without marking the page as changed by the user.
+            var dirty = HasUnsavedPreferences;
+            loadingPreferences = true;
+            try { VoiceVolumeSlider.Value = volume; } finally { loadingPreferences = false; }
+            if (!dirty) preferencesBaseline = PreferenceSnapshot();
+        }
+        if (voice is { } session) session.Mixer.Volume = volume / 100f;
+        VoiceCardVolumeText.Text = volume + "%";
+    }
+    // Moving the slider in Settings is heard at once; Save keeps it and Cancel puts the saved value back.
+    private void PreviewVoiceVolume(double value)
+    {
+        if (voice is { } session) session.Mixer.Volume = (float)(Math.Clamp(value, 0, 200) / 100);
     }
     private void VoiceTick()
     {
         if (voice is not { } session) return;
+        if (voiceJoining) { FinishJoining(); if (!voiceJoining) RefreshVoice(); }
         var client = room;
         var me = client?.Identity?.Peer;
         foreach (var member in client?.Snapshot?.Voice ?? [])
@@ -327,6 +461,7 @@ public partial class MainWindow
             if (voice is { } session && (arrived.Length > 0 || departed.Length > 0)) session.Mixer.Cue(arrived.Length > 0 ? VoiceCues.Join : VoiceCues.Leave);
         }
         if (snapshot.Voice is not null) voiceRoster = joined;
+        FinishJoining();
         RefreshVoice();
         if (voice is null && !voiceJoining && client != voiceClosingRoom && client?.VoiceAvailable == true && client.Identity?.Room is { } code
             && (voicePreferences.AutoJoin && voiceAutoJoinedRoom != code || voiceWaitingRoom == code))
@@ -339,7 +474,7 @@ public partial class MainWindow
     private void VoiceRoomChanged(RoomClient client, bool reconnecting)
     {
         voiceRoster = null; voicePresence.Clear();
-        if (!reconnecting) voiceLocallyMuted.Clear();
+        if (!reconnecting) { voiceLocallyMuted.Clear(); voiceLevels.Clear(); }
         if (voice is not null) AttachVoice();
         RefreshVoice();
     }
@@ -390,24 +525,37 @@ public partial class MainWindow
         VoiceInputPicker.SelectedValue = saved.Input ?? ""; VoiceOutputPicker.SelectedValue = saved.Output ?? "";
         if (VoiceInputPicker.SelectedIndex < 0) VoiceInputPicker.SelectedIndex = 0;
         if (VoiceOutputPicker.SelectedIndex < 0) VoiceOutputPicker.SelectedIndex = 0;
-        VoiceEchoCancellation.IsChecked = saved.EchoCancellation; VoicePushToTalk.IsChecked = saved.PushToTalk;
+        VoiceProcessingPicker.ItemsSource ??= VoiceProcessingChoices;
+        VoiceProcessingPicker.SelectedValue = saved.Processing;
+        VoicePushToTalk.IsChecked = saved.PushToTalk; VoiceAlwaysOn.IsChecked = saved.AlwaysOn;
         VoiceDucking.IsChecked = saved.Ducking; VoiceAutoJoin.IsChecked = saved.AutoJoin; VoiceVolumeSlider.Value = saved.Volume;
         // Cancel restores the saved microphone; the level meter follows it.
         if (VoicePreferences.IsVisible) _ = Guard(RestartVoiceTest);
     }
+    private sealed record VoiceProcessingChoice(VoiceAudio.Processing Id, string Name);
+    private static readonly VoiceProcessingChoice[] VoiceProcessingChoices =
+    [
+        new(VoiceAudio.Processing.Windows, "Windows voice processing: echo and noise reduction"),
+        new(VoiceAudio.Processing.Standard, "Standard: the microphone's own settings"),
+        new(VoiceAudio.Processing.Raw, "Raw: no processing at all"),
+    ];
     private VoiceOptions DraftVoicePreferences()
     {
         static string? Device(object? id) => id is string { Length: > 0 } value ? value : null;
-        return new(Device(VoiceInputPicker.SelectedValue), Device(VoiceOutputPicker.SelectedValue), VoiceEchoCancellation.IsChecked == true,
-            VoicePushToTalk.IsChecked == true, VoiceDucking.IsChecked == true, VoiceAutoJoin.IsChecked == true, (int)Math.Round(VoiceVolumeSlider.Value));
+        return new(Device(VoiceInputPicker.SelectedValue), Device(VoiceOutputPicker.SelectedValue), VoiceProcessingPicker.SelectedValue as VoiceAudio.Processing? ?? voicePreferences.Processing,
+            VoicePushToTalk.IsChecked == true, VoiceAlwaysOn.IsChecked == true, VoiceDucking.IsChecked == true, VoiceAutoJoin.IsChecked == true, (int)Math.Round(VoiceVolumeSlider.Value));
     }
     private void SaveVoicePreferences()
     {
         var draft = DraftVoicePreferences();
         library.Setting("voiceInput", draft.Input ?? ""); library.Setting("voiceOutput", draft.Output ?? "");
-        library.Setting("voiceEcho", draft.EchoCancellation ? "true" : "false"); library.Setting("voicePushToTalk", draft.PushToTalk ? "true" : "false");
+        library.Setting("voiceProcessing", draft.Processing switch { VoiceAudio.Processing.Standard => "standard", VoiceAudio.Processing.Raw => "raw", _ => "windows" });
+        // Older versions of the app read only the echo cancellation switch.
+        library.Setting("voiceEcho", draft.Processing == VoiceAudio.Processing.Windows ? "true" : "false");
+        library.Setting("voicePushToTalk", draft.PushToTalk ? "true" : "false"); library.Setting("voiceAlwaysOn", draft.AlwaysOn ? "true" : "false");
         library.Setting("voiceDucking", draft.Ducking ? "true" : "false"); library.Setting("voiceAutoJoin", draft.AutoJoin ? "true" : "false");
         library.Setting("voiceVolume", draft.Volume.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        voiceVolumeChanged = false;
         var previous = voicePreferences; voicePreferences = draft;
         if (voice is not { } session) { RefreshVoice(); return; }
         session.Mixer.Volume = draft.Volume / 100f;

@@ -18,7 +18,7 @@ static class VoiceDeviceChecks
         mic.Frame += _ => Interlocked.Increment(ref frames);
         var mixer = new VoiceMixer();
         var clock = Stopwatch.StartNew();
-        await using (var audio = new VoiceAudio(mic, mixer, new(null, null, true)) { SilentOutput = true })
+        await using (var audio = new VoiceAudio(mic, mixer, new(null, null, VoiceAudio.Processing.Windows)) { SilentOutput = true })
         {
             await audio.StartAsync();
             check(clock.ElapsedMilliseconds < 9000, $"opening voice devices returns promptly ({clock.ElapsedMilliseconds} ms)");
@@ -41,17 +41,20 @@ static class VoiceDeviceChecks
 
             await CheckPlayback(audio, mixer, check);
 
-            await audio.ApplyAsync(new(null, null, false));
+            await audio.ApplyAsync(new(null, null, VoiceAudio.Processing.Standard));
             before = Volatile.Read(ref frames); await Task.Delay(600);
-            check(audio.MicrophoneReady && Volatile.Read(ref frames) - before > 20, "turning echo cancellation off reopens the microphone without interrupting voice");
-            await audio.ApplyAsync(new("{0.0.1.00000000}.{00000000-0000-0000-0000-000000000000}", null, true));
+            check(audio.MicrophoneReady && Volatile.Read(ref frames) - before > 20, "switching to standard microphone processing reopens the microphone without interrupting voice");
+            await audio.ApplyAsync(new(null, null, VoiceAudio.Processing.Raw));
+            before = Volatile.Read(ref frames); await Task.Delay(600);
+            check(audio.MicrophoneReady && Volatile.Read(ref frames) - before > 20, "the raw microphone mode opens, or falls back to standard processing where the device has none");
+            await audio.ApplyAsync(new("{0.0.1.00000000}.{00000000-0000-0000-0000-000000000000}", null, VoiceAudio.Processing.Windows));
             before = Volatile.Read(ref frames); await Task.Delay(600);
             check(audio.MicrophoneReady && Volatile.Read(ref frames) - before > 20, "a saved microphone that is no longer connected falls back to the Windows default");
 
             // The settings meter opens the same microphone while voice is running.
             var meterFrames = 0;
             var meter = new VoiceCapture { PushToTalk = true, Transmitting = true }; meter.Frame += _ => Interlocked.Increment(ref meterFrames);
-            await using (var test = new VoiceAudio(meter, null, new(null, null, true)))
+            await using (var test = new VoiceAudio(meter, null, new(null, null, VoiceAudio.Processing.Windows)))
             {
                 await test.StartAsync(); before = Volatile.Read(ref frames); await Task.Delay(600);
                 check(test.MicrophoneReady && meterFrames > 20 && Volatile.Read(ref frames) - before > 20, "the settings microphone test runs alongside voice chat");

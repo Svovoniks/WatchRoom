@@ -191,6 +191,32 @@ static class VoiceUiChecks
             check(sawSpeaking && lowest == 1, "someone muted for you still shows as talking but never lowers the movie");
             Call("ToggleLocalVoiceMute", new Button { Tag = rileyId }, new RoutedEventArgs());
             check(!(bool)Prop(presence, "LocallyMuted")!, "the guest can be unmuted again");
+
+            // Each person's level and the overall voice volume apply to the mixer at once.
+            var mixer = (VoiceMixer)Prop(Session()!, "Mixer")!;
+            var rileySlot = host.VoiceState(rileyId)!.Slot;
+            check((int)Prop(presence, "Level")! == 100 && mixer.Gain(rileySlot) == 1f, "a person starts at full level for you");
+            presence.GetType().GetProperty("Level")!.SetValue(presence, 150);
+            check(mixer.Gain(rileySlot) == 1.5f && (string)Prop(presence, "LevelHelp")! == "Riley's volume for you: 150%", "moving a person's slider changes only their level in the mix");
+            Call("ToggleLocalVoiceMute", new Button { Tag = rileyId }, new RoutedEventArgs());
+            check(mixer.Gain(rileySlot) == 0f, "muting them for you silences them whatever their level");
+            Call("ToggleLocalVoiceMute", new Button { Tag = rileyId }, new RoutedEventArgs());
+            check(mixer.Gain(rileySlot) == 1.5f, "unmuting restores their level");
+            await Wait(() => store.Setting("voiceLevels")?.Contains("Riley") == true, "the level is remembered by name for the next room once the slider settles", 5);
+            presence.GetType().GetProperty("Level")!.SetValue(presence, 100);
+            var cardVolume = Named<Slider>("VoiceCardVolume"); var cardVolumeText = Named<TextBlock>("VoiceCardVolumeText");
+            var settingsVolume = Named<Slider>("VoiceVolumeSlider");
+            check(Named<FrameworkElement>("VoiceCardVolumeRow").Visibility == Visibility.Visible, "in voice, the participants panel shows the voice volume slider");
+            cardVolume.Value = 60;
+            check(Math.Abs(mixer.Volume - 0.6f) < 0.001f && cardVolumeText.Text == "60%" && settingsVolume.Value == 60
+                && !(bool)typeof(MainWindow).GetProperty("HasUnsavedPreferences", flags)!.GetValue(window)!,
+                $"the panel's voice volume applies at once and is mirrored in Settings without unsaved changes (mixer {mixer.Volume:F2})");
+            await Wait(() => store.Setting("voiceVolume") == "60", "the voice volume is saved once the slider settles", 5);
+            settingsVolume.Value = 120;
+            check(Math.Abs(mixer.Volume - 1.2f) < 0.001f && store.Setting("voiceVolume") == "60", "moving the Settings slider is heard at once but only saved with the page");
+            Call("LoadPreferences");
+            check(Math.Abs(mixer.Volume - 0.6f) < 0.001f && settingsVolume.Value == 60, "cancelling the Settings page puts the saved voice volume back");
+            mixer.Volume = 0.0001f;
             if (shots is not null)
             {
                 Call("ToggleLocalVoiceMute", new Button { Tag = rileyId }, new RoutedEventArgs());

@@ -33,17 +33,23 @@ public sealed partial class RoomClient
         if (Identity?.Host == true) { if (coordinator is not null) ApplyHostCommand(Identity.Peer, new("voice", Number: Volatile.Read(ref voiceDesired))); }
         else ReconcileVoice();
     }
-    // Guests repeat their state until the host's snapshot reflects it, including after a reconnect replaced the transport.
+    // Guests repeat their state until the host's snapshot reflects it, including after a reconnect replaced the
+    // transport: quickly at first so joining voice is not held up by one lost message, then every few seconds.
+    private int voiceRetries;
     private void ReconcileVoice()
     {
         if (Identity is not { Host: false } identity || hostPeer is not { } host || !negotiated.ContainsKey(host) || Snapshot?.Voice is not { } members) return;
         var desired = Volatile.Read(ref voiceDesired);
         var mine = members.FirstOrDefault(v => v.Peer == identity.Peer);
-        if (mine is not null && (mine.Joined ? 1 : 0) + (mine.Muted ? 2 : 0) == desired) { voiceSent = null; return; }
+        if (mine is not null && (mine.Joined ? 1 : 0) + (mine.Muted ? 2 : 0) == desired) { voiceSent = null; voiceRetries = 0; return; }
         var key = peers.GetValueOrDefault(host)?.DiagnosticId + ":" + desired;
-        if (voiceSent is { } sent && sent.Key == key && Environment.TickCount64 - sent.At < 3000) return;
+        var interval = voiceRetries < 6 ? 400 : 3000;
+        if (voiceSent is { } sent && sent.Key == key && Environment.TickCount64 - sent.At < interval) return;
+        if (voiceSent is { } previous && previous.Key == key) voiceRetries++; else voiceRetries = 0;
         voiceSent = (key, Environment.TickCount64);
         SendPeer(host, new("voice", Number: desired));
+        // Check again shortly rather than waiting for the next health tick.
+        _ = Task.Delay(interval + 50, lifetime.Token).ContinueWith(_ => Post(new("voice-local")), TaskContinuationOptions.OnlyOnRanToCompletion);
     }
     private void UpdateVoiceRoutes()
     {

@@ -12,6 +12,8 @@ public static class VoicePacket
     public const byte Version = 1;
     // The last frame of a talk spurt lets listeners stop without concealing a loss that never happened.
     public const byte EndOfSpeech = 1;
+    // A microphone sent continuously marks frames without speech, so listeners neither light up the speaker nor lower the video.
+    public const byte Silent = 2;
     public static int Write(Span<byte> frame, byte slot, ushort sequence, byte flags, ReadOnlySpan<byte> payload)
     {
         if (payload.Length is < 1 or > MaxPayload || frame.Length < HeaderBytes + payload.Length) throw new ArgumentException("Invalid voice payload");
@@ -39,16 +41,20 @@ public interface IVoiceSink
     void Receive(int slot, ushort sequence, byte flags, ReadOnlySpan<byte> payload);
 }
 
-// Turns microphone samples into Opus frames. Speech opens a gate that tracks the background noise
-// level, a short pre-roll keeps the first syllable, and a hangover keeps pauses between words.
+// Turns microphone samples into Opus frames. Speech opens a gate that tracks the background noise level in
+// the voice band, a pre-roll keeps the first syllable, and a hangover keeps pauses between words and sentences.
 public sealed class VoiceCapture
 {
+    // 100 ms of pre-roll keeps word onsets; 600 ms of hangover keeps the pauses inside a sentence.
+    public const int PrerollFrames = 5, HangoverFrames = 30;
     private readonly IOpusEncoder encoder;
     private readonly short[] frame = new short[VoicePacket.FrameSamples];
-    private readonly short[][] preroll = [new short[VoicePacket.FrameSamples], new short[VoicePacket.FrameSamples]];
+    private readonly short[][] preroll = Enumerable.Range(0, PrerollFrames).Select(_ => new short[VoicePacket.FrameSamples]).ToArray();
     private readonly byte[] encoded = new byte[VoicePacket.MaxPayload];
     private readonly byte[] packet = new byte[VoicePacket.HeaderBytes + VoicePacket.MaxPayload];
     private readonly object gate = new();
+    // Speech energy sits between roughly 100 Hz and 4 kHz; fans, hum and hiss spread their energy far wider.
+    private readonly Biquad highPass = Biquad.HighPass(100), lowPass = Biquad.LowPass(4000);
     private int filled, prerollCount, prerollNext, hangover;
     private ushort sequence = (ushort)Random.Shared.Next(ushort.MaxValue);
     private double noiseFloor = -60;
@@ -61,7 +67,11 @@ public sealed class VoiceCapture
     public bool Transmitting { get; set; }
     // Push-to-talk sends everything while the key is held instead of waiting for speech.
     public bool PushToTalk { get; set; }
+    // Sends the microphone continuously while transmitting; frames without speech are marked silent for listeners.
+    public bool AlwaysOn { get; set; }
     public double LevelDb { get; private set; } = -100;
+    // The background level in the voice band that speech has to rise above, for diagnostics and tests.
+    public double NoiseFloorDb { get { lock (gate) return noiseFloor; } }
     public bool Speaking => Environment.TickCount64 - Volatile.Read(ref lastSpeech) < 250;
     public VoiceCapture()
     {
@@ -84,21 +94,38 @@ public sealed class VoiceCapture
     }
     private void Process()
     {
-        double sum = 0;
-        foreach (var sample in frame) sum += (double)sample * sample;
-        var level = 10 * Math.Log10(sum / frame.Length / (32768.0 * 32768.0) + 1e-10);
+        double sum = 0, band = 0;
+        foreach (var sample in frame)
+        {
+            var x = sample / 32768.0;
+            sum += x * x;
+            var y = lowPass.Run(highPass.Run(x));
+            band += y * y;
+        }
+        // The filters ring briefly after a sound stops; the band can never hold more than the whole frame.
+        band = Math.Min(band, sum);
+        var level = 10 * Math.Log10(sum / frame.Length + 1e-10);
+        var bandLevel = 10 * Math.Log10(band / frame.Length + 1e-10);
         LevelDb = level;
-        // The floor falls quickly to quiet frames and rises slowly so speech does not raise it.
-        noiseFloor = level < noiseFloor ? noiseFloor + (level - noiseFloor) * 0.3 : noiseFloor + Math.Min(level - noiseFloor, 6) * 0.004;
-        var speech = level > Math.Max(-52, Math.Min(noiseFloor + 12, -30));
+        // Speech rises well above the background in the voice band and keeps most of its energy there; loud
+        // sounds count regardless. Windows noise suppression leaves a very low floor, so the floor's own level
+        // is the reference rather than a fixed threshold, with only a faint absolute minimum.
+        var speech = bandLevel > Math.Max(-60, noiseFloor + 9) && (band > sum * 0.4 || level > -30);
+        // The floor follows frames without speech quickly. During speech it creeps up slowly, and never past
+        // -50 dBFS, so a steady hum that passes for speech is learned within seconds while a long sentence
+        // can never raise the bar above its own quiet tail.
+        noiseFloor = speech ? (noiseFloor < -50 ? noiseFloor + Math.Clamp(bandLevel - noiseFloor, 0, 6) * 0.002 : noiseFloor)
+            : bandLevel < noiseFloor ? noiseFloor + (bandLevel - noiseFloor) * 0.3 : noiseFloor + (bandLevel - noiseFloor) * 0.1;
         if (!Transmitting)
         {
             if (open) Send(EndFrame(), VoicePacket.EndOfSpeech);
             open = false; hangover = 0; prerollCount = 0;
             return;
         }
-        if (PushToTalk || speech) { hangover = 20; Volatile.Write(ref lastSpeech, Environment.TickCount64); }
-        if (!open && hangover > 0)
+        if (PushToTalk || speech) { hangover = HangoverFrames; Volatile.Write(ref lastSpeech, Environment.TickCount64); }
+        else if (hangover > 0) hangover--;
+        var talking = hangover > 0;
+        if (!open && (talking || AlwaysOn))
         {
             open = true; encoder.ResetState();
             // Frames from just before the gate opened carry the start of the first word.
@@ -107,12 +134,39 @@ public sealed class VoiceCapture
         }
         if (open)
         {
-            if (--hangover > 0) Send(frame, 0);
+            if (talking) Send(frame, 0);
+            else if (AlwaysOn) Send(frame, VoicePacket.Silent);
             else { open = false; Send(frame, VoicePacket.EndOfSpeech); }
             return;
         }
         frame.CopyTo(preroll[prerollNext], 0);
         prerollNext = (prerollNext + 1) % preroll.Length; prerollCount = Math.Min(prerollCount + 1, preroll.Length);
+    }
+    // A second-order Butterworth section (transposed direct form II).
+    private sealed class Biquad
+    {
+        private double b0, b1, b2, a1, a2, z1, z2;
+        public static Biquad LowPass(double hz) => Make(hz, false);
+        public static Biquad HighPass(double hz) => Make(hz, true);
+        private static Biquad Make(double hz, bool high)
+        {
+            var w = 2 * Math.PI * hz / VoicePacket.SampleRate;
+            var cos = Math.Cos(w); var alpha = Math.Sin(w) / Math.Sqrt(2);
+            var a0 = 1 + alpha;
+            var mid = high ? 1 + cos : 1 - cos;
+            return new()
+            {
+                b0 = mid / 2 / a0, b1 = (high ? -mid : mid) / a0, b2 = mid / 2 / a0,
+                a1 = -2 * cos / a0, a2 = (1 - alpha) / a0
+            };
+        }
+        public double Run(double x)
+        {
+            var y = b0 * x + z1;
+            z1 = b1 * x - a1 * y + z2;
+            z2 = b2 * x - a2 * y;
+            return y;
+        }
     }
     private short[] EndFrame() { Array.Clear(frame); return frame; }
     private void Send(short[] samples, byte flags)
@@ -128,16 +182,21 @@ public sealed class VoiceCapture
 // waits briefly for late frames, and drops frames when the queue grows too far behind real time.
 public sealed class VoiceJitterBuffer
 {
-    private const int Capacity = 64, MaxConcealed = 5;
+    // Prebuffering adapts between 60 and 200 ms to the arrival jitter measured on the previous sentences.
+    public const int MinTargetFrames = 3, MaxTargetFrames = 10, MaxConcealed = 10;
+    private const int Capacity = 64;
     private readonly IOpusDecoder decoder = OpusCodecFactory.CreateDecoder(VoicePacket.SampleRate, 1);
     private readonly byte[]?[] packets = new byte[Capacity][];
     private readonly bool[] endings = new bool[Capacity];
     private readonly bool[] present = new bool[Capacity];
-    private ushort expected, newest, lastPlayed;
+    private ushort expected, newest, lastPlayed, spurtFirst;
     private bool playing, started, ended, hasPlayed;
     private int buffered, missing, lateRun;
     private long firstArrival, lastArrival;
-    public int TargetFrames { get; set; } = 3;
+    private double delay, jitter;
+    public int TargetFrames { get; set; } = MinTargetFrames;
+    // Smoothed deviation of frame arrival times from their 20 ms cadence.
+    public double JitterMs => Volatile.Read(ref jitter);
     public int Buffered { get { lock (packets) return buffered; } }
     public int Concealed { get; private set; }
     public int Dropped { get; private set; }
@@ -165,8 +224,19 @@ public sealed class VoiceJitterBuffer
                 else if (offset >= Capacity) Reset();
             }
             lateRun = 0; lastArrival = now;
-            if (!started) { started = true; expected = newest = sequence; firstArrival = now; }
-            else if (!playing && buffered == 0) { expected = newest = sequence; firstArrival = now; }
+            if (!started || !playing && buffered == 0)
+            {
+                // A new talk spurt: choose how much to prebuffer from the jitter seen so far.
+                started = true; expected = newest = spurtFirst = sequence; firstArrival = now; delay = 0;
+                TargetFrames = Math.Clamp((int)Math.Ceiling(jitter * 2.5 / VoicePacket.FrameMs) + 2, MinTargetFrames, MaxTargetFrames);
+            }
+            else
+            {
+                // How early or late this frame is against the spurt's own cadence; the mean absorbs clock drift.
+                var deviation = now - firstArrival - (short)(sequence - spurtFirst) * VoicePacket.FrameMs - delay;
+                delay += deviation / 16;
+                Volatile.Write(ref jitter, jitter + (Math.Abs(deviation) - jitter) / 16);
+            }
             var index = sequence % Capacity;
             if (present[index]) return;
             present[index] = true; packets[index] = payload.ToArray(); endings[index] = (flags & VoicePacket.EndOfSpeech) != 0; buffered++;
@@ -190,10 +260,17 @@ public sealed class VoiceJitterBuffer
                 if (buffered == 0 || now - firstArrival < TargetFrames * VoicePacket.FrameMs) return false;
                 playing = true; ended = false; missing = 0;
             }
-            // Behind real time (a sender's clock running fast, or a burst after a network stall): catch up.
+            // Behind real time (a sender's clock running fast, or a burst after a network stall): catch up by
+            // trimming the quiet between words first; speech itself is only skipped once far behind.
             while (buffered > TargetFrames + 4 && present[expected % Capacity])
             {
-                Decode(expected, output); Take(expected); Played(); Dropped++;
+                Decode(expected, output);
+                var last = endings[expected % Capacity];
+                Take(expected); Played();
+                if (buffered > TargetFrames + 8 || Quiet(output)) { Dropped++; continue; }
+                missing = 0;
+                if (last) { playing = false; ended = true; }
+                return true;
             }
             var index = expected % Capacity;
             if (present[index])
@@ -220,6 +297,13 @@ public sealed class VoiceJitterBuffer
         }
     }
     private void Played() { lastPlayed = expected; hasPlayed = true; expected++; }
+    // Below about -50 dBFS: the gaps between words, not the words.
+    private static bool Quiet(ReadOnlySpan<float> samples)
+    {
+        double sum = 0;
+        foreach (var sample in samples) sum += (double)sample * sample;
+        return sum / samples.Length < 1e-5;
+    }
     private void Decode(ushort sequence, Span<float> output) => Run(output, packets[sequence % Capacity], false);
     // Frames come from other people's apps; a corrupt one is skipped as silence rather than ever stopping playback.
     private void Run(Span<float> output, ReadOnlySpan<byte> data, bool fec)
@@ -250,7 +334,7 @@ public sealed class VoiceMixer : IVoiceSink
     private sealed class Speaker
     {
         public readonly VoiceJitterBuffer Buffer = new();
-        public long LastPacket;
+        public long LastPacket, LastSpeech;
     }
     private readonly Dictionary<int, Speaker> speakers = [];
     private readonly float[] mixed = new float[VoicePacket.FrameSamples];
@@ -263,8 +347,9 @@ public sealed class VoiceMixer : IVoiceSink
     public float Volume { get; set; } = 1;
     // A short local sound, such as someone joining voice. It is not speech, so it never lowers the video.
     public void Cue(float[] samples) { lock (speakers) { cue = samples; cueOffset = 0; } }
-    // Senders only transmit while their speech gate is open, so arriving frames mean someone is talking.
-    // That keeps speaking indicators and video ducking working even when no speaker device is playing.
+    // Senders only transmit while their speech gate is open, or mark frames silent when sending continuously,
+    // so arriving speech frames mean someone is talking. That keeps speaking indicators and video ducking
+    // working even when no speaker device is playing.
     public void Receive(int slot, ushort sequence, byte flags, ReadOnlySpan<byte> payload)
     {
         Speaker speaker;
@@ -273,14 +358,25 @@ public sealed class VoiceMixer : IVoiceSink
             if (!speakers.TryGetValue(slot, out speaker!)) { if (speakers.Count >= 16) return; speakers[slot] = speaker = new(); }
             var now = Environment.TickCount64;
             speaker.LastPacket = now;
-            if (Volume > 0 && gains.GetValueOrDefault(slot, 1f) > 0 && (flags & VoicePacket.EndOfSpeech) == 0) Volatile.Write(ref lastSpeech, now);
+            if ((flags & (VoicePacket.EndOfSpeech | VoicePacket.Silent)) == 0)
+            {
+                speaker.LastSpeech = now;
+                if (Volume > 0 && gains.GetValueOrDefault(slot, 1f) > 0) Volatile.Write(ref lastSpeech, now);
+            }
         }
         speaker.Buffer.Push(sequence, flags, payload);
     }
+    // Each person's own level, 0 to 2 (200%), on top of the overall voice volume.
     public void SetGain(int slot, float gain) { lock (speakers) gains[slot] = Math.Clamp(gain, 0, 2); }
+    public float Gain(int slot) { lock (speakers) return gains.GetValueOrDefault(slot, 1f); }
     public void Clear() { lock (speakers) { speakers.Clear(); offset = mixed.Length; } }
     public void Forget(int slot) { lock (speakers) speakers.Remove(slot); }
-    public bool IsSpeaking(int slot) { lock (speakers) return speakers.TryGetValue(slot, out var s) && Environment.TickCount64 - s.LastPacket < 300; }
+    public bool IsSpeaking(int slot) { lock (speakers) return speakers.TryGetValue(slot, out var s) && Environment.TickCount64 - s.LastSpeech < 300; }
+    // Arrival jitter and concealment for one speaker, for diagnostics.
+    public (double JitterMs, int TargetFrames, int Concealed, int Dropped, int Late)? Stats(int slot)
+    {
+        lock (speakers) return speakers.TryGetValue(slot, out var s) ? (s.Buffer.JitterMs, s.Buffer.TargetFrames, s.Buffer.Concealed, s.Buffer.Dropped, s.Buffer.Late) : null;
+    }
     // Only people you can hear count: someone you muted for yourself never lowers the video.
     public bool AnyoneSpeaking => Environment.TickCount64 - Volatile.Read(ref lastSpeech) < 300;
     public long LastSpeechTick => Volatile.Read(ref lastSpeech);
