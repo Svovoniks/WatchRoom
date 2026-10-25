@@ -14,11 +14,17 @@ public partial class MainWindow
     private void InitializeCaption(IntPtr handle)
     {
         HwndSource.FromHwnd(handle)?.AddHook(CaptionWindowMessage);
-        uint round = 2; // DWMWCP_ROUND
-        DwmSetWindowAttribute(handle, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, ref round, sizeof(uint));
+        ApplyWindowCorners(handle);
         StateChanged += (_, _) => UpdateCaption();
         DpiChanged += (_, _) => UpdateCaption();
         UpdateCaption();
+    }
+    // Fullscreen is a normal window covering the monitor rather than a maximized one, so Windows would still round it.
+    private void ApplyWindowCorners(IntPtr handle)
+    {
+        uint corners = fullscreen ? 1u /* DWMWCP_DONOTROUND */ : 2u /* DWMWCP_ROUND */;
+        DwmSetWindowAttribute(handle, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, ref corners, sizeof(uint));
+        RefreshPlayerCorners();
     }
     private void UpdateCaption()
     {
@@ -37,6 +43,7 @@ public partial class MainWindow
             WindowRoot.Margin = new Thickness(frame);
         }
         else WindowRoot.Margin = new Thickness(0);
+        RefreshPlayerCorners();
     }
     // The player has no caption row: the video reaches the top of the window and the player's top bar carries the
     // window buttons, except in fullscreen, which has none.

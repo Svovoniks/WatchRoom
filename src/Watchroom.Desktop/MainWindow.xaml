@@ -871,26 +871,31 @@
        <Grid x:Name="PlayerOverlay" Background="#01000000" Focusable="True" PreviewMouseLeftButtonDown="PlayerOverlayPressed" MouseMove="PlayerMouseMoved" MouseLeftButtonDown="VideoClicked" MouseLeave="PlayerMouseLeft" MouseWheel="VideoWheel" PreviewKeyDown="KeyPressed" PreviewKeyUp="KeyReleased">
         <Border x:Name="PlayerEmpty" Background="#0B0B0E"><Viewbox x:Name="PlayerEmptyContent" Stretch="Uniform" StretchDirection="DownOnly" Margin="16,72,16,128"><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"><Border Width="76" Height="76" CornerRadius="38" Background="#2A2442" HorizontalAlignment="Center"><TextBlock Text="&#xF5B0;" FontFamily="{StaticResource IconFont}" FontSize="28" Foreground="#A991FF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0,0,0"/></Border><TextBlock Text="Choose a video to play" FontSize="21" FontWeight="SemiBold" Foreground="#F4F4F7" HorizontalAlignment="Center" Margin="0,20,0,20"/><Button Content="Browse library" Tag="Library" Click="Navigate" Style="{StaticResource PlayerButton}" HorizontalAlignment="Center" Margin="0"/></StackPanel></Viewbox></Border>
         <StackPanel x:Name="PlayerTopChrome" VerticalAlignment="Top">
-         <!-- Top bar: back, title, room status and room actions. It hides and shows together with the bottom bar. -->
-         <Border x:Name="RoomHeader" Background="{StaticResource PlayerHeaderFade}" Padding="6,6,14,30" PreviewMouseMove="ControlsMouseMoved" PreviewKeyDown="ControlsKeyPressed" SizeChanged="RoomHeaderSizeChanged" MouseLeftButtonDown="RoomHeaderPressed">
+         <!-- Top bar: floating pills for back, the title, room status and room actions, centred on the window buttons. It hides and shows together with the dock. -->
+         <Border x:Name="RoomHeader" Background="{StaticResource PlayerHeaderFade}" Padding="9,9,14,24" PreviewMouseMove="ControlsMouseMoved" PreviewKeyDown="ControlsKeyPressed" SizeChanged="RoomHeaderSizeChanged" MouseLeftButtonDown="RoomHeaderPressed">
           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-           <Button x:Name="PlayerBackButton" Content="&#xE72B;" Tag="Library" Click="Navigate" Style="{StaticResource PlayerGlassButton}" FontFamily="{StaticResource IconFont}" FontSize="13" Width="34" Height="34" MinHeight="34" Padding="0" Margin="0,0,12,0" VerticalAlignment="Top" ToolTip="Back to library" AutomationProperties.Name="Library"/>
-           <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0" SizeChanged="RoomTitleSizeChanged">
-            <TextBlock x:Name="RoomHeading" Text="Watchroom player" Foreground="#F4F4F7" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>
-            <DockPanel x:Name="RoomHeaderDetails" Margin="0,5,0,0">
-             <Border x:Name="RoomStatusChip" DockPanel.Dock="Left" Style="{StaticResource PlayerChip}"><StackPanel Orientation="Horizontal"><Ellipse x:Name="RoomStatusDot" Width="7" Height="7" Fill="#6B6D7A" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock x:Name="ConnectionStatus" Text="Local playback" Foreground="#D9DAE2" FontSize="11.5" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"/></StackPanel></Border>
-             <ToggleButton x:Name="SharedControls" DockPanel.Dock="Left" Click="ControlsChanged" Visibility="Collapsed" Style="{StaticResource PlayerChipToggle}" ToolTip="Let admitted guests play, pause and seek" AutomationProperties.Name="Allow shared controls"><StackPanel Orientation="Horizontal"><TextBlock x:Name="SharedControlsIcon" Text="&#xE72E;" Style="{StaticResource PlayerPillIcon}" FontSize="11" Margin="0,0,6,0"/><TextBlock x:Name="SharedControlsText" Text="Host controls"/></StackPanel></ToggleButton>
-             <TextBlock x:Name="RoomSubtitle" Text="Choose a video from your library to start watching." Foreground="#B4B6C2" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="4,0,0,0"/>
+           <Button x:Name="PlayerBackButton" Content="&#xE72B;" Tag="Library" Click="Navigate" Style="{StaticResource PlayerGlassButton}" FontFamily="{StaticResource IconFont}" FontSize="11" Width="28" Padding="0" Margin="0,0,6,0" ToolTip="Back to library" AutomationProperties.Name="Library"/>
+           <!-- The title, then what is playing or the room's state, on one line; the line trims before the title does. -->
+           <Border Grid.Column="1" Style="{StaticResource PlayerChip}" Padding="12,0" Margin="0,0,8,0" HorizontalAlignment="Left" SizeChanged="RoomTitleSizeChanged">
+            <DockPanel VerticalAlignment="Center">
+             <TextBlock x:Name="RoomHeading" DockPanel.Dock="Left" Text="Watchroom player" Foreground="#F4F4F7" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+             <TextBlock x:Name="RoomSubtitle" Text="Choose a video from your library to start watching." Foreground="#A9ABB8" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="8,0,0,0"/>
             </DockPanel>
-           </StackPanel>
+           </Border>
            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top">
-            <!-- Voice: join or leave, with a microphone switch while in voice. -->
-            <Button x:Name="VoiceMuteButton" Click="ToggleVoiceMute" Style="{StaticResource PlayerGlassButton}" Visibility="Collapsed" FontFamily="{StaticResource IconFont}" FontSize="14" Width="34" Padding="0" Content="&#xE720;" ToolTip="Mute microphone (V)" AutomationProperties.Name="Mute microphone"/>
-            <Button x:Name="VoiceButton" Click="ToggleVoice" Style="{StaticResource PlayerGlassButton}" Visibility="Collapsed" ToolTip="Join voice chat to talk while you watch" AutomationProperties.Name="Join voice chat"><StackPanel Orientation="Horizontal"><TextBlock x:Name="VoiceButtonIcon" Text="&#xE95B;" Style="{StaticResource PlayerPillIcon}"/><TextBlock x:Name="VoiceButtonText" Text="Voice" VerticalAlignment="Center"/><Border x:Name="VoiceCountBadge" Visibility="Collapsed" Background="#3FB97A" CornerRadius="8" MinWidth="16" Height="16" Padding="5,0" Margin="7,0,0,0" VerticalAlignment="Center"><TextBlock x:Name="VoiceCountText" Foreground="#0B0B0E" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></StackPanel></Button>
-            <Button x:Name="InviteButton" Content="&#xE71B;" Click="CopyInvite" Style="{StaticResource PlayerGlassButton}" FontFamily="{StaticResource IconFont}" FontSize="14" Width="34" Padding="0" ToolTip="Copy invite" AutomationProperties.Name="Copy invite"/>
-            <Button x:Name="LeaveButton" Content="Leave" Click="LeaveRoom" Style="{StaticResource PlayerGlassButton}" Margin="0"/>
+            <StackPanel x:Name="RoomHeaderDetails" Orientation="Horizontal" VerticalAlignment="Top">
+             <Border x:Name="RoomStatusChip" Style="{StaticResource PlayerChip}"><StackPanel Orientation="Horizontal"><Ellipse x:Name="RoomStatusDot" Width="7" Height="7" Fill="#6B6D7A" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock x:Name="ConnectionStatus" Text="Local playback" Foreground="#D9DAE2" FontSize="11.5" MaxWidth="180" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite"/></StackPanel></Border>
+             <ToggleButton x:Name="SharedControls" Click="ControlsChanged" Visibility="Collapsed" Style="{StaticResource PlayerChipToggle}" ToolTip="Let admitted guests play, pause and seek" AutomationProperties.Name="Allow shared controls"><StackPanel Orientation="Horizontal"><TextBlock x:Name="SharedControlsIcon" Text="&#xE72E;" Style="{StaticResource PlayerPillIcon}" FontSize="11" Margin="0,0,6,0"/><TextBlock x:Name="SharedControlsText" Text="Host controls"/></StackPanel></ToggleButton>
+            </StackPanel>
+            <!-- Room actions share one pill: the microphone switch and voice while in a room, invite, and leave. -->
+            <Border Style="{StaticResource PlayerHeaderGroup}"><StackPanel Orientation="Horizontal">
+             <Button x:Name="VoiceMuteButton" Click="ToggleVoiceMute" Style="{StaticResource PlayerSegmentIcon}" Visibility="Collapsed" Content="&#xE720;" ToolTip="Mute microphone (V)" AutomationProperties.Name="Mute microphone"/>
+             <Button x:Name="VoiceButton" Click="ToggleVoice" Style="{StaticResource PlayerSegmentButton}" Visibility="Collapsed" ToolTip="Join voice chat to talk while you watch" AutomationProperties.Name="Join voice chat"><StackPanel Orientation="Horizontal"><TextBlock x:Name="VoiceButtonIcon" Text="&#xE95B;" Style="{StaticResource PlayerPillIcon}"/><TextBlock x:Name="VoiceButtonText" Text="Voice" VerticalAlignment="Center"/><Border x:Name="VoiceCountBadge" Visibility="Collapsed" Background="#3FB97A" CornerRadius="8" MinWidth="16" Height="16" Padding="5,0" Margin="7,0,0,0" VerticalAlignment="Center"><TextBlock x:Name="VoiceCountText" Foreground="#0B0B0E" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></StackPanel></Button>
+             <Button x:Name="InviteButton" Content="&#xE71B;" Click="CopyInvite" Style="{StaticResource PlayerSegmentIcon}" ToolTip="Copy invite" AutomationProperties.Name="Copy invite"/>
+             <Button x:Name="LeaveButton" Content="Leave" Click="LeaveRoom" Style="{StaticResource PlayerSegmentButton}" Padding="10,0"/>
+            </StackPanel></Border>
             <!-- The docked player has no caption row: the window buttons sit in the bar's corner, and the bar drags the window. -->
-            <StackPanel x:Name="PlayerCaptionButtons" Orientation="Horizontal" VerticalAlignment="Top" Margin="8,-6,-14,0">
+            <StackPanel x:Name="PlayerCaptionButtons" Orientation="Horizontal" VerticalAlignment="Top" Margin="8,-9,-14,0">
              <Button x:Name="PlayerMinimizeButton" Content="&#xE921;" Click="MinimizeWindow" Style="{StaticResource PlayerCaptionButton}" AutomationProperties.Name="Minimize"/>
              <Button x:Name="PlayerMaximizeButton" Content="&#xE922;" Click="ToggleMaximizeWindow" Style="{StaticResource PlayerCaptionButton}" AutomationProperties.Name="Maximize"/>
              <Button x:Name="PlayerCloseButton" Content="&#xE8BB;" Click="CloseWindow" Style="{StaticResource PlayerCaptionCloseButton}" AutomationProperties.Name="Close"/>
@@ -908,33 +913,45 @@
         <StackPanel x:Name="PlayerBottomChrome" VerticalAlignment="Bottom">
          <!-- The update card moves here while the player is open; native video draws over the main window. -->
          <Grid x:Name="PlayerUpdateHost"/>
-         <Border x:Name="UpNextCard" Visibility="Collapsed" HorizontalAlignment="Right" Margin="0,0,24,24" Width="360" Background="#F217181F" BorderBrush="#2E303B" BorderThickness="1" CornerRadius="12" Padding="18,16" Effect="{StaticResource PopupShadow}" MouseLeftButtonDown="UpNextCardClicked" AutomationProperties.Name="Up next">
-          <StackPanel>
-           <TextBlock Text="UP NEXT" Foreground="#A991FF" FontSize="11" FontWeight="SemiBold" Margin="0,0,0,6"/>
-           <TextBlock x:Name="UpNextSeries" Foreground="#F4F4F7" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-           <TextBlock x:Name="UpNextEpisode" Foreground="#B4B6C2" FontSize="13" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+         <!-- Sits centred just above the dock and drops to the bottom when the dock hides; see PlaceUpNextCard. -->
+         <Border x:Name="UpNextCard" Panel.ZIndex="1" Visibility="Collapsed" HorizontalAlignment="Center" Margin="0,0,0,8" Width="340" Background="#D9111116" BorderBrush="#1FFFFFFF" BorderThickness="1" CornerRadius="16" Padding="12,12,10,10" MouseLeftButtonDown="UpNextCardClicked" AutomationProperties.Name="Up next">
+          <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+           <Border x:Name="UpNextThumb" Width="96" Height="54" CornerRadius="8" local:RoundedClip.Radius="8" Background="#23242E" Margin="0,0,12,0" VerticalAlignment="Center"><Image x:Name="UpNextImage" Stretch="UniformToFill"/></Border>
+           <StackPanel Grid.Column="1" VerticalAlignment="Center">
+            <TextBlock Text="UP NEXT" Foreground="#A991FF" FontSize="10" FontWeight="SemiBold" Margin="0,0,0,3"/>
+            <TextBlock x:Name="UpNextSeries" Foreground="#F4F4F7" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+            <TextBlock x:Name="UpNextEpisode" Foreground="#A9ABB8" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
+           </StackPanel>
            <!-- The fill shrinks with a render transform animation so it drains smoothly. -->
-           <Border x:Name="UpNextProgress" Height="4" CornerRadius="2" Background="#2E303B" Margin="0,14,0,0" IsHitTestVisible="False"><Border x:Name="UpNextFill" CornerRadius="2" Background="#A991FF" RenderTransformOrigin="0,0.5"><Border.RenderTransform><ScaleTransform x:Name="UpNextFillScale"/></Border.RenderTransform></Border></Border>
-           <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <TextBlock x:Name="UpNextCountdown" Foreground="#B4B6C2" FontSize="13" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" AutomationProperties.LiveSetting="Polite"/>
-            <StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="Cancel" Click="UpNextCancelClicked" Style="{StaticResource PlayerButton}" Background="Transparent" MinHeight="34" Height="34" Padding="12,0" ToolTip="Stay on this episode (Esc)"/><Button Content="Play now" Click="UpNextPlayClicked" Style="{StaticResource PlayerButton}" Background="#A991FF" Foreground="#160E2E" FontWeight="SemiBold" MinHeight="34" Height="34" Padding="14,0" Margin="0"/></StackPanel>
+           <Border x:Name="UpNextProgress" Grid.Row="1" Grid.ColumnSpan="2" Height="3" CornerRadius="1.5" Background="#26FFFFFF" Margin="0,12,2,0" IsHitTestVisible="False"><Border x:Name="UpNextFill" CornerRadius="1.5" Background="#A991FF" RenderTransformOrigin="0,0.5"><Border.RenderTransform><ScaleTransform x:Name="UpNextFillScale"/></Border.RenderTransform></Border></Border>
+           <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock x:Name="UpNextCountdown" Foreground="#A9ABB8" FontSize="11.5" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" AutomationProperties.LiveSetting="Polite"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+             <Button Content="Cancel" Click="UpNextCancelClicked" Style="{StaticResource PlayerSegmentButton}" Height="26" Padding="12,0" Margin="0,0,4,0" ToolTip="Stay on this episode (Esc)"/>
+             <Button Click="UpNextPlayClicked" Style="{StaticResource PlayerSegmentPlay}" Width="Auto" Height="26" Padding="12,0" Margin="0" AutomationProperties.Name="Play now"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xF5B0;" FontFamily="{StaticResource IconFont}" FontSize="10" VerticalAlignment="Center" Margin="0,0,7,0"/><TextBlock Text="Play now" FontFamily="Segoe UI" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/></StackPanel></Button>
+            </StackPanel>
            </Grid>
-          </StackPanel>
+          </Grid>
          </Border>
          <!-- Bottom bar: timeline, transport, track and queue pills, and output. Each pill opens its menu above itself, so the bar never changes height. -->
-         <Border x:Name="PlaybackControls" Background="{StaticResource PlayerControlsFade}" Padding="18,34,18,12" PreviewMouseMove="ControlsMouseMoved" PreviewKeyDown="ControlsKeyPressed" SizeChanged="PlaybackControlsSizeChanged">
-          <StackPanel>
-           <Grid Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Slider x:Name="Timeline" PreviewMouseWheel="TimelineWheel" Style="{StaticResource PlayerSlider}" Minimum="0" Maximum="1" IsMoveToPointEnabled="False" PreviewMouseLeftButtonDown="SeekStarted" PreviewMouseLeftButtonUp="SeekFinished" PreviewMouseMove="SeekMoved" LostMouseCapture="SeekCaptureLost" PreviewKeyDown="SeekKeyStarted" PreviewKeyUp="SeekKeyFinished" AutomationProperties.Name="Playback position"/><Button x:Name="EpisodeEndButton" Grid.Column="1" Content="Next episode →" Click="EpisodeEndClicked" Visibility="Collapsed" Margin="12,0,0,0" Padding="12,0" MinHeight="30" Height="30" Style="{StaticResource PlayerButton}" AutomationProperties.Name="Next episode"/></Grid>
-           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-             <Button x:Name="PlayButton" Content="&#xF5B0;" Click="TogglePlayback" Style="{StaticResource PlayerPlayButton}" ToolTip="Play / pause (Space)" AutomationProperties.Name="Play or pause"/>
-             <Button x:Name="StopButton" Content="&#xEE95;" Click="StopPlayback" Style="{StaticResource PlayerIconButton}" ToolTip="Stop (S)" AutomationProperties.Name="Stop playback"/>
-             <Button x:Name="PreviousButton" IsEnabled="False" ToolTipService.ShowOnDisabled="True" Content="&#xE892;" Click="PreviousQueued" Style="{StaticResource PlayerIconButton}" ToolTip="Previous video (P)" AutomationProperties.Name="Previous video"/>
-             <Button x:Name="NextButton" IsEnabled="False" ToolTipService.ShowOnDisabled="True" Content="&#xE893;" Click="NextQueued" Style="{StaticResource PlayerIconButton}" ToolTip="Next video (N)" AutomationProperties.Name="Next video"/>
-             <TextBlock x:Name="PlaybackTime" Text="00:00 / 00:00" Foreground="#D9DAE2" FontSize="12.5" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" Margin="6,0,12,0"/>
+         <Border x:Name="PlaybackControls" Background="{StaticResource PlayerControlsFade}" Padding="16,40,16,16" PreviewMouseMove="ControlsMouseMoved" PreviewKeyDown="ControlsKeyPressed">
+          <!-- The dock: one glass capsule holding the timeline and every control, centred over the video. -->
+          <Border x:Name="PlaybackDock" Background="#D9111116" BorderBrush="#1FFFFFFF" BorderThickness="1" CornerRadius="16" Padding="10,2,10,8" MaxWidth="980" SizeChanged="PlaybackControlsSizeChanged">
+           <!-- The timeline spans the dock; while the episode pill shows, it stops at the output pill's column, and the episode pill centres over that pill. -->
+           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Slider x:Name="Timeline" Grid.ColumnSpan="3" Margin="0,0,0,2" PreviewMouseWheel="TimelineWheel" Style="{StaticResource PlayerSlider}" Minimum="0" Maximum="1" IsMoveToPointEnabled="False" PreviewMouseLeftButtonDown="SeekStarted" PreviewMouseLeftButtonUp="SeekFinished" PreviewMouseMove="SeekMoved" LostMouseCapture="SeekCaptureLost" PreviewKeyDown="SeekKeyStarted" PreviewKeyUp="SeekKeyFinished" AutomationProperties.Name="Playback position"/>
+            <Button x:Name="EpisodeEndButton" Grid.Column="2" HorizontalAlignment="Center" Content="Next episode →" Click="EpisodeEndClicked" Visibility="Collapsed" Margin="10,0,0,2" Background="#1FFFFFFF" Style="{StaticResource PlayerSegmentButton}" AutomationProperties.Name="Next episode"/>
+            <StackPanel Grid.Row="1" Orientation="Horizontal" VerticalAlignment="Center">
+             <Border Style="{StaticResource PlayerPillGroup}"><StackPanel Orientation="Horizontal">
+              <Button x:Name="PreviousButton" IsEnabled="False" ToolTipService.ShowOnDisabled="True" Content="&#xE892;" Click="PreviousQueued" Style="{StaticResource PlayerSegmentIcon}" ToolTip="Previous video (P)" AutomationProperties.Name="Previous video"/>
+              <Button x:Name="PlayButton" Content="&#xF5B0;" Click="TogglePlayback" Style="{StaticResource PlayerSegmentPlay}" ToolTip="Play / pause (Space)" AutomationProperties.Name="Play or pause"/>
+              <Button x:Name="NextButton" IsEnabled="False" ToolTipService.ShowOnDisabled="True" Content="&#xE893;" Click="NextQueued" Style="{StaticResource PlayerSegmentIcon}" ToolTip="Next video (N)" AutomationProperties.Name="Next video"/>
+              <Button x:Name="StopButton" Content="&#xEE95;" Click="StopPlayback" Style="{StaticResource PlayerSegmentIcon}" ToolTip="Stop (S)" AutomationProperties.Name="Stop playback"/>
+             </StackPanel></Border>
+             <Border x:Name="PlaybackTimePill" Style="{StaticResource PlayerPillGroup}" Padding="10,0"><TextBlock x:Name="PlaybackTime" Text="00:00 / 00:00" Foreground="#D9DAE2" FontSize="11.5" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular"/></Border>
             </StackPanel>
             <!-- Pills that don't fit fold, from the end, into the … pill; its menu also holds any bar buttons hidden for width. -->
-            <local:PillStrip x:Name="PlayerPills" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,-6,0">
+            <local:PillStrip x:Name="PlayerPills" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,-6,0">
              <ToggleButton x:Name="AudioPill" Style="{StaticResource PlayerMenuPill}" ToolTip="Audio track" AutomationProperties.Name="Audio track"><StackPanel Orientation="Horizontal"><TextBlock x:Name="AudioPillIcon" Text="&#xE7F6;" Style="{StaticResource PlayerPillIcon}"/><TextBlock x:Name="AudioPillText" Text="Audio" Style="{StaticResource PlayerPillText}"/><TextBlock x:Name="AudioPillDetail" Style="{StaticResource PlayerPillDetail}"/><TextBlock Text="&#xE70E;" Style="{StaticResource PlayerPillChevron}"/></StackPanel></ToggleButton>
              <local:PlayerMenuPopup x:Name="AudioMenu" Style="{StaticResource PlayerMenuPopup}" Opened="PlayerMenuOpened"><local:MenuSizer>
               <ContentControl Style="{StaticResource PlayerMenu}" PreviewKeyDown="PlayerMenuKeyDown"><StackPanel>
@@ -1024,20 +1041,20 @@
               <ContentControl Style="{StaticResource PlayerMenu}" MinWidth="220" PreviewKeyDown="PlayerMenuKeyDown"><StackPanel x:Name="OverflowItems"/></ContentControl></local:MenuSizer>
              </local:PlayerMenuPopup>
             </local:PillStrip>
-            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
-             <!-- The volume slider rises above the speaker while the pointer is on it or the volume changes; the level sits under the speaker. -->
-             <StackPanel x:Name="VolumeGroup" Width="40" Margin="0,0,4,0" VerticalAlignment="Center" PreviewMouseWheel="VolumeWheel" MouseEnter="VolumeGroupEntered" MouseLeave="VolumeGroupLeft">
-              <Button x:Name="MuteButton" Content="&#xE995;" Click="MutePlayback" Style="{StaticResource PlayerIconButton}" Height="34" Margin="0" ToolTip="Mute (M)" AutomationProperties.Name="Mute"/>
-              <TextBlock x:Name="VolumeText" Text="80%" Foreground="#B4B6C2" FontSize="10" HorizontalAlignment="Center" Margin="0,-5,0,0" IsHitTestVisible="False" Typography.NumeralAlignment="Tabular"/>
-              <Popup x:Name="VolumeFlyout" Placement="Top" VerticalOffset="-2" StaysOpen="True" AllowsTransparency="True" PopupAnimation="Fade" Opened="VolumeFlyoutOpened">
+            <Border Grid.Row="1" Grid.Column="2" Style="{StaticResource PlayerPillGroup}" Margin="10,0,0,0" HorizontalAlignment="Center"><StackPanel Orientation="Horizontal">
+             <!-- The volume slider rises above the speaker while the pointer is on it or the volume changes; the level sits beside the speaker. -->
+             <StackPanel x:Name="VolumeGroup" Orientation="Horizontal" VerticalAlignment="Center" PreviewMouseWheel="VolumeWheel" MouseEnter="VolumeGroupEntered" MouseLeave="VolumeGroupLeft">
+              <Button x:Name="MuteButton" Content="&#xE995;" Click="MutePlayback" Style="{StaticResource PlayerSegmentIcon}" ToolTip="Mute (M)" AutomationProperties.Name="Mute"/>
+              <TextBlock x:Name="VolumeText" Text="80%" Foreground="#B4B6C2" FontSize="10.5" MinWidth="28" VerticalAlignment="Center" Margin="0,0,6,0" IsHitTestVisible="False" Typography.NumeralAlignment="Tabular"/>
+              <Popup x:Name="VolumeFlyout" Placement="Top" HorizontalOffset="-5" VerticalOffset="-8" StaysOpen="True" AllowsTransparency="True" PopupAnimation="Fade" Opened="VolumeFlyoutOpened">
                <Border Background="#F717181F" BorderBrush="{StaticResource PlayerLine}" BorderThickness="1" CornerRadius="10" Width="40" Height="136" Padding="0,10">
                 <Slider x:Name="Volume" Orientation="Vertical" IsMoveToPointEnabled="True" Style="{StaticResource PlayerVerticalSlider}" Minimum="0" Maximum="100" Value="80" SmallChange="5" LargeChange="10" ValueChanged="VolumeChanged" AutomationProperties.Name="Volume"/>
                </Border>
               </Popup>
              </StackPanel>
-             <Button x:Name="PictureInPictureButton" Content="&#xE8A7;" Click="EnterPictureInPicture" Style="{StaticResource PlayerIconButton}" ToolTip="Picture in picture (I)" AutomationProperties.Name="Picture in picture"/><Button x:Name="FullscreenButton" Content="&#xE740;" Click="Fullscreen" Style="{StaticResource PlayerIconButton}" Margin="0" ToolTip="Fullscreen (F or double-click video)" AutomationProperties.Name="Fullscreen"/></StackPanel>
+             <Button x:Name="PictureInPictureButton" Content="&#xE8A7;" Click="EnterPictureInPicture" Style="{StaticResource PlayerSegmentIcon}" ToolTip="Picture in picture (I)" AutomationProperties.Name="Picture in picture"/><Button x:Name="FullscreenButton" Content="&#xE740;" Click="Fullscreen" Style="{StaticResource PlayerSegmentIcon}" Margin="0" ToolTip="Fullscreen (F or double-click video)" AutomationProperties.Name="Fullscreen"/></StackPanel></Border>
            </Grid>
-          </StackPanel>
+          </Border>
          </Border>
         </StackPanel>
         <!-- Picture in picture keeps only play/pause and a way back; they appear while the pointer is over the video.

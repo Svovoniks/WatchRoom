@@ -66,7 +66,9 @@ public partial class MainWindow : Window
     private string? activeQueueId;
     private bool updatingQueues;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
-    private readonly DispatcherTimer videoClickDelay = new();
+    // A click on the video plays or pauses at once. The second click of a double-click undoes that and toggles fullscreen,
+    // so this holds the playback state from before the click until the next one, along with the video it applied to.
+    private bool? videoClickUndo;
     private int videoClickGeneration;
     private readonly DispatcherTimer metadataRetentionTimer = new() { Interval = TimeSpan.FromHours(1) };
     private readonly DispatcherTimer scanDelay = new() { Interval = TimeSpan.FromSeconds(3) };
@@ -130,13 +132,6 @@ public partial class MainWindow : Window
         // Menus are separate popup windows; close them when the bar hides, moves to fullscreen or the player closes.
         PlaybackControls.IsVisibleChanged += (_, _) => { if (!PlaybackControls.IsVisible) ClosePlayerMenusNow(); };
         InitializeBackNavigation(); InitializeOpenFiles();
-        videoClickDelay.Interval = TimeSpan.FromMilliseconds(GetDoubleClickTime());
-        videoClickDelay.Tick += (_, _) =>
-        {
-            videoClickDelay.Stop();
-            if (!closing && RoomPage.Visibility == Visibility.Visible && videoClickGeneration == loadGeneration)
-                TogglePlayback(this, new RoutedEventArgs());
-        };
         // Keep the initial window inside the usable desktop on smaller displays.
         Height = Math.Min(Height, SystemParameters.WorkArea.Height);
         Width = Math.Min(Width, SystemParameters.WorkArea.Width);
@@ -237,6 +232,8 @@ public partial class MainWindow : Window
                     if (Interlocked.Exchange(ref trackRefreshQueued, 1) == 0)
                         Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { trackRefreshQueued = 0; if (!closing && ready) RefreshTracks(); });
                 }
+                // Each new video output starts without the subtitle lift; it comes from LibVLC's thread.
+                player.Vout += (_, _) => Dispatcher.BeginInvoke(() => { if (!closing) SubtitleOutputChanged(); });
                 player.ESAdded += (_, _) => TracksChanged(); player.ESDeleted += (_, _) => TracksChanged(); player.ESSelected += (_, _) => TracksChanged();
                 player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); ReportReady(); if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
                 player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus(room?.IsPeerRecovering == true ? "Connection interrupted · Reconnecting…" : "Playback failed. Check that the file is available and the connection is active."); });
@@ -312,7 +309,7 @@ public partial class MainWindow : Window
             StatusText.ToolTip = StatusText.Text;
         }
         currentPage = name;
-        if (name != "Room") videoClickDelay.Stop();
+        if (name != "Room") videoClickUndo = null;
         if (fullscreen && name != "Room") SetFullscreen(false);
         if (pictureInPicture && name == "Room") SetPictureInPicture(false, openPlayer: false);
         // VideoView hosts its content in a separate native overlay window. Collapsing
@@ -1257,6 +1254,7 @@ public partial class MainWindow : Window
     private void PlaybackTickCore()
     {
         UpdateSystemMediaControls();
+        if (player is not null && RoomPage.Visibility == Visibility.Visible) RefreshSubtitleLift();
         // The bars float over the video, so they fade when idle: always in fullscreen, and while playing in the window.
         // Cheap managed checks run first; the native playing state is read only once the bars are idle.
         if (!pictureInPicture && PlaybackControls.Visibility == Visibility.Visible && Environment.TickCount64 - lastPlayerInteraction > 2600 &&
@@ -1402,7 +1400,7 @@ public partial class MainWindow : Window
     }
     private void RequestPlayback(bool playing)
     {
-        videoClickDelay.Stop();
+        videoClickUndo = null;
         // During the up-next countdown, Play continues to the next episode instead of replaying this one;
         // once the countdown is paused, Play restarts it.
         if (playing && upNextChoice is not null) { if (upNextPaused) StartUpNextCountdown(); else EndUpNext(true); return; }
@@ -1665,7 +1663,7 @@ public partial class MainWindow : Window
         playbackRecovery.Clear();
         if (!reconnecting) { roomReconnect?.Cancel(); roomReconnect = null; }
         ClearHostQueues();
-        videoClickDelay.Stop();
+        videoClickUndo = null;
         SavePlaybackPosition(); localResume = 0; endedSeek = null;
         RecordRoomSession(force: true);
         if (fullscreen && !preserveFullscreen) SetFullscreen(false);
@@ -1796,6 +1794,7 @@ public partial class MainWindow : Window
             WindowState = WindowState.Normal;
             WindowStyle = WindowStyle.None;
             ResizeMode = ResizeMode.NoResize;
+            ApplyWindowCorners(handle);
             ApplyPlayerLayout();
             SetWindowPos(handle, IntPtr.Zero, monitor.Monitor.Left, monitor.Monitor.Top,
                 monitor.Monitor.Right - monitor.Monitor.Left, monitor.Monitor.Bottom - monitor.Monitor.Top, 0x0020 | 0x0040);
@@ -1803,6 +1802,7 @@ public partial class MainWindow : Window
         else
         {
             fullscreen = false;
+            ApplyWindowCorners(handle);
             WindowStyle = WindowStyle.SingleBorderWindow;
             ResizeMode = previousResizeMode;
             Left = previousBounds.Left; Top = previousBounds.Top;
@@ -1876,15 +1876,20 @@ public partial class MainWindow : Window
         if (e.OriginalSource != PlayerOverlay) return;
         PlayerOverlay.Focus();
         ShowPlayerControls();
-        videoClickDelay.Stop();
+        var undo = videoClickUndo; videoClickUndo = null;
         if (pictureInPicture) { PictureInPicturePressed(e); e.Handled = true; return; }
-        if (e.ClickCount == 2) SetFullscreen(!fullscreen);
+        if (e.ClickCount == 2)
+        {
+            // The first click already played or paused; put that back if the video is the same. A local toggle always takes
+            // effect even before LibVLC reports it, while in a room the requested state shows at once unless the host refused it.
+            if (undo is { } before && videoClickGeneration == loadGeneration && (room is null || before != WantsMediaPlayback)) RequestPlayback(before);
+            SetFullscreen(!fullscreen);
+        }
         else if (e.ClickCount == 1)
         {
-            // Wait through the system double-click interval so fullscreen does not
-            // also pause playback. Discard the click if the video changes meanwhile.
-            videoClickGeneration = loadGeneration;
-            videoClickDelay.Start();
+            var before = WantsMediaPlayback;
+            TogglePlayback(this, new RoutedEventArgs());
+            videoClickUndo = before; videoClickGeneration = loadGeneration;
         }
         e.Handled = true;
     }
@@ -1983,7 +1988,7 @@ public partial class MainWindow : Window
     private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref uint value, int size);
     private async void WindowClosing(object? sender, CancelEventArgs e)
     {
-        if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop(); videoClickDelay.Stop();
+        if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop();
         DisableSystemMediaControls();
         disconnectToast?.Invoke();
         guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); metadataRetentionTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
@@ -2001,7 +2006,6 @@ public partial class MainWindow : Window
             Close();
         }
     }
-    [DllImport("user32.dll")] private static extern uint GetDoubleClickTime();
     [DllImport("kernel32.dll")] private static extern uint SetThreadExecutionState(uint flags);
     [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] private struct MonitorInfo { public int Size; public NativeRect Monitor, Work; public uint Flags; }

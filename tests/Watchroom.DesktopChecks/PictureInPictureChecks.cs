@@ -39,6 +39,13 @@ static class PictureInPictureChecks
             Call("ShowPage", "Library");
             await (Task)Call("PlayLocalItem", item)!;
             check(await Advances(), "the fixture video plays in the full player");
+            // Subtitles rise above the dock through LibVLC's video output, which LibVLCSharp does not expose.
+            var engine = Field<LibVLC>("vlc"); var native = Field<MediaPlayer>("player");
+            check(VlcSubtitleMargin.TrySet(engine, native, 48) && VlcSubtitleMargin.TrySet(engine, native, 0), "the subtitle lift reaches LibVLC's video output");
+            typeof(MainWindow).GetField("subtitleLiftApplied", flags)!.SetValue(window, 0);
+            Call("ShowPlayerControls");
+            for (var i = 0; i < 30 && Field<int>("subtitleLiftApplied") == 0; i++) await Task.Delay(50);
+            check(Field<int>("subtitleLiftApplied") > 0, $"showing the dock raises the subtitles above it ({Field<int>("subtitleLiftApplied")} video pixels)");
 
             Call("SetPictureInPicture", true, true);
             var small = Field<Window>("pictureInPictureWindow");

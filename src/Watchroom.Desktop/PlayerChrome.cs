@@ -33,6 +33,15 @@ public partial class MainWindow
         // LibVLC moves the video overlay into its own window, outside this window's name scope,
         // so overlay controls are linked by source rather than ElementName.
         RoomHeader.SetBinding(VisibilityProperty, new Binding(nameof(Visibility)) { Source = PlaybackControls });
+        // A narrow header shows only the status dot, so the status reads from its tooltip.
+        RoomStatusChip.SetBinding(ToolTipProperty, new Binding(nameof(TextBlock.Text)) { Source = ConnectionStatus });
+        // The timeline gives the episode pill the output pill's column while it shows.
+        System.ComponentModel.DependencyPropertyDescriptor.FromProperty(VisibilityProperty, typeof(UIElement)).AddValueChanged(EpisodeEndButton,
+            (_, _) => Grid.SetColumnSpan(Timeline, EpisodeEndButton.Visibility == Visibility.Visible ? 2 : 3));
+        PlaybackControls.IsVisibleChanged += (_, _) => PlaceUpNextCard();
+        PlayerBottomChrome.SizeChanged += (_, _) => PlaceUpNextCard();
+        PlayerOverlay.SizeChanged += (_, _) => RefreshPlayerCorners();
+        InitializeSubtitleLift();
         PlayerPills.Overflow = OverflowPill;
         PlayerPills.FoldedChanged += (_, _) => RefreshOverflowMenu();
         // The participants menu sits in LibVLC's overlay window, outside the player page that maps the app palette to dark.
@@ -211,6 +220,27 @@ public partial class MainWindow
         Math.Max(16, RoomHeader.ActualHeight - RoomHeader.Padding.Bottom + 8), 16,
         Math.Max(16, PlayerBottomChrome.ActualHeight - PlaybackControls.Padding.Top + 8));
 
+    // The up-next card sits centred just above the dock and drops to the dock's place when the dock hides.
+    // It comes before the controls in their stack, so it reaches down over their fade with a negative margin.
+    private void PlaceUpNextCard()
+    {
+        var padding = PlaybackControls.Padding;
+        var margin = new Thickness(0, 0, 0, PlaybackControls.IsVisible ? 10 - padding.Top : padding.Bottom);
+        if (UpNextCard.Margin != margin) UpNextCard.Margin = margin;
+    }
+
+    // Windows rounds the window but not LibVLC's overlay window above the video, so the overlay rounds itself to match,
+    // except where Windows draws square corners: maximized and fullscreen.
+    private const double WindowCornerRadius = 8;
+    private void RefreshPlayerCorners()
+    {
+        var round = !fullscreen && (pictureInPicture || WindowState == WindowState.Normal);
+        var size = PlayerOverlay.RenderSize;
+        if (!round || size.Width <= 0 || size.Height <= 0) { PlayerOverlay.Clip = null; return; }
+        var clip = new RectangleGeometry(new Rect(size), WindowCornerRadius, WindowCornerRadius); clip.Freeze();
+        PlayerOverlay.Clip = clip;
+    }
+
     // Short players tighten both bars and drop the status line under the title, so the bars don't meet over the video.
     private int playerHeightStep = -1;
     private void VideoFrameSizeChanged(object sender, SizeChangedEventArgs e)
@@ -219,14 +249,15 @@ public partial class MainWindow
         var step = height >= 420 ? 2 : height >= 300 ? 1 : 0;
         if (step == playerHeightStep) return;
         playerHeightStep = step;
-        PlaybackControls.Padding = step == 2 ? new Thickness(18, 34, 18, 12) : new Thickness(18, 14, 18, 8);
-        RoomHeader.Padding = step == 2 ? new Thickness(6, 6, 14, 30) : new Thickness(6, 6, 14, 12);
+        PlaybackControls.Padding = step == 2 ? new Thickness(16, 40, 16, 16) : new Thickness(10, 12, 10, 8);
+        // The top padding centres the header's pills on the window buttons; only the fade below them shrinks.
+        RoomHeader.Padding = step == 2 ? new Thickness(9, 9, 14, 24) : new Thickness(9, 9, 14, 10);
         RoomHeaderDetails.Visibility = step == 0 ? Visibility.Collapsed : Visibility.Visible;
         // The window buttons stay flush with the window's top-right corner.
         PlayerCaptionButtons.Margin = new Thickness(8, -RoomHeader.Padding.Top, -RoomHeader.Padding.Right, 0);
     }
 
-    // Narrow headers keep only the icons of the room buttons and shorten Leave; the narrowest keep only the
+    // Narrow headers keep only the icons of the room buttons and the status dot, and shorten Leave; the narrowest keep only the
     // close button of the window buttons, as double-clicking the bar still maximizes.
     private bool roomHeaderCompact;
     private void RoomHeaderSizeChanged(object sender, SizeChangedEventArgs e)
@@ -242,6 +273,9 @@ public partial class MainWindow
         VoiceButtonIcon.Margin = new Thickness(0, 0, voiceLabel ? 7 : 0, 0);
         if (compact == roomHeaderCompact) return;
         roomHeaderCompact = compact;
+        ConnectionStatus.Visibility = SharedControlsText.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        RoomStatusDot.Margin = new Thickness(0, 0, compact ? 0 : 7, 0);
+        SharedControlsIcon.Margin = new Thickness(0, 0, compact ? 0 : 6, 0);
         RefreshLeaveButton();
     }
     // A title squeezed to a letter or two says nothing, so it steps aside; its column keeps the space either way.
@@ -261,17 +295,17 @@ public partial class MainWindow
     {
         var width = e.NewSize.Width;
         FitPlayerEmptyContent();
-        UpNextCard.Width = Math.Clamp(width - 48, 240, 360);
+        UpNextCard.Width = Math.Clamp(width - 16, 240, 340);
         // Resizing fires this continuously; only re-lay out the bar when it crosses a density step.
-        var density = width >= 1000 ? 5 : width >= 640 ? 4 : width >= 540 ? 3 : width >= 520 ? 2 : width >= 440 ? 1 : 0;
+        var density = width >= 900 ? 5 : width >= 640 ? 4 : width >= 540 ? 3 : width >= 520 ? 2 : width >= 440 ? 1 : 0;
         if (density == controlsDensity) return;
         controlsDensity = density;
         foreach (var detail in new[] { AudioPillDetail, SubtitlePillDetail, QueuePillDetail, ParticipantsPillDetail })
-        { detail.MaxWidth = width >= 1000 ? 96 : 0; detail.Margin = new Thickness(width >= 1000 ? 6 : 0, 0, 0, 0); }
+        { detail.MaxWidth = width >= 900 ? 96 : 0; detail.Margin = new Thickness(width >= 900 ? 6 : 0, 0, 0, 0); }
         foreach (var text in new[] { AudioPillText, SubtitlePillText, QueuePillText, ParticipantsPillText }) text.MaxWidth = width >= 640 ? 130 : 72;
         StopButton.Visibility = width >= 540 ? Visibility.Visible : Visibility.Collapsed;
         PictureInPictureButton.Visibility = width >= 520 ? Visibility.Visible : Visibility.Collapsed;
-        PlaybackTime.Visibility = width >= 440 ? Visibility.Visible : Visibility.Collapsed;
+        PlaybackTime.Visibility = PlaybackTimePill.Visibility = width >= 440 ? Visibility.Visible : Visibility.Collapsed;
         RefreshOverflowMenu();
     }
 
@@ -369,7 +403,7 @@ public partial class MainWindow
         // Like the player menus, the flyout draws over the native video.
         if (VolumeFlyout.Child is { } child) App.UseSoftwareSurface(child);
     }
-    // The speaker shows more waves as the volume rises; the level reads underneath it.
+    // The speaker shows more waves as the volume rises; the level reads beside it.
     private void RefreshVolumeIndicator()
     {
         var muted = player?.Mute == true;

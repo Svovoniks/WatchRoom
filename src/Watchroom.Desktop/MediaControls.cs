@@ -52,7 +52,7 @@ public partial class MainWindow
         // media button. A toggle right after a system button must not undo it.
         var now = Environment.TickCount64;
         if (system) lastSystemMediaButtonAt = now; else if (play is null && now - lastSystemMediaButtonAt < 400) return true;
-        videoClickDelay.Stop();
+        videoClickUndo = null;
         var requested = play ?? !WantsMediaPlayback;
         try { if (requested != WantsMediaPlayback) RequestPlayback(requested); }
         catch (IOException error) { SetStatus(error.Message); }

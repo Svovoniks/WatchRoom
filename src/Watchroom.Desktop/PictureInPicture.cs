@@ -75,6 +75,7 @@ public partial class MainWindow
         PictureInPictureControls.Visibility = Visibility.Collapsed;
         RoomPlaybackNotice.Margin = pictureInPicture ? new Thickness(12) : new Thickness(24, 112, 24, 112);
         PlayerOverlay.Cursor = Cursors.Arrow;
+        RefreshPlayerCorners();
         ShowPlayerControls();
         PlayerOverlay.Focus();
     }
@@ -114,6 +115,8 @@ public partial class MainWindow
         window.SourceInitialized += (_, _) =>
         {
             pictureInPictureHandle = new WindowInteropHelper(window).Handle;
+            uint round = 2; // DWMWCP_ROUND, matching the overlay's rounded corners
+            DwmSetWindowAttribute(pictureInPictureHandle, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, ref round, sizeof(uint));
             HwndSource.FromHwnd(pictureInPictureHandle)?.AddHook(VideoHostWindowMessage);
         };
         // Closing the small window, for example with Alt+F4, returns the video to the full player.

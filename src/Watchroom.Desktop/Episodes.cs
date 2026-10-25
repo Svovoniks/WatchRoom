@@ -175,6 +175,9 @@ public partial class MainWindow
         EndUpNext(false);
         UpNextSeries.Text = next.Series ?? next.Title;
         UpNextEpisode.Text = $"Season {next.Season} · {next.EpisodeDisplayTitle}";
+        // The episode's still, or its season or series poster; without any artwork the text takes the whole card.
+        UpNextImage.Source = LibraryCatalog.EpisodeArtwork(next) is { } artwork ? LoadThumbnail(artwork) : null;
+        UpNextThumb.Visibility = UpNextImage.Source is null ? Visibility.Collapsed : Visibility.Visible;
         var choice = upNextChoice = new();
         var timer = upNextTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         upNextUpdate = () =>
