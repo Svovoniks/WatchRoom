@@ -114,7 +114,9 @@ public partial class MainWindow
         }
         if (subtitleLift == subtitleLiftTarget) subtitleLiftTimer!.Stop();
     }
-    // How far the dock reaches into the picture, above any black bar under it, converted from screen to video pixels.
+    // How far the dock reaches into the picture, above any black bar under it, in the pixels subtitles are drawn in.
+    // Direct3D draws them at the picture's size on screen when that is larger than the video, and at the video's size
+    // otherwise, so a small video shown large is lifted in screen pixels.
     private double SubtitleLiftTarget()
     {
         if (player is null || pictureInPicture || !PlaybackControls.IsVisible) return 0;
@@ -125,6 +127,10 @@ public partial class MainWindow
         var shown = Math.Min(frame.Height, frame.Width * height / width);
         var letterbox = (frame.Height - shown) / 2;
         var covered = frame.Height - PlaybackDock.TranslatePoint(new Point(), PlayerOverlay).Y + SubtitleDockGap - letterbox;
-        return covered <= 0 ? 0 : covered * height / shown;
+        if (covered <= 0) return 0;
+        var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(PlayerOverlay);
+        var screenWidth = Math.Round(shown * width / height * dpi.DpiScaleX);
+        var screenHeight = Math.Round(shown * dpi.DpiScaleY);
+        return (double)width * height < screenWidth * screenHeight ? covered * dpi.DpiScaleY : covered * height / shown;
     }
 }
