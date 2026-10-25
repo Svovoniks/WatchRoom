@@ -123,7 +123,8 @@ public partial class MainWindow : Window
         get { PosterGrid.ApplyTemplate(); return (ScrollViewer)PosterGrid.Template.FindName("LibraryScroll", PosterGrid); }
     }
 
-    public MainWindow()
+    public MainWindow() : this(null) { }
+    public MainWindow(string? startupFile)
     {
         episodeArtwork = new(CaptureEpisodeFrame);
         InitializeComponent();
@@ -140,7 +141,7 @@ public partial class MainWindow : Window
         InitializeUpdates();
         light = library.Setting("theme") == "light";
         ApplyTheme();
-        ShowPage("Home");
+        if (startupFile is null) ShowPage("Home");
         foreach (var f in Wire.Read<List<LibraryFolder>>(library.Setting("folders") ?? "[]")) folders.Add(f);
         FolderList.ItemsSource = folders; InitializePlayerChrome();
         ScanButton.IsEnabled = folders.Count > 0;
@@ -178,21 +179,27 @@ public partial class MainWindow : Window
         { if (await Task.Run(() => library.ExpireTmdbContent())) await RefreshLibrary(); });
         metadataRetentionTimer.Start();
         scanDelay.Tick += async (_, _) => { scanDelay.Stop(); if (!scanning) await Guard(() => Scan(fromWatcher: true)); };
+        if (startupFile is not null) ShowStartupPlayer(startupFile);
         Loaded += async (_, _) =>
         {
+            SetStatus("Loading library…"); ResultCount.Text = "Loading library…";
+            EmptyLibrary.Visibility = Visibility.Collapsed;
+            var roots = folders.ToArray(); var excluded = exclusions.ToArray();
+            var catalog = Task.Run(() => library.PruneAndLoad(roots, excluded));
+            // A video opened at launch starts the player and plays alongside the library load.
+            var playerStart = startupFile is null ? null : StartPlayer();
+            if (startupFile is not null) _ = Guard(() => OpenStartupFileAsync(startupFile, catalog));
             await Guard(async () =>
             {
-                SetStatus("Loading library…"); ResultCount.Text = "Loading library…";
-                EmptyLibrary.Visibility = Visibility.Collapsed;
-                var roots = folders.ToArray(); var excluded = exclusions.ToArray();
-                var loaded = await Task.Run(() => library.PruneAndLoad(roots, excluded));
+                var loaded = await catalog;
                 if (closing) return;
                 // Restore the saved queue before refresh persists any queue edits.
                 items = loaded;
                 var byId = loaded.ToDictionary(item => item.Id);
                 try { foreach (var id in Wire.Read<string[]>(savedQueue).Take(10000)) if (byId.TryGetValue(id, out var queued)) queue.Add(queued); }
                 catch (System.Text.Json.JsonException) { }
-                if (int.TryParse(savedCursor, out var cursor)) queuePosition = Math.Clamp(cursor, -1, queue.Count - 1);
+                // An opened video plays on its own, outside the saved queue.
+                if (!openedFile && int.TryParse(savedCursor, out var cursor)) queuePosition = Math.Clamp(cursor, -1, queue.Count - 1);
                 libraryLoaded = true;
                 RefreshLibraryFromItems(loaded); WatchFolders(); BackfillRuntimes();
             });
@@ -203,56 +210,65 @@ public partial class MainWindow : Window
             // Starting the native player loads hundreds of DLLs under the process loader lock, which
             // stalls the UI thread's own first-frame work. Wait until the library has rendered unless
             // playback is requested sooner.
-            await Task.WhenAny(Task.Delay(1000), playerRequested.Task);
-            if (closing) return;
-            await Guard(async () =>
+            if (playerStart is null)
             {
-                var volume = (int)Volume.Value;
-                var native = await Task.Run(() =>
-                {
-                    PrefetchVlcLibraries();
-                    LibVLCSharp.Shared.Core.Initialize();
-                    var engine = new LibVLC("--no-video-title-show", "--no-snapshot-preview", "--no-osd", "--quiet");
-                    try { return (Engine: engine, Player: new LibVLCSharp.Shared.MediaPlayer(engine) { Volume = volume, EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false }); }
-                    catch { engine.Dispose(); throw; }
-                });
-                if (closing) { native.Player.Dispose(); native.Engine.Dispose(); return; }
-                vlc = native.Engine; player = native.Player;
-                Video.MediaPlayer = player;
-                player.TimeChanged += (_, e) =>
-                {
-                    var mono = Environment.TickCount64; playbackPosition.Observe(e.Time, mono);
-                    if (PlaybackDiagnostics.Detailed) PlaybackDiagnostics.Record("native-time", new { position = e.Time });
-                    Dispatcher.BeginInvoke(() => { if (!closing) settling.Observe(e.Time, mono); });
-                };
-                RefreshTracks();
-                // Track lists change only when streams are added, removed or selected; refresh once per burst.
-                void TracksChanged()
-                {
-                    if (Interlocked.Exchange(ref trackRefreshQueued, 1) == 0)
-                        Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { trackRefreshQueued = 0; if (!closing && ready) RefreshTracks(); });
-                }
-                // Each new video output starts without the subtitle lift; it comes from LibVLC's thread.
-                player.Vout += (_, _) => Dispatcher.BeginInvoke(() => { if (!closing) SubtitleOutputChanged(); });
-                player.ESAdded += (_, _) => TracksChanged(); player.ESDeleted += (_, _) => TracksChanged(); player.ESSelected += (_, _) => TracksChanged();
-                player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); ReportReady(); if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
-                player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus(room?.IsPeerRecovering == true ? "Connection interrupted · Reconnecting…" : "Playback failed. Check that the file is available and the connection is active."); });
-                player.Buffering += (_, e) => Dispatcher.BeginInvoke(() =>
-                {
-                    if (closing) return;
-                    if (PlaybackDiagnostics.Detailed) PlaybackDiagnostics.Record("buffer", new { cache = e.Cache, position = player?.Time, revision = target?.Revision });
-                    if (buffering.Cache(e.Cache, Environment.TickCount64)) { readyGeneration = -1; ReportReady(); }
-                });
-                player.EndReached += (_, _) =>
-                {
-                    var endedItem = playingItem; var endedRoom = room; var generation = loadGeneration;
-                    Dispatcher.BeginInvoke(async () => await Guard(() => PlaybackEnded(endedItem, endedRoom, generation)));
-                };
-            });
-            playerInitialized.TrySetResult();
+                await Task.WhenAny(Task.Delay(1000), playerRequested.Task);
+                if (closing) return;
+                playerStart = StartPlayer();
+            }
+            await playerStart;
+            if (closing) return;
             if (folders.Count == 0 && savedRooms.Count == 0 && !openedFile && currentPage is "Home" or "Library") ShowPage("Welcome");
             else if (SavedAutoArtwork) await Guard(FetchArtwork);
         };
+    }
+    private async Task StartPlayer()
+    {
+        await Guard(async () =>
+        {
+            var volume = (int)Volume.Value;
+            var native = await Task.Run(() =>
+            {
+                PrefetchVlcLibraries();
+                LibVLCSharp.Shared.Core.Initialize();
+                var engine = new LibVLC("--no-video-title-show", "--no-snapshot-preview", "--no-osd", "--quiet");
+                try { return (Engine: engine, Player: new LibVLCSharp.Shared.MediaPlayer(engine) { Volume = volume, EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false }); }
+                catch { engine.Dispose(); throw; }
+            });
+            if (closing) { native.Player.Dispose(); native.Engine.Dispose(); return; }
+            vlc = native.Engine; player = native.Player;
+            Video.MediaPlayer = player;
+            player.TimeChanged += (_, e) =>
+            {
+                var mono = Environment.TickCount64; playbackPosition.Observe(e.Time, mono);
+                if (PlaybackDiagnostics.Detailed) PlaybackDiagnostics.Record("native-time", new { position = e.Time });
+                Dispatcher.BeginInvoke(() => { if (!closing) settling.Observe(e.Time, mono); });
+            };
+            RefreshTracks();
+            // Track lists change only when streams are added, removed or selected; refresh once per burst.
+            void TracksChanged()
+            {
+                if (Interlocked.Exchange(ref trackRefreshQueued, 1) == 0)
+                    Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { trackRefreshQueued = 0; if (!closing && ready) RefreshTracks(); });
+            }
+            // Each new video output starts without the subtitle lift; it comes from LibVLC's thread.
+            player.Vout += (_, _) => Dispatcher.BeginInvoke(() => { if (!closing) SubtitleOutputChanged(); });
+            player.ESAdded += (_, _) => TracksChanged(); player.ESDeleted += (_, _) => TracksChanged(); player.ESSelected += (_, _) => TracksChanged();
+            player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); ReportReady(); if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
+            player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus(room?.IsPeerRecovering == true ? "Connection interrupted · Reconnecting…" : "Playback failed. Check that the file is available and the connection is active."); });
+            player.Buffering += (_, e) => Dispatcher.BeginInvoke(() =>
+            {
+                if (closing) return;
+                if (PlaybackDiagnostics.Detailed) PlaybackDiagnostics.Record("buffer", new { cache = e.Cache, position = player?.Time, revision = target?.Revision });
+                if (buffering.Cache(e.Cache, Environment.TickCount64)) { readyGeneration = -1; ReportReady(); }
+            });
+            player.EndReached += (_, _) =>
+            {
+                var endedItem = playingItem; var endedRoom = room; var generation = loadGeneration;
+                Dispatcher.BeginInvoke(async () => await Guard(() => PlaybackEnded(endedItem, endedRoom, generation)));
+            };
+        });
+        playerInitialized.TrySetResult();
     }
     private async Task<bool> EnsurePlayer()
     {

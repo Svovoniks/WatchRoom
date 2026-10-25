@@ -35,6 +35,22 @@ static class OpenFileChecks
             Call("RefreshPlayingItem");
             check(Field<MediaItem>("playingItem").Path == copyPath, "library refreshes keep playing the opened file");
 
+            // A video opened at launch shows the player at once and plays before the library has rendered.
+            var launched = new MainWindow(copyPath);
+            T LaunchedField<T>(string name) => (T)typeof(MainWindow).GetField(name, flags)!.GetValue(launched)!;
+            check(LaunchedField<string>("currentPage") == "Room" && ((FrameworkElement)launched.FindName("PlayerEmpty")).Visibility == Visibility.Collapsed &&
+                ((System.Windows.Controls.TextBlock)launched.FindName("RoomHeading")).Text.Contains("Opened Show"),
+                "a video opened at launch starts in the player, titled from its file name");
+            launched.Close();
+            await (Task)Call("Disconnect", false, false)!;
+            var backLocations = Field<System.Collections.IList>("backLocations"); backLocations.Clear();
+            await (Task)Call("OpenStartupFileAsync", copyPath, Task.FromResult(Field<List<MediaItem>>("items")))!;
+            playing = Field<MediaItem>("playingItem");
+            string Page(int index) => (string)backLocations[index]!.GetType().GetProperty("Page")!.GetValue(backLocations[index])!;
+            check(playing.Id == first.Id && playing.Path == copyPath && Field<string>("currentPage") == "Room" &&
+                backLocations.Count == 2 && Page(0) == "Home" && Page(1) == "Details",
+                "a video opened at launch plays as its library record, with its details page and Home behind the player");
+
             await (Task)Call("OpenFileAsync", otherPath)!;
             playing = Field<MediaItem>("playingItem");
             check(playing.Path == otherPath && Field<List<MediaItem>>("items").All(item => item.Id != playing.Id) && Field<string>("currentPage") == "Room",

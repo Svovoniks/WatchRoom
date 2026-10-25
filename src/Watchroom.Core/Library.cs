@@ -309,7 +309,7 @@ public sealed partial class LibraryStore
         return SortItems(ReadMedia(command));
     }
     // A moved file keeps its original ID, so a record can live at a path whose hash is not its ID.
-    private MediaItem? ByPath(string path)
+    public MediaItem? ByPath(string path)
     {
         ExpireTmdbContent();
         using var db = Open(); using var command = db.CreateCommand();

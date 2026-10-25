@@ -56,10 +56,10 @@ public partial class App : Application
                 }
             }));
         }
-        var window = new MainWindow(); MainWindow = window;
+        // A video opened at launch starts in the player; the library loads behind it.
+        var window = new MainWindow(openedFile); MainWindow = window;
         if (primary) OpenFileHandoff.Listen(path => window.Dispatcher.BeginInvoke(() => window.OpenFile(path)), handoff.Token);
         window.Show();
-        if (openedFile is not null) window.OpenFile(openedFile);
     }
     public static bool SoftwareRendering { get; } = Environment.GetEnvironmentVariable("WATCHROOM_RENDER") is { } mode
         ? !mode.Equals("hardware", StringComparison.OrdinalIgnoreCase)

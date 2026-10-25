@@ -94,7 +94,65 @@ public partial class MainWindow
     private void OpenFilesReady()
     {
         openFilesReady = true;
+        libraryReady.TrySetResult();
         if (pendingOpenFile is { } path) { pendingOpenFile = null; _ = Guard(() => OpenFileAsync(path)); }
+    }
+
+    private readonly TaskCompletionSource libraryReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    // A video opened at launch shows the player before the library loads, titled from its file name.
+    private void ShowStartupPlayer(string path)
+    {
+        openedFile = true;
+        PlayerEmpty.Visibility = Visibility.Collapsed;
+        RoomHeading.Text = PlaybackTitle(FileNames.Parse(path)); RoomSubtitle.Text = "Opening…";
+        ConnectionStatus.Text = "Local playback";
+        ShowPage("Room");
+    }
+    // Plays a video opened at launch while the player starts and the catalog loads. A file the library holds at that
+    // path is one lookup; any other file is matched against the catalog. The library's pages fill in behind the player.
+    private async Task OpenStartupFileAsync(string path, Task<List<MediaItem>> catalog)
+    {
+        var roots = folders.ToArray(); var excluded = exclusions.ToArray();
+        var opened = await Task.Run(async () =>
+        {
+            if (library.ByPath(path) is { IsExtra: false, IsVirtual: false } exact &&
+                roots.Any(root => LibraryStore.IsWithin(path, root.Path)) && !excluded.Any(folder => LibraryStore.IsWithin(path, folder)))
+                return new OpenedFile(exact with { Available = true }, exact, "path");
+            List<MediaItem> known;
+            // The library load reports its own failure; the video still plays on its own.
+            try { known = await catalog; } catch (Exception) { known = []; }
+            return OpenedFiles.Resolve(known, path);
+        });
+        if (closing || playingItem is not null) return;
+        PlaybackDiagnostics.Record("open-file", new { match = opened.Match, known = opened.Library?.Id, startup = true });
+        queuePosition = -1;
+        try { await PlayLocalItem(opened.Item); }
+        finally
+        {
+            // The player could not start: show the empty player instead of the opening title.
+            if (playingItem is null && !closing)
+            {
+                PlayerEmpty.Visibility = Visibility.Visible;
+                RoomHeading.Text = "Watchroom player"; RoomSubtitle.Text = "Choose a video from your library to start watching.";
+            }
+        }
+        if (playingItem is null) return;
+        PublishQueue();
+        // Leaving the player goes back to the details page and then Home, as when the video is started from the library.
+        await libraryReady.Task;
+        if (closing) return;
+        var history = new List<BrowseLocation> { new("Home", 0, null, null, null, null, "", 0, 0, 0, openQueueId) };
+        if (opened.Library is { } record && items.FirstOrDefault(item => item.Id == record.Id) is { } listed)
+        {
+            var series = listed.Series is null ? null : LibraryIdentity.ShowKey(listed);
+            var kind = listed.Series is null ? null : listed.Kind;
+            int? season = listed.Series is null ? null : listed.Season ?? -1;
+            history.Add(new("Details", CategoryFor(listed), series, kind, season, listed.Id, "", 0, 0, 0, openQueueId));
+            // Back to library from the player opens the video's show, unless the library is already showing elsewhere.
+            if (currentPage == "Room") { libraryCategory = CategoryFor(listed); browseSeries = series; browseKind = kind; browseSeason = season; }
+        }
+        backLocations.InsertRange(0, history);
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
     }
     private async Task OpenFileAsync(string path)
     {
