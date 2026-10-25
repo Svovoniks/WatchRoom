@@ -52,7 +52,7 @@ public partial class MainWindow
         if (episodeActionItem != item || episodeActionLibrary != items || Environment.TickCount64 - episodeActionCheckedAt > 5000)
         {
             episodeActionItem = item; episodeActionLibrary = items; episodeActionCheckedAt = Environment.TickCount64;
-            episodeActionNext = EpisodePlayback.Next(items, item!, false, next => RecentlyExists(next.Path));
+            episodeActionNext = EpisodePlayback.Next(items, item!, false, next => RecentlyExists(next.Path), PreferredVersion(item));
         }
         EpisodeEndButton.Content = episodeActionNext is null ? "Finish ✓" : "Next episode →";
         EpisodeEndButton.ToolTip = episodeActionNext is null ? item!.Series is null ? "Mark this movie as watched" : "Mark this episode as watched" :
@@ -66,7 +66,7 @@ public partial class MainWindow
         {
             RefreshEpisodeEndAction();
             if (EpisodeEndButton.Visibility != Visibility.Visible || !EpisodeEndButton.IsEnabled || playingItem is not { } item) return;
-            var next = EpisodePlayback.Next(items, item, false, candidate => File.Exists(candidate.Path));
+            var next = EpisodePlayback.Next(items, item, false, candidate => File.Exists(candidate.Path), PreferredVersion(item));
             library.Setting("position:" + item.Id, "0"); SetWatched(item, true);
             if (next is null) { SetStatus(item.Series is null ? "Movie marked as watched." : "Episode marked as watched."); return; }
             await PlayFollowingEpisode(next);
@@ -149,7 +149,7 @@ public partial class MainWindow
             return;
         }
         if (endedItem is null || room is not null && (room.Identity?.Host != true || !room.IsConnected)) return;
-        var next = EpisodePlayback.Next(items, items.FirstOrDefault(item => item.Id == endedItem.Id) ?? endedItem, false, item => File.Exists(item.Path));
+        var next = EpisodePlayback.Next(items, items.FirstOrDefault(item => item.Id == endedItem.Id) ?? endedItem, false, item => File.Exists(item.Path), PreferredVersion(endedItem));
         if (next is null) return;
         nextEpisodePromptOpen = true;
         try

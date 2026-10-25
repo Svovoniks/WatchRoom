@@ -64,7 +64,7 @@ static class LibraryScrollingChecks
             "scrolling back restores the first card with the correct binding");
     }
 
-    private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
+    internal static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
     {
         for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
         {

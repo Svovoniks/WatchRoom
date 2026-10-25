@@ -359,7 +359,7 @@ public partial class MainWindow
     private MediaItem? FirstEpisode(MediaItem show)
     {
         var key = LibraryIdentity.ShowKey(show);
-        return LibraryCatalog.PreferredFiles(items.Where(item => item.Available && !item.IsExtra && !item.IsVirtual && LibraryIdentity.ShowKey(item) == key))
+        return LibraryCatalog.PreferredFiles(items.Where(item => item.Available && !item.IsExtra && !item.IsVirtual && LibraryIdentity.ShowKey(item) == key), PreferredVersion(key))
             .OrderBy(item => item.Season is null or 0 ? int.MaxValue : item.Season).ThenBy(item => item.Episode ?? int.MaxValue).ThenBy(item => item.Id).FirstOrDefault();
     }
     private void OpenHomeTitle(LibraryCardView view)

@@ -209,6 +209,27 @@ static class Program
                     "resizing recalculates library rows and keeps the final card reachable");
                 window.Width = originalWidth; libraryScroll.ScrollToTop(); await Task.Delay(150);
                 await LibraryScrollingChecks.Run(grid, libraryScroll, Check);
+                // A click focuses a card; focusing a half-visible card must not scroll the grid.
+                libraryScroll.ScrollToVerticalOffset(165); await Task.Delay(150);
+                var halfVisible = Enumerable.Range(0, grid.Items.Count).Select(index => grid.ItemContainerGenerator.ContainerFromIndex(index) as FrameworkElement)
+                    .Where(container => container is not null).Select(container =>
+                    {
+                        var top = container!.TransformToAncestor(libraryScroll).Transform(new Point()).Y;
+                        return (container, top);
+                    }).First(pair => pair.top < libraryScroll.ViewportHeight && pair.top + 312 > libraryScroll.ViewportHeight).container;
+                var requests = new List<string>();
+                void Trace(object sender, RequestBringIntoViewEventArgs e) => requests.Add(e.TargetObject?.GetType().Name + (e.Handled ? " handled" : ""));
+                window.AddHandler(FrameworkElement.RequestBringIntoViewEvent, (RequestBringIntoViewEventHandler)Trace, true);
+                var cardButton = LibraryScrollingChecks.Descendants(halfVisible).OfType<System.Windows.Controls.Button>().First(button => button.Tag is LibraryCard);
+                var before = libraryScroll.VerticalOffset;
+                cardButton.Focus(); await Task.Delay(150);
+                window.RemoveHandler(FrameworkElement.RequestBringIntoViewEvent, (RequestBringIntoViewEventHandler)Trace);
+                Console.WriteLine($"Focus requests: {string.Join(", ", requests)}; offset {before} -> {libraryScroll.VerticalOffset}");
+                Check(Math.Abs(libraryScroll.VerticalOffset - before) < .5, "focusing a half-visible library card does not scroll the grid");
+                var tick = LibraryScrollingChecks.Descendants(halfVisible).OfType<System.Windows.Controls.Button>().First(button => button.Tag is not LibraryCard);
+                tick.Focus(); await Task.Delay(150);
+                Check(Math.Abs(libraryScroll.VerticalOffset - before) < .5, "focusing the watched tick on a half-visible card does not scroll the grid");
+                System.Windows.Input.Keyboard.ClearFocus(); libraryScroll.ScrollToTop(); await Task.Delay(150);
                 var previous = cards.ToArray();
                 await CheckSearchLayout(window, Check);
                 var tracker = new LibraryCardView(new("Example", "Movie", null, entries[0], "movie"));

@@ -219,6 +219,14 @@ if (args.FirstOrDefault() == "--metadata-pipeline")
     Console.WriteLine($"{checks} metadata pipeline checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--library-versions")
+{
+    var checks = 0;
+    await LibraryVersionsFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/library-versions-check"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} library version and extras checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--library-ingestion")
 {
     var checks = 0;
@@ -360,6 +368,7 @@ await MetadataRecoveryFixture.Run(Path.Combine(root, "metadata-recovery"), Check
 await MetadataEvidenceFixture.Run(Path.Combine(root, "metadata-evidence"), Check);
 await MetadataCacheFixture.Run(Path.Combine(root, "metadata-cache"), Check);
 await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
+await LibraryVersionsFixture.Run(Path.Combine(root, "library-versions"), Check);
 await FilenameSchemaFixture.Run(Path.Combine(root, "filename-schemas"), Check);
 await GroupingAuditFixture.Run(Path.Combine(root, "grouping-audit"), Check);
 HostRoomFixture.Run(Check);

@@ -64,9 +64,48 @@ public static class VideoFrames
             Release();
         }
         if (result is null || result.Width <= 0 || result.Height <= 0) return false;
+        // A fade-in or black leader is no preview; the caller tries another position.
+        if (IsFlat(result)) return false;
         var track = media.Tracks.FirstOrDefault(x => x.TrackType == TrackType.Video).Data.Video;
         var aspect = result.Width / (double)result.Height * (track.SarNum > 0 && track.SarDen > 0 ? track.SarNum / (double)track.SarDen : 1);
         return Save(result, aspect, output);
+    }
+
+    // Nearly every sampled pixel is dark: a black frame, a fade, or a solid card rather than a picture.
+    private static bool IsFlat(Frame frame)
+    {
+        long total = 0; var bright = 0; var samples = 0;
+        var stepX = Math.Max(1, frame.Width / 64); var stepY = Math.Max(1, frame.Height / 36);
+        for (var y = 0; y < frame.Height; y += stepY)
+            for (var x = 0; x < frame.Width; x += stepX)
+            {
+                var offset = y * frame.Pitch + x * 4;
+                if (offset + 2 >= frame.Pixels.Length) continue;
+                var luma = (frame.Pixels[offset] * 11 + frame.Pixels[offset + 1] * 59 + frame.Pixels[offset + 2] * 30) / 100;
+                total += luma; if (luma > 40) bright++; samples++;
+            }
+        return samples == 0 || total / samples < 12 && bright * 50 < samples;
+    }
+    // Thumbnails captured before dark frames were rejected can be black; such a file is replaced on the next visit.
+    public static bool IsFlatThumbnail(string? path)
+    {
+        if (path is null || !File.Exists(path)) return false;
+        try
+        {
+            using var bitmap = SKBitmap.Decode(path);
+            if (bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0) return false;
+            long total = 0; var bright = 0; var samples = 0;
+            var stepX = Math.Max(1, bitmap.Width / 64); var stepY = Math.Max(1, bitmap.Height / 36);
+            for (var y = 0; y < bitmap.Height; y += stepY)
+                for (var x = 0; x < bitmap.Width; x += stepX)
+                {
+                    var pixel = bitmap.GetPixel(x, y);
+                    var luma = (pixel.Red * 30 + pixel.Green * 59 + pixel.Blue * 11) / 100;
+                    total += luma; if (luma > 40) bright++; samples++;
+                }
+            return samples > 0 && total / samples < 12 && bright * 50 < samples;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
 
     private static bool Save(Frame frame, double aspect, string output)

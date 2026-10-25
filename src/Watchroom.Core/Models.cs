@@ -19,12 +19,15 @@ public record MediaItem(string Id, string Path, string Title, string Kind, int? 
     int? AirsBeforeEpisode = null, int? AirsAfterSeason = null, string? NumberingConflict = null, long ArtworkFetchedAt = 0,
     string? LocalPosterUrl = null, string? LocalSeasonPosterUrl = null, string? LocalEpisodePosterUrl = null, int? AbsoluteEpisodeEnd = null,
     int? SourcePart = null, int? SourcePartEpisode = null, int? SourcePartEpisodeEnd = null,
-    string? NumberingSource = null, string? SourceLibraryKind = null, bool IsExtra = false, string? GeneratedEpisodePoster = null, string? EpisodePosterQualityPath = null, bool IsBonus = false, Dictionary<string, TmdbField>? TmdbFields = null, int TmdbRetentionVersion = 0, long? FileSize = null)
+    string? NumberingSource = null, string? SourceLibraryKind = null, bool IsExtra = false, string? GeneratedEpisodePoster = null, string? EpisodePosterQualityPath = null, bool IsBonus = false, Dictionary<string, TmdbField>? TmdbFields = null, int TmdbRetentionVersion = 0, long? FileSize = null,
+    // The film this clip came with, for a clip from a film's own extras folder.
+    string? ExtraOf = null)
 {
-    public string Caption => IsBonus ? $"{Series} · Bonus content" : Series is not null ? $"{Series} · {(Season is null ? "Season unknown" : $"S{Season:00}")} {(Episode is null ? "Episode unknown" : $"E{Episode:00}" + (EpisodeEnd > Episode ? $"–E{EpisodeEnd:00}" : ""))}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";
+    public string Caption => IsBonus ? Series is null ? "Bonus content" : $"{Series} · Bonus content" : Series is not null ? $"{Series} · {(Season is null ? "Season unknown" : $"S{Season:00}")} {(Episode is null ? "Episode unknown" : $"E{Episode:00}" + (EpisodeEnd > Episode ? $"–E{EpisodeEnd:00}" : ""))}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";
     public string DisplayTitle => Series ?? Title;
     public string QueueTitle => Episode is null ? Title : Caption;
-    public string EpisodeDisplayTitle => Episode is { } ep ? $"Episode {ep}" + (EpisodeEnd > ep ? $"–{EpisodeEnd}" : "") + (string.IsNullOrWhiteSpace(EpisodeTitle) ? "" : " · " + EpisodeTitle) : Title;
+    public string EpisodeDisplayTitle => Episode is { } ep ? $"Episode {ep}" + (EpisodeEnd > ep ? $"–{EpisodeEnd}" : "") + (string.IsNullOrWhiteSpace(EpisodeTitle) ? "" : " · " + EpisodeTitle)
+        : IsBonus && !string.IsNullOrWhiteSpace(EpisodeTitle) ? EpisodeTitle : Title;
     public string? DetailOverview => new[] { EpisodeOverview, SeasonOverview, Overview }.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
     public override string ToString() => Episode is not null ? Caption + " · " + Title : Title;
 }

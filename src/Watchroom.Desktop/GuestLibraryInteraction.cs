@@ -46,7 +46,7 @@ public partial class MainWindow
         DetailHost.Visibility = DetailWatched.Visibility = RestartButton.Visibility = DetailRemove.Visibility = Visibility.Collapsed;
         // The host's videos can go into the host's queues.
         DetailQueue.Visibility = ShowingHostQueues ? Visibility.Visible : Visibility.Collapsed;
-        Episodes.Visibility = Visibility.Collapsed; DetailPoster.Source = null;
+        Episodes.Visibility = DetailVersions.Visibility = DetailExtrasSection.Visibility = Visibility.Collapsed; DetailPoster.Source = null;
         ScheduleGuestView();
         var view = guestLibraryCards.FirstOrDefault(view => view.Card == card);
         if (view is not null) { await view.LoadPosterAsync(); if (selected?.Id == card.Media.Id && GuestLibrary) DetailPoster.Source = view.Poster; }

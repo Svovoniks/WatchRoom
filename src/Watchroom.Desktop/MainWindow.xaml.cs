@@ -367,7 +367,7 @@ public partial class MainWindow : Window
     }
     private static int CategoryFor(MediaItem item) => item.Kind == "Anime" ? 3 : item.Series is not null ? 2 : 1;
     private static string CategoryName(int category) => category switch { 1 => "Movies", 2 => "Shows", 3 => "Anime", 4 => "Unavailable", _ => "All" };
-    private static string SeasonName(int season) => season < 0 ? "Season unknown" : season == 0 ? "Specials" : $"Season {season}";
+    private static string SeasonName(int season, IEnumerable<MediaItem>? members = null) => LibraryCatalog.SeasonName(season, members);
     private void UpdateLibraryCategorySelection(bool active)
     {
         UnavailableLibraryNav.Visibility = !GuestLibrary && items.Any(item => !item.Available && !item.IsExtra && !item.IsVirtual)
@@ -413,7 +413,7 @@ public partial class MainWindow : Window
             var showId = LibraryIdentity.ShowKey(show);
             crumbs.Add(new(show.Series, "show", category, showId, show.Kind));
             var season = detail is not null ? detail.Season ?? -1 : browseSeason;
-            if (season is { } number) crumbs.Add(new(SeasonName(number), "season", category, showId, show.Kind, number));
+            if (season is { } number) crumbs.Add(new(SeasonName(number, items.Where(x => !x.IsExtra && LibraryIdentity.InShow(x, showId, show.Kind) && (x.Season ?? -1) == number)), "season", category, showId, show.Kind, number));
         }
         if (detail is not null) crumbs.Add(new(detail.Series is null ? detail.DisplayTitle : detail.EpisodeDisplayTitle, "media", category, MediaId: detail.Id));
         crumbs[^1] = crumbs[^1] with { IsCurrent = true };
@@ -574,7 +574,7 @@ public partial class MainWindow : Window
             // A slow artwork drive must not spawn overlapping searches on every keystroke.
             await librarySearchGate.WaitAsync(cancellation);
             List<LibraryCard> cards;
-            try { cards = await LibraryCatalog.SearchAsync(source, query, filter, series, kind, season, cancellation, displaySpecialsWithinSeasons); }
+            try { cards = await LibraryCatalog.SearchAsync(source, query, filter, series, kind, season, cancellation, displaySpecialsWithinSeasons, season is null ? null : PreferredVersion(series)); }
             finally { librarySearchGate.Release(); }
             if (status == 1) cards = cards.Where(card => card.Poster is null).ToList();
             var views = libraryCards.ToDictionary(view => view.Key);
@@ -671,6 +671,12 @@ public partial class MainWindow : Window
         ((Image)sender).Source = null;
         e.Handled = true;
     }
+    // A click focuses the card, and a focused control scrolls itself fully into view, which lurches the grid
+    // when the card is half visible. Keyboard focus still scrolls, so arrow and tab navigation keep working.
+    private void LibraryCardBringIntoView(object sender, RequestBringIntoViewEventArgs e)
+    {
+        if (InputManager.Current.MostRecentInputDevice is not KeyboardDevice) e.Handled = true;
+    }
     private void SelectMovie(object sender, RoutedEventArgs e)
     {
         DetachGuestMirror();
@@ -698,15 +704,65 @@ public partial class MainWindow : Window
         DetailRemove.Visibility = item.Available ? Visibility.Collapsed : Visibility.Visible;
         DetailRemove.IsEnabled = !scanning;
         UpdateDetailPlayback(item);
-        DetailContext.Text = item.Series ?? "";
-        DetailMeta.Text = item.Caption + " · " + Path.GetExtension(item.Path).TrimStart('.').ToUpperInvariant() + (string.IsNullOrWhiteSpace(item.AirDate) ? "" : " · " + item.AirDate) + (item.RuntimeMinutes is > 0 ? $" · {item.RuntimeMinutes} min" : "");
+        var film = item.ExtraOf is { } parent ? items.FirstOrDefault(x => x.Id == parent) : null;
+        DetailContext.Text = item.Series ?? (film is null ? "" : film.Title + " · Extra");
+        ShowDetailExtras(item, film);
+        var versions = LibraryCatalog.Versions(items, item);
+        var version = versions.Length > 1 ? LibraryCatalog.VersionLabel(item, versions) : null;
+        DetailMeta.Text = item.Caption + " · " + Path.GetExtension(item.Path).TrimStart('.').ToUpperInvariant() + (string.IsNullOrWhiteSpace(item.AirDate) ? "" : " · " + item.AirDate) + (item.RuntimeMinutes is > 0 ? $" · {item.RuntimeMinutes} min" : "") +
+            (version is null ? "" : " · " + version);
+        ShowDetailVersions(item, versions);
         _ = UpdateDetailPosterAsync(item);
+        if (item.ExtraOf is not null && !ArtworkCache.IsUsable(item.GeneratedEpisodePoster)) _ = ImproveClipArtwork(item);
         DetailFile.Text = item.Path;
         var overviewSource = !string.IsNullOrWhiteSpace(item.EpisodeOverview) ? item.EpisodeSource : !string.IsNullOrWhiteSpace(item.SeasonOverview) ? item.SeasonSource : item.PosterSource;
         DetailSummary.Text = (item.DetailOverview ?? "No overview available yet.") +
             (item.Genres?.Length > 0 ? "\n\nGenres: " + string.Join(", ", item.Genres) : "") + (item.Cast?.Length > 0 ? "\nCast: " + string.Join(", ", item.Cast) : "") +
             (item.Rating is > 0 ? $"\nRating: {item.Rating:0.0}/10" : "") + (item.NumberingConflict is null ? "" : "\n\n" + item.NumberingConflict) + (overviewSource is null ? "" : "\n\nMetadata: " + overviewSource);
         Episodes.Visibility = Visibility.Collapsed;
+    }
+    // The releases of one episode, each a pill; picking one opens that file and makes its release the show's choice.
+    private void ShowDetailVersions(MediaItem item, MediaItem[] versions)
+    {
+        DetailVersions.Children.Clear();
+        var available = versions.Where(x => x.Available).ToArray();
+        DetailVersions.Visibility = available.Length > 1 ? Visibility.Visible : Visibility.Collapsed;
+        if (available.Length < 2) return;
+        DetailVersions.Children.Add(new TextBlock { Text = "Version", Style = (Style)FindResource("MutedText"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 8) });
+        foreach (var candidate in available)
+        {
+            var label = LibraryCatalog.VersionLabel(candidate, versions);
+            var pill = new Button { Content = label, ToolTip = candidate.Path, Margin = new Thickness(0, 0, 8, 8), Tag = candidate.Id };
+            if (candidate.Id == item.Id) pill.Style = (Style)FindResource("Primary");
+            System.Windows.Automation.AutomationProperties.SetName(pill, $"Version {label}");
+            pill.Click += (_, _) => ChooseVersion(candidate, label);
+            DetailVersions.Children.Add(pill);
+        }
+    }
+    // A film's page lists the clips that came with it; a clip's page leads back to the film and its other clips.
+    private void ShowDetailExtras(MediaItem item, MediaItem? film)
+    {
+        DetailExtras.Children.Clear();
+        var owner = film ?? item;
+        var clips = LibraryCatalog.Extras(items, owner).Where(x => x.Available).ToArray();
+        DetailExtrasSection.Visibility = clips.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (clips.Length == 0) return;
+        foreach (var entry in film is null ? clips : clips.Prepend(owner))
+        {
+            var pill = new Button { Content = entry.Id == owner.Id ? "Film" : entry.Title, ToolTip = entry.Path, Margin = new Thickness(0, 0, 8, 8), Tag = entry.Id };
+            if (entry.Id == item.Id) pill.Style = (Style)FindResource("Primary");
+            pill.Click += (_, _) => { Select(entry); Details.ScrollToTop(); };
+            DetailExtras.Children.Add(pill);
+        }
+    }
+    private string? PreferredVersion(MediaItem? item) => item?.Series is null ? null : PreferredVersion(LibraryIdentity.ShowKey(item));
+    private string? PreferredVersion(string? showKey) => showKey is null ? null : library.Setting("version:" + showKey);
+    private void ChooseVersion(MediaItem version, string label)
+    {
+        library.Setting("version:" + LibraryIdentity.ShowKey(version), label);
+        Select(version);
+        // Season cards and queues now lead with this release.
+        FilterLibrary(); RefreshHome();
     }
     private async Task UpdateDetailPosterAsync(MediaItem item)
     {
@@ -1145,6 +1201,30 @@ public partial class MainWindow : Window
     {
         if (((Image)sender).DataContext is LibraryCardView view) await view.LoadPosterAsync();
     }
+    // A black thumbnail from an earlier capture is dropped so the next capture can replace it.
+    private static MediaItem WithoutFlatThumbnail(MediaItem item)
+    {
+        if (!VideoFrames.IsFlatThumbnail(item.GeneratedEpisodePoster)) return item;
+        try { File.Delete(item.GeneratedEpisodePoster!); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return item with { GeneratedEpisodePoster = null };
+    }
+    // A film's clip has no card of its own, so its frame thumbnail is taken when its page opens.
+    private async Task ImproveClipArtwork(MediaItem item)
+    {
+        if (!episodeArtworkRequests.Add(item.Id + ":clip")) return;
+        try
+        {
+            item = await Task.Run(() => WithoutFlatThumbnail(item));
+            var improved = await Task.Run(() => episodeArtwork.ImproveAsync(item, App.DataDirectory, savedMetadataToken, lifetime.Token, MetadataOptions.Load(library) with { Providers = [] }));
+            if (closing || improved == item || !ArtworkCache.IsUsable(improved.GeneratedEpisodePoster)) return;
+            var current = await Task.Run(() => library.Get(item.Id));
+            if (current is null || current.Path != item.Path) return;
+            var saved = current with { GeneratedEpisodePoster = improved.GeneratedEpisodePoster };
+            library.Save(saved);
+            if (selected?.Id == item.Id) { selected = saved; _ = UpdateDetailPosterAsync(saved); }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or UnauthorizedAccessException) { }
+    }
     private async Task ImproveEpisodeArtwork(LibraryCardView view)
     {
         // Runs for every card realized while scrolling: return before any settings reads.
@@ -1159,6 +1239,7 @@ public partial class MainWindow : Window
         if (closing || !episodeArtworkRequests.Add(item.Id + ":" + item.EpisodeSource + ":" + LibraryIdentity.Hash(token) + ":" + string.Join(',', options.ProviderOrder))) return;
         try
         {
+            item = await Task.Run(() => WithoutFlatThumbnail(item));
             var improved = await Task.Run(() => episodeArtwork.ImproveAsync(item, App.DataDirectory, token, lifetime.Token, options));
             if (closing || improved == item) return;
             var current = await Task.Run(() => library.Get(item.Id));

@@ -632,7 +632,7 @@ public partial class MainWindow
             guestButton.ContextMenu = guestMenu; guestMenu.IsOpen = true; e.Handled = true; return;
         }
         if (sender is not Button button || button.Tag is not LibraryCard card) return;
-        var videos = LibraryCatalog.CardItems(items, card, displaySpecialsWithinSeasons).ToArray();
+        var videos = LibraryCatalog.CardItems(items, card, displaySpecialsWithinSeasons, PreferredVersion(card.Media)).ToArray();
         var menu = new ContextMenu { PlacementTarget = button };
         var open = new MenuItem { Header = card.Level is "series" or "season" ? "Open" : "Details" }; open.Click += (_, _) => SelectMovie(button, new RoutedEventArgs()); menu.Items.Add(open);
         var play = new MenuItem { Header = card.Level is "series" or "season" ? "Play all" : "Play", IsEnabled = room?.Identity?.Host != false && videos.Any(x => x.Available && File.Exists(x.Path)) };
@@ -673,11 +673,16 @@ public partial class MainWindow
         {
             if (card.Level == "episode" && card.Media.Episode is not null)
             {
-                var versions = items.Where(x => LibraryIdentity.SameShow(x, card.Media) && x.Season == card.Media.Season && x.Episode == card.Media.Episode && x.EpisodeEnd == card.Media.EpisodeEnd && !x.IsVirtual).ToArray();
+                var versions = LibraryCatalog.Versions(items, card.Media);
                 if (versions.Length > 1)
                 {
                     var versionMenu = new MenuItem { Header = "Choose version" };
-                    foreach (var version in versions) { var choice = new MenuItem { Header = Path.GetFileName(version.Path) }; choice.Click += (_, _) => Select(version); versionMenu.Items.Add(choice); }
+                    foreach (var version in versions)
+                    {
+                        var label = LibraryCatalog.VersionLabel(version, versions);
+                        var choice = new MenuItem { Header = label + (version.Available ? "" : " · Unavailable"), IsCheckable = true, IsChecked = version.Id == card.Media.Id, IsEnabled = version.Available, ToolTip = version.Path };
+                        choice.Click += (_, _) => ChooseVersion(version, label); versionMenu.Items.Add(choice);
+                    }
                     menu.Items.Add(versionMenu);
                 }
             }

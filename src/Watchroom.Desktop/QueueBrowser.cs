@@ -212,12 +212,12 @@ public partial class MainWindow
         {
             cancellation.ThrowIfCancellationRequested();
             var episodes = season.OrderBy(item => item.Episode ?? int.MaxValue).ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase).ToArray();
-            rows.Add(new QueueAddRow($"{episodes[0].Series} · {SeasonName(season.Key.Season ?? -1)}", episodes.Length == 1 ? "1 episode" : $"{episodes.Length} episodes")
+            rows.Add(new QueueAddRow($"{episodes[0].Series} · {SeasonName(season.Key.Season ?? -1, episodes)}", episodes.Length == 1 ? "1 episode" : $"{episodes.Length} episodes")
                 { IsGroup = true, CanAddAll = true, Group = episodes });
             rows.AddRange(episodes.Select(item => new QueueAddRow(item.EpisodeDisplayTitle, item.RuntimeMinutes is int minutes and > 0 ? $"{minutes} min" : item.Caption)
                 { Media = item, Group = [item], Artwork = artwork }));
         }
-        var movies = matches.Where(item => item.Series is null).OrderBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase).ThenBy(item => item.Year).ToArray();
+        var movies = matches.Where(item => item.Series is null && item.ExtraOf is null).OrderBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase).ThenBy(item => item.Year).ToArray();
         if (movies.Length > 0)
         {
             rows.Add(new QueueAddRow("Movies and other videos", VideoCount(movies.Length)) { IsGroup = true });

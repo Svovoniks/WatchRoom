@@ -25,7 +25,7 @@ internal static class EpisodeArtworkFixture
         var service = new EpisodeArtwork(Capture);
         var result = await service.ImproveAsync(item, directory, null, default);
         check(ArtworkCache.IsUsable(result.GeneratedEpisodePoster), "short video gets a local thumbnail after unknown-duration seek fallback");
-        check(seeks.SequenceEqual([180d, 1d]), "thumbnail capture skips opening credits, then retries near the start");
+        check(seeks.SequenceEqual([180d, 20d, 5d, 1d]), "thumbnail capture skips opening credits, then retries earlier and earlier");
         check(LibraryCatalog.EpisodeArtwork(result) == result.GeneratedEpisodePoster, "generated episode frame takes priority over series fallback");
         var still = Path.Combine(directory, "still.png"); var showPoster = Path.Combine(directory, "show.png");
         File.WriteAllBytes(still, ArtworkFixture.Png); File.WriteAllBytes(showPoster, ArtworkFixture.Png);

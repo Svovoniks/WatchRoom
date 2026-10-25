@@ -56,13 +56,15 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         if (HomeDetail != detail) { HomeDetail = detail; Changed(nameof(HomeDetail)); }
         if (HomeTag != tag) { HomeTag = tag; Changed(nameof(HomeTag)); Changed(nameof(HomeTagVisibility)); }
     }
-    public string EpisodeMeta => (Card.Media.Season is { } season ? $"S{season:00} · " : "") +
-        (Card.Media.Episode is { } episode ? $"E{episode:00}" + (Card.Media.EpisodeEnd > episode ? $"–{Card.Media.EpisodeEnd:00}" : "") : "Episode unknown") +
-        (Card.Media.RuntimeMinutes is > 0 ? $" · {Card.Media.RuntimeMinutes} min" : "");
+    public string EpisodeMeta => (Card.Media.IsBonus ? "Extra" : (Card.Media.Season is { } season ? $"S{season:00} · " : "") +
+        (Card.Media.Episode is { } episode ? $"E{episode:00}" + (Card.Media.EpisodeEnd > episode ? $"–{Card.Media.EpisodeEnd:00}" : "") : "Episode unknown")) +
+        (Card.Media.RuntimeMinutes is > 0 ? $" · {Card.Media.RuntimeMinutes} min" : "") +
+        (Card.Version is { Length: > 0 } version ? $" · {version} · {Card.Versions} versions" : "");
     // Shown in red beside the episode details and as a badge on the artwork.
-    public string EpisodeStatus => IsRemote ? "" : Card.Media.IsVirtual ? "Missing" : Card.Media.Available ? "" : "Unavailable";
+    public string EpisodeStatus => IsRemote ? "" : Card.Status ?? (Card.Media.IsVirtual ? "Missing" : Card.Media.Available ? "" : "Unavailable");
     public string EpisodeStatusSuffix => EpisodeStatus.Length > 0 ? " · " + EpisodeStatus : "";
-    public bool HasEpisodeStatus => IsEpisode && EpisodeStatus.Length > 0;
+    // Season cards carry the badge too when every episode of the season is a placeholder.
+    public bool HasEpisodeStatus => (IsEpisode || Card.Status is not null) && EpisodeStatus.Length > 0;
     public double Progress { get; private set; }
     public bool IsWatched { get; private set; }
     public string PlaybackLabel { get; private set; } = "";

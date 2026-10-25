@@ -78,7 +78,7 @@ static class GroupingAuditFixture
         check(repaired.Where(x => filmPaths.Contains(x.Path)).All(x => x.Series is null && x.ShowId is null && x.Title != "Old folder alias"),
             "legacy nested films regain file titles without dummy seasons");
         check(repaired.Single(x => x.Id == extra.Id) is { IsExtra: true, Available: true } && !LibraryCatalog.Browse(repaired).Any(x => x.Media.Id == extra.Id),
-            "old excluded extra is available on disk and hidden from normal catalog");
+            "an extras folder with no episodes or seasons beside it stays a hidden extra");
         check(store.Setting("queues") == queue && File.Exists(extraPath) && File.Exists(Path.Combine(dbDirectory, "library-before-grouping-repair-v1.db")) &&
             File.ReadAllText(Path.Combine(dbDirectory, "grouping-repair-v1.json")).Contains(mib.Id), "migration backs up and logs repairs without losing queue IDs or files");
         check(repaired.Single(x => x.Id == locked.Id) is { Season: 4, Episode: 99, ShowId: "user-identity" } &&
@@ -87,7 +87,7 @@ static class GroupingAuditFixture
         repaired = new LibraryStore(dbDirectory).All();
         check(LibraryCatalog.CardItems(repaired, LibraryCatalog.Browse(repaired).Single(x => x.Media.Id == komi[0].Id || x.DisplayTitle == "Komi Can't Communicate")).Count() == 23,
             "two rescans and reopening do not reintroduce season collisions");
-        check(repaired.Single(x => x.Id == extra.Id) is { IsExtra: true, Available: true } && repaired.Any(x => x.Path == specialPath && !x.IsExtra),
+        check(repaired.Single(x => x.Id == extra.Id) is { IsExtra: true, Available: true } && repaired.Single(x => x.Path == specialPath) is { IsExtra: false, IsBonus: false, Season: 0, Episode: 1 },
             "rescan distinguishes excluded extras from numbered specials");
         check(repaired.Single(x => x.Id == locked.Id) is { Season: 4, Episode: 99, ShowId: "user-identity" },
             "locked season-relative numbers survive rescans without an absolute-number marker");

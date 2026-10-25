@@ -16,7 +16,8 @@ public sealed class EpisodeArtwork(FrameCapture? capture = null)
     public async Task<MediaItem> ImproveAsync(MediaItem item, string directory, string? token, CancellationToken ct, MetadataOptions? options = null)
     {
         options ??= new();
-        if (item.Series is null || item.IsVirtual || item.MetadataLocked || LibraryIdentity.Locked(item, "EpisodePoster")) return item;
+        // Episodes and clips get a frame from the file; a film's clip has no show but still wants one.
+        if (item.Series is null && item.ExtraOf is null || item.IsVirtual || item.MetadataLocked || LibraryIdentity.Locked(item, "EpisodePoster")) return item;
         await workers.WaitAsync(ct);
         try
         {
@@ -84,8 +85,12 @@ public sealed class EpisodeArtwork(FrameCapture? capture = null)
         var cache = Path.Combine(directory, "episode-thumbnails"); Directory.CreateDirectory(cache);
         var path = Path.Combine(cache, LibraryIdentity.Hash($"{item.Path}:{file.Length}:{file.LastWriteTimeUtc.Ticks}") + ".jpg");
         if (ArtworkCache.IsUsable(path)) return path;
-        // Skip opening credits where possible. A second early seek handles short/unknown videos.
-        foreach (var seconds in new[] { item.RuntimeMinutes is > 0 ? Math.Min(600, item.RuntimeMinutes.Value * 15d) : 180, 1d })
+        // Skip opening credits where possible. Later seeks handle short or unknown videos, such as a
+        // ninety-second clip whose first second is black, and the grabber rejects dark frames.
+        var positions = item.RuntimeMinutes is > 0 and var minutes
+            ? minutes <= 3 ? new[] { minutes * 60 * 0.4, minutes * 60 * 0.7, minutes * 60 * 0.15 } : [Math.Min(600, minutes * 15d), 20d, 1d]
+            : [180d, 20d, 5d, 1d];
+        foreach (var seconds in positions)
         {
             var temporary = path + "." + Guid.NewGuid().ToString("N") + ".jpg";
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(20));
