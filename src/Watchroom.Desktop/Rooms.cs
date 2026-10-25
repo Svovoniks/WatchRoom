@@ -80,12 +80,12 @@ public partial class MainWindow
         if (host)
         {
             var active = connected ? room!.Snapshot?.People.Where(p => !p.IsHost).ToArray() ?? [] : [];
-            rows = active.Select(p => new RoomGuestRow(p.Id, p.Name, p.Approved ? "In the room" : "Asking to join", !p.Approved, connected, pendingAdmissions.ContainsKey(p.Id), true, true)).ToList();
+            rows = active.Select(p => new RoomGuestRow(p.Id, p.Name, p.Approved ? (room!.VoiceState(p.Id)?.Joined == true ? "In the room · In voice" : "In the room") : "Asking to join", !p.Approved, connected, pendingAdmissions.ContainsKey(p.Id), true, true)).ToList();
             rows.AddRange(remembered.Where(p => !active.Any(a => a.GuestId == p.Id)).Select(p => new RoomGuestRow(p.Id, p.Name, "Admitted · Not here", false, connected, false, true, false)));
         }
         // Guests see who is in the room while connected.
         else rows = connected ? (room!.Snapshot?.People ?? []).Where(p => p.IsHost || p.Approved)
-            .Select(p => new RoomGuestRow(p.Id, p.Id == room.Identity!.Peer ? p.Name + " (you)" : p.Name, p.IsHost ? "Host" : "In the room", false, false, false, false, true)).ToList() : [];
+            .Select(p => new RoomGuestRow(p.Id, p.Id == room.Identity!.Peer ? p.Name + " (you)" : p.Name, (p.IsHost ? "Host" : "In the room") + (room.VoiceState(p.Id)?.Joined == true ? " · In voice" : ""), false, false, false, false, true)).ToList() : [];
         if (SavedRoomGuests.ItemsSource is not IEnumerable<RoomGuestRow> shown || !shown.SequenceEqual(rows)) SavedRoomGuests.ItemsSource = rows;
         SavedRoomGuestHeading.Text = host ? "GUESTS" : "PEOPLE";
         SavedRoomGuestCount.Text = host ? remembered.Length == 0 ? "" : remembered.Length + " admitted" : rows.Count == 0 ? "" : rows.Count + " here";
@@ -161,7 +161,7 @@ public partial class MainWindow
             try { await client.ConnectAsync(SavedServerAddress, SavedDisplayName, persistent: true, roomName: name); }
             catch { await Disconnect(); throw; }
             RememberCurrentRoom(); RoomHeading.Text = name; RoomSubtitle.Text = "Share an invitation, then choose a video from the library.";
-            roomPanelVisible = true; ShowPage("Rooms");
+            roomPanelVisible = false; ShowPage("Rooms");
         }
         finally { pendingRoomName = null; roomBusy = false; RefreshSavedRooms(); }
     });
@@ -193,7 +193,7 @@ public partial class MainWindow
             catch { await Disconnect(); throw; }
             RoomHeading.Text = client.Snapshot?.Name ?? saved.Name;
             RoomSubtitle.Text = saved.HostKey is null ? "Waiting for host approval" : "Choose a video from the library.";
-            RememberCurrentRoom(); roomPanelVisible = true;
+            RememberCurrentRoom(); roomPanelVisible = false;
             PublishRoomSession(client, saved); RestoreRoomSession(client, saved);
             return true;
         }

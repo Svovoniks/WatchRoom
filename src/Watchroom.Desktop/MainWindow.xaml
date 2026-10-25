@@ -1,4 +1,4 @@
-<Window x:Class="Watchroom.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Watchroom.Desktop" xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF" Style="{StaticResource {x:Type Window}}" Title="Watchroom" Icon="Assets/Watchroom.ico" Width="1280" Height="850" MinWidth="900" MinHeight="640" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" WindowStartupLocation="CenterScreen" Closing="WindowClosing" PreviewKeyDown="KeyPressed">
+<Window x:Class="Watchroom.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Watchroom.Desktop" xmlns:vlc="clr-namespace:LibVLCSharp.WPF;assembly=LibVLCSharp.WPF" Style="{StaticResource {x:Type Window}}" Title="Watchroom" Icon="Assets/Watchroom.ico" Width="1280" Height="850" MinWidth="900" MinHeight="640" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" WindowStartupLocation="CenterScreen" Closing="WindowClosing" PreviewKeyDown="KeyPressed" PreviewKeyUp="KeyReleased">
  <!-- The app draws its own caption row; WindowChrome keeps native drag, resize and snap behaviour. -->
  <WindowChrome.WindowChrome><WindowChrome CaptionHeight="40" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/></WindowChrome.WindowChrome>
  <Grid x:Name="WindowRoot" Background="{DynamicResource Canvas}"><Grid.RowDefinitions><RowDefinition x:Name="TitleRow" Height="40"/><RowDefinition Height="*"/><RowDefinition x:Name="StatusRow" Height="30"/></Grid.RowDefinitions><Grid.ColumnDefinitions><ColumnDefinition Width="212" x:Name="RailWidth"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -536,6 +536,7 @@
        <Button Content="Profile" Tag="Profile" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
        <Button Content="Metadata" Tag="Metadata" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
        <Button Content="Playback" Tag="Playback" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
+       <Button Content="Voice chat" Tag="Voice" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
        <Button Content="Appearance" Tag="Appearance" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
        <Button Content="Updates &amp; about" Tag="Updates" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
       </WrapPanel>
@@ -635,6 +636,41 @@
        <TextBlock Text="Default: 30 seconds. Playback starts as soon as a few seconds are ready; Watchroom then keeps downloading up to this much video ahead while you watch. Applies to the next streamed video. Larger buffers use more memory but do not delay starting or seeking. During a brief host connection interruption, playback continues from buffered video for up to this time, then pauses if recovery has not finished. Actual coverage depends on available bandwidth." Style="{StaticResource Hint}"/>
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
+     <ScrollViewer x:Name="VoicePreferences" Tag="Voice" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" IsVisibleChanged="VoicePreferencesVisibilityChanged"><StackPanel MaxWidth="760" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
+      <Border Style="{StaticResource Card}"><StackPanel>
+       <TextBlock Text="Devices" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
+       <TextBlock Text="Talk with everyone in your room while you watch. Join voice from the player's top bar or the Participants panel." Style="{StaticResource Hint}" Margin="0,0,0,14"/>
+       <TextBlock Text="Microphone" Style="{StaticResource FieldLabel}"/>
+       <ComboBox x:Name="VoiceInputPicker" DisplayMemberPath="Name" SelectedValuePath="Id" AutomationProperties.Name="Microphone for voice chat" Margin="0,6,0,8" MaxWidth="460" HorizontalAlignment="Left" MinWidth="320"/>
+       <!-- A live level meter while this page is open: speak and watch it move. -->
+       <Grid Margin="0,0,0,4" MaxWidth="460" HorizontalAlignment="Left" MinWidth="320"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <TextBlock Text="&#xE720;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+        <Border Grid.Column="1" x:Name="VoiceTestTrack" Height="6" CornerRadius="3" Background="{DynamicResource Line}" VerticalAlignment="Center" AutomationProperties.Name="Microphone level"><Border x:Name="VoiceTestFill" CornerRadius="3" Background="#3FB97A" HorizontalAlignment="Left" Width="0"/></Border>
+       </Grid>
+       <TextBlock x:Name="VoiceTestStatus" Style="{StaticResource Hint}" AutomationProperties.LiveSetting="Polite" Margin="0,0,0,14"/>
+       <TextBlock Text="Speakers or headphones" Style="{StaticResource FieldLabel}"/>
+       <WrapPanel><ComboBox x:Name="VoiceOutputPicker" DisplayMemberPath="Name" SelectedValuePath="Id" AutomationProperties.Name="Speakers or headphones for voice chat" Margin="0,6,8,8" MinWidth="320" MaxWidth="460"/><Button x:Name="VoiceTestSoundButton" Content="Play test sound" Click="PlayVoiceTestSound" Style="{StaticResource SettingsButton}" Margin="0,6,0,8"/></WrapPanel>
+       <TextBlock Text="Windows default follows the device you choose in Windows sound settings, including when you plug in a headset. A Bluetooth headset's own microphone makes Windows switch the headset to call-quality sound, movie included; a separate or built-in microphone keeps full quality." Style="{StaticResource Hint}"/>
+      </StackPanel></Border>
+      <Border Style="{StaticResource Card}"><StackPanel>
+       <TextBlock Text="Talking" Style="{StaticResource CardTitle}"/>
+       <CheckBox x:Name="VoiceEchoCancellation" Content="Reduce echo and background noise"/>
+       <TextBlock Text="Keeps the movie and other people's voices coming from your speakers out of your microphone. Turn it off only if your voice sounds wrong." Style="{StaticResource Hint}" Margin="28,0,0,10"/>
+       <CheckBox x:Name="VoicePushToTalk" Content="Push to talk: hold V to speak"/>
+       <TextBlock Text="Otherwise Watchroom sends your voice when you speak, and V mutes or unmutes you. Keys work while Watchroom is the active window." Style="{StaticResource Hint}" Margin="28,0,0,10"/>
+       <CheckBox x:Name="VoiceAutoJoin" Content="Join voice automatically when I enter a room"/>
+      </StackPanel></Border>
+      <Border Style="{StaticResource Card}"><StackPanel>
+       <TextBlock Text="Listening" Style="{StaticResource CardTitle}"/>
+       <TextBlock Text="Voice volume" Style="{StaticResource FieldLabel}"/>
+       <Grid MaxWidth="460" HorizontalAlignment="Left" MinWidth="320" Margin="0,6,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/></Grid.ColumnDefinitions>
+        <Slider x:Name="VoiceVolumeSlider" Minimum="0" Maximum="200" SmallChange="5" LargeChange="10" IsSnapToTickEnabled="True" TickFrequency="5" AutomationProperties.Name="Voice volume" VerticalAlignment="Center"/>
+        <TextBlock Grid.Column="1" Text="{Binding Value, ElementName=VoiceVolumeSlider, StringFormat={}{0:0}%}" TextAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/>
+       </Grid>
+       <CheckBox x:Name="VoiceDucking" Content="Lower the video while people talk"/>
+       <TextBlock Text="The movie fades to half volume while someone speaks, then returns." Style="{StaticResource Hint}" Margin="28,0,0,0"/>
+      </StackPanel></Border>
+     </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="AppearancePreferences" Tag="Appearance" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,0,12">
       <Border Style="{StaticResource Card}"><DockPanel>
        <Button DockPanel.Dock="Right" Content="Switch light / dark" Click="ToggleTheme" VerticalAlignment="Center" Margin="16,0,0,0"/>
@@ -650,7 +686,7 @@
        <TextBlock Text="Diagnostics" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/><TextBlock Text="For connection or playback issues, share logs from both devices. Invitations, credentials and videos are excluded." Style="{StaticResource Hint}"/><Button x:Name="OpenLogsFolderButton" Content="Open logs folder" Click="OpenLogsFolder" Style="{StaticResource SettingsButton}" HorizontalAlignment="Left" Margin="0,12,0,0"/>
       </StackPanel></Border>
       <Border Style="{StaticResource Card}"><StackPanel>
-       <TextBlock Text="About" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/><TextBlock Text="Video playback by libVLC / LibVLCSharp. Peer connections by libdatachannel / DataChannelDotnet. Artwork by TVmaze (https://www.tvmaze.com, CC BY-SA), Wikipedia, and TMDB. Source pages appear in title details." Style="{StaticResource Hint}"/><Image Source="Assets/Tmdb.png" Width="200" Stretch="Uniform" HorizontalAlignment="Left" Margin="0,16,0,6" AutomationProperties.Name="The Movie Database logo"/><TextBlock><Hyperlink NavigateUri="https://www.themoviedb.org" RequestNavigate="OpenTmdbAttribution" Foreground="{DynamicResource Accent}">The Movie Database</Hyperlink></TextBlock><TextBlock Text="This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB." Style="{StaticResource Hint}" Margin="0,10,0,0"/><TextBlock Text="Streaming-provider data supplied by JustWatch via TMDB." Style="{StaticResource Hint}" Margin="0,10,0,0"/><TextBlock><Hyperlink NavigateUri="https://www.justwatch.com/" RequestNavigate="OpenTmdbAttribution" Foreground="{DynamicResource Accent}">JustWatch</Hyperlink></TextBlock>
+       <TextBlock Text="About" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/><TextBlock Text="Video playback by libVLC / LibVLCSharp. Peer connections by libdatachannel / DataChannelDotnet. Voice chat by Concentus (Opus) and NAudio. Artwork by TVmaze (https://www.tvmaze.com, CC BY-SA), Wikipedia, and TMDB. Source pages appear in title details." Style="{StaticResource Hint}"/><Image Source="Assets/Tmdb.png" Width="200" Stretch="Uniform" HorizontalAlignment="Left" Margin="0,16,0,6" AutomationProperties.Name="The Movie Database logo"/><TextBlock><Hyperlink NavigateUri="https://www.themoviedb.org" RequestNavigate="OpenTmdbAttribution" Foreground="{DynamicResource Accent}">The Movie Database</Hyperlink></TextBlock><TextBlock Text="This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB." Style="{StaticResource Hint}" Margin="0,10,0,0"/><TextBlock Text="Streaming-provider data supplied by JustWatch via TMDB." Style="{StaticResource Hint}" Margin="0,10,0,0"/><TextBlock><Hyperlink NavigateUri="https://www.justwatch.com/" RequestNavigate="OpenTmdbAttribution" Foreground="{DynamicResource Accent}">JustWatch</Hyperlink></TextBlock>
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
     </Grid>
@@ -828,7 +864,7 @@
      <Border x:Name="VideoFrame" Background="Black">
       <vlc:VideoView x:Name="Video">
        <!-- A nonzero alpha keeps the native overlay hit-testable over the video. -->
-       <Grid x:Name="PlayerOverlay" Background="#01000000" Focusable="True" MouseMove="PlayerMouseMoved" MouseLeftButtonDown="VideoClicked" MouseLeave="PlayerMouseLeft" MouseWheel="VideoWheel" PreviewKeyDown="KeyPressed">
+       <Grid x:Name="PlayerOverlay" Background="#01000000" Focusable="True" MouseMove="PlayerMouseMoved" MouseLeftButtonDown="VideoClicked" MouseLeave="PlayerMouseLeft" MouseWheel="VideoWheel" PreviewKeyDown="KeyPressed" PreviewKeyUp="KeyReleased">
         <Border x:Name="PlayerEmpty" Background="#0B0B0E"><Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="16"><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"><Border Width="76" Height="76" CornerRadius="38" Background="#2A2442" HorizontalAlignment="Center"><TextBlock Text="&#xF5B0;" FontFamily="{StaticResource IconFont}" FontSize="28" Foreground="#A991FF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0,0,0"/></Border><TextBlock Text="Choose a video to play" FontSize="21" FontWeight="SemiBold" Foreground="#F4F4F7" HorizontalAlignment="Center" Margin="0,20,0,20"/><Button Content="Browse library" Tag="Library" Click="Navigate" Style="{StaticResource PlayerButton}" HorizontalAlignment="Center" Margin="0"/></StackPanel></Viewbox></Border>
         <StackPanel x:Name="PlayerTopChrome" VerticalAlignment="Top">
          <!-- Top bar: back, title, room status and room actions. It hides and shows together with the bottom bar. -->
@@ -845,7 +881,10 @@
            </StackPanel>
            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top">
             <Button x:Name="RoomLibraryButton" Content="Room library" Click="OpenRoomLibrary" Style="{StaticResource PlayerGlassButton}" Visibility="Collapsed" ToolTip="Browse the host library, manage the room queue and guest access"/>
-            <Button x:Name="RoomToggle" Click="ToggleRoomPanel" Style="{StaticResource PlayerGlassButton}" ToolTip="Show or hide participants and chat" AutomationProperties.Name="Room and chat"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE716;" Style="{StaticResource PlayerPillIcon}"/><TextBlock Text="Room &amp; chat" VerticalAlignment="Center"/><Border x:Name="RoomUnreadBadge" Visibility="Collapsed" Background="#A991FF" CornerRadius="8" MinWidth="16" Height="16" Padding="5,0" Margin="7,0,0,0" VerticalAlignment="Center"><TextBlock x:Name="RoomUnreadText" Foreground="#160E2E" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></StackPanel></Button>
+            <!-- Voice: join or leave, with a microphone switch while in voice. -->
+            <Button x:Name="VoiceMuteButton" Click="ToggleVoiceMute" Style="{StaticResource PlayerGlassButton}" Visibility="Collapsed" FontFamily="{StaticResource IconFont}" FontSize="14" Width="34" Padding="0" Content="&#xE720;" ToolTip="Mute microphone (V)" AutomationProperties.Name="Mute microphone"/>
+            <Button x:Name="VoiceButton" Click="ToggleVoice" Style="{StaticResource PlayerGlassButton}" Visibility="Collapsed" ToolTip="Join voice chat to talk while you watch" AutomationProperties.Name="Join voice chat"><StackPanel Orientation="Horizontal"><TextBlock x:Name="VoiceButtonIcon" Text="&#xE95B;" Style="{StaticResource PlayerPillIcon}"/><TextBlock x:Name="VoiceButtonText" Text="Voice" VerticalAlignment="Center"/><Border x:Name="VoiceCountBadge" Visibility="Collapsed" Background="#3FB97A" CornerRadius="8" MinWidth="16" Height="16" Padding="5,0" Margin="7,0,0,0" VerticalAlignment="Center"><TextBlock x:Name="VoiceCountText" Foreground="#0B0B0E" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></StackPanel></Button>
+            <Button x:Name="RoomToggle" Click="ToggleRoomPanel" Style="{StaticResource PlayerGlassButton}" ToolTip="Show or hide participants and chat" AutomationProperties.Name="Room and chat"><StackPanel Orientation="Horizontal"><TextBlock x:Name="RoomToggleIcon" Text="&#xE716;" Style="{StaticResource PlayerPillIcon}"/><TextBlock x:Name="RoomToggleText" Text="Room &amp; chat" VerticalAlignment="Center"/><Border x:Name="RoomUnreadBadge" Visibility="Collapsed" Background="#A991FF" CornerRadius="8" MinWidth="16" Height="16" Padding="5,0" Margin="7,0,0,0" VerticalAlignment="Center"><TextBlock x:Name="RoomUnreadText" Foreground="#160E2E" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></StackPanel></Button>
             <Button x:Name="InviteButton" Content="&#xE71B;" Click="CopyInvite" Style="{StaticResource PlayerGlassButton}" FontFamily="{StaticResource IconFont}" FontSize="14" Width="34" Padding="0" ToolTip="Copy invite" AutomationProperties.Name="Copy invite"/>
             <Button x:Name="LeaveButton" Content="Leave" Click="LeaveRoom" Style="{StaticResource PlayerGlassButton}" Margin="0"/>
            </StackPanel>
@@ -985,15 +1024,36 @@
         </Style>
        </TabControl.Resources>
        <TabItem Header="Participants">
-        <Grid Margin="0,12,0,0"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-         <ListBox x:Name="PeopleList" AutomationProperties.Name="Room participants" Background="Transparent" BorderThickness="0" Padding="0" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate>
-          <Grid Margin="0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-           <Border Width="32" Height="32" CornerRadius="16" Background="{DynamicResource AccentSoft}" Margin="0,0,10,0" VerticalAlignment="Center"><TextBlock Text="&#xE77B;" FontFamily="{StaticResource IconFont}" FontSize="13" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+        <Grid Margin="0,12,0,0"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+         <!-- Voice chat: who is talking, your microphone, and joining or leaving. -->
+         <Border x:Name="VoiceCard" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="12,10" Margin="0,0,0,10">
+          <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+           <Border x:Name="VoiceCardBadge" Width="32" Height="32" CornerRadius="16" Background="{DynamicResource AccentSoft}" VerticalAlignment="Top" Margin="0,2,10,0"><TextBlock x:Name="VoiceCardIcon" Text="&#xE95B;" FontFamily="{StaticResource IconFont}" FontSize="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+           <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,8,0">
+            <TextBlock Text="Voice chat" FontWeight="SemiBold"/>
+            <TextBlock x:Name="VoiceCardStatus" Foreground="{DynamicResource Muted}" FontSize="11.5" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+            <Border x:Name="VoiceLevelTrack" Height="3" CornerRadius="1.5" Background="{DynamicResource Line}" Margin="0,6,0,2" Visibility="Collapsed" ToolTip="Your microphone level"><Border x:Name="VoiceLevelFill" CornerRadius="1.5" Background="#3FB97A" HorizontalAlignment="Left" Width="0"/></Border>
+            <TextBlock x:Name="VoiceCardProblem" Foreground="#F0616D" FontSize="11.5" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,4,0,0"><Run x:Name="VoiceCardProblemText"/><Hyperlink x:Name="VoicePrivacyLink" NavigateUri="ms-settings:privacy-microphone" RequestNavigate="OpenMicrophonePrivacy" Foreground="{DynamicResource Accent}"><Run x:Name="VoicePrivacyLinkText"/></Hyperlink></TextBlock>
+           </StackPanel>
+           <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+            <Button x:Name="VoiceCardMute" Click="ToggleVoiceMute" Style="{StaticResource IconButton}" Width="34" Height="34" MinHeight="34" Margin="0,0,6,0" Visibility="Collapsed" Content="&#xE720;" ToolTip="Mute microphone (V)" AutomationProperties.Name="Mute microphone"/>
+            <Button x:Name="VoiceCardJoin" Click="ToggleVoice" Style="{StaticResource Primary}" Content="Join" Padding="14,0" Height="34" MinHeight="34" Margin="0" AutomationProperties.Name="Join voice chat"/>
+           </StackPanel>
+          </Grid>
+         </Border>
+         <ListBox Grid.Row="1" x:Name="PeopleList" AutomationProperties.Name="Room participants" Background="Transparent" BorderThickness="0" Padding="0" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate>
+          <Grid Margin="0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+           <!-- The avatar ring lights up while the person is talking. -->
+           <Border Width="32" Height="32" CornerRadius="16" Background="{DynamicResource AccentSoft}" BorderBrush="{Binding Voice.Ring}" BorderThickness="2" Margin="0,0,10,0" VerticalAlignment="Center"><TextBlock Text="&#xE77B;" FontFamily="{StaticResource IconFont}" FontSize="13" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,8,0"><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}"/><TextBlock Text="{Binding Status}" Foreground="{DynamicResource Muted}" FontSize="11" TextWrapping="Wrap"/></StackPanel>
-           <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding Actions}"><Button Content="{Binding AdmitLabel}" Visibility="{Binding AdmitVisibility}" IsEnabled="{Binding CanAdmit}" Tag="{Binding Id}" Click="Admit" Style="{StaticResource Primary}" Padding="10,0" Height="30" MinHeight="30" FontSize="12" Margin="0,0,6,0"/><Button Content="Remove" Tag="{Binding Id}" Click="RemovePeer" Style="{StaticResource QuietButton}" Padding="8,0" Height="30" MinHeight="30" FontSize="12" Margin="0"/></StackPanel>
+           <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding Voice.Visibility}" Margin="0,0,6,0">
+            <TextBlock Text="{Binding Voice.Icon}" Foreground="{Binding Voice.IconBrush}" ToolTip="{Binding Voice.Description}" FontFamily="{StaticResource IconFont}" FontSize="13" VerticalAlignment="Center" Margin="0,0,4,0" AutomationProperties.Name="{Binding Voice.Description}"/>
+            <Button Content="{Binding Voice.LocalMuteIcon}" Visibility="{Binding Voice.LocalMuteVisibility}" Tag="{Binding Id}" Click="ToggleLocalVoiceMute" ToolTip="{Binding Voice.LocalMuteHelp}" AutomationProperties.Name="{Binding Voice.LocalMuteHelp}" Style="{StaticResource QuietIcon}" FontSize="12" Width="28" Height="28" MinHeight="28" Margin="0"/>
+           </StackPanel>
+           <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding Actions}"><Button Content="{Binding AdmitLabel}" Visibility="{Binding AdmitVisibility}" IsEnabled="{Binding CanAdmit}" Tag="{Binding Id}" Click="Admit" Style="{StaticResource Primary}" Padding="10,0" Height="30" MinHeight="30" FontSize="12" Margin="0,0,6,0"/><Button Content="Remove" Tag="{Binding Id}" Click="RemovePeer" Style="{StaticResource QuietButton}" Padding="8,0" Height="30" MinHeight="30" FontSize="12" Margin="0"/></StackPanel>
           </Grid>
          </DataTemplate></ListBox.ItemTemplate></ListBox>
-         <Button Grid.Row="1" Content="Join a room" Click="JoinClick" Margin="0,12,0,0"/>
+         <Button Grid.Row="2" Content="Join a room" Click="JoinClick" Margin="0,12,0,0"/>
         </Grid>
        </TabItem>
        <TabItem Header="Chat">

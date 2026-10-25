@@ -64,6 +64,9 @@ public sealed partial class RoomClient : IAsyncDisposable
     public Task DirectControlsReady => directConnected.Task;
     public bool DiscoveryOnline => Volatile.Read(ref discoveryFailed) == 0 && connection is not null;
     public bool IsPeerRecovering => Volatile.Read(ref peerRecovering) != 0;
+    // Whether this guest has been let in, and whether the room currently has a host to talk to.
+    public bool IsAdmitted => Volatile.Read(ref admitted);
+    public bool HostPresent => Volatile.Read(ref hostPeer) is not null;
     public IMediaSource? HostedMedia { get; set; }
     public void ShareSubtitle(string path)
     {
@@ -338,6 +341,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                                 PlaybackDiagnostics.Record("peer-unresponsive", new { room = diagnosticId, silentMs = Environment.TickCount64 - lastHostMessageMs });
                                 DepartPeer(hostPeer, "Host control replies stopped arriving");
                             }
+                            ReconcileVoice();
                             break;
                         case "discovery": HandleDiscovery(item.Message!); break;
                         case "discovery-lost":
@@ -346,6 +350,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                             else Status?.Invoke("Room discovery is offline. Existing peer playback continues; new joins are unavailable.");
                             break;
                         case "local": HandleLocal(item.Message!); break;
+                        case "voice-local": ApplyLocalVoice(); break;
                         case "subtitle-selection":
                             if (coordinator?.Media?.Id != item.MediaId || item.Subtitle is null) break;
                             assets[item.Subtitle.Media.Id] = item.Subtitle;
@@ -427,6 +432,8 @@ public sealed partial class RoomClient : IAsyncDisposable
                         coordinator.Apply(Identity.Peer, new("controls", Number: 1), clock.Now, out _);
                     coordinator.Apply(Identity.Peer, new("catalog-permission", Number: settings?.Setting(RoomSetting(Identity.Room, "libraryBrowsing")) == "true" ? 1 : 0), clock.Now, out _);
                     if (roomControlsRestored) TryQueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
+                    coordinator.Apply(Identity.Peer, new("voice", Number: Volatile.Read(ref voiceDesired)), clock.Now, out _);
+                    UpdateVoiceRoutes();
                     Snapshot = coordinator.Snapshot; directConnected.TrySetResult();
                 }
                 connected.TrySetResult(Identity); Message?.Invoke(message); break;
@@ -532,6 +539,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                     if (clockHost != sender) { clock.Initialize(state.HostNowMs); clockHost = sender; }
                     receivedSequence = state.Sequence; ApplySnapshot(state.Snapshot);
                     directConnected.TrySetResult();
+                    ReconcileVoice();
                     if (Interlocked.Exchange(ref peerRecovering, 0) != 0)
                     {
                         PlaybackDiagnostics.Record("peer-recovered", new { room = diagnosticId, transport = peers.GetValueOrDefault(sender)?.DiagnosticId });
@@ -645,6 +653,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     private string? publishedSnapshot, publishedRecipients;
     private void PublishHostState()
     {
+        UpdateVoiceRoutes();
         var snapshot = coordinator!.Snapshot;
         // Chat, library renewals and other commands often leave the room unchanged; skip republishing
         // unless the state or the set of peers receiving it changed.
@@ -690,7 +699,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     }
     private void DepartPeer(string id, string? reason = null, bool recover = true)
     {
-        artworkTransfers.Remove(id);
+        artworkTransfers.Remove(id); voiceBudgets.TryRemove(id, out _);
         var name = Snapshot?.People.FirstOrDefault(p => p.Id == id)?.Name;
         var present = negotiated.ContainsKey(id) || peers.ContainsKey(id) || name is not null;
         PlaybackDiagnostics.Record("peer-departed", new { room = diagnosticId, transport = peers.GetValueOrDefault(id)?.DiagnosticId,
@@ -724,7 +733,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                 return;
             }
             Interlocked.Exchange(ref peerRecovering, 0);
-            if (Snapshot is { } snapshot) ApplySnapshot(snapshot with { People = snapshot.People.Where(p => p.Id != id).ToArray(), Media = null, Playback = null, LibraryActivity = null, LibraryBrowsing = false });
+            if (Snapshot is { } snapshot) ApplySnapshot(snapshot with { People = snapshot.People.Where(p => p.Id != id).ToArray(), Media = null, Playback = null, LibraryActivity = null, LibraryBrowsing = false, Voice = null });
             if (present) Message?.Invoke(new("peer-left", Sender: id, Text: name));
             Status?.Invoke("Host disconnected. Waiting in the room for the host to return.");
         }
@@ -749,6 +758,7 @@ public sealed partial class RoomClient : IAsyncDisposable
         var inbox = new PeerInbox(Identity.Host, Identity.Host ? 48 : 160);
         peer.ControlMessage += message => PostPeer(inbox, new("peer", id, message, peer));
         peer.ControlClosed += () => Post(new("closed", id, Transport: peer));
+        peer.VoiceFrame += (transport, frame) => ReceiveVoice(id, transport, frame);
         peers[id] = peer;
         if (offer) peer.StartOffer();
         TryQueueDiscovery(new("signal", Target: id, Text: "library-capability", Data: "1"));

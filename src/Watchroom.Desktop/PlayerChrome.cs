@@ -260,5 +260,10 @@ public partial class MainWindow
         foreach (var text in new[] { AudioPillText, SubtitlePillText, QueuePillText }) text.MaxWidth = width >= 640 ? 130 : 72;
         Volume.Visibility = VolumeText.Visibility = width >= 780 ? Visibility.Visible : Visibility.Collapsed;
         PlaybackTime.Visibility = width >= 640 ? Visibility.Visible : Visibility.Collapsed;
+        // The top bar keeps every room action: in narrow players voice, then room & chat, show only their icons and counts.
+        VoiceButtonText.Visibility = width >= 1000 ? Visibility.Visible : Visibility.Collapsed;
+        VoiceButtonIcon.Margin = new Thickness(0, 0, width >= 1000 ? 7 : 0, 0);
+        RoomToggleText.Visibility = width >= 780 ? Visibility.Visible : Visibility.Collapsed;
+        RoomToggleIcon.Margin = new Thickness(0, 0, width >= 780 ? 7 : 0, 0);
     }
 }

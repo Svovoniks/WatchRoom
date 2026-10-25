@@ -157,6 +157,7 @@ public partial class MainWindow : Window
             MetadataToken.Password = savedMetadataToken = MetadataCredential.Load(App.DataDirectory);
         }
         catch (Win32Exception) { SetStatus("Could not read the saved TMDB token. Enter it again in Settings."); }
+        InitializeVoice();
         InitializePreferences();
         displaySpecialsWithinSeasons = MetadataOptions.Load(library).DisplaySpecialsWithinSeasons;
         foreach (var path in Wire.Read<string[]>(library.Setting("exclusions") ?? "[]")) exclusions.Add(path);
@@ -987,7 +988,8 @@ public partial class MainWindow : Window
             await Disconnect(); playingItem = null; var client = NewRoom(); SetStatus("Joining room…");
             try { await client.ConnectAsync(address.Server, SavedDisplayName, address.Code); }
             catch { await Disconnect(); throw; }
-            roomPanelVisible = true; RoomHeading.Text = "Your watch room";
+            // Rooms open with participants and chat closed; the top bar button shows them.
+            roomPanelVisible = false; RoomHeading.Text = "Your watch room";
             RememberCurrentRoom(); RoomSubtitle.Text = "Waiting for host approval"; ShowPage("Room");
         } finally { roomBusy = false; RefreshSavedRooms(); UpdateSessionControls(); }
     });
@@ -1032,10 +1034,12 @@ public partial class MainWindow : Window
         {
             if (room != client) return; ConnectionStatus.Text = text;
             if (text.StartsWith("Host disconnected", StringComparison.Ordinal) || text.StartsWith("Host offline", StringComparison.Ordinal))
-            { playbackRecovery.Clear(); player?.SetPause(true); target = null; loadedMedia = null; ready = false; ++loadGeneration; RoomSubtitle.Text = "Host offline · Waiting for the host to return"; SetStatus(text); UpdateSessionControls(); }
+            { playbackRecovery.Clear(); player?.SetPause(true); target = null; loadedMedia = null; ready = false; ++loadGeneration; RoomSubtitle.Text = "Host offline · Waiting for the host to return"; SetStatus(text); UpdateSessionControls(); RefreshVoice(); }
             if (text.StartsWith("Disconnected", StringComparison.Ordinal) || text.StartsWith("Room discovery is offline", StringComparison.Ordinal))
             { SetStatus(text); _ = ReconnectRoomAsync(client); }
+            if (text.StartsWith("Host connection restored", StringComparison.Ordinal) || text.StartsWith("Reconnecting to host", StringComparison.Ordinal)) RefreshVoice();
         });
+        VoiceRoomChanged(client, reconnecting: roomReconnect is not null);
         return client;
     }
     private string[] guestQueueTitles = [];
@@ -1104,6 +1108,7 @@ public partial class MainWindow : Window
                 }
                 RecordRoomSession();
                 RefreshPeople(snapshot, settings: false); RefreshSavedRooms();
+                VoiceSnapshot(snapshot);
                 SharedControls.IsEnabled = room.Identity?.Host == true; SharedControls.IsChecked = snapshot.SharedControls; RefreshSharedControlsChip();
                 if (room.Identity?.Host != true && !snapshot.SharedControls) { playbackPause.Clear(); playbackIntent.Clear(); }
                 if (snapshot.Playback is not null) AcceptState(snapshot.Playback);
@@ -1246,7 +1251,8 @@ public partial class MainWindow : Window
     private async Task PrepareVideoSurface(bool openPlayer = true)
     {
         PlayerEmpty.Visibility = Visibility.Collapsed;
-        roomPanelVisible = room is not null;
+        // Starting a video keeps participants and chat as the viewer left them.
+        if (room is null) roomPanelVisible = false;
         // A video started while picture in picture is open plays there; the app stays on its page.
         if (!openPlayer || pictureInPicture) return;
         ShowPage("Room");
@@ -1485,7 +1491,7 @@ public partial class MainWindow : Window
         finally { loading.Release(); }
     });
     private void MutePlayback(object sender, RoutedEventArgs e) { if (player is not null) player.Mute = !player.Mute; }
-    private void VolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e) { if (player is not null) { player.Volume = (int)e.NewValue; if (e.NewValue > 0) player.Mute = false; } }
+    private void VolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e) { if (player is not null) { ApplyPlayerVolume(); if (e.NewValue > 0) player.Mute = false; } }
     private void VolumeWheel(object sender, MouseWheelEventArgs e)
     {
         e.Handled = true;
@@ -1570,6 +1576,7 @@ public partial class MainWindow : Window
         var people = snapshot.People.Select(p => new
         {
             p.Id, p.Name,
+            Voice = PresenceFor(p.Id, p.Name),
             Status = !p.Approved ? (pendingAdmissions.ContainsKey(p.Id) ? "Waiting for admission confirmation…" : "Waiting for approval")
                 : (p.IsHost ? "Host · " : "Admitted · ") + (p.Ready ? "Ready" : "Buffering"),
             Actions = room?.Identity?.Host == true && !p.IsHost ? Visibility.Visible : Visibility.Collapsed,
@@ -1673,6 +1680,7 @@ public partial class MainWindow : Window
     private async void LeaveRoom(object sender, RoutedEventArgs e) => await Guard(async () => { var wasRoom = room is not null; ShowPage(wasRoom ? "Rooms" : "Library"); await Disconnect(); RoomHeading.Text = "Your watch room"; RoomSubtitle.Text = "Room closed"; RefreshSavedRooms(); });
     private async Task Disconnect(bool preserveFullscreen = false, bool reconnecting = false)
     {
+        await VoiceRoomClosed(reconnecting);
         CancelPeerNotices();
         playbackRecovery.Clear();
         if (!reconnecting) { roomReconnect?.Cancel(); roomReconnect = null; }
@@ -1704,7 +1712,7 @@ public partial class MainWindow : Window
         PeopleList.ItemsSource = null; pendingAdmissions.Clear(); RoomFeedback.Text = ""; RoomFeedback.Visibility = Visibility.Collapsed;
         RoomTabs.SelectedIndex = 0; chat.Clear(); ClearChatBubbles(); SetThreadExecutionState(0x80000000); ConnectionStatus.Text = "Local playback";
         guestBrowsePending = false; ++guestBrowseRequest; RefreshSharedLibrary();
-        UpdateSessionControls();
+        UpdateSessionControls(); RefreshVoice();
     }
     private static string PlaybackTitle(MediaItem item) => item.QueueTitle;
     private void RemoveQueued(object sender, RoutedEventArgs e)
@@ -1915,6 +1923,7 @@ public partial class MainWindow : Window
     {
         if (e.Handled) return;
         if (MediaKeyPressed(e)) return;
+        if (VoiceKey(e, true)) return;
         if (e.Key is Key.BrowserBack or Key.BrowserForward || Keyboard.Modifiers == ModifierKeys.Alt && e.SystemKey is Key.Left or Key.Right)
         { BrowseHistory(e.Key == Key.BrowserBack || e.SystemKey == Key.Left); e.Handled = true; return; }
         if (e.Key == Key.Escape && upNextChoice is not null) { EndUpNext(false); e.Handled = true; return; }

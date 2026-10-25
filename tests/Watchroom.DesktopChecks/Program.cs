@@ -61,6 +61,19 @@ static class Program
             });
             app.Run(); return;
         }
+        if (args.FirstOrDefault() == "--voice-ui")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var voiceWindow = new MainWindow { Left = -20000, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+            voiceWindow.Loaded += async (_, _) =>
+            {
+                var count = 0;
+                try { await VoiceUiChecks.Run(voiceWindow, store, directory, (condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); count++; }); Console.WriteLine($"{count} voice UI checks passed."); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { voiceWindow.Close(); app.Shutdown(); }
+            };
+            voiceWindow.Show(); app.Run(); return;
+        }
         if (args.FirstOrDefault() == "--guest-recovery")
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -118,6 +131,18 @@ static class Program
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             HostLibraryBrowseChecks.Run(directory); app.Shutdown(); return;
+        }
+        if (args.FirstOrDefault() == "--voice-devices")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                var count = 0;
+                try { await VoiceDeviceChecks.Run((condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); count++; }); Console.WriteLine($"{count} voice device checks passed."); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
         }
         if (args.FirstOrDefault() == "--home")
         {
@@ -261,6 +286,7 @@ static class Program
                 await PlayerShutdownChecks.Run(window, Check);
                 await RoomRecoveryChecks.Run(window, directory, Check);
                 await GuestRecoveryChecks.Run(window, directory, Check);
+                await VoiceUiChecks.Run(window, activeStore, directory, Check);
                 Console.WriteLine($"Input heartbeat: maximum {gaps.Max():F1} ms; p95 {gaps.Order().ElementAt((int)(gaps.Count * .95)):F1} ms");
                 Console.WriteLine($"{checks} desktop responsiveness checks passed.");
             }

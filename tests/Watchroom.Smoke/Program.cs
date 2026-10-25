@@ -125,6 +125,17 @@ if (args.FirstOrDefault() == "--room-reconnect")
     Console.WriteLine($"{checks} room reconnect checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--voice")
+{
+    var checks = 0;
+    void VoiceCheck(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; }
+    VoiceFixture.RunUnits(VoiceCheck);
+    if (!args.Contains("--units"))
+        await VoiceFixture.RunIsolated(File.Exists(".tools/dotnet/dotnet.exe") ? Path.GetFullPath(".tools/dotnet/dotnet.exe") : "dotnet",
+            Path.GetFullPath("src/Watchroom.Server/bin/Release/net10.0/Watchroom.Server.dll"), Path.GetFullPath(Path.Combine("artifacts", "voice-" + Guid.NewGuid().ToString("N"))), VoiceCheck);
+    Console.WriteLine($"{checks} voice checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--peer-recovery")
 {
     var checks = 0;
@@ -617,6 +628,8 @@ var start = new ProcessStartInfo(sdkPath) { UseShellExecute = false, CreateNoWin
 start.Environment["WATCHROOM_DATA"] = Path.Combine(root, "server-data");
 start.ArgumentList.Add(Path.GetFullPath(Environment.GetEnvironmentVariable("WATCHROOM_TEST_SERVER_DLL") ?? "src/Watchroom.Server/bin/Release/net10.0/Watchroom.Server.dll")); start.ArgumentList.Add("--urls"); start.ArgumentList.Add(serverUrl);
 await GuestLibraryPeerFixture.RunIsolated(sdkPath, start.ArgumentList[0], root, videoPath, Check);
+VoiceFixture.RunUnits(Check);
+await VoiceFixture.RunIsolated(sdkPath, start.ArgumentList[0], root, Check);
 using var server = externalServer is null ? Process.Start(start)! : null;
 var stdout = server?.StandardOutput.ReadToEndAsync(); var stderr = server?.StandardError.ReadToEndAsync();
 try

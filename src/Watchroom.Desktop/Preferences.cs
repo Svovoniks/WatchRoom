@@ -55,6 +55,10 @@ public partial class MainWindow
         { box.Checked += PreferencesChanged; box.Unchecked += PreferencesChanged; }
         MetadataLanguage.SelectionChanged += PreferencesChanged;
         MetadataCountry.SelectionChanged += PreferencesChanged;
+        foreach (var box in new[] { VoiceEchoCancellation, VoicePushToTalk, VoiceDucking, VoiceAutoJoin })
+        { box.Checked += PreferencesChanged; box.Unchecked += PreferencesChanged; }
+        VoiceInputPicker.SelectionChanged += PreferencesChanged; VoiceOutputPicker.SelectionChanged += PreferencesChanged;
+        VoiceVolumeSlider.ValueChanged += (sender, _) => PreferencesChanged(sender, new RoutedEventArgs());
         preferencesReady = true;
         ShowPreferenceSection("Profile");
     }
@@ -68,6 +72,7 @@ public partial class MainWindow
             StreamingBufferSeconds.Text = SavedStreamingBufferSeconds.ToString(CultureInfo.InvariantCulture);
             MetadataToken.Password = savedMetadataToken;
             LoadTrackPreferences();
+            LoadVoicePreferenceControls();
             var options = MetadataOptions.Load(library);
             providerChoices.Clear();
             foreach (var id in options.ProviderOrder.Concat(new[] { "tmdb", "tvmaze", "wikipedia" }).Distinct())
@@ -104,7 +109,7 @@ public partial class MainWindow
         providers = providerChoices.Select(p => new { p.Id, p.Enabled }).ToArray(), language = MetadataLanguage.SelectedValue,
         country = MetadataCountry.SelectedValue, days = MetadataRefreshDays.Text, never = NeverRefresh.IsChecked,
         missing = ImportMissing.IsChecked, upcoming = ImportUpcoming.IsChecked, nfo = SaveNfo.IsChecked,
-        specials = DisplaySpecials.IsChecked, grouping = GroupShows.IsChecked
+        specials = DisplaySpecials.IsChecked, grouping = GroupShows.IsChecked, voice = DraftVoicePreferences()
     });
     private void PreferencesChanged(object sender, RoutedEventArgs e)
     {
@@ -116,6 +121,8 @@ public partial class MainWindow
         ClearPreferenceErrors();
         ValidateRefreshDays();
         ValidateStreamingBuffer();
+        // The microphone test follows the chosen microphone and echo setting before they are saved.
+        if (sender == VoiceInputPicker || sender == VoiceEchoCancellation) _ = Guard(RestartVoiceTest);
     }
     private bool ValidateStreamingBuffer()
     {
@@ -169,7 +176,7 @@ public partial class MainWindow
     private void ShowPreferenceSection(string section)
     {
         preferenceSection = section;
-        foreach (var panel in new[] { ProfilePreferences, MetadataPreferences, PlaybackPreferences, AppearancePreferences, UpdatePreferences })
+        foreach (var panel in new[] { ProfilePreferences, MetadataPreferences, PlaybackPreferences, VoicePreferences, AppearancePreferences, UpdatePreferences })
             panel.Visibility = (string)panel.Tag == section ? Visibility.Visible : Visibility.Collapsed;
         foreach (Button button in PreferenceSections.Children)
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, (string)button.Tag == section ? "Selected" : "");
@@ -205,6 +212,7 @@ public partial class MainWindow
         displaySpecialsWithinSeasons = DisplaySpecials.IsChecked == true;
         library.Setting("name", DisplayNameBox.Text.Trim()); library.Setting("server", ServerBox.Text.Trim().TrimEnd('/'));
         library.Setting("artwork", AutoArtwork.IsChecked == true ? "true" : "false");
+        SaveVoicePreferences();
         preferencesBaseline = PreferenceSnapshot();
         SavePreferencesButton.IsEnabled = CancelPreferencesButton.IsEnabled = false;
         PreferencesStatus.Text = "Settings saved.";

@@ -12,6 +12,8 @@ Watchroom dynamically links the following components. Package versions and conte
 | VideoLAN LibVLC Windows | 3.0.23.1 | https://code.videolan.org/videolan/vlc |
 | DataChannelDotnet | 1.3.1 | https://www.nuget.org/packages/DataChannelDotnet |
 | libdatachannel and bundled OpenSSL | Included in DataChannelDotnet | https://github.com/paullouisageneau/libdatachannel |
+| Concentus (managed Opus voice codec) | 2.2.2 | https://github.com/lostromb/concentus |
+| NAudio Core / WASAPI (voice microphone and playback) | 3.3.0 | https://github.com/naudio/NAudio |
 | SkiaSharp / native Skia (artwork decoding) | 2.88.9 | https://github.com/mono/SkiaSharp |
 | Microsoft.Data.Sqlite | 10.0.12 | https://github.com/dotnet/efcore |
 | SQLitePCLRaw | 3.0.5 | https://github.com/ericsink/SQLitePCL.raw |

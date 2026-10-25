@@ -15,7 +15,12 @@ internal sealed class HostRoomCoordinator(string host)
     private long revision, generation;
     private bool resumeWhenReady;
     public AdmittedGuest[] AdmittedGuests { get; set; } = [];
-    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name, LibraryBrowsing, LibraryActivity, Tracks, LastSession);
+    public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name, LibraryBrowsing, LibraryActivity, Tracks, LastSession,
+        voice.Values.Where(v => people.ContainsKey(v.Peer)).OrderBy(v => v.Slot).ToArray());
+    // Everyone whose app supports voice reports its state once connected; each keeps a small slot that
+    // labels its relayed audio frames, so listeners can tell speakers apart without per-frame names.
+    private readonly Dictionary<string, VoiceMember> voice = [];
+    public IReadOnlyCollection<VoiceMember> Voice => voice.Values;
     // The host's record of what the room watched last, shown to guests while nothing is playing.
     public RoomSession? LastSession { get; private set; }
     public RoomTracks? Tracks { get; private set; }
@@ -47,7 +52,7 @@ internal sealed class HostRoomCoordinator(string host)
     public void Discover(Participant[] members, long now)
     {
         var ids = members.Select(p => p.Id).ToHashSet();
-        foreach (var id in people.Keys.Where(id => !ids.Contains(id)).ToArray()) { people.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); }
+        foreach (var id in people.Keys.Where(id => !ids.Contains(id)).ToArray()) { people.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); voice.Remove(id); }
         foreach (var p in members)
             if (!departed.Contains(p.Id)) people[p.Id] = p with { Ready = people.GetValueOrDefault(p.Id)?.Ready ?? false };
         if (LibraryActivity is { } activity && !Approved(activity.Peer)) LibraryActivity = null;
@@ -55,7 +60,7 @@ internal sealed class HostRoomCoordinator(string host)
     }
     public void Depart(string id, long now)
     {
-        departed.Add(id); people.Remove(id); limits.Remove(id); scopedReadiness.Remove(id); connected.Remove(id);
+        departed.Add(id); people.Remove(id); limits.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); voice.Remove(id);
         if (LibraryActivity?.Peer == id) LibraryActivity = null;
         TryResume(now);
     }
@@ -167,6 +172,14 @@ internal sealed class HostRoomCoordinator(string host)
                     Playback = current with { Stop = new("buffering", sender, people[sender].Name), Revision = ++revision, Playing = false, PositionMs = SyncMath.TargetPosition(current, now), AtUnixMs = now };
                     announcement = new("notice", Text: $"{people[sender].Name} is buffering. Playback resumes when everyone is ready.");
                 }
+                return true;
+            case "voice":
+                // Bit 1: in voice; bit 2: microphone muted.
+                if (message.Number is < 0 or > 3) return false;
+                var slot = voice.TryGetValue(sender, out var existing) ? existing.Slot
+                    : Enumerable.Range(1, 250).FirstOrDefault(candidate => voice.Values.All(v => v.Slot != candidate));
+                if (slot == 0) return false;
+                voice[sender] = new(sender, slot, (message.Number & 1) != 0, (message.Number & 2) != 0);
                 return true;
             case "chat":
                 var text = message.Text?.Trim();

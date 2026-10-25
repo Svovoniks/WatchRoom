@@ -96,6 +96,20 @@ public sealed class PeerTransport : IDisposable
     private IRtcDataChannel? channel;
     private IRtcDataChannel? controls;
     private IRtcDataChannel? catalogChannel;
+    // Voice frames are useless once late, so they are never retransmitted past a quarter second
+    // and never wait behind each other.
+    private IRtcDataChannel? voiceChannel;
+    public const string VoiceLabel = "voice-v1";
+    public delegate void VoiceFrameHandler(PeerTransport transport, ReadOnlySpan<byte> frame);
+    public event VoiceFrameHandler? VoiceFrame;
+    public bool IsVoiceOpen => voiceChannel?.IsOpen == true && disposed == 0;
+    public bool SendVoice(ReadOnlySpan<byte> frame)
+    {
+        var voice = voiceChannel;
+        if (voice?.IsOpen != true || disposed != 0) return false;
+        try { voice.Send(frame); return true; }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException) { return false; }
+    }
     private readonly TaskCompletionSource catalogOpened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public Task LibraryReady => Task.WhenAll(ControlReady, catalogOpened.Task);
     public void EnableLibraryChannel()
@@ -185,6 +199,8 @@ public sealed class PeerTransport : IDisposable
         // Ranges are identified independently. Reliable unordered delivery avoids
         // holding later bytes behind retransmission of an earlier range.
         Attach(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = "media", Unordered = true }));
+        // Older apps close channels they do not recognize; the room then treats them as unable to use voice.
+        Attach(peer.CreateDataChannel(new RtcCreateDataChannelArgs { Label = VoiceLabel, Unordered = true, Unreliable = true, MaxPacketLifetime = 250 }));
     }
     private void IsolateMedia()
     {
@@ -239,6 +255,19 @@ public sealed class PeerTransport : IDisposable
             return;
         }
         if (data.Label == "watchroom-control-v2") { AttachControls(data); return; }
+        if (data.Label == VoiceLabel)
+        {
+            if (voiceChannel is not null) { data.Dispose(); return; }
+            voiceChannel = data;
+            // A closed voice channel only silences voice; playback and controls continue.
+            data.OnBinaryReceivedSafe += (_, frame) =>
+            {
+                if (disposed != 0) return;
+                try { VoiceFrame?.Invoke(this, frame.Data); }
+                catch (Exception ex) { PlaybackDiagnostics.Record("voice-frame-rejected", new { transport = DiagnosticId, error = ex.GetType().Name }); }
+            };
+            return;
+        }
         Action markOpen;
         if (data.Label == "media-v2")
         {
@@ -443,6 +472,7 @@ public sealed class PeerTransport : IDisposable
         try { legacyMedia?.Dispose(); } catch { }
         try { mediaPeer?.Dispose(); } catch { }
         try { catalogChannel?.Dispose(); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning("Catalog cleanup: {0}", ex.Message); }
+        try { voiceChannel?.Dispose(); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning("Voice cleanup: {0}", ex.Message); }
         // A remotely closed native channel can reject disposal. Cleanup of one
         // departed peer must still release its connection and preserve the room.
         try { channel?.Dispose(); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning("Channel cleanup: {0}", ex.Message); }
