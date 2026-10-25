@@ -36,6 +36,14 @@ static class PlayerLayoutChecks
         Check(Wheel(videoOverlay, -120, false).Handled && volume.Value == 47.5, "wheel over video adjusts volume");
         volume.Value = 99; Wheel(volume, 120);
         Check(volume.Value == 100, "wheel volume stays within its allowed range");
+        var mute = (Button)window.FindName("MuteButton"); var volumeText = (TextBlock)window.FindName("VolumeText");
+        Check(mute.Content as string == "\uE995" && volumeText.Text == "100%", "a loud volume shows three speaker waves and its level under the speaker");
+        volume.Value = 50; Check(mute.Content as string == "\uE994" && volumeText.Text == "50%", "a middle volume shows two speaker waves");
+        volume.Value = 20; Check(mute.Content as string == "\uE993", "a quiet volume shows one speaker wave");
+        volume.Value = 0; Check(mute.Content as string == "\uE992" && volumeText.Text == "0%", "zero volume shows a speaker without waves");
+        Check(!IsDescendant(volume, (Border)window.FindName("PlaybackControls")) && !((System.Windows.Controls.Primitives.Popup)window.FindName("VolumeFlyout")).IsOpen,
+            "the volume slider stays out of the bar in a closed flyout until it is needed");
+        volume.Value = 100;
         var timeline = (Slider)window.FindName("Timeline");
         Check(Wheel(timeline, 120).Handled && volume.Value == 100 && timeline.Value == 0,
             "timeline wheel is consumed independently and ignores an unloaded video");
@@ -180,10 +188,50 @@ static class PlayerLayoutChecks
             if (size.Item1 == 900) Save(root, "episode-end-action.png");
             episodeAction.Visibility = Visibility.Collapsed;
         }
+        // A small player folds the pills that don't fit, and the stop and picture-in-picture buttons, into the … pill.
+        void Settle(int width, int height)
+        {
+            // The bars live in the video's overlay, which is laid out on its own at the video's size.
+            var overlay = (Grid)window.FindName("PlayerOverlay");
+            for (var pass = 0; pass < 3; pass++)
+            {
+                Layout(width, height);
+                var size = new Size(video.ActualWidth, video.ActualHeight);
+                overlay.Measure(size); overlay.Arrange(new Rect(size)); overlay.UpdateLayout();
+                window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+            }
+        }
+        var bar = (FrameworkElement)window.FindName("PlaybackControls");
+        var overflowPill = (FrameworkElement)window.FindName("OverflowPill");
+        var overflowItems = (StackPanel)window.FindName("OverflowItems");
+        var pills = (PillStrip)window.FindName("PlayerPills");
+        bool InBar(FrameworkElement element)
+        {
+            var box = element.TransformToAncestor(bar).TransformBounds(new Rect(new Point(), element.RenderSize));
+            return box.Left >= 0 && box.Right <= bar.ActualWidth + 0.5;
+        }
+        foreach (var width in new[] { 320, 400, 480, 560, 700 })
+        {
+            Invoke(window, "ClosePlayerMenus"); Settle(width, 360);
+            var shown = new[] { "PlayButton", "PreviousButton", "NextButton", "MuteButton", "FullscreenButton", "OverflowPill", "AudioPill", "SubtitlePill", "QueuePill", "StopButton", "PictureInPictureButton", "PlaybackTime" }
+                .Select(name => (FrameworkElement)window.FindName(name)).Where(element => element.Visibility == Visibility.Visible).ToList();
+            Check(shown.All(InBar), $"every control shown in a {width}px player bar fits inside it");
+            var folded = pills.Folded.Count; var stopHidden = ((Button)window.FindName("StopButton")).Visibility != Visibility.Visible;
+            Check((folded > 0 || stopHidden) == (overflowPill.Visibility == Visibility.Visible) &&
+                overflowItems.Children.OfType<Button>().Count() == folded + (stopHidden ? 1 : 0) + (((Button)window.FindName("PictureInPictureButton")).Visibility != Visibility.Visible ? 1 : 0),
+                $"the … pill appears only when something is folded and lists each folded control at {width}px");
+            if (width == 400) Save(bar, "player-bar-narrow.png");
+        }
+        Settle(320, 360);
+        Check(pills.Folded.Count >= 2 && ((System.Windows.Controls.Primitives.Popup)window.FindName("SubtitleMenu")).PlacementTarget == overflowPill,
+            "folded pills open their menus from the … pill in the narrowest player");
+        Settle(1280, 810);
+        Check(pills.Folded.Count == 0 && overflowPill.Visibility != Visibility.Visible && queueMenu.PlacementTarget == queuePill,
+            "widening the player unfolds every pill and hides the … pill");
         var library = (Button)window.FindName("RoomLibraryButton");
         Check(!IsDescendant(library, queueMenuContent), "library access is outside the queue menu");
         Check(window.FindName("SavedRoomLibraryButton") is Button, "Rooms settings provide a library access entry");
-        library.Visibility = Visibility.Visible; library.Content = "Library & guest access";
+        library.Visibility = Visibility.Visible; ((TextBlock)window.FindName("RoomLibraryText")).Text = "Library & guest access";
         ((Button)window.FindName("RoomToggle")).Visibility = Visibility.Visible;
         ((Button)window.FindName("InviteButton")).Visibility = Visibility.Visible;
         Layout(900, 600);
@@ -194,6 +242,27 @@ static class PlayerLayoutChecks
             var bounds = button.TransformToAncestor(header).TransformBounds(new Rect(new Point(), button.RenderSize));
             Check(bounds.Left >= 0 && bounds.Right <= header.ActualWidth + 1, name + " fits in the smallest room header");
         }
+        Settle(320, 360);
+        foreach (var name in new[] { "RoomLibraryButton", "RoomToggle", "InviteButton", "LeaveButton", "PlayerCloseButton" })
+        {
+            var button = (Button)window.FindName(name);
+            var bounds = button.TransformToAncestor(header).TransformBounds(new Rect(new Point(), button.RenderSize));
+            Check(bounds.Left >= 0 && bounds.Right <= header.ActualWidth + 1, name + " fits in a 320px room header");
+        }
+        var titleBox = ((FrameworkElement)window.FindName("RoomHeading")).TransformToAncestor(header).TransformBounds(new Rect(new Point(), ((FrameworkElement)window.FindName("RoomHeading")).RenderSize));
+        var libraryBox = library.TransformToAncestor(header).TransformBounds(new Rect(new Point(), library.RenderSize));
+        Check(titleBox.Right <= libraryBox.Left, "the room buttons and window buttons leave the title its own space in a 320px header");
+        Check(((TextBlock)window.FindName("RoomToggleText")).Visibility == Visibility.Collapsed, "a narrow room header shows its buttons as icons");
+        Save(header, "player-header-narrow.png");
+        // The shortest player window still keeps the top and bottom bars apart.
+        Settle(700, 220);
+        var shortOverlay = (Grid)window.FindName("PlayerOverlay");
+        var headerBox = header.TransformToAncestor(shortOverlay).TransformBounds(new Rect(new Point(), header.RenderSize));
+        var barBox = bar.TransformToAncestor(shortOverlay).TransformBounds(new Rect(new Point(), bar.RenderSize));
+        Check(((FrameworkElement)window.FindName("RoomHeaderDetails")).Visibility == Visibility.Collapsed && headerBox.Bottom <= barBox.Top + 24 && barBox.Bottom <= shortOverlay.ActualHeight + 1,
+            $"a short player tightens its bars so they stay apart (header ends {headerBox.Bottom:F0}, controls start {barBox.Top:F0}, video {shortOverlay.ActualHeight:F0})");
+        Save(shortOverlay, "player-short.png");
+        Settle(900, 600);
         Save(root, "player-library-access.png");
         var movie = episode with { Id = "movie-finish", Series = null, Season = null, Episode = null, ShowId = null, Kind = "Movie" };
         typeof(MainWindow).GetField("playingItem", flags)!.SetValue(window, movie);
@@ -217,6 +286,7 @@ static class PlayerLayoutChecks
         var caption = (Grid)window.FindName("CaptionBar");
         Check(caption.Visibility == Visibility.Collapsed && System.Windows.Shell.WindowChrome.GetWindowChrome(window).CaptionHeight == 0,
             "fullscreen video hides the caption row and leaves the top of the video clickable");
+        Check(((FrameworkElement)window.FindName("PlayerCaptionButtons")).Visibility == Visibility.Collapsed, "fullscreen hides the window buttons in the top bar");
         Save(fullscreenOverlay, "player-fullscreen-bars.png");
         transport.Visibility = Visibility.Collapsed; Layout(900, 600);
         Check(header.Visibility == Visibility.Collapsed, "fullscreen header follows bottom controls after moving into the overlay");
@@ -231,11 +301,19 @@ static class PlayerLayoutChecks
         Check(header.Visibility == Visibility.Visible && header.ActualHeight > 0, "leaving fullscreen restores the docked top bar");
         var updateCard = (Border)window.FindName("UpdateCard");
         Check(updateCard.Parent == window.FindName("PlayerUpdateHost"), "the update card shows in the video overlay so the video cannot cover it");
-        Check(caption.Visibility == Visibility.Visible && System.Windows.Shell.WindowChrome.GetWindowChrome(window).CaptionHeight == 40 &&
-            caption.Background is SolidColorBrush { Color: var captionColor } && captionColor == Color.FromRgb(0x17, 0x18, 0x1F),
-            "the docked player keeps a dark caption row that matches its header");
+        var captionButtons = (FrameworkElement)window.FindName("PlayerCaptionButtons");
+        var dockedOverlay = (Grid)window.FindName("PlayerOverlay");
+        dockedOverlay.Measure(new Size(video.ActualWidth, video.ActualHeight)); dockedOverlay.Arrange(new Rect(0, 0, video.ActualWidth, video.ActualHeight)); dockedOverlay.UpdateLayout();
+        var captionBox = captionButtons.TransformToAncestor(dockedOverlay).TransformBounds(new Rect(new Point(), captionButtons.RenderSize));
+        Check(caption.Visibility == Visibility.Collapsed && System.Windows.Shell.WindowChrome.GetWindowChrome(window).CaptionHeight == 0 && video.ActualHeight == 600 &&
+            captionButtons.Visibility == Visibility.Visible && captionBox.Top == 0 && Math.Abs(captionBox.Right - dockedOverlay.ActualWidth) < 1,
+            "the docked player reaches the top of the window, with the window buttons in the top bar's corner");
+        double Middle(string name) { var element = (FrameworkElement)window.FindName(name); return element.TransformToAncestor(dockedOverlay).TransformBounds(new Rect(new Point(), element.RenderSize)) is var box ? box.Top + box.Height / 2 : double.NaN; }
+        Check(Math.Abs(Middle("LeaveButton") - Middle("PlayerCloseButton")) < 1 && Math.Abs(Middle("PlayerBackButton") - Middle("PlayerCloseButton")) < 1,
+            $"the top bar's buttons line up with the window buttons ({Middle("PlayerBackButton"):F0}, {Middle("LeaveButton"):F0}, {Middle("PlayerCloseButton"):F0})");
+        Save((FrameworkElement)window.FindName("RoomHeader"), "player-header-docked.png");
         window.Close();
-        Console.WriteLine("49 player layout and control checks passed.");
+        Console.WriteLine("Player layout and control checks passed.");
     }
     static bool IsDescendant(DependencyObject child, DependencyObject parent)
     {

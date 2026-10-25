@@ -327,6 +327,31 @@
    </Style.Triggers>
   </Style>
 
+  <!-- Window buttons in the player's top bar, which replaces the caption row while the player is docked.
+       The bar lives in LibVLC's overlay window, so these don't follow the main window's active state. -->
+  <Style x:Key="PlayerCaptionButton" TargetType="Button">
+   <Setter Property="Width" Value="46"/><Setter Property="Height" Value="46"/><Setter Property="Focusable" Value="False"/>
+   <Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="10"/>
+   <Setter Property="Foreground" Value="{StaticResource PlayerInk}"/><Setter Property="Background" Value="Transparent"/><Setter Property="VerticalAlignment" Value="Top"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Grid Background="Transparent">
+     <Border x:Name="Frame" Background="{TemplateBinding Background}"/>
+     <Border x:Name="Tint" Background="#FFFFFF" Opacity="0" IsHitTestVisible="False"/>
+     <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    </Grid>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.1"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.16"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="PlayerCaptionCloseButton" TargetType="Button" BasedOn="{StaticResource PlayerCaptionButton}">
+   <Style.Triggers>
+    <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#C42B1C"/><Setter Property="Foreground" Value="#FFFFFF"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter Property="Background" Value="#B02718"/><Setter Property="Foreground" Value="#FFFFFF"/></Trigger>
+   </Style.Triggers>
+  </Style>
+
   <!-- Player controls: borderless icon buttons on a dark bar. -->
   <Style x:Key="PlayerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="MinHeight" Value="40"/><Setter Property="Padding" Value="14,8"/>
    <Setter Property="Background" Value="#1AFFFFFF"/><Setter Property="Foreground" Value="{StaticResource PlayerInk}"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="MinWidth" Value="34"/><Setter Property="VerticalAlignment" Value="Center"/>
@@ -416,6 +441,11 @@
   <Style x:Key="PlayerSlider" TargetType="Slider">
    <Setter Property="VerticalAlignment" Value="Center"/><Setter Property="Height" Value="24"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider"><Grid x:Name="Root" Background="Transparent"><Border x:Name="Rail" Height="4" Background="#40FFFFFF" CornerRadius="2" Margin="6,0"/><Track x:Name="PART_Track" Margin="0" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}"><Track.DecreaseRepeatButton><RepeatButton Command="Slider.DecreaseLarge" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="4" Margin="6,0,-6,0" Background="{StaticResource PlayerAccent}" CornerRadius="2"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton><Track.Thumb><Thumb Width="14" Height="14"><Thumb.Template><ControlTemplate TargetType="Thumb"><Ellipse x:Name="Knob" Fill="#FFFFFF" RenderTransformOrigin="0.5,0.5"><Ellipse.RenderTransform><ScaleTransform x:Name="KnobScale" ScaleX="0.75" ScaleY="0.75"/></Ellipse.RenderTransform></Ellipse><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Knob" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value></Setter></Trigger><Trigger Property="IsDragging" Value="True"><Setter TargetName="Knob" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value></Setter></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb></Track.Thumb><Track.IncreaseRepeatButton><RepeatButton Command="Slider.IncreaseLarge" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton></Track></Grid><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Rail" Property="Background" Value="#59FFFFFF"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <!-- The volume flyout's slider: PlayerSlider stood upright, filling from the bottom. -->
+  <Style x:Key="PlayerVerticalSlider" TargetType="Slider">
+   <Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="Width" Value="24"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider"><Grid x:Name="Root" Background="Transparent"><Border x:Name="Rail" Width="4" Background="#40FFFFFF" CornerRadius="2" Margin="0,6"/><Track x:Name="PART_Track" Orientation="Vertical" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}"><Track.DecreaseRepeatButton><RepeatButton Command="Slider.DecreaseLarge" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Width="4" Margin="0,-6,0,6" Background="{StaticResource PlayerAccent}" CornerRadius="2"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton><Track.Thumb><Thumb Width="14" Height="14"><Thumb.Template><ControlTemplate TargetType="Thumb"><Ellipse x:Name="Knob" Fill="#FFFFFF" RenderTransformOrigin="0.5,0.5"><Ellipse.RenderTransform><ScaleTransform ScaleX="0.75" ScaleY="0.75"/></Ellipse.RenderTransform></Ellipse><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Knob" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value></Setter></Trigger><Trigger Property="IsDragging" Value="True"><Setter TargetName="Knob" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value></Setter></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb></Track.Thumb><Track.IncreaseRepeatButton><RepeatButton Command="Slider.IncreaseLarge" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton></Track></Grid><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Rail" Property="Background" Value="#59FFFFFF"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
   </Style>
  </Application.Resources>
 </Application>

@@ -198,34 +198,12 @@ public partial class MainWindow
         if (pictureInPicture) PictureInPictureControls.Visibility = Visibility.Collapsed;
     }
     // Matches the pointer to the window border it is near, or the caption elsewhere.
-    private int PictureInPictureHit(Point position)
-    {
-        bool left = position.X < PictureInPictureEdge, right = position.X > PlayerOverlay.ActualWidth - PictureInPictureEdge;
-        bool top = position.Y < PictureInPictureEdge, bottom = position.Y > PlayerOverlay.ActualHeight - PictureInPictureEdge;
-        return (top, bottom, left, right) switch
-        {
-            (true, _, true, _) => 13, // HTTOPLEFT
-            (true, _, _, true) => 14, // HTTOPRIGHT
-            (_, true, true, _) => 16, // HTBOTTOMLEFT
-            (_, true, _, true) => 17, // HTBOTTOMRIGHT
-            (true, _, _, _) => 12, // HTTOP
-            (_, true, _, _) => 15, // HTBOTTOM
-            (_, _, true, _) => 10, // HTLEFT
-            (_, _, _, true) => 11, // HTRIGHT
-            _ => 2, // HTCAPTION
-        };
-    }
+    private int PictureInPictureHit(Point position) =>
+        EdgeHit(position, PlayerOverlay.RenderSize, PictureInPictureEdge) is > 0 and var edge ? edge : 2; // HTCAPTION
     private void PictureInPictureMouseMoved(MouseEventArgs e)
     {
         if (e.OriginalSource != PlayerOverlay) { PlayerOverlay.Cursor = Cursors.Arrow; return; }
-        PlayerOverlay.Cursor = PictureInPictureHit(e.GetPosition(PlayerOverlay)) switch
-        {
-            13 or 17 => Cursors.SizeNWSE,
-            14 or 16 => Cursors.SizeNESW,
-            12 or 15 => Cursors.SizeNS,
-            10 or 11 => Cursors.SizeWE,
-            _ => Cursors.Arrow,
-        };
+        PlayerOverlay.Cursor = EdgeCursor(PictureInPictureHit(e.GetPosition(PlayerOverlay))) ?? Cursors.Arrow;
     }
     private void PictureInPicturePressed(MouseButtonEventArgs e)
     {

@@ -1297,10 +1297,7 @@ public partial class MainWindow : Window
         { readyGeneration = -1; SendReadiness("buffering"); }
         ReportReady();
         UpdateSessionControls();
-        MuteButton.Content = player.Mute ? "\uE74F" : "\uE767";
-        MuteButton.ToolTip = player.Mute ? "Unmute (M)" : "Mute (M)";
-        System.Windows.Automation.AutomationProperties.SetName(MuteButton, player.Mute ? "Unmute" : "Mute");
-        VolumeText.Text = player.Mute ? "Muted" : $"{(int)Volume.Value}%";
+        RefreshVolumeIndicator();
         if (pendingSeek is { } requested && (Wire.Now >= seekExpires || (room is null || target?.Revision > seekRevision) && Math.Abs(player.Time - requested) < 1500)) pendingSeek = null;
         if (!seeking)
         {
@@ -1492,14 +1489,18 @@ public partial class MainWindow : Window
         try { await StopNativePlayback(); }
         finally { loading.Release(); }
     });
-    private void MutePlayback(object sender, RoutedEventArgs e) { if (player is not null) player.Mute = !player.Mute; }
-    private void VolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e) { if (player is not null) { ApplyPlayerVolume(); if (e.NewValue > 0) player.Mute = false; } }
+    private void MutePlayback(object sender, RoutedEventArgs e) { if (player is not null) { player.Mute = !player.Mute; RefreshVolumeIndicator(); } }
+    private void VolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (player is not null) { ApplyPlayerVolume(); if (e.NewValue > 0) player.Mute = false; }
+        RefreshVolumeIndicator();
+        ShowVolumeFlyout();
+    }
     private void VolumeWheel(object sender, MouseWheelEventArgs e)
     {
         e.Handled = true;
-        Volume.Value = Math.Clamp(Volume.Value + e.Delta * 5d / 120, Volume.Minimum, Volume.Maximum);
-        VolumeText.Text = $"{(int)Volume.Value}%";
         ShowPlayerControls();
+        Volume.Value = Math.Clamp(Volume.Value + e.Delta * 5d / 120, Volume.Minimum, Volume.Maximum);
     }
     private void VideoWheel(object sender, MouseWheelEventArgs e)
     {
@@ -1752,8 +1753,9 @@ public partial class MainWindow : Window
         var canControl = room is null || connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
         InviteButton.Visibility = RoomToggle.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
         RoomLibraryButton.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
-        RoomLibraryButton.Content = room?.Identity?.Host == true ? "Library & guest access" : "Host library";
-        LeaveButton.Content = room is null ? "Close player" : "Leave room";
+        RoomLibraryText.Text = room?.Identity?.Host == true ? "Library & guest access" : "Host library";
+        System.Windows.Automation.AutomationProperties.SetName(RoomLibraryButton, RoomLibraryText.Text);
+        RefreshLeaveButton();
         ChatInput.IsEnabled = SendChatButton.IsEnabled = connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.People.Any(p => p.Id == room.Identity?.Peer && p.Approved) == true);
         PlayButton.IsEnabled = StopButton.IsEnabled = canControl && (ready || playingItem is not null && player?.State is VLCState.Stopped or VLCState.Ended);
         Timeline.IsEnabled = canControl && player?.Length > 0;
@@ -1804,6 +1806,9 @@ public partial class MainWindow : Window
         RoomSplitterWidth.Width = new GridLength(showRoomPanel ? 6 : 0);
         RoomSideWidth.MinWidth = showRoomPanel ? 280 : 0;
         RoomSideWidth.Width = new GridLength(showRoomPanel ? roomPanelWidth : 0);
+        // The player shrinks well below the library's minimum size; leaving it brings that minimum back.
+        MinWidth = !inPlayer ? 900 : showRoomPanel ? 640 : 400;
+        MinHeight = inPlayer ? 220 : 640;
         RoomToggle.ToolTip = roomPanelVisible ? "Hide participants and chat" : "Show participants and chat";
         ApplyCaptionLayout(inPlayer);
         PlaceUpdateCard(inPlayer);
@@ -1852,15 +1857,16 @@ public partial class MainWindow : Window
         PlayerOverlay.Focus();
     }
     private void ToggleRoomPanel(object sender, RoutedEventArgs e) { roomPanelVisible = !roomPanelVisible; if (roomPanelVisible) { RoomTabs.SelectedIndex = unreadChat > 0 ? 1 : RoomTabs.SelectedIndex; ClearChatBubbles(); } ApplyPlayerLayout(); }
-    private bool PlayerMenuOpen => AudioMenu.IsOpen || SubtitleMenu.IsOpen || PlayerQueueMenu.IsOpen;
-    private void ClosePlayerMenus() => AudioMenu.IsOpen = SubtitleMenu.IsOpen = PlayerQueueMenu.IsOpen = false;
+    private bool PlayerMenuOpen => AudioMenu.IsOpen || SubtitleMenu.IsOpen || PlayerQueueMenu.IsOpen || OverflowMenu.IsOpen;
+    private void ClosePlayerMenus() => AudioMenu.IsOpen = SubtitleMenu.IsOpen = PlayerQueueMenu.IsOpen = OverflowMenu.IsOpen = false;
     // Skips the fade when the bar itself hides or the window changes size.
-    private void ClosePlayerMenusNow() { AudioMenu.CloseNow(); SubtitleMenu.CloseNow(); PlayerQueueMenu.CloseNow(); }
+    private void ClosePlayerMenusNow() { AudioMenu.CloseNow(); SubtitleMenu.CloseNow(); PlayerQueueMenu.CloseNow(); OverflowMenu.CloseNow(); HideVolumeFlyout(); }
     private void PlayerMenuOpened(object sender, EventArgs e)
     {
         ShowPlayerControls();
         // Move focus into the menu so arrow keys pick tracks instead of seeking.
         var menu = (System.Windows.Controls.Primitives.Popup)sender;
+        if (menu == OverflowMenu) { Dispatcher.BeginInvoke(() => OverflowItems.MoveFocus(new TraversalRequest(FocusNavigationDirection.First)), DispatcherPriority.Input); return; }
         var list = menu == AudioMenu ? AudioTracks : menu == SubtitleMenu ? SubtitleTracks : QueueList;
         // Rows are virtualized, so bring the selected one into view before focusing it.
         if (list.SelectedItem is { } chosen) list.ScrollIntoView(chosen);
@@ -1876,8 +1882,8 @@ public partial class MainWindow : Window
         // Arrow keys select tracks as they move; Enter confirms. The queue list handles Enter itself.
         var trackConfirmed = e.Key == Key.Enter && e.OriginalSource is ListBoxItem && !PlayerQueueMenu.IsOpen;
         if (e.Key != Key.Escape && !trackConfirmed) return;
-        var pill = AudioMenu.IsOpen ? AudioPill : SubtitleMenu.IsOpen ? SubtitlePill : QueuePill;
-        ClosePlayerMenus(); pill.Focus(); e.Handled = true;
+        var pill = OverflowMenu.IsOpen ? OverflowPill : AudioMenu.IsOpen ? AudioPill : SubtitleMenu.IsOpen ? SubtitlePill : QueuePill;
+        ClosePlayerMenus(); (pill.IsVisible ? pill : OverflowPill).Focus(); e.Handled = true;
     }
     private void TrackMenuClicked(object sender, MouseButtonEventArgs e)
     {
@@ -1900,6 +1906,7 @@ public partial class MainWindow : Window
         lastPlayerMouse = position;
         ShowPlayerControls();
         if (pictureInPicture) PictureInPictureMouseMoved(e);
+        else ShowDockedEdgeCursor(e.GetPosition(PlayerOverlay));
     }
     private void ControlsMouseMoved(object sender, MouseEventArgs e) => PlayerMouseMoved(sender, e);
     private void ControlsKeyPressed(object sender, KeyEventArgs e) => ShowPlayerControls();
@@ -1953,7 +1960,7 @@ public partial class MainWindow : Window
         else if (e.Key == Key.S) { StopPlayback(sender, e); e.Handled = true; }
         else if (e.Key == Key.P) { PreviousQueued(sender, e); e.Handled = true; }
         else if (e.Key == Key.N) { NextQueued(sender, e); e.Handled = true; }
-        else if (Keyboard.FocusedElement is not Slider && e.Key is Key.Up or Key.Down) { Volume.Value = Math.Clamp(Volume.Value + (e.Key == Key.Up ? 5 : -5), 0, 100); e.Handled = true; }
+        else if (Keyboard.FocusedElement is not Slider && e.Key is Key.Up or Key.Down) { ShowPlayerControls(); Volume.Value = Math.Clamp(Volume.Value + (e.Key == Key.Up ? 5 : -5), 0, 100); e.Handled = true; }
     }
     private void ToggleTheme(object sender, RoutedEventArgs e)
     {

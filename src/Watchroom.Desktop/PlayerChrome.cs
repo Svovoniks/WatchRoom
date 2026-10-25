@@ -40,10 +40,15 @@ public partial class MainWindow
         // LibVLC moves the video overlay into its own window, outside this window's name scope,
         // so overlay controls are linked by source rather than ElementName.
         RoomHeader.SetBinding(VisibilityProperty, new Binding(nameof(Visibility)) { Source = PlaybackControls });
-        foreach (var (pill, menu) in new[] { (AudioPill, AudioMenu), (SubtitlePill, SubtitleMenu), (QueuePill, PlayerQueueMenu) })
+        PlayerPills.Overflow = OverflowPill;
+        PlayerPills.FoldedChanged += (_, _) => RefreshOverflowMenu();
+        VolumeFlyout.PlacementTarget = MuteButton;
+        MuteButton.GotKeyboardFocus += (_, _) => { if (InputManager.Current.MostRecentInputDevice is KeyboardDevice) ShowVolumeFlyout(); };
+        foreach (var (pill, menu) in new[] { (AudioPill, AudioMenu), (SubtitlePill, SubtitleMenu), (QueuePill, PlayerQueueMenu), (OverflowPill, OverflowMenu) })
         {
             menu.PlacementTarget = pill;
-            menu.Dismissing += (_, _) => OpenPillUnderPointer(pill);
+            // A folded pill's menu opens from the overflow pill, so a click there only closes it.
+            menu.Dismissing += (_, _) => OpenPillUnderPointer(menu.PlacementTarget as System.Windows.Controls.Primitives.ToggleButton ?? pill);
             pill.SetBinding(System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, new Binding(nameof(System.Windows.Controls.Primitives.Popup.IsOpen)) { Source = menu, Mode = BindingMode.TwoWay });
         }
         foreach (var (text, detail, list, fallback) in new[] { (AudioPillText, AudioPillDetail, AudioTracks, "Audio"), (SubtitlePillText, SubtitlePillDetail, SubtitleTracks, "Subtitles") })
@@ -63,7 +68,7 @@ public partial class MainWindow
     private void OpenPillUnderPointer(System.Windows.Controls.Primitives.ToggleButton closing)
     {
         if (Mouse.LeftButton != MouseButtonState.Pressed) return;
-        var pill = new[] { AudioPill, SubtitlePill, QueuePill }.FirstOrDefault(candidate =>
+        var pill = new[] { AudioPill, SubtitlePill, QueuePill, OverflowPill }.FirstOrDefault(candidate =>
             candidate != closing && candidate.IsVisible && candidate.IsEnabled && new Rect(candidate.RenderSize).Contains(Mouse.GetPosition(candidate)));
         if (pill is null) return;
         pillReleaseWatch?.Stop();
@@ -246,24 +251,172 @@ public partial class MainWindow
         RoomUnreadBadge.Visibility = unreadChat > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    // Narrow bars drop the pills' details first, then the volume slider, then the time.
+    // Short players tighten both bars and drop the status line under the title, so the bars don't meet over the video.
+    private int playerHeightStep = -1;
+    private void VideoFrameSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var height = e.NewSize.Height;
+        var step = height >= 420 ? 2 : height >= 300 ? 1 : 0;
+        if (step == playerHeightStep) return;
+        playerHeightStep = step;
+        PlaybackControls.Padding = step == 2 ? new Thickness(18, 34, 18, 12) : new Thickness(18, 14, 18, 8);
+        RoomHeader.Padding = step == 2 ? new Thickness(14, 6, 14, 30) : new Thickness(14, 6, 14, 12);
+        RoomHeaderDetails.Visibility = step == 0 ? Visibility.Collapsed : Visibility.Visible;
+        // The window buttons stay flush with the window's top-right corner.
+        PlayerCaptionButtons.Margin = new Thickness(8, -RoomHeader.Padding.Top, -RoomHeader.Padding.Right, 0);
+    }
+
+    // Narrow headers keep only the icons of the room buttons and shorten Leave; the narrowest keep only the
+    // close button of the window buttons, as double-clicking the bar still maximizes.
+    private bool roomHeaderCompact;
+    private void RoomHeaderSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var tiny = e.NewSize.Width < 560;
+        PlayerMinimizeButton.Visibility = PlayerMaximizeButton.Visibility = tiny ? Visibility.Collapsed : Visibility.Visible;
+        var compact = e.NewSize.Width < 720;
+        foreach (var button in new[] { PlayerMinimizeButton, PlayerMaximizeButton, PlayerCloseButton }) button.Width = compact ? 40 : 46;
+        // Voice gives up its label first, as it sits among more room buttons.
+        var voiceLabel = e.NewSize.Width >= 1000;
+        VoiceButtonText.Visibility = voiceLabel ? Visibility.Visible : Visibility.Collapsed;
+        VoiceButtonIcon.Margin = new Thickness(0, 0, voiceLabel ? 7 : 0, 0);
+        if (compact == roomHeaderCompact) return;
+        roomHeaderCompact = compact;
+        foreach (var (icon, text) in new[] { (RoomLibraryIcon, RoomLibraryText), (RoomToggleIcon, RoomToggleText) })
+        { text.Visibility = compact ? Visibility.Collapsed : Visibility.Visible; icon.Margin = new Thickness(0, 0, compact ? 0 : 7, 0); }
+        RefreshLeaveButton();
+    }
+    // A title squeezed to a letter or two says nothing, so it steps aside; its column keeps the space either way.
+    private void RoomTitleSizeChanged(object sender, SizeChangedEventArgs e) =>
+        ((UIElement)sender).Visibility = e.NewSize.Width < 72 ? Visibility.Hidden : Visibility.Visible;
+    private void RefreshLeaveButton()
+    {
+        var label = room is null ? "Close player" : "Leave room";
+        LeaveButton.Content = roomHeaderCompact ? room is null ? "Close" : "Leave" : label;
+        System.Windows.Automation.AutomationProperties.SetName(LeaveButton, label);
+    }
+
+    // Narrow bars drop the pills' details first, then shorten their labels, then fold the stop and
+    // picture-in-picture buttons into the … pill and hide the time. Pills that still don't fit fold too.
     private int controlsDensity = -1;
     private void PlaybackControlsSizeChanged(object sender, SizeChangedEventArgs e)
     {
         var width = e.NewSize.Width;
+        UpNextCard.Width = Math.Clamp(width - 48, 240, 360);
         // Resizing fires this continuously; only re-lay out the bar when it crosses a density step.
-        var density = width >= 1000 ? 3 : width >= 780 ? 2 : width >= 640 ? 1 : 0;
+        var density = width >= 1000 ? 5 : width >= 640 ? 4 : width >= 540 ? 3 : width >= 520 ? 2 : width >= 440 ? 1 : 0;
         if (density == controlsDensity) return;
         controlsDensity = density;
         foreach (var detail in new[] { AudioPillDetail, SubtitlePillDetail, QueuePillDetail })
         { detail.MaxWidth = width >= 1000 ? 96 : 0; detail.Margin = new Thickness(width >= 1000 ? 6 : 0, 0, 0, 0); }
         foreach (var text in new[] { AudioPillText, SubtitlePillText, QueuePillText }) text.MaxWidth = width >= 640 ? 130 : 72;
-        Volume.Visibility = VolumeText.Visibility = width >= 780 ? Visibility.Visible : Visibility.Collapsed;
-        PlaybackTime.Visibility = width >= 640 ? Visibility.Visible : Visibility.Collapsed;
-        // The top bar keeps every room action: in narrow players voice, then room & chat, show only their icons and counts.
-        VoiceButtonText.Visibility = width >= 1000 ? Visibility.Visible : Visibility.Collapsed;
-        VoiceButtonIcon.Margin = new Thickness(0, 0, width >= 1000 ? 7 : 0, 0);
-        RoomToggleText.Visibility = width >= 780 ? Visibility.Visible : Visibility.Collapsed;
-        RoomToggleIcon.Margin = new Thickness(0, 0, width >= 780 ? 7 : 0, 0);
+        StopButton.Visibility = width >= 540 ? Visibility.Visible : Visibility.Collapsed;
+        PictureInPictureButton.Visibility = width >= 520 ? Visibility.Visible : Visibility.Collapsed;
+        PlaybackTime.Visibility = width >= 440 ? Visibility.Visible : Visibility.Collapsed;
+        RefreshOverflowMenu();
+    }
+
+    private (System.Windows.Controls.Primitives.ToggleButton Pill, PlayerMenuPopup Menu, TextBlock Icon, TextBlock Text, TextBlock Detail)[] PillMenus =>
+        [(AudioPill, AudioMenu, AudioPillIcon, AudioPillText, AudioPillDetail), (SubtitlePill, SubtitleMenu, SubtitlePillIcon, SubtitlePillText, SubtitlePillDetail),
+         (QueuePill, PlayerQueueMenu, QueuePillIcon, QueuePillText, QueuePillDetail)];
+
+    // The … menu lists the folded pills, each opening its own menu from the … pill, then any bar buttons hidden for width.
+    private void RefreshOverflowMenu()
+    {
+        OverflowItems.Children.Clear();
+        foreach (var (pill, menu, icon, text, detail) in PillMenus)
+        {
+            var folded = PlayerPills.Folded.Contains(pill);
+            menu.PlacementTarget = folded ? OverflowPill : pill;
+            if (!folded) continue;
+            var row = OverflowRow(icon, text, detail, pill, true);
+            row.Click += (_, _) => { OverflowMenu.IsOpen = false; Dispatcher.BeginInvoke(() => menu.IsOpen = true, DispatcherPriority.Input); };
+            OverflowItems.Children.Add(row);
+        }
+        var actions = new List<Button>();
+        foreach (var (button, label, action) in new (Button, string, RoutedEventHandler)[] { (StopButton, "Stop", StopPlayback), (PictureInPictureButton, "Picture in picture", EnterPictureInPicture) })
+        {
+            if (button.Visibility == Visibility.Visible) continue;
+            var row = OverflowRow(button.Content, label, null, button, false);
+            row.Click += (sender, e) => { OverflowMenu.IsOpen = false; action(sender, e); };
+            actions.Add(row);
+        }
+        if (actions.Count > 0 && OverflowItems.Children.Count > 0) OverflowItems.Children.Add(new Border { Height = 1, Background = (Brush)FindResource("PlayerLine"), Margin = new Thickness(6, 4, 6, 4) });
+        foreach (var row in actions) OverflowItems.Children.Add(row);
+        PlayerPills.ShowsOverflow = actions.Count > 0;
+        if (OverflowItems.Children.Count == 0) OverflowMenu.CloseNow();
+    }
+    // A row in the … menu: icon, label and muted detail, mirroring the pill or button it stands in for.
+    private Button OverflowRow(object icon, object text, TextBlock? detail, UIElement source, bool submenu)
+    {
+        static TextBlock Label(object value, TextBlock block)
+        {
+            if (value is TextBlock mirrored) block.SetBinding(TextBlock.TextProperty, new Binding(nameof(TextBlock.Text)) { Source = mirrored });
+            else block.Text = value as string;
+            return block;
+        }
+        var muted = (Brush)FindResource("PlayerMuted");
+        var icons = (FontFamily)FindResource("IconFont");
+        var grid = new Grid { ColumnDefinitions = { new() { Width = new GridLength(26) }, new() { Width = new GridLength(1, GridUnitType.Star) }, new() { Width = GridLength.Auto }, new() { Width = GridLength.Auto } } };
+        grid.Children.Add(Label(icon, new TextBlock { FontFamily = icons, FontSize = 13, Foreground = muted, VerticalAlignment = VerticalAlignment.Center }));
+        var title = Label(text, new TextBlock { TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 220, VerticalAlignment = VerticalAlignment.Center });
+        Grid.SetColumn(title, 1); grid.Children.Add(title);
+        if (detail is not null)
+        {
+            var extra = Label(detail, new TextBlock { Foreground = muted, FontSize = 11.5, MaxWidth = 120, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+            Grid.SetColumn(extra, 2); grid.Children.Add(extra);
+        }
+        if (submenu)
+        {
+            var chevron = new TextBlock { Text = "", FontFamily = icons, FontSize = 9, Foreground = muted, Margin = new Thickness(12, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(chevron, 3); grid.Children.Add(chevron);
+        }
+        var row = new Button { Content = grid, Style = (Style)FindResource("PlayerMenuButton"), HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        row.SetBinding(IsEnabledProperty, new Binding(nameof(IsEnabled)) { Source = source });
+        System.Windows.Automation.AutomationProperties.SetName(row, text as string ?? System.Windows.Automation.AutomationProperties.GetName(source));
+        return row;
+    }
+
+    // The volume slider stands above the speaker while the pointer is over either, and briefly after the volume changes.
+    private DispatcherTimer? volumeFlyoutTimer;
+    private void ShowVolumeFlyout()
+    {
+        if (!MuteButton.IsVisible) return;
+        VolumeFlyout.IsOpen = true;
+        ScheduleVolumeFlyoutHide(1200);
+    }
+    private void ScheduleVolumeFlyoutHide(int milliseconds)
+    {
+        if (volumeFlyoutTimer is null)
+        {
+            var timer = volumeFlyoutTimer = new DispatcherTimer(DispatcherPriority.Input, Dispatcher);
+            timer.Tick += (_, _) =>
+            {
+                // Over the speaker or the slider, or dragging the slider, keeps it up; check again shortly.
+                if (VolumeGroup.IsMouseOver || Volume.IsMouseCaptureWithin) { timer.Interval = TimeSpan.FromMilliseconds(350); return; }
+                timer.Stop();
+                VolumeFlyout.IsOpen = false;
+            };
+        }
+        volumeFlyoutTimer.Stop();
+        volumeFlyoutTimer.Interval = TimeSpan.FromMilliseconds(milliseconds);
+        volumeFlyoutTimer.Start();
+    }
+    private void HideVolumeFlyout() { volumeFlyoutTimer?.Stop(); VolumeFlyout.IsOpen = false; }
+    private void VolumeGroupEntered(object sender, MouseEventArgs e) => ShowVolumeFlyout();
+    private void VolumeGroupLeft(object sender, MouseEventArgs e) { if (VolumeFlyout.IsOpen) ScheduleVolumeFlyoutHide(350); }
+    private void VolumeFlyoutOpened(object? sender, EventArgs e)
+    {
+        // Like the player menus, the flyout draws over the native video.
+        if (VolumeFlyout.Child is { } child) App.UseSoftwareSurface(child);
+    }
+    // The speaker shows more waves as the volume rises; the level reads underneath it.
+    private void RefreshVolumeIndicator()
+    {
+        var muted = player?.Mute == true;
+        var level = (int)Volume.Value;
+        MuteButton.Content = muted ? "" : level == 0 ? "" : level < 34 ? "" : level < 67 ? "" : "";
+        MuteButton.ToolTip = muted ? "Unmute (M)" : "Mute (M)";
+        System.Windows.Automation.AutomationProperties.SetName(MuteButton, muted ? "Unmute" : "Mute");
+        VolumeText.Text = muted ? "Muted" : $"{level}%";
     }
 }
