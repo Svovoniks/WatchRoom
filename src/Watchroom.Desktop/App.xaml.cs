@@ -7,8 +7,14 @@ namespace Watchroom.Desktop;
 public partial class App : Application
 {
     public static string DataDirectory { get; } = Environment.GetEnvironmentVariable("WATCHROOM_DATA") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Watchroom");
+    private readonly CancellationTokenSource handoff = new();
     protected override void OnStartup(StartupEventArgs e)
     {
+        // A video opened while Watchroom already runs plays there. Update relaunches always start their own window.
+        var openedFile = OpenFileHandoff.FileArgument(e.Args);
+        var updated = e.Args.Contains("--updated");
+        var primary = OpenFileHandoff.Claim();
+        if (!primary && !updated && openedFile is not null && OpenFileHandoff.Forward(openedFile)) { Shutdown(); return; }
         // The library, scrolling and animations draw on the GPU. Surfaces layered over the native video
         // (LibVLC's see-through control window and the player menus) keep the software surface for reliable
         // interop on hybrid GPUs. Remote desktops, GPUs without hardware rendering and WATCHROOM_RENDER=software
@@ -50,6 +56,10 @@ public partial class App : Application
                 }
             }));
         }
+        var window = new MainWindow(); MainWindow = window;
+        if (primary) OpenFileHandoff.Listen(path => window.Dispatcher.BeginInvoke(() => window.OpenFile(path)), handoff.Token);
+        window.Show();
+        if (openedFile is not null) window.OpenFile(openedFile);
     }
     public static bool SoftwareRendering { get; } = Environment.GetEnvironmentVariable("WATCHROOM_RENDER") is { } mode
         ? !mode.Equals("hardware", StringComparison.OrdinalIgnoreCase)
@@ -61,6 +71,7 @@ public partial class App : Application
     }
     protected override void OnExit(ExitEventArgs e)
     {
+        handoff.Cancel();
         PlaybackDiagnostics.Record("app-exit", new { e.ApplicationExitCode });
         try { PlaybackDiagnostics.FlushAsync().Wait(TimeSpan.FromSeconds(2)); } catch { }
         base.OnExit(e);

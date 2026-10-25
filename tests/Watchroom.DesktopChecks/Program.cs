@@ -278,6 +278,7 @@ static class Program
                 PreferenceNavigationChecks.Run(window, activeStore, Check);
                 await QueuePlaybackChecks.Run(window, activeStore, directory, Check);
                 await EpisodeEndChecks.Run(window, Check);
+                await OpenFileChecks.Run(window, Check);
                 await PictureInPictureChecks.Run(window, Check);
                 await EndedSeekChecks.Run(window, Check);
                 await CheckBackNavigation(window, Check);

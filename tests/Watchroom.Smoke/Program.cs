@@ -101,6 +101,14 @@ if (args.FirstOrDefault() == "--episode-playback")
     Console.WriteLine($"{checks} episode continuation and watched-state checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--opened-files")
+{
+    var checks = 0;
+    OpenedFileFixture.Run((condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} opened file checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--metadata-discovery")
 {
     var checks = 0;
@@ -340,6 +348,7 @@ await MetadataDiagnosticsFixture.Run(Path.Combine(root, "metadata-diagnostics"),
 await MetadataFixesFixture.Run(Path.Combine(root, "metadata-fixes"), Check);
 TrackLanguageFixture.Run(Check);
 EpisodePlaybackFixture.Run(Check);
+OpenedFileFixture.Run(Check);
 RoomLibraryChecks.Run(Check);
 await DiagnosticLogFixture.Run(Path.Combine(root, "diagnostic-log"), Check);
 await RecoveryFixture.Run(Check);

@@ -17,10 +17,62 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\Watchroom.exe
 CloseApplications=yes
+ChangesAssociations=yes
 [Files]
 Source: "..\artifacts\Watchroom\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 [Icons]
 Name: "{group}\Watchroom"; Filename: "{app}\Watchroom.exe"
+[Registry]
+; Offers Watchroom in Open with and Default apps for the video types it scans; Windows leaves the default to the user.
+Root: HKCU; Subkey: "Software\Classes\Watchroom.Video"; ValueType: string; ValueName: ""; ValueData: "Video"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Watchroom.Video"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "Video"
+Root: HKCU; Subkey: "Software\Classes\Watchroom.Video\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\Watchroom.exe,0"
+Root: HKCU; Subkey: "Software\Classes\Watchroom.Video\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Watchroom.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "Watchroom"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Watchroom.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "Watchroom"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Watch your videos alone or together"
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: "{app}\Watchroom.exe,0"
+Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "Watchroom"; ValueData: "Software\Watchroom\Capabilities"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\.mkv\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".mkv"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mkv"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.mp4\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".mp4"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mp4"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.m4v\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".m4v"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m4v"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.avi\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".avi"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".avi"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.mov\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".mov"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mov"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.webm\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".webm"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".webm"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.mpeg\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".mpeg"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mpeg"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.mpg\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".mpg"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mpg"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.ts\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".ts"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ts"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.m2ts\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".m2ts"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m2ts"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.wmv\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".wmv"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".wmv"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.flv\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".flv"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".flv"; ValueData: "Watchroom.Video"
+Root: HKCU; Subkey: "Software\Classes\.ogv\OpenWithProgids"; ValueType: string; ValueName: "Watchroom.Video"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"; ValueType: string; ValueName: ".ogv"; ValueData: ""
+Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ogv"; ValueData: "Watchroom.Video"
 [Run]
 Filename: "{app}\Watchroom.exe"; Description: "Open Watchroom"; Flags: nowait postinstall skipifsilent
 

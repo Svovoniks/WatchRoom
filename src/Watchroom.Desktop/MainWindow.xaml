@@ -635,6 +635,10 @@
        <TextBlock x:Name="StreamingBufferError" Style="{StaticResource FieldError}" AutomationProperties.LiveSetting="Polite"/>
        <TextBlock Text="Default: 30 seconds. Playback starts as soon as a few seconds are ready; Watchroom then keeps downloading up to this much video ahead while you watch. Applies to the next streamed video. Larger buffers use more memory but do not delay starting or seeking. During a brief host connection interruption, playback continues from buffered video for up to this time, then pauses if recovery has not finished. Actual coverage depends on available bandwidth." Style="{StaticResource Hint}"/>
       </StackPanel></Border>
+      <Border Style="{StaticResource Card}"><DockPanel>
+       <Button DockPanel.Dock="Right" Content="Open default apps" Click="OpenDefaultAppsSettings" VerticalAlignment="Center" Margin="16,0,0,0" AutomationProperties.HelpText="Opens Windows Settings, where you can choose Watchroom for video files"/>
+       <StackPanel VerticalAlignment="Center"><TextBlock Text="Open videos with Watchroom" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/><TextBlock Text="Double-click a video in File Explorer, choose Open with → Watchroom, or drop a video on this window. Videos from your library play with their artwork, progress and next episode; other videos play on their own. To use Watchroom for every video, choose it in Windows default apps." Style="{StaticResource Hint}"/></StackPanel>
+      </DockPanel></Border>
      </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="VoicePreferences" Tag="Voice" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" IsVisibleChanged="VoicePreferencesVisibilityChanged"><StackPanel MaxWidth="760" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
       <Border Style="{StaticResource Card}"><StackPanel>

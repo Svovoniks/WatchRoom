@@ -1,4 +1,4 @@
-<Application x:Class="Watchroom.Desktop.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Watchroom.Desktop" StartupUri="MainWindow.xaml">
+<Application x:Class="Watchroom.Desktop.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Watchroom.Desktop">
  <Application.Resources>
   <Style TargetType="ScrollViewer"><Setter Property="local:PrecisionScrolling.Enabled" Value="True"/></Style>
   <local:ArtworkCardWidthConverter x:Key="ArtworkCardWidth"/>

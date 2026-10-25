@@ -132,7 +132,7 @@ public partial class MainWindow : Window
         RoomPage.SizeChanged += (_, _) => AudioTracks.MaxHeight = SubtitleTracks.MaxHeight = QueueList.MaxHeight = Math.Clamp(RoomPage.ActualHeight - 260, 120, 360);
         // Menus are separate popup windows; close them when the bar hides, moves to fullscreen or the player closes.
         PlaybackControls.IsVisibleChanged += (_, _) => { if (!PlaybackControls.IsVisible) ClosePlayerMenusNow(); };
-        InitializeBackNavigation();
+        InitializeBackNavigation(); InitializeOpenFiles();
         videoClickDelay.Interval = TimeSpan.FromMilliseconds(GetDoubleClickTime());
         videoClickDelay.Tick += (_, _) =>
         {
@@ -204,6 +204,8 @@ public partial class MainWindow : Window
                 libraryLoaded = true;
                 RefreshLibraryFromItems(loaded); WatchFolders(); BackfillRuntimes();
             });
+            if (closing) return;
+            OpenFilesReady();
             _ = Guard(async () => { if (!closing && await Task.Run(() => library.ExpireTmdbContent(force: true)) && !closing) await RefreshLibrary(); });
             if (closing) return;
             // Starting the native player loads hundreds of DLLs under the process loader lock, which
@@ -254,7 +256,7 @@ public partial class MainWindow : Window
                 };
             });
             playerInitialized.TrySetResult();
-            if (folders.Count == 0 && savedRooms.Count == 0 && currentPage is "Home" or "Library") ShowPage("Welcome");
+            if (folders.Count == 0 && savedRooms.Count == 0 && !openedFile && currentPage is "Home" or "Library") ShowPage("Welcome");
             else if (SavedAutoArtwork) await Guard(FetchArtwork);
         };
     }

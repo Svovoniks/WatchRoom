@@ -36,7 +36,9 @@ public partial class MainWindow
     // Library updates replace records; keep the playing video's current metadata.
     private void RefreshPlayingItem()
     {
-        if (playingItem is { } playing && items.FirstOrDefault(item => item.Id == playing.Id) is { } current) playingItem = current;
+        // A video opened from outside the library keeps playing its own file under the record it was recognised as.
+        if (playingItem is { } playing && items.FirstOrDefault(item => item.Id == playing.Id) is { } current)
+            playingItem = current.Path == playing.Path ? current : current with { Path = playing.Path, Available = true, IsVirtual = false };
     }
 
     private void RefreshEpisodeEndAction()
