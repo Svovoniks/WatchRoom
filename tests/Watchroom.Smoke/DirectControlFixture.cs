@@ -108,17 +108,12 @@ static class DirectControlFixture
             host.Send(new("queue", Data: Wire.Serialize(new[] { "Next", "Then" })));
             await Wait(() => b.Snapshot!.Queue?.Length == 2);
             check(a.Snapshot!.Queue!.SequenceEqual(new[] { "Next", "Then" }), "host distributes queue on the control channel");
-            var chat = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            b.Message += message => { if (message.Type == "chat" && message.Text == "Guest A: hello direct peers") chat.TrySetResult(); };
-            a.Send(new("chat", Text: "hello direct peers", Sender: host.Identity.Peer));
-            await chat.Task.WaitAsync(TimeSpan.FromSeconds(2));
-            check(true, "host authenticates and relays guest chat to other peers");
             await Task.Delay(2200);
             check(Math.Abs(a.ServerNowMs - host.ServerNowMs) < 250 && Math.Abs(b.ServerNowMs - host.ServerNowMs) < 250,
                 "guests synchronize to host clock despite discovery clock being ten minutes ahead");
             using var http = new HttpClient();
             var stats = await http.GetFromJsonAsync<Stats>(url + "/test/stats", Wire.Json);
-            check(stats!.Commands.All(type => type is "ping" or "signal" or "admit" or "remove" or "settings"), "no playback, readiness, queue, or chat commands reach Sites");
+            check(stats!.Commands.All(type => type is "ping" or "signal" or "admit" or "remove" or "settings"), "no playback, readiness or queue commands reach Sites");
             server.Kill(true); await server.WaitForExitAsync();
             await Control(b, false, 0, host, a, b);
             check(true, "direct stop still reaches all peers immediately after discovery goes offline");

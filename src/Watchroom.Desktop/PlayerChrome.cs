@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -24,11 +23,6 @@ public sealed class QueueRowConverter : IValueConverter
 
 public partial class MainWindow
 {
-    public sealed record ChatBubble(string Name, string Text, double Opacity);
-    private readonly ObservableCollection<ChatBubble> chatBubbles = [];
-    private readonly List<(string Name, string Text, long Expires)> recentChat = [];
-    private DispatcherTimer? chatBubbleTimer;
-    private int unreadChat;
     // Set while the queue menu's switch is on Queue but no queue has been chosen yet.
     private bool queueModeRequested;
     private static readonly SolidColorBrush statusIdle = QueueRowConverter.Frozen(0x6B, 0x6D, 0x7A), statusLive = QueueRowConverter.Frozen(0x3F, 0xB9, 0x7A), statusWaiting = QueueRowConverter.Frozen(0xE0, 0xA8, 0x4A);
@@ -36,15 +30,16 @@ public partial class MainWindow
     private void InitializePlayerChrome()
     {
         QueueRowConverter.Resolve = QueueRowValue;
-        ChatBubbles.ItemsSource = chatBubbles;
         // LibVLC moves the video overlay into its own window, outside this window's name scope,
         // so overlay controls are linked by source rather than ElementName.
         RoomHeader.SetBinding(VisibilityProperty, new Binding(nameof(Visibility)) { Source = PlaybackControls });
         PlayerPills.Overflow = OverflowPill;
         PlayerPills.FoldedChanged += (_, _) => RefreshOverflowMenu();
+        // The participants menu sits in LibVLC's overlay window, outside the player page that maps the app palette to dark.
+        ((FrameworkElement)ParticipantsMenu.Child).Resources.MergedDictionaries.Add(RoomPage.Resources);
         VolumeFlyout.PlacementTarget = MuteButton;
         MuteButton.GotKeyboardFocus += (_, _) => { if (InputManager.Current.MostRecentInputDevice is KeyboardDevice) ShowVolumeFlyout(); };
-        foreach (var (pill, menu) in new[] { (AudioPill, AudioMenu), (SubtitlePill, SubtitleMenu), (QueuePill, PlayerQueueMenu), (OverflowPill, OverflowMenu) })
+        foreach (var (pill, menu) in new[] { (AudioPill, AudioMenu), (SubtitlePill, SubtitleMenu), (QueuePill, PlayerQueueMenu), (ParticipantsPill, ParticipantsMenu), (OverflowPill, OverflowMenu) })
         {
             menu.PlacementTarget = pill;
             // A folded pill's menu opens from the overflow pill, so a click there only closes it.
@@ -68,7 +63,7 @@ public partial class MainWindow
     private void OpenPillUnderPointer(System.Windows.Controls.Primitives.ToggleButton closing)
     {
         if (Mouse.LeftButton != MouseButtonState.Pressed) return;
-        var pill = new[] { AudioPill, SubtitlePill, QueuePill, OverflowPill }.FirstOrDefault(candidate =>
+        var pill = new[] { AudioPill, SubtitlePill, QueuePill, ParticipantsPill, OverflowPill }.FirstOrDefault(candidate =>
             candidate != closing && candidate.IsVisible && candidate.IsEnabled && new Rect(candidate.RenderSize).Contains(Mouse.GetPosition(candidate)));
         if (pill is null) return;
         pillReleaseWatch?.Stop();
@@ -183,7 +178,6 @@ public partial class MainWindow
         else if (queue.Count > 0)
             SetQueuePill(savedQueues.FirstOrDefault(saved => saved.Id == activeQueueId)?.Name ?? "Queue",
                 queuePosition >= 0 && queuePosition < queue.Count ? $"{queuePosition + 1} / {queue.Count}" : $"{queue.Count} videos");
-        else if (roomLibrary?.Queue.Entries.Length is > 0 and var entries) SetQueuePill("Queue", $"{entries} videos");
         else SetQueuePill("Queue", queueModeRequested ? "" : "Off");
     }
     private void SetQueuePill(string text, string detail, string icon = "")
@@ -212,44 +206,10 @@ public partial class MainWindow
     private void RefreshRoomStatusDot() =>
         RoomStatusDot.Fill = room is null ? statusIdle : room.IsConnected && !room.IsPeerRecovering ? statusLive : statusWaiting;
 
-    // Chat appears over the video for a few seconds while the room panel isn't showing it.
-    private void ChatArrived(string text)
-    {
-        var panelOpen = roomPanelVisible && !fullscreen;
-        if (panelOpen && RoomTabs.SelectedIndex == 1) return;
-        unreadChat++; RefreshUnreadBadge();
-        if (panelOpen) return;
-        var split = text.IndexOf(": ", StringComparison.Ordinal);
-        var (name, body) = split is > 0 and < 48 ? (text[..split] + " ", text[(split + 2)..]) : ("", text);
-        recentChat.Add((name, body, Environment.TickCount64 + 6000));
-        if (recentChat.Count > 3) recentChat.RemoveAt(0);
-        RenderChatBubbles();
-        chatBubbleTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(400), DispatcherPriority.Background, (_, _) => ExpireChatBubbles(), Dispatcher);
-        chatBubbleTimer.Start();
-    }
-    private void ExpireChatBubbles()
-    {
-        var now = Environment.TickCount64;
-        if (recentChat.RemoveAll(bubble => bubble.Expires <= now) > 0) RenderChatBubbles();
-        if (recentChat.Count == 0) chatBubbleTimer?.Stop();
-    }
-    private void RenderChatBubbles()
-    {
-        chatBubbles.Clear();
-        // Older messages fade so the newest one reads first.
-        for (var i = 0; i < recentChat.Count; i++)
-            chatBubbles.Add(new(recentChat[i].Name, recentChat[i].Text, (recentChat.Count - 1 - i) switch { 0 => 1, 1 => 0.8, _ => 0.55 }));
-    }
-    private void ClearChatBubbles()
-    {
-        recentChat.Clear(); chatBubbles.Clear(); chatBubbleTimer?.Stop();
-        unreadChat = 0; RefreshUnreadBadge();
-    }
-    private void RefreshUnreadBadge()
-    {
-        RoomUnreadText.Text = unreadChat > 99 ? "99+" : unreadChat.ToString();
-        RoomUnreadBadge.Visibility = unreadChat > 0 ? Visibility.Visible : Visibility.Collapsed;
-    }
+    // The empty player's prompt stays between the two bars rather than under them.
+    private void FitPlayerEmptyContent() => PlayerEmptyContent.Margin = new Thickness(16,
+        Math.Max(16, RoomHeader.ActualHeight - RoomHeader.Padding.Bottom + 8), 16,
+        Math.Max(16, PlayerBottomChrome.ActualHeight - PlaybackControls.Padding.Top + 8));
 
     // Short players tighten both bars and drop the status line under the title, so the bars don't meet over the video.
     private int playerHeightStep = -1;
@@ -260,7 +220,7 @@ public partial class MainWindow
         if (step == playerHeightStep) return;
         playerHeightStep = step;
         PlaybackControls.Padding = step == 2 ? new Thickness(18, 34, 18, 12) : new Thickness(18, 14, 18, 8);
-        RoomHeader.Padding = step == 2 ? new Thickness(14, 6, 14, 30) : new Thickness(14, 6, 14, 12);
+        RoomHeader.Padding = step == 2 ? new Thickness(6, 6, 14, 30) : new Thickness(6, 6, 14, 12);
         RoomHeaderDetails.Visibility = step == 0 ? Visibility.Collapsed : Visibility.Visible;
         // The window buttons stay flush with the window's top-right corner.
         PlayerCaptionButtons.Margin = new Thickness(8, -RoomHeader.Padding.Top, -RoomHeader.Padding.Right, 0);
@@ -271,6 +231,7 @@ public partial class MainWindow
     private bool roomHeaderCompact;
     private void RoomHeaderSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        FitPlayerEmptyContent();
         var tiny = e.NewSize.Width < 560;
         PlayerMinimizeButton.Visibility = PlayerMaximizeButton.Visibility = tiny ? Visibility.Collapsed : Visibility.Visible;
         var compact = e.NewSize.Width < 720;
@@ -281,8 +242,6 @@ public partial class MainWindow
         VoiceButtonIcon.Margin = new Thickness(0, 0, voiceLabel ? 7 : 0, 0);
         if (compact == roomHeaderCompact) return;
         roomHeaderCompact = compact;
-        foreach (var (icon, text) in new[] { (RoomLibraryIcon, RoomLibraryText), (RoomToggleIcon, RoomToggleText) })
-        { text.Visibility = compact ? Visibility.Collapsed : Visibility.Visible; icon.Margin = new Thickness(0, 0, compact ? 0 : 7, 0); }
         RefreshLeaveButton();
     }
     // A title squeezed to a letter or two says nothing, so it steps aside; its column keeps the space either way.
@@ -301,14 +260,15 @@ public partial class MainWindow
     private void PlaybackControlsSizeChanged(object sender, SizeChangedEventArgs e)
     {
         var width = e.NewSize.Width;
+        FitPlayerEmptyContent();
         UpNextCard.Width = Math.Clamp(width - 48, 240, 360);
         // Resizing fires this continuously; only re-lay out the bar when it crosses a density step.
         var density = width >= 1000 ? 5 : width >= 640 ? 4 : width >= 540 ? 3 : width >= 520 ? 2 : width >= 440 ? 1 : 0;
         if (density == controlsDensity) return;
         controlsDensity = density;
-        foreach (var detail in new[] { AudioPillDetail, SubtitlePillDetail, QueuePillDetail })
+        foreach (var detail in new[] { AudioPillDetail, SubtitlePillDetail, QueuePillDetail, ParticipantsPillDetail })
         { detail.MaxWidth = width >= 1000 ? 96 : 0; detail.Margin = new Thickness(width >= 1000 ? 6 : 0, 0, 0, 0); }
-        foreach (var text in new[] { AudioPillText, SubtitlePillText, QueuePillText }) text.MaxWidth = width >= 640 ? 130 : 72;
+        foreach (var text in new[] { AudioPillText, SubtitlePillText, QueuePillText, ParticipantsPillText }) text.MaxWidth = width >= 640 ? 130 : 72;
         StopButton.Visibility = width >= 540 ? Visibility.Visible : Visibility.Collapsed;
         PictureInPictureButton.Visibility = width >= 520 ? Visibility.Visible : Visibility.Collapsed;
         PlaybackTime.Visibility = width >= 440 ? Visibility.Visible : Visibility.Collapsed;
@@ -317,7 +277,7 @@ public partial class MainWindow
 
     private (System.Windows.Controls.Primitives.ToggleButton Pill, PlayerMenuPopup Menu, TextBlock Icon, TextBlock Text, TextBlock Detail)[] PillMenus =>
         [(AudioPill, AudioMenu, AudioPillIcon, AudioPillText, AudioPillDetail), (SubtitlePill, SubtitleMenu, SubtitlePillIcon, SubtitlePillText, SubtitlePillDetail),
-         (QueuePill, PlayerQueueMenu, QueuePillIcon, QueuePillText, QueuePillDetail)];
+         (QueuePill, PlayerQueueMenu, QueuePillIcon, QueuePillText, QueuePillDetail), (ParticipantsPill, ParticipantsMenu, ParticipantsPillIcon, ParticipantsPillText, ParticipantsPillDetail)];
 
     // The … menu lists the folded pills, each opening its own menu from the … pill, then any bar buttons hidden for width.
     private void RefreshOverflowMenu()

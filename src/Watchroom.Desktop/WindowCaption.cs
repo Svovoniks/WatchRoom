@@ -56,8 +56,7 @@ public partial class MainWindow
     private int DockedPlayerHit(Point position)
     {
         if (fullscreen || pictureInPicture || WindowState != WindowState.Normal || RoomPage.Visibility != Visibility.Visible) return 0;
-        // With the room panel open the video's right edge is inside the window.
-        return EdgeHit(position, PlayerOverlay.RenderSize, PlayerResizeEdge, RoomSide.Visibility != Visibility.Visible);
+        return EdgeHit(position, PlayerOverlay.RenderSize, PlayerResizeEdge);
     }
     private static int EdgeHit(Point position, Size size, double edge, bool rightEdge = true)
     {

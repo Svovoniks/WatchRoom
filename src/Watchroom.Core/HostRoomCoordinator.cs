@@ -3,7 +3,7 @@ namespace Watchroom.Core;
 internal sealed record HostRoomState(long Sequence, long HostNowMs, RoomSnapshot Snapshot);
 
 // Accessed by RoomClient's single control event loop. Discovery supplies identity
-// and admission; the host owns all playback, readiness, queue, and chat state.
+// and admission; the host owns all playback, readiness and queue state.
 internal sealed class HostRoomCoordinator(string host)
 {
     private readonly Dictionary<string, Participant> people = [];
@@ -181,10 +181,6 @@ internal sealed class HostRoomCoordinator(string host)
                 if (slot == 0) return false;
                 voice[sender] = new(sender, slot, (message.Number & 1) != 0, (message.Number & 2) != 0);
                 return true;
-            case "chat":
-                var text = message.Text?.Trim();
-                if (string.IsNullOrEmpty(text) || text.Length > 1000) return false;
-                announcement = new("chat", Sender: sender, Text: people[sender].Name + ": " + text); return true;
             default: return false;
         }
     }

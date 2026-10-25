@@ -228,31 +228,62 @@ static class PlayerLayoutChecks
         Settle(1280, 810);
         Check(pills.Folded.Count == 0 && overflowPill.Visibility != Visibility.Visible && queueMenu.PlacementTarget == queuePill,
             "widening the player unfolds every pill and hides the … pill");
-        var library = (Button)window.FindName("RoomLibraryButton");
-        Check(!IsDescendant(library, queueMenuContent), "library access is outside the queue menu");
-        Check(window.FindName("SavedRoomLibraryButton") is Button, "Rooms settings provide a library access entry");
-        library.Visibility = Visibility.Visible; ((TextBlock)window.FindName("RoomLibraryText")).Text = "Library & guest access";
-        ((Button)window.FindName("RoomToggle")).Visibility = Visibility.Visible;
-        ((Button)window.FindName("InviteButton")).Visibility = Visibility.Visible;
+        // In a room, Participants joins the bar's pills and opens its own menu; outside a room it takes no space.
+        var participantsPill = (System.Windows.Controls.Primitives.ToggleButton)window.FindName("ParticipantsPill");
+        var participantsMenu = (System.Windows.Controls.Primitives.Popup)window.FindName("ParticipantsMenu");
+        // A closed popup has no visual tree yet, so membership follows the logical tree.
+        bool InMenu(string name)
+        {
+            for (DependencyObject? node = (DependencyObject)window.FindName(name); node is not null; node = LogicalTreeHelper.GetParent(node)) if (node == participantsMenu) return true;
+            return false;
+        }
+        Settle(1280, 810);
+        Check(participantsPill.Visibility == Visibility.Collapsed && !pills.Folded.Contains(participantsPill), "outside a room the bar has no participants pill");
+        PillStrip.SetShown(participantsPill, true); Settle(1280, 810);
+        Check(participantsPill.Visibility == Visibility.Visible && InBar(participantsPill) && participantsMenu.PlacementTarget == participantsPill &&
+            InMenu("PeopleList") && InMenu("VoiceCard") && InMenu("RoomFeedback"),
+            "in a room the participants pill sits in the bar and its menu holds voice chat and the people list");
+        Check(window.FindName("RoomSide") is null && window.FindName("RoomToggle") is null, "the side panel and its top bar button are gone");
+        var peopleList = (ListBox)window.FindName("PeopleList");
+        var rowHidden = Visibility.Collapsed; var rowShown = Visibility.Visible;
+        peopleList.ItemsSource = new[]
+        {
+            new { Id = "a", Name = "svovoniks", Status = "Host · Ready", Voice = (object?)null, Actions = rowHidden, AdmitVisibility = rowHidden, AdmitLabel = "Admit", CanAdmit = true },
+            new { Id = "b", Name = "Riley", Status = "Admitted · Ready", Voice = (object?)null, Actions = rowShown, AdmitVisibility = rowHidden, AdmitLabel = "Admit", CanAdmit = true },
+            new { Id = "c", Name = "Sam", Status = "Waiting for approval", Voice = (object?)null, Actions = rowShown, AdmitVisibility = rowShown, AdmitLabel = "Admit", CanAdmit = true },
+        };
+        var participantsContent = (FrameworkElement)participantsMenu.Child;
+        participantsContent.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        participantsContent.Arrange(new Rect(participantsContent.DesiredSize)); participantsContent.UpdateLayout();
+        Check(participantsContent.ActualHeight is > 100 and < 600, $"the participants menu lays out as a compact card ({participantsContent.ActualHeight:F0} px)");
+        Save(participantsContent, "player-participants-menu.png");
+        peopleList.ItemsSource = null;
+        Settle(400, 360);
+        Check(pills.Folded.Contains(participantsPill) && participantsMenu.PlacementTarget == overflowPill &&
+            overflowItems.Children.OfType<Button>().Any(row => System.Windows.Automation.AutomationProperties.GetName(row) == "Participants"),
+            "a narrow bar folds the participants pill into the … menu");
+        PillStrip.SetShown(participantsPill, false); Settle(900, 600);
+        Check(window.FindName("RoomLibraryButton") is null && window.FindName("SavedRoomLibraryButton") is null, "the room library window has no buttons left");
+        var invite = (Button)window.FindName("InviteButton"); invite.Visibility = Visibility.Visible;
         Layout(900, 600);
         var header = (FrameworkElement)window.FindName("RoomHeader");
-        foreach (var name in new[] { "RoomLibraryButton", "RoomToggle", "InviteButton", "LeaveButton" })
+        foreach (var name in new[] { "InviteButton", "LeaveButton" })
         {
             var button = (Button)window.FindName(name);
             var bounds = button.TransformToAncestor(header).TransformBounds(new Rect(new Point(), button.RenderSize));
             Check(bounds.Left >= 0 && bounds.Right <= header.ActualWidth + 1, name + " fits in the smallest room header");
         }
         Settle(320, 360);
-        foreach (var name in new[] { "RoomLibraryButton", "RoomToggle", "InviteButton", "LeaveButton", "PlayerCloseButton" })
+        foreach (var name in new[] { "InviteButton", "LeaveButton", "PlayerCloseButton" })
         {
             var button = (Button)window.FindName(name);
             var bounds = button.TransformToAncestor(header).TransformBounds(new Rect(new Point(), button.RenderSize));
             Check(bounds.Left >= 0 && bounds.Right <= header.ActualWidth + 1, name + " fits in a 320px room header");
         }
         var titleBox = ((FrameworkElement)window.FindName("RoomHeading")).TransformToAncestor(header).TransformBounds(new Rect(new Point(), ((FrameworkElement)window.FindName("RoomHeading")).RenderSize));
-        var libraryBox = library.TransformToAncestor(header).TransformBounds(new Rect(new Point(), library.RenderSize));
-        Check(titleBox.Right <= libraryBox.Left, "the room buttons and window buttons leave the title its own space in a 320px header");
-        Check(((TextBlock)window.FindName("RoomToggleText")).Visibility == Visibility.Collapsed, "a narrow room header shows its buttons as icons");
+        var inviteBox = invite.TransformToAncestor(header).TransformBounds(new Rect(new Point(), invite.RenderSize));
+        Check(titleBox.Right <= inviteBox.Left, "the room buttons and window buttons leave the title its own space in a 320px header");
+        Check(((Button)window.FindName("LeaveButton")).Content as string is "Close" or "Leave", "a narrow room header shortens its Leave button");
         Save(header, "player-header-narrow.png");
         // The shortest player window still keeps the top and bottom bars apart.
         Settle(700, 220);
@@ -311,6 +342,9 @@ static class PlayerLayoutChecks
         double Middle(string name) { var element = (FrameworkElement)window.FindName(name); return element.TransformToAncestor(dockedOverlay).TransformBounds(new Rect(new Point(), element.RenderSize)) is var box ? box.Top + box.Height / 2 : double.NaN; }
         Check(Math.Abs(Middle("LeaveButton") - Middle("PlayerCloseButton")) < 1 && Math.Abs(Middle("PlayerBackButton") - Middle("PlayerCloseButton")) < 1,
             $"the top bar's buttons line up with the window buttons ({Middle("PlayerBackButton"):F0}, {Middle("LeaveButton"):F0}, {Middle("PlayerCloseButton"):F0})");
+        var backButton = (FrameworkElement)window.FindName("PlayerBackButton");
+        var backBox = backButton.TransformToAncestor(dockedOverlay).TransformBounds(new Rect(new Point(), backButton.RenderSize));
+        Check(Math.Abs(backBox.Left - backBox.Top) < 0.5, $"the back button sits as far from the left edge as from the top ({backBox.Left:F0}, {backBox.Top:F0})");
         Save((FrameworkElement)window.FindName("RoomHeader"), "player-header-docked.png");
         window.Close();
         Console.WriteLine("Player layout and control checks passed.");

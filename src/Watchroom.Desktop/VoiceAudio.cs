@@ -11,7 +11,11 @@ internal sealed class VoiceAudio : IAsyncDisposable
 {
     public sealed record Device(string Id, string Name);
     public sealed record Settings(string? Input, string? Output, bool EchoCancellation);
-    public static Task<(Device[] Inputs, Device[] Outputs)> ListDevicesAsync() => Task.Run(() =>
+    // Automated checks set WATCHROOM_SIMULATED_AUDIO=1 so voice never opens Windows audio devices, which would ask
+    // for microphone access: a test microphone sends silence and test speakers take the room's mix.
+    internal static bool Simulated { get; } = Environment.GetEnvironmentVariable("WATCHROOM_SIMULATED_AUDIO") == "1";
+    private static readonly Device SimulatedInput = new("simulated-microphone", "Test microphone"), SimulatedOutput = new("simulated-speakers", "Test speakers");
+    public static Task<(Device[] Inputs, Device[] Outputs)> ListDevicesAsync() => Simulated ? Task.FromResult<(Device[], Device[])>(([SimulatedInput], [SimulatedOutput])) : Task.Run(() =>
     {
         using var devices = new MMDeviceEnumerator();
         Device[] List(DataFlow flow) => devices.EnumerateAudioEndPoints(flow, DeviceState.Active)
@@ -20,7 +24,7 @@ internal sealed class VoiceAudio : IAsyncDisposable
     });
 
     // Plays a short chime on the chosen output so people can check where voice will come from.
-    public static Task PlayTestSoundAsync(string? output) => Task.Run(async () =>
+    public static Task PlayTestSoundAsync(string? output) => Simulated ? Task.Delay(VoiceCues.Test.Length * 1000 / VoicePacket.SampleRate) : Task.Run(async () =>
     {
         using var devices = new MMDeviceEnumerator();
         MMDevice? device = null;
@@ -60,6 +64,8 @@ internal sealed class VoiceAudio : IAsyncDisposable
     internal long SamplesPlayed => provider is { } played ? Interlocked.Read(ref played.Samples) : 0;
     internal float PeakPlayed { get => provider?.Peak ?? 0; set { if (provider is { } played) played.Peak = value; } }
     private MixerProvider? provider;
+    private Timer? simulation;
+    private volatile bool simulatedInput, simulatedOutput;
 
     // A null mixer opens only the microphone, for the settings level meter.
     public VoiceAudio(VoiceCapture capture, VoiceMixer? mixer, Settings settings)
@@ -67,6 +73,7 @@ internal sealed class VoiceAudio : IAsyncDisposable
 
     public Task StartAsync() => Run(() =>
     {
+        if (Simulated) { OpenAll(); return; }
         devices = new MMDeviceEnumerator();
         notifications = devices.CreateNotificationClient(false);
         notifications.DefaultDeviceChanged += (_, e) =>
@@ -123,6 +130,7 @@ internal sealed class VoiceAudio : IAsyncDisposable
     private void OpenInput()
     {
         MicrophoneBlocked = false; MicrophoneReady = false; InputName = null;
+        if (Simulated) { InputName = SimulatedInput.Name; simulatedInput = true; Simulate(); MicrophoneReady = true; return; }
         using var device = Find(DataFlow.Capture, settings.Input);
         if (device is null) return;
         InputName = device.FriendlyName;
@@ -151,6 +159,7 @@ internal sealed class VoiceAudio : IAsyncDisposable
     private void OpenOutput()
     {
         OutputName = null;
+        if (Simulated) { OutputName = SimulatedOutput.Name; provider ??= new MixerProvider(mixer!); simulatedOutput = true; Simulate(); return; }
         using var device = Find(DataFlow.Render, settings.Output);
         if (device is null) throw new InvalidOperationException("No audio output");
         OutputName = device.FriendlyName;
@@ -178,13 +187,21 @@ internal sealed class VoiceAudio : IAsyncDisposable
             try { await Run(() => { CloseAll(); OpenAll(); }); } catch (ObjectDisposedException) { }
         });
     }
+    // Runs the simulated devices in real time: 20 ms of microphone silence in, 20 ms of the mix out.
+    private void Simulate() => simulation ??= new Timer(_ =>
+    {
+        if (simulatedInput) { Span<short> silence = stackalloc short[VoicePacket.FrameSamples]; silence.Clear(); capture.Write(silence); }
+        if (simulatedOutput && provider is { } played) played.Read(new byte[VoicePacket.FrameSamples * 8]);
+    }, null, 0, 20);
     private void CloseInput()
     {
+        simulatedInput = false;
         var old = recorder; recorder = null; MicrophoneReady = false;
         try { old?.Dispose(); } catch (Exception ex) when (ex is COMException or InvalidOperationException) { }
     }
     private void CloseOutput()
     {
+        simulatedOutput = false;
         var old = player; player = null;
         try { old?.Dispose(); } catch (Exception ex) when (ex is COMException or InvalidOperationException) { }
     }
@@ -210,6 +227,7 @@ internal sealed class VoiceAudio : IAsyncDisposable
     {
         if (lifetime.IsCancellationRequested) return;
         lifetime.Cancel();
+        simulation?.Dispose();
         // Leaving voice must never hang the app, even if Windows audio is stuck; cleanup then finishes in the background.
         var cleanup = Task.Run(async () =>
         {

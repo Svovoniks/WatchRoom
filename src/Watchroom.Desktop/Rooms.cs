@@ -56,8 +56,6 @@ public partial class MainWindow
         ConnectSavedRoomButton.Content = connected ? "Open player" : "Connect";
         DisconnectSavedRoomButton.Visibility = connected ? Visibility.Visible : Visibility.Collapsed;
         DisconnectSavedRoomButton.IsEnabled = connected && !roomBusy;
-        SavedRoomLibraryButton.IsEnabled = connected;
-        SavedRoomLibraryButton.Content = host ? "Room library" : "Browse host library";
         SavedRoomSharedControls.IsEnabled = host;
         updatingLibraryPermission = true;
         SavedRoomLibraryBrowsing.IsEnabled = host;
@@ -161,7 +159,7 @@ public partial class MainWindow
             try { await client.ConnectAsync(SavedServerAddress, SavedDisplayName, persistent: true, roomName: name); }
             catch { await Disconnect(); throw; }
             RememberCurrentRoom(); RoomHeading.Text = name; RoomSubtitle.Text = "Share an invitation, then choose a video from the library.";
-            roomPanelVisible = false; ShowPage("Rooms");
+            ShowPage("Rooms");
         }
         finally { pendingRoomName = null; roomBusy = false; RefreshSavedRooms(); }
     });
@@ -193,7 +191,7 @@ public partial class MainWindow
             catch { await Disconnect(); throw; }
             RoomHeading.Text = client.Snapshot?.Name ?? saved.Name;
             RoomSubtitle.Text = saved.HostKey is null ? "Waiting for host approval" : "Choose a video from the library.";
-            RememberCurrentRoom(); roomPanelVisible = false;
+            RememberCurrentRoom();
             PublishRoomSession(client, saved); RestoreRoomSession(client, saved);
             return true;
         }

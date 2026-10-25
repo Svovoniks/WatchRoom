@@ -205,10 +205,6 @@ app.Map("/room", async context =>
                         break;
                     case "ready" when !member.Ready && member.AllowBroadcast():
                         member.Ready = true; room.TryResume(); room.Snapshot(); break;
-                    case "chat" when member.AllowBroadcast():
-                        var text = message.Text?.Trim();
-                        if (!string.IsNullOrEmpty(text) && text.Length <= 1000) room.Broadcast(new("chat", Sender: member.Id, Text: member.Name + ": " + text));
-                        break;
                 }
             }
         }

@@ -39,7 +39,7 @@ static class VoiceUiChecks
         var voiceButton = Named<Button>("VoiceButton"); var voiceText = Named<TextBlock>("VoiceButtonText");
         var muteButton = Named<Button>("VoiceMuteButton"); var badge = Named<Border>("VoiceCountBadge"); var count = Named<TextBlock>("VoiceCountText");
         var card = Named<Border>("VoiceCard"); var status = Named<TextBlock>("VoiceCardStatus"); var cardJoin = Named<Button>("VoiceCardJoin");
-        var problem = Named<TextBlock>("VoiceCardProblem"); var chat = (System.Collections.ObjectModel.ObservableCollection<string>)Field("chat")!;
+        var problem = Named<TextBlock>("VoiceCardProblem");
         var volume = Named<Slider>("Volume");
         object? Session() => Field("voice");
         // WATCHROOM_VOICE_SCREENSHOTS=<folder> saves the voice controls at each stage for review.
@@ -121,17 +121,15 @@ static class VoiceUiChecks
             var rileyId = guest.Identity.Peer;
             guest.SetVoice(true, false);
             await Wait(() => badge.Visibility == Visibility.Visible && count.Text == "1" && status.Text == "Riley is in voice.", "before joining, the host sees who is already in voice");
-            check(chat.Contains("Riley joined voice"), "the chat notes when someone joins voice");
             check(voiceButton.ToolTip as string == "Riley is in voice. Join to talk while you watch.", "the voice button invites the host to join the conversation");
-            SetField("roomPanelVisible", true); Call("ApplyPlayerLayout");
-            await Shot("1-before-join", "RoomHeader", "RoomSide");
+            await Shot("1-before-join", "RoomHeader", "RoomParticipants");
 
             Call("ToggleVoice", voiceButton, new RoutedEventArgs());
             await Wait(() => Session() is not null && !(bool)Field("voiceJoining")! && host.VoiceState(host.Identity.Peer)?.Joined == true && guest.VoiceState(host.Identity.Peer)?.Joined == true,
                 "joining from the top bar puts the host in voice for everyone");
             check(voiceText.Text == "Leave voice" && muteButton.Visibility == Visibility.Visible && (string)cardJoin.Content == "Leave", "in voice, the top bar offers a microphone switch and Leave voice");
             await Wait(() => status.Text.StartsWith("Talking with Riley.", StringComparison.Ordinal), "the panel says who the host is talking with");
-            await Shot("2-in-voice", "RoomHeader", "RoomSide");
+            await Shot("2-in-voice", "RoomHeader", "RoomParticipants");
             // The narrowest player: minimum window width with the room panel open.
             var wide = window.Width; window.Width = 900; await Task.Delay(300); window.UpdateLayout();
             var header = Named<FrameworkElement>("RoomHeader"); var leave = Named<FrameworkElement>("LeaveButton");
@@ -144,6 +142,8 @@ static class VoiceUiChecks
             ((VoiceMixer)Prop(Session()!, "Mixer")!).Volume = 0.0001f;
             var micReady = Audio().MicrophoneReady;
             Console.WriteLine(micReady ? "Microphone: " + Audio().InputName : "Microphone unavailable: " + Audio().Problem);
+            check(VoiceAudio.Simulated && micReady && Audio().InputName == "Test microphone" && Audio().OutputName == "Test speakers",
+                "the checks run voice on a simulated microphone and speakers, never the real devices");
             if (micReady)
             {
                 check(guest.VoiceState(host.Identity.Peer)?.Muted == false && (string)muteButton.Content == "", "with a working microphone the host's microphone is on");
@@ -176,7 +176,7 @@ static class VoiceUiChecks
             while (!talker.IsCompleted)
             {
                 sawSpeaking |= Speaking(); lowest = Math.Min(lowest, Duck());
-                if (Speaking() && !shotTaken) { shotTaken = true; await Shot("3-guest-talking", "RoomSide"); }
+                if (Speaking() && !shotTaken) { shotTaken = true; await Shot("3-guest-talking", "RoomParticipants"); }
                 await Task.Delay(30);
             }
             check(sawSpeaking, "the guest's avatar shows when they are talking");
@@ -194,7 +194,7 @@ static class VoiceUiChecks
             if (shots is not null)
             {
                 Call("ToggleLocalVoiceMute", new Button { Tag = rileyId }, new RoutedEventArgs());
-                await Shot("4-guest-muted-for-me", "RoomSide");
+                await Shot("4-guest-muted-for-me", "RoomParticipants");
                 Call("ToggleLocalVoiceMute", new Button { Tag = rileyId }, new RoutedEventArgs());
                 Call("ShowPage", "Settings"); Call("ShowPreferenceSection", "Voice");
                 await Task.Delay(800);
@@ -228,7 +228,7 @@ static class VoiceUiChecks
             }
 
             guest.SetVoice(false, false);
-            await Wait(() => chat.Contains("Riley left voice") && badge.Visibility != Visibility.Visible, "the chat notes when someone leaves voice");
+            await Wait(() => badge.Visibility != Visibility.Visible, "the voice count clears when someone leaves voice");
             Call("ToggleVoice", cardJoin, new RoutedEventArgs());
             await Wait(() => Session() is null && guest.VoiceState(host.Identity.Peer)?.Joined == false && voiceText.Text == "Voice" && muteButton.Visibility != Visibility.Visible,
                 "leaving voice from the panel takes the host out of voice for everyone");
@@ -283,7 +283,7 @@ static class VoiceUiChecks
             // A guest left alone after the host goes: clicking Voice says why instead of doing nothing, and voice
             // starts by itself once the host is back.
             store.Setting("voiceAutoJoin", "false"); SetField("voicePreferences", Call("LoadVoicePreferences"));
-            await GuestAloneChecks(window, url, check, Wait, Field, (name, args) => Call(name, args), voiceButton, cardJoin, status, chat, Session);
+            await GuestAloneChecks(window, url, check, Wait, Field, (name, args) => Call(name, args), voiceButton, cardJoin, status, Session);
 
             // What guests see before the host lets them in, while the host is away, or when the host's app has no voice chat.
             var waiting = new RoomClient();
@@ -312,7 +312,7 @@ static class VoiceUiChecks
 
     static async Task GuestAloneChecks(MainWindow window, string url, Action<bool, string> check, Func<Func<bool>, string, int, Task> wait,
         Func<string, object?> field, Func<string, object?[], object?> call, Button voiceButton, Button cardJoin, TextBlock status,
-        System.Collections.ObjectModel.ObservableCollection<string> chat, Func<object?> session)
+        Func<object?> session)
     {
         Task Wait(Func<bool> condition, string label) => wait(condition, label, 25);
         // Toasts are popups outside the window's tree; this reads the text of any that are open.
@@ -338,12 +338,10 @@ static class VoiceUiChecks
             host.SetVoice(true, true);
             await Wait(() => guest.VoiceState(host.Identity.Peer)?.Joined == true, "the guest sees the host in voice");
             check(session() is null, "with auto-join off, a guest is not put in voice on arrival");
-            var notices = chat.Count;
             await host.DisposeAsync();
             await Wait(() => !guest.HostPresent && !guest.VoiceAvailable, "the guest notices the host has left");
             await Task.Delay(300);
             check(guest.Snapshot?.Voice is null, "once the host leaves, nobody is still listed in voice");
-            check(!chat.Skip(notices).Any(line => line.Contains("left voice")), $"the host leaving does not post voice notices ({string.Join(" | ", chat.Skip(notices))})");
 
             check(voiceButton.Visibility == Visibility.Visible && voiceButton.IsEnabled && voiceButton.Opacity < 1,
                 $"with no host the Voice button stays clickable but looks unavailable ({voiceButton.Visibility}, enabled {voiceButton.IsEnabled}, opacity {voiceButton.Opacity}, connected {guest.IsConnected}, available {guest.VoiceAvailable})");

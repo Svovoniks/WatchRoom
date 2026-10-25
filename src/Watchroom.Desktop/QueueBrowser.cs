@@ -78,16 +78,16 @@ public partial class MainWindow
     {
         // Covers and watch counts are read only while the gallery is on screen; showing the page refreshes it.
         if (QueueGallery is null || QueuesPage.Visibility != Visibility.Visible || QueueGalleryView.Visibility != Visibility.Visible) return;
-        var byId = MediaById();
-        var playback = library.PlaybackSettings();
-        QueueGallery.ItemsSource = savedQueues.Select(saved =>
+        var byId = QueueMedia();
+        var playback = ShowingHostQueues ? [] : library.PlaybackSettings();
+        QueueGallery.ItemsSource = QueueSource.Select(saved =>
         {
             var media = saved.MediaIds.Select(id => byId.GetValueOrDefault(id)).OfType<MediaItem>().ToArray();
             var covers = QueueCovers(media, 3);
             return new QueueCard(saved, saved.Name, QueueSummary(saved, media, playback, detailed: false))
             {
                 Cover1 = new(covers.ElementAtOrDefault(0)), Cover2 = new(covers.ElementAtOrDefault(1)), Cover3 = new(covers.ElementAtOrDefault(2)),
-                Playing = saved.Id == activeQueueId && playingItem is not null, Count = saved.MediaIds.Length,
+                Playing = ShowingHostQueues ? saved.Id == hostQueues!.ActiveId && hostQueues.ActiveIndex >= 0 : saved.Id == activeQueueId && playingItem is not null, Count = saved.MediaIds.Length,
                 Watched = media.Count(item => playback.TryGetValue("watched:" + item.Id, out var value) && value == "true")
             };
         }).Append(new QueueCard(null, "New queue", "Start an empty queue")).ToArray();
@@ -99,7 +99,7 @@ public partial class MainWindow
     }
     private void QueueCardContextMenu(object sender, ContextMenuEventArgs e)
     {
-        if (sender is not Button { Tag: QueueCard { Queue: { } shown } } button || savedQueues.FirstOrDefault(x => x.Id == shown.Id) is not { } saved)
+        if (sender is not Button { Tag: QueueCard { Queue: { } shown } } button || QueueSource.FirstOrDefault(x => x.Id == shown.Id) is not { } saved)
         { e.Handled = true; return; }
         var menu = new ContextMenu { PlacementTarget = button };
         var open = new MenuItem { Header = "Open" }; open.Click += (_, _) => OpenQueue(saved.Id); menu.Items.Add(open);

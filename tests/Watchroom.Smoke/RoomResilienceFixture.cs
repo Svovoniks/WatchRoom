@@ -39,20 +39,20 @@ static class RoomResilienceFixture
         check(room.Playback is { Playing: true, PositionMs: 5000 }, "seek resumes when every connected participant is ready");
         check(!room.SetConnected("host", false, 2300) && room.IsConnected("host"), "the host always counts as connected");
 
-        var host = new RoomLibrary(true, "host"); var guest = new RoomLibrary(false, "guest");
-        var queueUpdates = 0;
-        host.Send += (_, message) => { if (message.Type == "library-queue") queueUpdates++; };
-        host.SetPeople([new("host", "Host", true, true), new("guest", "Anna", false, true)]);
-        host.Publish([new SharedLibraryItem("item", "Movie", "Movie", 2026, null, null, null, null, true)]);
-        host.PeerReady("guest"); host.SetAccess("guest", new(true, true, true));
-        int Send(int request)
-        {
-            var before = queueUpdates;
-            host.Receive("guest", new("library-command", Data: Wire.Serialize(new LibraryCommand("request-" + request, "add", -1, "item"))));
-            return queueUpdates - before;
-        }
-        for (var request = 0; request <= 257; request++) Send(request);
-        check(Send(256) == 0 && Send(257) == 0, "newest library results stay cached after the result cache evicts");
-        check(Send(1) == 1, "library result cache evicts the oldest request first");
+        // The host's queues travel to guests in chunks: any order rebuilds them, late older states are ignored, malformed edits are refused.
+        var films = Enumerable.Range(0, 3000).Select(i => new SharedQueueMedia("m" + i, $"Фильм «{i}» \"quoted\"", "Movie", 2026)).ToArray();
+        var queues = new SharedQueues([new("q", "Очередь", films.Select(film => film.Id).ToArray())], films, "q", 7);
+        var chunks = QueueSharing.Messages(5, queues);
+        check(chunks.Length > 1 && chunks.All(chunk => System.Text.Encoding.UTF8.GetByteCount(Wire.Serialize(chunk)) < 60000),
+            $"shared queues split into {chunks.Length} chunks under the 64 KiB room message limit");
+        var assembler = new QueueStateAssembler(); SharedQueues? rebuilt = null;
+        foreach (var chunk in chunks.Reverse()) rebuilt = assembler.Add(chunk) ?? rebuilt;
+        check(rebuilt is { ActiveIndex: 7 } && rebuilt.Media.Length == 3000 && rebuilt.Media[42].Title == films[42].Title && rebuilt.Queues[0].Name == "Очередь",
+            "chunks arriving in any order rebuild the shared queues exactly");
+        check(QueueSharing.Messages(4, queues with { Queues = [] }).All(chunk => assembler.Add(chunk) is null), "an older queue state arriving late is ignored");
+        check(QueueSharing.Problem(new("order", "q", "short", [0])) is not null && QueueSharing.Problem(new("create", Name: "  ")) is not null &&
+            QueueSharing.Problem(new("add", "q", MediaIds: [])) is not null && QueueSharing.Problem(new("delete", "q")) is not null &&
+            QueueSharing.Problem(new("create", Name: "Weekend")) is null && QueueSharing.Problem(new("order", "q", QueueSharing.Fingerprint(["a"]), [0])) is null,
+            "malformed or unsupported queue edits are refused");
     }
 }

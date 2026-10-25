@@ -12,6 +12,8 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // Voice runs on simulated devices so the checks never open the microphone; --voice-devices checks the real ones.
+        if (args.FirstOrDefault() != "--voice-devices") Environment.SetEnvironmentVariable("WATCHROOM_SIMULATED_AUDIO", "1");
         if (args.FirstOrDefault() == "--video-frames")
         {
             VideoFrameChecks.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? Path.Combine("artifacts", "video-frames-" + Guid.NewGuid().ToString("N")))).GetAwaiter().GetResult(); return;

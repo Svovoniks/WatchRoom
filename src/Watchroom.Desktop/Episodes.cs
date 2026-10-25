@@ -25,13 +25,11 @@ public partial class MainWindow
         foreach (var card in libraryCards.Where(card => card.Card.Media.Id == item.Id || LibraryIdentity.SameShow(card.Card.Media, item)))
             UpdateCardPlayback(card);
     }
-    private bool HasPlaybackQueue => queue.Count > 0 || roomLibrary?.Queue.Entries.Length > 0 || room?.Snapshot?.Queue?.Length > 0;
+    private bool HasPlaybackQueue => queue.Count > 0 || room?.Snapshot?.Queue?.Length > 0;
     // A loaded queue continues only the video it started; other videos offer their next episode.
     private bool PlayingFromQueue(MediaItem? item) => item is not null && queuePosition >= 0 && queuePosition < queue.Count && queue[queuePosition].Id == item.Id;
-    // Guests' up-next requests and a queue that started this video take priority;
-    // at the end of that queue an episode still offers its next episode.
-    private bool ContinuesQueue(MediaItem? ended) => roomLibrary?.Queue.Entries.Length > 0 ||
-        PlayingFromQueue(ended) && QueuePlayback.FindNext(queue, queuePosition, 1, QueueItemAvailable) >= 0;
+    // A queue that started this video takes priority; at the end of that queue an episode still offers its next episode.
+    private bool ContinuesQueue(MediaItem? ended) => PlayingFromQueue(ended) && QueuePlayback.FindNext(queue, queuePosition, 1, QueueItemAvailable) >= 0;
     private long episodeActionCheckedAt;
     // Library updates replace records; keep the playing video's current metadata.
     private void RefreshPlayingItem()
@@ -145,14 +143,9 @@ public partial class MainWindow
             SetWatched(endedItem, true);
         }
         if (room?.Identity?.Host == true) SendPlayback(false, Math.Max(0, player!.Length), stopReason: "ended");
-        var upNext = roomLibrary?.Queue.Entries.Length > 0;
         if (ContinuesQueue(endedItem))
         {
-            if (room is null || room.Identity?.Host == true)
-            {
-                if (upNext) roomLibrary!.Request(HostPeerId(), "next");
-                else await PlayQueueStep(1);
-            }
+            if (room is null || room.Identity?.Host == true) await PlayQueueStep(1);
             return;
         }
         if (endedItem is null || room is not null && (room.Identity?.Host != true || !room.IsConnected)) return;
@@ -163,7 +156,7 @@ public partial class MainWindow
         {
             // Restarting, replacing or leaving the video, or losing room hosting, cancels the countdown.
             bool Stale() => closing || generation != loadGeneration || room != endedRoom || playingItem?.Id != endedItem.Id ||
-                roomLibrary?.Queue.Entries.Length > 0 || player?.IsPlaying == true || RoomPage.Visibility != Visibility.Visible && !pictureInPicture ||
+                player?.IsPlaying == true || RoomPage.Visibility != Visibility.Visible && !pictureInPicture ||
                 room is not null && (room.Identity?.Host != true || !room.IsConnected);
             if (!await OfferNextEpisode(next, Stale) || Stale()) return;
             await PlayFollowingEpisode(next);

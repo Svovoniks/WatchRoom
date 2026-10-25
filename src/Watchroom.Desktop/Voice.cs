@@ -311,7 +311,7 @@ public partial class MainWindow
     {
         if (player is not null) player.Volume = (int)Math.Round(Volume.Value * videoDuck);
     }
-    // Snapshot changes: refresh the panel, announce who joined or left voice, and join automatically if chosen.
+    // Snapshot changes: refresh the panel, sound a cue when someone joins or leaves voice, and join automatically if chosen.
     private void VoiceSnapshot(RoomSnapshot snapshot)
     {
         var client = room;
@@ -324,8 +324,6 @@ public partial class MainWindow
             var arrived = joined.Except(previous).Where(id => id != me).ToArray();
             // People who left the room are announced by the room itself.
             var departed = previous.Except(joined).Where(id => id != me && snapshot.People.Any(p => p.Id == id)).ToArray();
-            foreach (var id in arrived) VoiceNotice((snapshot.People.FirstOrDefault(p => p.Id == id)?.Name ?? "Someone") + " joined voice");
-            foreach (var id in departed) VoiceNotice((snapshot.People.FirstOrDefault(p => p.Id == id)?.Name ?? "Someone") + " left voice");
             if (voice is { } session && (arrived.Length > 0 || departed.Length > 0)) session.Mixer.Cue(arrived.Length > 0 ? VoiceCues.Join : VoiceCues.Leave);
         }
         if (snapshot.Voice is not null) voiceRoster = joined;
@@ -336,11 +334,6 @@ public partial class MainWindow
             voiceAutoJoinedRoom = code;
             _ = Guard(JoinVoiceAsync);
         }
-    }
-    private void VoiceNotice(string text)
-    {
-        chat.Add(text); if (chat.Count > 150) chat.RemoveAt(0);
-        ChatList.ScrollIntoView(chat.Last());
     }
     // A new room connection: reattach a running session, or reset for a different room.
     private void VoiceRoomChanged(RoomClient client, bool reconnecting)

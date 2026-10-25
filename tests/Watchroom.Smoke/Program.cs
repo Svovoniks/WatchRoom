@@ -349,7 +349,6 @@ await MetadataFixesFixture.Run(Path.Combine(root, "metadata-fixes"), Check);
 TrackLanguageFixture.Run(Check);
 EpisodePlaybackFixture.Run(Check);
 OpenedFileFixture.Run(Check);
-RoomLibraryChecks.Run(Check);
 await DiagnosticLogFixture.Run(Path.Combine(root, "diagnostic-log"), Check);
 await RecoveryFixture.Run(Check);
 await MediaCacheFixture.Run(Check);

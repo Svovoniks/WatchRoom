@@ -20,6 +20,9 @@ public partial class MainWindow
         return true;
     }
     private bool QueueEditable => room is null || room.IsConnected && room.Identity?.Host == true;
+    // Guests change the host's queues through the host; only the host plays, renames or deletes them.
+    private bool QueueChangeable => QueueEditable || ShowingHostQueues;
+    private bool CanChangeQueue() => ShowingHostQueues || CanEditQueue();
     private static bool QueueItemAvailable(MediaItem item) => item.Available && File.Exists(item.Path);
     // The playback tick enables Previous and Next by scanning for the nearest playable file. With a drive offline that
     // can mean hundreds of disk checks per tick, so the tick reuses answers for a few seconds; playing still checks the disk.
@@ -48,6 +51,7 @@ public partial class MainWindow
     {
         library.Setting("queues", Wire.Serialize(savedQueues));
         library.Setting("activeQueue", activeQueueId ?? "");
+        ScheduleQueueShare();
     }
     private void RefreshQueuePickers()
     {
@@ -64,10 +68,10 @@ public partial class MainWindow
 
     // The Queues page shows either the gallery of queues or one opened queue.
     private string? openQueueId;
-    private SavedQueue? OpenedQueue => openQueueId is null ? null : savedQueues.FirstOrDefault(x => x.Id == openQueueId);
+    private SavedQueue? OpenedQueue => openQueueId is null ? null : QueueSource.FirstOrDefault(x => x.Id == openQueueId);
     private void OpenQueue(string id)
     {
-        if (savedQueues.All(x => x.Id != id)) return;
+        if (QueueSource.All(x => x.Id != id)) return;
         if (openQueueId != id)
         {
             if (currentPage == "Queues") RememberLocation();
@@ -77,6 +81,13 @@ public partial class MainWindow
         RefreshSavedItems();
     }
     private void ShowQueueGallery(object sender, RoutedEventArgs e) => ShowAllQueues();
+    // A guest in a room edits the host's queues, and the page says so.
+    private void RefreshQueuesHeading()
+    {
+        if (QueuesHeading is null) return;
+        QueuesHeading.Text = ShowingHostQueues ? $"{HostName}'s queues" : "Queues";
+        QueuesSubheading.Text = ShowingHostQueues ? $"You're in {HostName}'s room, so changes here go to their queues." : "Line up movies and episodes to play back to back.";
+    }
     private void ShowAllQueues()
     {
         if (openQueueId is null) return;
@@ -104,6 +115,7 @@ public partial class MainWindow
     private void RefreshSavedItems()
     {
         if (SavedQueueItems is null) return;
+        RefreshQueuesHeading();
         var saved = OpenedQueue;
         if (saved is null) openQueueId = null;
         QueueGalleryView.Visibility = saved is null ? Visibility.Visible : Visibility.Collapsed;
@@ -116,9 +128,10 @@ public partial class MainWindow
             UpdateSavedQueueActions();
             return;
         }
-        var byId = MediaById();
-        var current = saved.Id == activeQueueId ? SavedEntryIndex(saved, byId, queuePosition) : -1;
-        if (current >= 0 && playingItem?.Id != saved.MediaIds[current]) current = -1;
+        var byId = QueueMedia();
+        var current = ShowingHostQueues ? saved.Id == hostQueues!.ActiveId ? hostQueues.ActiveIndex : -1
+            : saved.Id == activeQueueId ? SavedEntryIndex(saved, byId, queuePosition) : -1;
+        if (current >= saved.MediaIds.Length || !ShowingHostQueues && current >= 0 && playingItem?.Id != saved.MediaIds[current]) current = -1;
         Func<MediaItem, LibraryCardView> artwork = QueueStill;
         var selectedIndex = SavedQueueItems.SelectedIndex;
         SavedQueueItems.ItemsSource = saved.MediaIds.Select((id, index) => new QueueEntry(index, byId.GetValueOrDefault(id)) { Artwork = artwork, IsCurrent = index == current }).ToArray();
@@ -153,7 +166,7 @@ public partial class MainWindow
         var slots = new[] { QueueHeroCover0, QueueHeroCover1, QueueHeroCover2, QueueHeroCover3 };
         for (var index = 0; index < slots.Length; index++) slots[index].DataContext = new QueueCoverSlot(index < covers.Count ? covers[index] : null);
         QueueHeroBackdrop.DataContext = new QueueCoverSlot(covers.FirstOrDefault());
-        QueueDetailCaption.Text = QueueSummary(saved, media, QueuesPage.Visibility == Visibility.Visible ? library.PlaybackSettings() : null, detailed: true);
+        QueueDetailCaption.Text = QueueSummary(saved, media, QueuesPage.Visibility == Visibility.Visible && !ShowingHostQueues ? library.PlaybackSettings() : null, detailed: true);
     }
     // Watch state comes from one settings read; without it the summary shows only the size of the queue.
     private static string QueueSummary(SavedQueue saved, MediaItem[] media, Dictionary<string, string>? playback, bool detailed)
@@ -183,7 +196,7 @@ public partial class MainWindow
         if (PlaySavedQueueButton is null || SavedQueueFeedback is null) return;
         var saved = OpenedQueue;
         var canEdit = QueueEditable;
-        var byId = saved is null ? null : MediaById();
+        var byId = saved is null ? null : QueueMedia();
         var playable = saved is not null && saved.MediaIds.Any(id => byId!.TryGetValue(id, out var item) && QueueItemAvailable(item));
         var hasEntries = saved?.MediaIds.Length > 0;
         PlaySavedQueueButton.IsEnabled = canEdit && playable;
@@ -195,13 +208,18 @@ public partial class MainWindow
         PlayQueueFromStartButton.Visibility = canEdit && next is not null && (upNext > 0 || resume) ? Visibility.Visible : Visibility.Collapsed;
         var selectedEntry = SavedQueueItems.SelectedItem as QueueEntry;
         PlaySelectedSavedQueueButton.IsEnabled = canEdit && selectedEntry is { Media: { } selectedItem } && QueueItemAvailable(selectedItem);
-        PlaySelectedSavedQueueButton.Visibility = hasEntries && selectedEntry is not null && selectedEntry.Index != upNext ? Visibility.Visible : Visibility.Collapsed;
-        PlaySavedQueueButton.Visibility = hasEntries ? Visibility.Visible : Visibility.Collapsed;
+        // A guest editing the host's queues sees no play buttons: the host starts videos for the room.
+        var guest = ShowingHostQueues;
+        PlaySelectedSavedQueueButton.Visibility = !guest && hasEntries && selectedEntry is not null && selectedEntry.Index != upNext ? Visibility.Visible : Visibility.Collapsed;
+        PlaySavedQueueButton.Visibility = !guest && hasEntries ? Visibility.Visible : Visibility.Collapsed;
         PlaySavedQueueButton.Style = (Style)FindResource(playable ? "Primary" : typeof(Button));
         AddQueueVideosButton.Style = (Style)FindResource(playable ? typeof(Button) : "Primary");
         AddQueueVideosButton.IsEnabled = canEdit && saved is not null;
+        AddQueueVideosButton.Visibility = QueueMoreButton.Visibility = guest ? Visibility.Collapsed : Visibility.Visible;
         QueueMoreButton.IsEnabled = canEdit && saved is not null;
-        SavedQueueFeedback.Text = !canEdit ? "The host controls the queue."
+        SavedQueueFeedback.Text = guest && QueueNotice is { } notice ? notice
+            : guest ? $"Changes are saved to {HostName}'s queue. To add videos, open a title in {HostName}'s library and choose Add to queue."
+            : !canEdit ? "The host controls the queue."
             : saved?.MediaIds.Length is null or 0 ? ""
             : !playable ? "No available videos. Reconnect their drive or add videos from your library." : "";
     }
@@ -240,7 +258,6 @@ public partial class MainWindow
     {
         SaveActiveQueueEdits();
         activeQueueId = null; queue.Clear(); queuePosition = -1; queueModeRequested = false;
-        if (roomLibrary?.Queue.Entries.Length > 0) roomLibrary.Request(HostPeerId(), "clear");
         SaveQueues(); RefreshQueuePickers(); PublishQueue(); RefreshEpisodeEndAction();
     }
     // A new queue opens with Add videos ready, since an empty queue has nothing else to do.
@@ -248,6 +265,7 @@ public partial class MainWindow
     {
         var name = Dialogs.Prompt(this, "Create queue", "Queue name", action: "Create queue");
         if (name is null) return;
+        if (ShowingHostQueues) { SendQueueCreate(name, []); return; }
         var saved = new SavedQueue(Guid.NewGuid().ToString("N"), name, []);
         savedQueues.Add(saved); SaveQueues(); RefreshQueuePickers();
         if (currentPage != "Queues") ShowPage("Queues");
@@ -400,7 +418,7 @@ public partial class MainWindow
         {
             if (Keyboard.Modifiers == ModifierKeys.Control && e.Key is Key.Up or Key.Down)
             {
-                if (CanEditQueue()) MoveSavedEntry(saved, entry.Index, entry.Index + (e.Key == Key.Up ? -1 : 1));
+                if (CanChangeQueue()) MoveSavedEntry(saved, entry.Index, entry.Index + (e.Key == Key.Up ? -1 : 1));
                 e.Handled = true; return;
             }
             if (e.Key == Key.Delete) { RemoveSavedEntry(saved, entry); e.Handled = true; return; }
@@ -415,13 +433,13 @@ public partial class MainWindow
         while (node is not null && node is not ListBoxItem) node = node is Visual ? VisualTreeHelper.GetParent(node) : LogicalTreeHelper.GetParent(node);
         if (node is not ListBoxItem { DataContext: QueueEntry entry } row || OpenedQueue is not { } saved) { e.Handled = true; return; }
         row.IsSelected = true;
-        var canEdit = QueueEditable; var last = saved.MediaIds.Length - 1;
+        var canEdit = QueueChangeable; var last = saved.MediaIds.Length - 1;
         var menu = new ContextMenu { PlacementTarget = row };
         MenuItem Item(string header, bool enabled, Action action)
         {
             var item = new MenuItem { Header = header, IsEnabled = canEdit && enabled }; item.Click += (_, _) => action(); menu.Items.Add(item); return item;
         }
-        Item("Play from here", entry.Media is { } media && QueueItemAvailable(media), () => PlaySelectedSavedQueue(row, new RoutedEventArgs()));
+        Item("Play from here", QueueEditable && entry.Media is { } media && QueueItemAvailable(media), () => PlaySelectedSavedQueue(row, new RoutedEventArgs()));
         menu.Items.Add(new Separator());
         Item("Move to top", entry.Index > 0, () => MoveSavedEntry(saved, entry.Index, 0));
         Item("Move up", entry.Index > 0, () => MoveSavedEntry(saved, entry.Index, entry.Index - 1)).InputGestureText = "Ctrl+Up";
@@ -440,6 +458,11 @@ public partial class MainWindow
     }
     private void ApplyQueueOrder(SavedQueue saved, int[] order)
     {
+        if (ShowingHostQueues)
+        {
+            if (QueueSource.Contains(saved) && order.Distinct().Count() == order.Length && order.All(i => i >= 0 && i < saved.MediaIds.Length)) SendQueueOrder(saved, order);
+            return;
+        }
         if (!CanEditQueue() || !savedQueues.Contains(saved) || order.Distinct().Count() != order.Length || order.Any(i => i < 0 || i >= saved.MediaIds.Length)) return;
         var resolvedIndices = Enumerable.Range(0, saved.MediaIds.Length).Where(i => items.Any(x => x.Id == saved.MediaIds[i])).ToArray();
         var cursor = queuePosition >= 0 && queuePosition < resolvedIndices.Length ? resolvedIndices[queuePosition] : -1;
@@ -496,7 +519,7 @@ public partial class MainWindow
         var point = e.GetPosition(SavedQueueItems);
         if (Math.Abs(point.X - queueDragStart.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(point.Y - queueDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         queueDragEntry = null;
-        if (CanEditQueue())
+        if (CanChangeQueue())
         {
             try { DragDrop.DoDragDrop((DependencyObject)sender, new DataObject(typeof(QueueDrag), new QueueDrag(saved, entry.Index)), DragDropEffects.Move); }
             finally { QueueDropMarker.Visibility = Visibility.Collapsed; }
@@ -518,7 +541,7 @@ public partial class MainWindow
     private void QueueDragOver(object sender, DragEventArgs e)
     {
         var drag = e.Data.GetData(typeof(QueueDrag)) as QueueDrag;
-        e.Effects = drag is not null && ReferenceEquals(OpenedQueue, drag.Queue) && room?.Identity?.Host != false ? DragDropEffects.Move : DragDropEffects.None;
+        e.Effects = drag is not null && ReferenceEquals(OpenedQueue, drag.Queue) && QueueChangeable ? DragDropEffects.Move : DragDropEffects.None;
         e.Handled = true;
         QueueDropMarker.Visibility = e.Effects == DragDropEffects.Move ? Visibility.Visible : Visibility.Collapsed;
         var markerY = QueueDropLocation(e).Y;
@@ -544,37 +567,45 @@ public partial class MainWindow
         var insertion = QueueDropLocation(e).Index;
         MoveSavedEntry(drag.Queue, drag.Index, insertion > drag.Index ? insertion - 1 : insertion);
     }
-    private void AddToSavedQueue(SavedQueue saved, IEnumerable<MediaItem> source)
+    // Returns how many videos were added; a guest's additions are counted once the host applies them.
+    private int AddToSavedQueue(SavedQueue saved, IEnumerable<MediaItem> source)
     {
-        if (!CanEditQueue()) return;
+        if (ShowingHostQueues) { var requested = source.ToArray(); SendQueueAdd(saved, requested); return 0; }
+        if (!CanEditQueue()) return 0;
         var added = source.Where(x => x.Available && File.Exists(x.Path)).ToArray();
-        if (added.Length == 0) { SetStatus("No available videos to add."); return; }
+        if (added.Length == 0) { SetStatus("No available videos to add."); return 0; }
         var index = savedQueues.FindIndex(x => x.Id == saved.Id);
-        if (index < 0) return;
+        if (index < 0) return 0;
         saved = savedQueues[index];
         savedQueues[index] = saved with { MediaIds = saved.MediaIds.Concat(added.Select(x => x.Id)).ToArray() };
         if (activeQueueId == saved.Id) { foreach (var item in added) queue.Add(item); PublishQueue(); }
         SaveQueues(); RefreshQueuePickers(); SetStatus($"Added {VideoCount(added.Length)} to {saved.Name}.");
+        return added.Length;
     }
     // Each saved queue, then New queue…; the divider shows only when there are queues above it.
     private IEnumerable<Control> QueueChoices(MediaItem[] videos)
     {
-        foreach (var saved in savedQueues)
+        foreach (var saved in QueueSource)
         {
             var entry = new MenuItem { Header = saved.Name }; entry.Click += (_, _) => AddToSavedQueue(saved, videos); yield return entry;
         }
-        if (savedQueues.Count > 0) yield return new Separator();
+        if (QueueSource.Count > 0) yield return new Separator();
         var create = new MenuItem { Header = "New queue…" }; create.Click += (_, _) => CreateQueueWith(videos);
         yield return create;
     }
     private MenuItem QueueMenu(IEnumerable<MediaItem> source)
     {
-        var menu = new MenuItem { Header = "Add to queue", IsEnabled = room?.Identity?.Host != false };
+        var menu = new MenuItem { Header = "Add to queue", IsEnabled = QueueChangeable };
         foreach (var choice in QueueChoices(source.ToArray())) menu.Items.Add(choice);
         return menu;
     }
     private void CreateQueueWith(MediaItem[] videos)
     {
+        if (ShowingHostQueues)
+        {
+            if (Dialogs.Prompt(this, "New queue", "Queue name", action: "Create and add") is { } hostQueueName) SendQueueCreate(hostQueueName, videos);
+            return;
+        }
         if (!CanEditQueue()) return;
         if (!videos.Any(QueueItemAvailable)) { SetStatus("No available videos to add."); return; }
         var name = Dialogs.Prompt(this, "New queue", "Queue name", action: "Create and add"); if (name is null) return;
@@ -584,15 +615,22 @@ public partial class MainWindow
     private void ShowAddToQueueMenu(FrameworkElement target, IEnumerable<MediaItem> source)
     {
         var videos = source.ToArray();
-        if (savedQueues.Count == 0) { CreateQueueWith(videos); return; }
-        if (!CanEditQueue()) return;
+        if (QueueSource.Count == 0) { CreateQueueWith(videos); return; }
+        if (!CanChangeQueue()) return;
         var menu = new ContextMenu { PlacementTarget = target, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
         foreach (var choice in QueueChoices(videos)) menu.Items.Add(choice);
         target.ContextMenu = menu; menu.IsOpen = true;
     }
     private void CardContextMenu(object sender, ContextMenuEventArgs e)
     {
-        if (GuestLibrary) { e.Handled = true; return; }
+        if (GuestLibrary)
+        {
+            // A guest can add the host's videos to the host's queues from a card.
+            if (!ShowingHostQueues || sender is not Button { Tag: LibraryCard guestCard } guestButton || guestCard.Level is "series" or "season") { e.Handled = true; return; }
+            var guestMenu = new ContextMenu { PlacementTarget = guestButton };
+            guestMenu.Items.Add(QueueMenu([guestCard.Media]));
+            guestButton.ContextMenu = guestMenu; guestMenu.IsOpen = true; e.Handled = true; return;
+        }
         if (sender is not Button button || button.Tag is not LibraryCard card) return;
         var videos = LibraryCatalog.CardItems(items, card, displaySpecialsWithinSeasons).ToArray();
         var menu = new ContextMenu { PlacementTarget = button };

@@ -202,7 +202,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     {
         if (!IsConnected) throw new IOException("Room connection is closed. Rejoin the room to reconnect.");
         if (message.Type == "remove" && !DiscoveryOnline) throw new IOException("Reconnect to the room service before revoking saved guest access.");
-        if (message.Type is "tracks" or "catalog-follow" or "catalog-artwork" or "catalog-watch" or "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "last-session" or "session-artwork" or "artwork-ack" or "queue" or "playback" or "ready" or "buffering" or "chat" or "remove")
+        if (message.Type is "tracks" or "catalog-follow" or "catalog-artwork" or "catalog-watch" or "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "last-session" or "session-artwork" or "artwork-ack" or "queue" or "playback" or "ready" or "buffering" or "remove")
         {
             if (Identity?.Host != true && !directConnected.Task.IsCompletedSuccessfully)
                 throw new IOException("Waiting for the host's direct control connection. All participants need the updated app.");
@@ -484,7 +484,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                 if (Identity is null) FailRoom(message.Text ?? "Could not join this room");
                 else Message?.Invoke(message);
                 break;
-            // Playback, queues, chat and clock replies from discovery are ignored.
+            // Playback, queues and clock replies from discovery are ignored.
         }
     }
     private void HandleLocal(WireMessage message)
@@ -548,7 +548,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                     }
                     break;
                 case "clock-pong": if (long.TryParse(message.Data, out var now)) clock.Receive(message.Number, now); break;
-                case "catalog-artwork-chunk": case "session-artwork-chunk": case "catalog-started": case "catalog-page": case "catalog-error": case "chat": case "notice": case "error": Message?.Invoke(message); break;
+                case "catalog-artwork-chunk": case "session-artwork-chunk": case "catalog-started": case "catalog-page": case "catalog-error": case "notice": case "error": Message?.Invoke(message); break;
             }
         }
     }
@@ -655,7 +655,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     {
         UpdateVoiceRoutes();
         var snapshot = coordinator!.Snapshot;
-        // Chat, library renewals and other commands often leave the room unchanged; skip republishing
+        // Library renewals and other commands often leave the room unchanged; skip republishing
         // unless the state or the set of peers receiving it changed.
         var json = Wire.Serialize(snapshot);
         // Include each peer's transport so a reconnected peer always receives the current state.

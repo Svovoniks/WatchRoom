@@ -40,21 +40,6 @@ static class SurfaceAudit
         Dialogs.Choose(window, [new(1, "movie", "Example title", "2024", null, "An overview long enough to wrap onto a second line in the picker."),
             new(2, "tv", "Another title", "2019", null, "A second candidate.")], null, "Pick the matching title.");
 
-        // The guest library window, populated the same way a room shares it.
-        var host = new RoomLibrary(true, "host"); var guest = new RoomLibrary(false, "guest");
-        Participant[] people = [new("host", "Fixture Host", true, true), new("guest", "Fixture Guest", false, true)];
-        var traffic = new Queue<Action>();
-        host.Send += (_, message) => traffic.Enqueue(() => guest.Receive("host", message));
-        guest.Send += (_, message) => traffic.Enqueue(() => host.Receive("guest", message));
-        host.SetPeople(people);
-        host.Publish(Enumerable.Range(1, 40).Select(i => new SharedLibraryItem("item-" + i, "Fixture movie " + i, "Movie", 2026, null, null, null, "A generated library fixture.", true)));
-        host.SetAccess("guest", new(true, true, true));
-        while (traffic.TryDequeue(out var action)) action();
-        dialog = "guest-library"; new RoomLibraryWindow(guest, false, () => "host", () => people, _ => { }) { Owner = window }.Show();
-        await settle(1500);
-        dialog = "host-library"; new RoomLibraryWindow(host, true, () => "host", () => people, _ => { }) { Owner = window }.Show();
-        await settle(1500);
-
         // Card context menus with each submenu opened in turn.
         foreach (var (level, navigate) in new (string, Action)[] { ("library", () => Call("NavigateLibrary", 0, null, null, null)) })
         {

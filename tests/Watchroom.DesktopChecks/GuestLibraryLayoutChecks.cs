@@ -2,92 +2,122 @@ using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Watchroom.Core;
 using Watchroom.Desktop;
 
+// The room's queues: a guest's Queues page shows the host's saved queues, and the host applies the guest's changes.
+// Two windows are joined directly instead of over a peer connection; the peer transport is covered by the smoke checks.
 static class GuestLibraryLayoutChecks
 {
+    const BindingFlags Flags = BindingFlags.Instance | BindingFlags.NonPublic;
 
     public static void Run()
     {
-        // Render detached WPF content. No desktop windows are opened or personal data read.
-
         RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
-        var host = new RoomLibrary(true, "host"); var guest = new RoomLibrary(false, "guest");
+        var directory = Environment.GetEnvironmentVariable("WATCHROOM_DATA")!;
+        var host = new MainWindow(); var guest = new MainWindow();
         Participant[] people = [new("host", "Fixture Host", true, true), new("guest", "Fixture Guest", false, true)];
-        var traffic = new Queue<Action>();
-        host.Send += (_, message) => traffic.Enqueue(() => guest.Receive("host", message));
-        guest.Send += (_, message) => traffic.Enqueue(() => host.Receive("guest", message));
-        void Pump() { while (traffic.TryDequeue(out var action)) action(); }
-        host.SetPeople(people);
-        host.Publish(Enumerable.Range(1, 65).Select(i => new SharedLibraryItem("item-" + i, "Fixture movie " + i, "Movie", 2026, null, null, null, "A generated library fixture.", true)));
-        host.SetAccess("guest", new(true, true, true)); Pump();
-        var guestWindow = new RoomLibraryWindow(guest, false, () => "host", () => people, _ => { });
-        var hostWindow = new RoomLibraryWindow(host, true, () => "host", () => people, _ => { });
-        void Layout(InAppDialog window, int width, int height)
+        RoomClient Join(MainWindow window, string peer, bool isHost)
         {
-            var content = (FrameworkElement)window.Content; content.Measure(new Size(width, height)); content.Arrange(new Rect(0, 0, width, height)); content.UpdateLayout();
+            var client = new RoomClient();
+            typeof(RoomClient).GetProperty("Identity")!.SetValue(client, new Welcome("fixture", peer, isHost, [], false));
+            typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, new RoomSnapshot(people, null, null, false));
+            typeof(MainWindow).GetField("room", Flags)!.SetValue(window, client);
+            return client;
         }
-        Layout(guestWindow, 1300, 1220); Invoke(guestWindow, "RenderBrowser"); Layout(guestWindow, 1300, 1220); Invoke(guestWindow, "RenderBrowser"); Layout(guestWindow, 1300, 1220);
-        var grid = Field<UniformGrid>(guestWindow, "grid");
-        Check(grid.Columns == 8 && grid.Rows == 4 && grid.Children.Count == 32, "guest grid automatically sizes to 8 × 4");
-        Check(!Field<Button>(guestWindow, "add").IsEnabled && !Field<Button>(guestWindow, "play").IsEnabled && !Field<Button>(guestWindow, "next").IsEnabled,
-            "shared library requires a title selection and a nonempty queue for playback actions");
-        Check(!Field<Button>(guestWindow, "previousPage").IsEnabled && Field<Button>(guestWindow, "nextPage").IsEnabled,
-            "first shared page disables Previous and enables Next when more titles exist");
-        grid.Children.OfType<Button>().First().RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Check(Field<Button>(guestWindow, "add").IsEnabled && Field<Button>(guestWindow, "play").IsEnabled,
-            "selecting a shared title enables its permitted actions");
-        var hovered = grid.Children.OfType<Button>().ElementAt(20); hovered.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseEnterEvent });
-        Invoke(guestWindow, "SendView", true); Pump();
-        var view = host.Views["guest"];
-        Check(view.VisibleIds.Length == 32 && view.HoveredId == (string)hovered.Tag, "actual guest hover event is sent with every visible ID");
-        var hostTabs = Field<TabControl>(hostWindow, "tabs"); hostTabs.SelectedIndex = 2;
-        Layout(hostWindow, 1000, 760); Invoke(hostWindow, "RenderPreviews"); Layout(hostWindow, 1000, 760);
-        var previews = Field<StackPanel>(hostWindow, "previews"); var box = previews.Children.OfType<Viewbox>().Single(); var mirror = (UniformGrid)box.Child;
-        Check(mirror.Columns == 8 && mirror.Rows == 4 && mirror.Children.OfType<Border>().Count(c => c.Child is not null) == 32, "host mirror renders all 32 cards in the same grid");
-        Check(((Border)mirror.Children[20]).BorderBrush == Brushes.Gold, "hovered guest card is highlighted gold in host mirror");
-        Check(view.SelectedId == "item-1" && ((Border)mirror.Children[0]).BorderBrush == Brushes.DeepSkyBlue, "guest selection is shown as a blue card in host mirror");
-        var renderedLast = ((FrameworkElement)mirror.Children[31]).TransformToAncestor(box).TransformBounds(new Rect(new Point(), ((FrameworkElement)mirror.Children[31]).RenderSize));
-        Check(renderedLast.Bottom <= box.ActualHeight + 1 && renderedLast.Right <= box.ActualWidth + 1, "last preview card fits inside scaled host view without clipping");
-        var scroll = Field<ScrollViewer>(hostWindow, "previewScroll");
-        Check(previews.ActualHeight <= scroll.ViewportHeight + 1, "complete guest page fits host viewport without scrolling through cards");
-        Save(guestWindow, "guest-grid.png"); Save(hostWindow, "host-preview.png");
-        hostTabs.SelectedIndex = 0; hostWindow.ShowAccess();
-        Check(hostTabs.SelectedIndex == 2, "host library entry opens guest access settings directly");
-        var nextPage = Descendants((DependencyObject)guestWindow.Content).OfType<Button>().Single(b => Equals(b.Content, "Next page"));
-        nextPage.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Invoke(guestWindow, "RenderBrowser");
-        Invoke(guestWindow, "SendView", true); Pump();
-        Check(host.Views["guest"].Page == 1 && host.Views["guest"].VisibleIds[0] == "item-" + (grid.Columns * grid.Rows + 1), "paging updates the guest grid and exact host mirror IDs");
-        hovered.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.MouseLeaveEvent });
-        Invoke(guestWindow, "SendView", true); Pump();
-        Check(host.Views["guest"].HoveredId is null, "leaving a guest card clears host hover state");
-        Layout(guestWindow, 700, 540); Invoke(guestWindow, "RenderBrowser"); Layout(guestWindow, 700, 540); Invoke(guestWindow, "RenderBrowser"); Invoke(guestWindow, "SendView", true); Pump();
-        Check(host.Views["guest"].Columns == grid.Columns && host.Views["guest"].Rows == grid.Rows && host.Views["guest"].VisibleIds.Length == grid.Children.OfType<Button>().Count(), "resized guest grid sends its new exact page to host");
-        host.SetAccess("guest", new()); Pump(); Invoke(guestWindow, "RenderBrowser");
-        Check(grid.Children.OfType<Button>().Count() == 0, "revoked catalog disappears from guest grid");
-        guestWindow.Shutdown(); hostWindow.Shutdown();
-        Console.WriteLine("15 desktop layout checks passed.");
+        var hostClient = Join(host, "host", true); var guestClient = Join(guest, "guest", false);
+        var videos = Enumerable.Range(1, 6).Select(i =>
+        {
+            var path = Path.Combine(directory, $"queue-video-{i}.mp4"); File.WriteAllBytes(path, []);
+            return new MediaItem("video-" + i, path, $"Fixture film {i}", "Movie", 2020 + i, RuntimeMinutes: 90 + i);
+        }).ToList();
+        var hostItems = Field<List<MediaItem>>(host, "items"); hostItems.Clear(); hostItems.AddRange(videos);
+        var hostQueues = Field<List<SavedQueue>>(host, "savedQueues"); hostQueues.Clear();
+        hostQueues.Add(new("evening", "Evening films", ["video-1", "video-2", "video-3"]));
+        var guestOwn = Field<List<SavedQueue>>(guest, "savedQueues"); guestOwn.Clear(); guestOwn.Add(new("mine", "My own queue", []));
+        var toGuest = new List<WireMessage>();
+        typeof(MainWindow).GetField("queueOutbox", Flags)!.SetValue(host, (Action<string, WireMessage>)((peer, message) =>
+        { toGuest.Add(message); Call(guest, "ReceiveQueueMessage", guestClient, "host", message); }));
+        typeof(MainWindow).GetField("queueOutbox", Flags)!.SetValue(guest, (Action<string, WireMessage>)((peer, message) =>
+        { Check(peer == "host", "guests send queue changes to the host"); Call(host, "ReceiveQueueMessage", hostClient, "guest", message); }));
+
+        Call(host, "ShareQueues", [null]);
+        Call(guest, "ShowPage", "Queues");
+        var gallery = Named<ItemsControl>(guest, "QueueGallery");
+        Check(Named<TextBlock>(guest, "QueuesHeading").Text == "Fixture Host's queues" && GalleryNames(gallery).SequenceEqual(["Evening films", "New queue"]),
+            "a guest's Queues page shows the host's queues instead of their own");
+        Call(guest, "OpenQueue", "evening");
+        var rows = Named<ListBox>(guest, "SavedQueueItems");
+        string[] Titles() => rows.Items.Cast<object>().Select(row => (string)row.GetType().GetProperty("Title")!.GetValue(row)!).ToArray();
+        Check(Titles().SequenceEqual(["Fixture film 1", "Fixture film 2", "Fixture film 3"]), "the guest sees the host's queue entries with their titles");
+        Check(Named<Button>(guest, "PlaySavedQueueButton").Visibility != Visibility.Visible && Named<Button>(guest, "AddQueueVideosButton").Visibility != Visibility.Visible &&
+            Named<Button>(guest, "QueueMoreButton").Visibility != Visibility.Visible && Named<TextBlock>(guest, "SavedQueueFeedback").Text.Contains("Fixture Host's library"),
+            "guests can't play, rename or delete the host's queues and are told how to add videos");
+
+        SavedQueue Opened() => (SavedQueue)typeof(MainWindow).GetProperty("OpenedQueue", Flags)!.GetValue(guest)!;
+        string[] HostIds() => hostQueues.Single(q => q.Id == "evening").MediaIds;
+        Call(guest, "MoveSavedEntry", Opened(), 2, 0);
+        Check(HostIds().SequenceEqual(["video-3", "video-1", "video-2"]) && Titles()[0] == "Fixture film 3", "a guest's reorder is applied to the host's queue and shows at once");
+        Pump();
+        Check(Titles().SequenceEqual(["Fixture film 3", "Fixture film 1", "Fixture film 2"]), "the host shares its updated queue back to the guest");
+        Call(guest, "RemoveSavedEntry", Opened(), rows.Items[1]);
+        Pump();
+        Check(HostIds().SequenceEqual(["video-3", "video-2"]) && Titles().Length == 2, "a guest can remove a video from the host's queue");
+        var hostVideo = new MediaItem("video-5", "", "Fixture film 5", "Movie");
+        Call(guest, "AddToSavedQueue", Opened(), new[] { hostVideo });
+        Pump();
+        Check(HostIds().SequenceEqual(["video-3", "video-2", "video-5"]) && Titles().Last() == "Fixture film 5", "a guest can add the host's videos to the host's queue");
+
+        Call(guest, "SendQueueEdit", new QueueEdit("order", "evening", "0000000000000000", [1, 0, 2]));
+        Pump();
+        Check(HostIds().SequenceEqual(["video-3", "video-2", "video-5"]) && Named<TextBlock>(guest, "SavedQueueFeedback").Text.Contains("changed before your change"),
+            "an edit made against an out-of-date queue is refused and the guest is told why");
+        Call(guest, "SendQueueEdit", new QueueEdit("add", "evening", MediaIds: ["not-in-library"]));
+        Check(HostIds().Length == 3 && Named<TextBlock>(guest, "SavedQueueFeedback").Text.Contains("not available"), "videos the host doesn't have are refused");
+        Call(guest, "SendQueueCreate", "Weekend", new[] { hostVideo });
+        Pump();
+        Call(guest, "ShowAllQueues");
+        Check(hostQueues.Any(q => q.Name == "Weekend" && q.MediaIds.SequenceEqual(["video-5"])) && GalleryNames(gallery).SequenceEqual(["Evening films", "Weekend", "New queue"]),
+            "a guest can create a queue in the host's queues");
+        Save(guest, "guest-host-queues.png");
+
+        toGuest.Clear(); Field<HashSet<string>>(host, "queueSharePeers").Clear();
+        Call(host, "ShareQueuesWithNewGuests", hostClient.Snapshot!);
+        Check(toGuest.Count > 0 && toGuest.All(message => message.Type == QueueSharing.StateMessage), "a newly admitted guest receives the host's queues");
+        toGuest.Clear(); Call(host, "ShareQueuesWithNewGuests", hostClient.Snapshot!);
+        Check(toGuest.Count == 0, "guests who already have the queues are not sent them again for every room update");
+
+        typeof(MainWindow).GetField("room", Flags)!.SetValue(guest, null); Call(guest, "ClearHostQueues");
+        Check(Named<TextBlock>(guest, "QueuesHeading").Text == "Queues" && GalleryNames(gallery).SequenceEqual(["My own queue", "New queue"]),
+            "leaving the room brings back the guest's own queues");
+        host.Close(); guest.Close();
+        Console.WriteLine("Room queue checks passed.");
     }
-    static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
+    static string[] GalleryNames(ItemsControl gallery) =>
+        gallery.Items.Cast<object>().Select(card => (string)card.GetType().GetProperty("Name")!.GetValue(card)!).ToArray();
+    // Lets the share timer and queued dispatcher work run.
+    static void Pump(int milliseconds = 400)
     {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        var until = Environment.TickCount64 + milliseconds;
+        while (Environment.TickCount64 < until)
         {
-            var child = VisualTreeHelper.GetChild(parent, i); yield return child;
-            foreach (var descendant in Descendants(child)) yield return descendant;
+            var frame = new DispatcherFrame();
+            Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => frame.Continue = false));
+            Dispatcher.PushFrame(frame); Thread.Sleep(15);
         }
     }
-    static T Field<T>(object target, string name) => (T)target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target)!;
-    static void Invoke(object target, string name, params object[] args) => target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(target, args);
+    static T Named<T>(MainWindow window, string name) => (T)window.FindName(name);
+    static T Field<T>(object target, string name) => (T)target.GetType().GetField(name, Flags)!.GetValue(target)!;
+    static object? Call(object target, string name, params object?[]? args) => target.GetType().GetMethod(name, Flags)!.Invoke(target, args);
     static void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); }
-    static void Save(InAppDialog window, string name)
+    static void Save(MainWindow window, string name)
     {
-        var content = (FrameworkElement)window.Content;
-        var bitmap = new RenderTargetBitmap((int)content.ActualWidth, (int)content.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(content);
+        var root = (FrameworkElement)window.Content;
+        root.Measure(new Size(1100, 760)); root.Arrange(new Rect(0, 0, 1100, 760)); root.UpdateLayout();
+        var bitmap = new RenderTargetBitmap(1100, 760, 96, 96, PixelFormats.Pbgra32); bitmap.Render(root);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         Directory.CreateDirectory("artifacts/library-ui"); using var output = File.Create(Path.Combine("artifacts/library-ui", name)); encoder.Save(output);
     }

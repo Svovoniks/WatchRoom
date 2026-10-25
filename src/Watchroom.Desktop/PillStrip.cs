@@ -14,6 +14,12 @@ public sealed class PillStrip : Panel
     public static readonly DependencyProperty ShowsOverflowProperty = DependencyProperty.Register(nameof(ShowsOverflow), typeof(bool), typeof(PillStrip),
         new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsMeasure));
 
+    // A pill that is not shown is collapsed and never folds; set it rather than the pill's Visibility, which the strip manages.
+    public static readonly DependencyProperty ShownProperty = DependencyProperty.RegisterAttached("Shown", typeof(bool), typeof(PillStrip),
+        new FrameworkPropertyMetadata(true, FrameworkPropertyMetadataOptions.AffectsParentMeasure));
+    public static bool GetShown(UIElement element) => (bool)element.GetValue(ShownProperty);
+    public static void SetShown(UIElement element, bool value) => element.SetValue(ShownProperty, value);
+
     // The pill that holds folded pills; it is one of the children.
     public UIElement? Overflow { get => (UIElement?)GetValue(OverflowProperty); set => SetValue(OverflowProperty, value); }
     // Keeps the overflow pill showing even when every pill fits, for other controls folded into its menu.
@@ -26,7 +32,7 @@ public sealed class PillStrip : Panel
     private int shown = int.MaxValue;
     private bool overflowing;
 
-    private IEnumerable<UIElement> Pills => InternalChildren.Cast<UIElement>().Where(child => child is not Popup && child != Overflow);
+    private IEnumerable<UIElement> Pills => InternalChildren.Cast<UIElement>().Where(child => child is not Popup && child != Overflow && GetShown(child));
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -69,7 +75,16 @@ public sealed class PillStrip : Panel
             overflow.Arrange(overflowing ? new Rect(x, (finalSize.Height - overflow.DesiredSize.Height) / 2, overflow.DesiredSize.Width, overflow.DesiredSize.Height) : new Rect());
             Show(overflow, overflowing);
         }
-        foreach (UIElement child in InternalChildren) if (child is Popup) child.Arrange(new Rect());
+        foreach (UIElement child in InternalChildren)
+        {
+            if (child is Popup) child.Arrange(new Rect());
+            else if (child != Overflow && !GetShown(child))
+            {
+                child.Arrange(new Rect());
+                if (child.Visibility != Visibility.Collapsed) child.Visibility = Visibility.Collapsed;
+                changed |= folded.Remove(child);
+            }
+        }
         if (changed)
         {
             folded.Sort((a, b) => InternalChildren.IndexOf(a).CompareTo(InternalChildren.IndexOf(b)));

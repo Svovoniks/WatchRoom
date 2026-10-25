@@ -57,7 +57,6 @@ public partial class MainWindow : Window
     }
     private readonly DispatcherTimer libraryUpdateTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private readonly ObservableCollection<LibraryFolder> folders = [];
-    private readonly ObservableCollection<string> chat = [];
     private readonly Dictionary<string, Guid> pendingAdmissions = [];
     private readonly List<FileSystemWatcher> watchers = [];
     private readonly List<MediaItem> queue = [];
@@ -108,8 +107,6 @@ public partial class MainWindow : Window
     private WindowState previousState;
     private Rect previousBounds;
     private ResizeMode previousResizeMode;
-    private bool roomPanelVisible;
-    private double roomPanelWidth = 340;
     private long lastPlayerInteraction;
     private Point lastPlayerMouse;
     private string? browseSeries, browseKind;
@@ -150,7 +147,7 @@ public partial class MainWindow : Window
         ApplyTheme();
         ShowPage("Home");
         foreach (var f in Wire.Read<List<LibraryFolder>>(library.Setting("folders") ?? "[]")) folders.Add(f);
-        FolderList.ItemsSource = folders; ChatList.ItemsSource = chat; InitializePlayerChrome();
+        FolderList.ItemsSource = folders; InitializePlayerChrome();
         ScanButton.IsEnabled = folders.Count > 0;
         try
         {
@@ -177,7 +174,7 @@ public partial class MainWindow : Window
         library.MediaSaved += QueueLibraryUpdate;
         libraryUpdateTimer.Tick += (_, _) => ApplyLibraryUpdates();
         libraryUpdateTimer.Start();
-        InitializeSharedLibrary();
+        InitializeSharedLibrary(); InitializeQueueSharing();
         var savedCursor = library.Setting("queuePosition");
         LoadSavedRooms(); RefreshQueuePickers();
         if (int.TryParse(library.Setting("volume"), out var savedVolume)) Volume.Value = Math.Clamp(savedVolume, 0, 100);
@@ -990,8 +987,7 @@ public partial class MainWindow : Window
             await Disconnect(); playingItem = null; var client = NewRoom(); SetStatus("Joining room…");
             try { await client.ConnectAsync(address.Server, SavedDisplayName, address.Code); }
             catch { await Disconnect(); throw; }
-            // Rooms open with participants and chat closed; the top bar button shows them.
-            roomPanelVisible = false; RoomHeading.Text = "Your watch room";
+            RoomHeading.Text = "Your watch room";
             RememberCurrentRoom(); RoomSubtitle.Text = "Waiting for host approval"; ShowPage("Room");
         } finally { roomBusy = false; RefreshSavedRooms(); UpdateSessionControls(); }
     });
@@ -1021,17 +1017,9 @@ public partial class MainWindow : Window
             }
             Dispatcher.BeginInvoke(async () => { if (room == client) await Guard(() => OnRoomMessage(msg)); });
         };
-        client.LibraryPeerReady += id => Dispatcher.BeginInvoke(() =>
-        {
-            if (room != client) return; EnsureRoomLibrary();
-            try { roomLibrary?.PeerReady(id); } catch (IOException ex) { SetStatus(ex.Message); }
-        });
-        client.LibraryMessage += (id, message) => Dispatcher.BeginInvoke(() =>
-        {
-            if (room != client) return; EnsureRoomLibrary();
-            try { roomLibrary?.Receive(id, message); }
-            catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException or ArgumentException) { SetStatus("Invalid library request: " + ex.Message); }
-        });
+        // A guest's connection is ready for the host's queues; queue messages and edits travel on it.
+        client.LibraryPeerReady += id => Dispatcher.BeginInvoke(() => { if (room == client && client.Identity?.Host == true) ShareQueues(id); });
+        client.LibraryMessage += (id, message) => Dispatcher.BeginInvoke(() => { if (room == client) ReceiveQueueMessage(client, id, message); });
         client.Status += text => Dispatcher.BeginInvoke(() =>
         {
             if (room != client) return; ConnectionStatus.Text = text;
@@ -1077,7 +1065,6 @@ public partial class MainWindow : Window
                 ShowPage("Room"); break;
             case "catalog-page": case "catalog-error": if (!ReceiveArtworkError(message)) ReceiveHostLibrary(message); break;
             case "welcome":
-                EnsureRoomLibrary();
                 RememberCurrentRoom();
                 if (room.Identity!.Host && room.HostedMedia is not null)
                 {
@@ -1090,7 +1077,7 @@ public partial class MainWindow : Window
             case "admitted": RoomSubtitle.Text = "Admitted · Connecting to host…"; break;
             case "snapshot":
                 var snapshot = Wire.Read<RoomSnapshot>(message.Data!);
-                roomLibrary?.SetPeople(snapshot.People);
+                ShareQueuesWithNewGuests(snapshot);
                 SyncCurrentRoomName(snapshot);
                 if (room.Identity?.Host == false)
                 {
@@ -1120,10 +1107,6 @@ public partial class MainWindow : Window
                 RefreshSharedLibrary();
                 break;
             case "playback": AcceptState(Wire.Read<PlaybackState>(message.Data!)); break;
-            case "chat": case "notice":
-                chat.Add(message.Text ?? ""); if (chat.Count > 150) chat.RemoveAt(0); ChatList.ScrollIntoView(chat.Last());
-                if (message.Type == "chat") ChatArrived(message.Text ?? "");
-                break;
             case "error" when ReceiveHeroArtworkError(message): break;
             case "error": ShowRoomFeedback(message.Text ?? "Room error"); SetStatus(message.Text ?? "Room error"); break;
         }
@@ -1253,8 +1236,6 @@ public partial class MainWindow : Window
     private async Task PrepareVideoSurface(bool openPlayer = true)
     {
         PlayerEmpty.Visibility = Visibility.Collapsed;
-        // Starting a video keeps participants and chat as the viewer left them.
-        if (room is null) roomPanelVisible = false;
         // A video started while picture in picture is open plays there; the app stays on its page.
         if (!openPlayer || pictureInPicture) return;
         ShowPage("Room");
@@ -1276,7 +1257,6 @@ public partial class MainWindow : Window
     private void PlaybackTickCore()
     {
         UpdateSystemMediaControls();
-        roomLibrary?.ExpireViews(Wire.Now);
         // The bars float over the video, so they fade when idle: always in fullscreen, and while playing in the window.
         // Cheap managed checks run first; the native playing state is read only once the bars are idle.
         if (!pictureInPicture && PlaybackControls.Visibility == Visibility.Visible && Environment.TickCount64 - lastPlayerInteraction > 2600 &&
@@ -1589,6 +1569,10 @@ public partial class MainWindow : Window
         }).ToList();
         // Unchanged rows keep their containers instead of being rebuilt on every snapshot.
         if (PeopleList.ItemsSource is not System.Collections.IEnumerable shown || !shown.Cast<object>().SequenceEqual(people)) PeopleList.ItemsSource = people;
+        // The pill counts everyone in the room; for the host, guests waiting to be let in stand out instead.
+        var waiting = room?.Identity?.Host == true ? snapshot.People.Count(p => !p.Approved) : 0;
+        ParticipantsPillDetail.Text = waiting > 0 ? $"{waiting} waiting" : snapshot.People.Count().ToString();
+        ParticipantsPillDetail.Foreground = (Brush)FindResource(waiting > 0 ? "PlayerAccent" : "PlayerMuted");
         if (settings) RefreshRoomSettings();
     }
     private async void Admit(object sender, RoutedEventArgs e)
@@ -1624,7 +1608,6 @@ public partial class MainWindow : Window
         try
         {
             var id = (string)((Button)sender).Tag;
-            if (room?.Snapshot?.People.Any(p => p.Id == id && p.Approved) == true) roomLibrary?.SetAccess(id, new());
             room?.Send(new("remove", Target: id));
         }
         catch (IOException ex) { ShowRoomFeedback(ex.Message); SetStatus(ex.Message); }
@@ -1634,17 +1617,11 @@ public partial class MainWindow : Window
         if (room?.Identity?.Host == true) room.Send(new("controls", Number: SharedControls.IsChecked == true ? 1 : 0));
         RefreshSharedControlsChip();
     }
-    private void SendChat(object sender, RoutedEventArgs e)
-    {
-        if (room?.IsConnected != true || string.IsNullOrWhiteSpace(ChatInput.Text)) return;
-        room.Send(new("chat", Text: ChatInput.Text.Trim())); ChatInput.Clear();
-    }
-    private void ChatKey(object sender, KeyEventArgs e) { if (e.Key == Key.Enter) { SendChat(sender, e); e.Handled = true; } }
     private void QueueClick(object sender, RoutedEventArgs e)
     {
         if (selected is null) return;
+        if (GuestLibrary) { if (ShowingHostQueues) ShowAddToQueueMenu(DetailQueue, [selected]); return; }
         if (!File.Exists(selected.Path)) { SetStatus("This file is unavailable. Reconnect its drive and rescan."); return; }
-        if (room?.Identity?.Host == false) { room.Send(new("chat", Text: "Suggestion: " + selected.Title)); SetStatus("Suggested title to the room"); return; }
         ShowAddToQueueMenu(DetailQueue, [selected]);
     }
 
@@ -1655,10 +1632,10 @@ public partial class MainWindow : Window
         library.Setting("queuePosition", queuePosition.ToString());
         library.Setting("queue", Wire.Serialize(queue.Select(x => x.Id).ToArray()));
         if (room?.Identity?.Host == true) room.Send(new("queue", Data: Wire.Serialize(titles.Take(150).ToArray())));
+        ScheduleQueueShare();
     }
     private async void NextQueued(object sender, RoutedEventArgs e) => await Guard(() =>
     {
-        if (roomLibrary?.Queue.Entries.Length > 0) { roomLibrary.Request(HostPeerId(), "next"); return Task.CompletedTask; }
         return PlayQueueStep(1);
     });
     private async void PreviousQueued(object sender, RoutedEventArgs e) => await Guard(() => PlayQueueStep(-1));
@@ -1687,7 +1664,7 @@ public partial class MainWindow : Window
         CancelPeerNotices();
         playbackRecovery.Clear();
         if (!reconnecting) { roomReconnect?.Cancel(); roomReconnect = null; }
-        libraryWindow?.Shutdown(); libraryWindow = null; roomLibrary = null; sharedItems.Clear(); sharedIds.Clear(); sharedKinds = [];
+        ClearHostQueues();
         videoClickDelay.Stop();
         SavePlaybackPosition(); localResume = 0; endedSeek = null;
         RecordRoomSession(force: true);
@@ -1712,8 +1689,8 @@ public partial class MainWindow : Window
             await Task.WhenAll(StopNativePlayback(), stopBridge, disconnect);
         }
         finally { loading.Release(); }
-        PeopleList.ItemsSource = null; pendingAdmissions.Clear(); RoomFeedback.Text = ""; RoomFeedback.Visibility = Visibility.Collapsed;
-        RoomTabs.SelectedIndex = 0; chat.Clear(); ClearChatBubbles(); SetThreadExecutionState(0x80000000); ConnectionStatus.Text = "Local playback";
+        PeopleList.ItemsSource = null; ParticipantsPillDetail.Text = ""; pendingAdmissions.Clear(); RoomFeedback.Text = ""; RoomFeedback.Visibility = Visibility.Collapsed;
+        SetThreadExecutionState(0x80000000); ConnectionStatus.Text = "Local playback";
         guestBrowsePending = false; ++guestBrowseRequest; RefreshSharedLibrary();
         UpdateSessionControls(); RefreshVoice();
     }
@@ -1751,12 +1728,9 @@ public partial class MainWindow : Window
         NowPlayingButton.Visibility = ready || room is not null ? Visibility.Visible : Visibility.Collapsed;
         NowPlayingLabel.Text = playingItem is not null ? PlaybackTitle(playingItem) : room?.Snapshot?.Media?.Title ?? RoomHeading.Text;
         var canControl = room is null || connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
-        InviteButton.Visibility = RoomToggle.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
-        RoomLibraryButton.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
-        RoomLibraryText.Text = room?.Identity?.Host == true ? "Library & guest access" : "Host library";
-        System.Windows.Automation.AutomationProperties.SetName(RoomLibraryButton, RoomLibraryText.Text);
+        InviteButton.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
+        PillStrip.SetShown(ParticipantsPill, connectedRoom);
         RefreshLeaveButton();
-        ChatInput.IsEnabled = SendChatButton.IsEnabled = connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.People.Any(p => p.Id == room.Identity?.Peer && p.Approved) == true);
         PlayButton.IsEnabled = StopButton.IsEnabled = canControl && (ready || playingItem is not null && player?.State is VLCState.Stopped or VLCState.Ended);
         Timeline.IsEnabled = canControl && player?.Length > 0;
         // Previous and Next stay in the bar; they are disabled when there is nothing to step to.
@@ -1765,8 +1739,6 @@ public partial class MainWindow : Window
         RefreshEpisodeEndAction();
         var canManageEpisodes = room is null || connectedRoom && room!.Identity?.Host == true;
         NextButton.IsEnabled = ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(1) is not null
-            : roomLibrary?.Queue.Entries.Length > 0
-            ? connectedRoom && (room!.Identity?.Host == true || roomLibrary.OwnAccess.Start)
             : QueuePlayback.FindNext(queue, queuePosition, 1, x => RecentlyExists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
         PreviousButton.IsEnabled = ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(-1) is not null
             : QueuePlayback.FindNext(queue, queuePosition, -1, x => RecentlyExists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
@@ -1800,23 +1772,11 @@ public partial class MainWindow : Window
         ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(28, 22, 28, 16);
         AppStatusBar.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
         StatusRow.Height = new GridLength(inPlayer ? 0 : 30);
-        var showRoomPanel = roomPanelVisible && !fullscreen;
-        RoomSide.Visibility = showRoomPanel ? Visibility.Visible : Visibility.Collapsed;
-        RoomSplitter.Visibility = showRoomPanel ? Visibility.Visible : Visibility.Collapsed;
-        RoomSplitterWidth.Width = new GridLength(showRoomPanel ? 6 : 0);
-        RoomSideWidth.MinWidth = showRoomPanel ? 280 : 0;
-        RoomSideWidth.Width = new GridLength(showRoomPanel ? roomPanelWidth : 0);
         // The player shrinks well below the library's minimum size; leaving it brings that minimum back.
-        MinWidth = !inPlayer ? 900 : showRoomPanel ? 640 : 400;
+        MinWidth = inPlayer ? 400 : 900;
         MinHeight = inPlayer ? 220 : 640;
-        RoomToggle.ToolTip = roomPanelVisible ? "Hide participants and chat" : "Show participants and chat";
         ApplyCaptionLayout(inPlayer);
         PlaceUpdateCard(inPlayer);
-    }
-    private void RoomPanelSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (roomPanelVisible && !fullscreen && RoomSideWidth.ActualWidth >= 280)
-            roomPanelWidth = Math.Clamp(RoomSideWidth.ActualWidth, 280, 600);
     }
     private void SetFullscreen(bool value)
     {
@@ -1856,17 +1816,17 @@ public partial class MainWindow : Window
         ShowPlayerControls();
         PlayerOverlay.Focus();
     }
-    private void ToggleRoomPanel(object sender, RoutedEventArgs e) { roomPanelVisible = !roomPanelVisible; if (roomPanelVisible) { RoomTabs.SelectedIndex = unreadChat > 0 ? 1 : RoomTabs.SelectedIndex; ClearChatBubbles(); } ApplyPlayerLayout(); }
-    private bool PlayerMenuOpen => AudioMenu.IsOpen || SubtitleMenu.IsOpen || PlayerQueueMenu.IsOpen || OverflowMenu.IsOpen;
-    private void ClosePlayerMenus() => AudioMenu.IsOpen = SubtitleMenu.IsOpen = PlayerQueueMenu.IsOpen = OverflowMenu.IsOpen = false;
+    private bool PlayerMenuOpen => AudioMenu.IsOpen || SubtitleMenu.IsOpen || PlayerQueueMenu.IsOpen || ParticipantsMenu.IsOpen || OverflowMenu.IsOpen;
+    private void ClosePlayerMenus() => AudioMenu.IsOpen = SubtitleMenu.IsOpen = PlayerQueueMenu.IsOpen = ParticipantsMenu.IsOpen = OverflowMenu.IsOpen = false;
     // Skips the fade when the bar itself hides or the window changes size.
-    private void ClosePlayerMenusNow() { AudioMenu.CloseNow(); SubtitleMenu.CloseNow(); PlayerQueueMenu.CloseNow(); OverflowMenu.CloseNow(); HideVolumeFlyout(); }
+    private void ClosePlayerMenusNow() { AudioMenu.CloseNow(); SubtitleMenu.CloseNow(); PlayerQueueMenu.CloseNow(); ParticipantsMenu.CloseNow(); OverflowMenu.CloseNow(); HideVolumeFlyout(); }
     private void PlayerMenuOpened(object sender, EventArgs e)
     {
         ShowPlayerControls();
         // Move focus into the menu so arrow keys pick tracks instead of seeking.
         var menu = (System.Windows.Controls.Primitives.Popup)sender;
-        if (menu == OverflowMenu) { Dispatcher.BeginInvoke(() => OverflowItems.MoveFocus(new TraversalRequest(FocusNavigationDirection.First)), DispatcherPriority.Input); return; }
+        if (menu == OverflowMenu || menu == ParticipantsMenu)
+        { Dispatcher.BeginInvoke(() => ((FrameworkElement)menu.Child).MoveFocus(new TraversalRequest(FocusNavigationDirection.First)), DispatcherPriority.Input); return; }
         var list = menu == AudioMenu ? AudioTracks : menu == SubtitleMenu ? SubtitleTracks : QueueList;
         // Rows are virtualized, so bring the selected one into view before focusing it.
         if (list.SelectedItem is { } chosen) list.ScrollIntoView(chosen);
@@ -1882,7 +1842,7 @@ public partial class MainWindow : Window
         // Arrow keys select tracks as they move; Enter confirms. The queue list handles Enter itself.
         var trackConfirmed = e.Key == Key.Enter && e.OriginalSource is ListBoxItem && !PlayerQueueMenu.IsOpen;
         if (e.Key != Key.Escape && !trackConfirmed) return;
-        var pill = OverflowMenu.IsOpen ? OverflowPill : AudioMenu.IsOpen ? AudioPill : SubtitleMenu.IsOpen ? SubtitlePill : QueuePill;
+        var pill = OverflowMenu.IsOpen ? OverflowPill : ParticipantsMenu.IsOpen ? ParticipantsPill : AudioMenu.IsOpen ? AudioPill : SubtitleMenu.IsOpen ? SubtitlePill : QueuePill;
         ClosePlayerMenus(); (pill.IsVisible ? pill : OverflowPill).Focus(); e.Handled = true;
     }
     private void TrackMenuClicked(object sender, MouseButtonEventArgs e)
