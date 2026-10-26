@@ -43,6 +43,11 @@
           "SQLitePCLRaw.core": "2.1.12"
         }
       },
+      "Microsoft.Extensions.AI.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.2.0",
+        "contentHash": "ONGlIBht0ygEdKc0bCt9XWUiq19/460dAu7fCKzPM34OFJSMQIohEDTJwjCJ8vVp8znNakloc9xFF9+R/eDCYQ=="
+      },
       "NAudio.Core": {
         "type": "Transitive",
         "resolved": "3.3.0",
@@ -58,6 +63,19 @@
         "dependencies": {
           "NAudio.Core": "3.3.0"
         }
+      },
+      "Panlingo.LanguageIdentification.CLD3": {
+        "type": "Transitive",
+        "resolved": "0.8.1",
+        "contentHash": "xAhAGw/LGwk02VdZpO/kjTsapNAHufljcv2XdVqdz0H5+2qsBIq+NhHN8E/8Rk2rGIKq5xLV/LgA77UPvn1XDQ==",
+        "dependencies": {
+          "Panlingo.LanguageIdentification.CLD3.Native": "0.8.1"
+        }
+      },
+      "Panlingo.LanguageIdentification.CLD3.Native": {
+        "type": "Transitive",
+        "resolved": "0.8.1",
+        "contentHash": "NngO4K7RH4qRau0kOG4sGnrG92nrrNMg0BamisM5wX05/oofjKfEMvrlhqwPP0qSA842Ejbq0TytW/RiZ12sBA=="
       },
       "SkiaSharp": {
         "type": "Transitive",
@@ -131,13 +149,43 @@
         "resolved": "3.0.23.1",
         "contentHash": "yTGNrzj+Q/t72VNKK0d64jZ+8BGu5Vcp2nxpZ2ll350LkRWKSwqShGpZWcVxXVP8TiMbeGML09+Jzz3hNsIcqA=="
       },
+      "Whisper.net": {
+        "type": "Transitive",
+        "resolved": "1.9.1",
+        "contentHash": "82WAKyyMun44cAXE80sP7vIra1oYhbVp2WrnqJm0CISTfMAvint1k/umt0SvsQH+IkDyekZ3BgMdS3Rag9SZ5A==",
+        "dependencies": {
+          "Microsoft.Extensions.AI.Abstractions": "10.2.0"
+        }
+      },
+      "Whisper.net.Runtime": {
+        "type": "Transitive",
+        "resolved": "1.9.1",
+        "contentHash": "TipPJkry69VwJ3XL38U082QK5Trqte6NgSOoosuyj/C1eRHabmBbLQ3ujjcDryg5pkXT7wXwAKU5+PxGIJyxkQ==",
+        "dependencies": {
+          "Whisper.net.Runtime.Metal": "1.9.1"
+        }
+      },
+      "Whisper.net.Runtime.Metal": {
+        "type": "Transitive",
+        "resolved": "1.9.1",
+        "contentHash": "Ut5tZyCUwXMVdThoLvdvQ7GyLwjRMreR/p3LuMJvRiXidQ2AXxx2Tv8UOGtMxvL395AC3+IkHdN/kMfd+EPSEw=="
+      },
+      "Whisper.net.Runtime.NoAvx": {
+        "type": "Transitive",
+        "resolved": "1.9.1",
+        "contentHash": "5itvwa/WN+e8dFa6izByrG9yeHEKi+hRQPtAlcoRxvSJZMq4+q9z7JEm36hmbcAJZ2Jiyaai/yFOPfFcdDjK+Q=="
+      },
       "Watchroom": {
         "type": "Project",
         "dependencies": {
           "LibVLCSharp.WPF": "[3.10.1, )",
           "NAudio.Wasapi": "[3.3.0, )",
+          "Panlingo.LanguageIdentification.CLD3": "[0.8.1, )",
           "VideoLAN.LibVLC.Windows": "[3.0.23.1, )",
-          "Watchroom.Core": "[0.3.58, )"
+          "Watchroom.Core": "[0.3.67, )",
+          "Whisper.net": "[1.9.1, )",
+          "Whisper.net.Runtime": "[1.9.1, )",
+          "Whisper.net.Runtime.NoAvx": "[1.9.1, )"
         }
       },
       "watchroom.core": {

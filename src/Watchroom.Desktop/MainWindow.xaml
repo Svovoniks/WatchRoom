@@ -318,6 +318,15 @@
        <TextBlock x:Name="DetailContext" Foreground="{DynamicResource Accent}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,8"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
        <TextBlock x:Name="DetailTitle" FontSize="36" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,10"/>
        <TextBlock x:Name="DetailMeta" Style="{StaticResource MutedText}" FontSize="14" Margin="0,0,0,24"/>
+       <!-- The file's audio and subtitles, with languages identified for tracks the file doesn't tag. -->
+       <Grid x:Name="DetailTracks" Visibility="Collapsed" Margin="0,-12,0,22" MaxWidth="720" HorizontalAlignment="Left" AutomationProperties.Name="Audio and subtitles">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <TextBlock Text="Audio" Style="{StaticResource MutedText}" FontSize="14" FontWeight="SemiBold" Margin="0,0,14,4"/>
+        <TextBlock x:Name="DetailAudio" Grid.Column="1" Style="{StaticResource MutedText}" FontSize="14" TextWrapping="Wrap" Margin="0,0,0,4" AutomationProperties.Name="Audio tracks"/>
+        <TextBlock Grid.Row="1" Text="Subtitles" Style="{StaticResource MutedText}" FontSize="14" FontWeight="SemiBold" Margin="0,0,14,0"/>
+        <TextBlock x:Name="DetailSubtitles" Grid.Row="1" Grid.Column="1" Style="{StaticResource MutedText}" FontSize="14" TextWrapping="Wrap" AutomationProperties.Name="Subtitle tracks"/>
+       </Grid>
        <!-- One pill per release of this episode, such as a colour and a black-and-white version; the chosen one is highlighted. -->
        <WrapPanel x:Name="DetailVersions" Visibility="Collapsed" Margin="0,-10,0,16" AutomationProperties.Name="Versions"/>
        <WrapPanel><Button x:Name="DetailPlay" Content="Play locally" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" Padding="20,8" Click="PlayLocal"/><Button x:Name="RestartButton" Content="Start over" Click="RestartLocal" Visibility="Collapsed"/><Button x:Name="DetailHost" Content="Watch together" ContentTemplate="{StaticResource PeopleContent}" Click="HostClick"/><Button x:Name="DetailQueue" Content="Add to queue" ContentTemplate="{StaticResource AddContent}" Click="QueueClick"/><Button x:Name="DetailWatched" Click="ToggleDetailWatched" ToolTip="Mark as watched" AutomationProperties.Name="Mark as watched"><StackPanel Orientation="Horizontal"><TextBlock x:Name="DetailWatchedIcon" Text="&#xE73E;" Style="{StaticResource Icon}" FontSize="13" Margin="0,0,9,0"/><TextBlock x:Name="DetailWatchedText" Text="Mark as watched" VerticalAlignment="Center"/></StackPanel></Button><Button x:Name="DetailRemove" Content="Remove from library" Click="RemoveUnavailableVideo" Visibility="Collapsed" ToolTip="Remove the saved entry for this unavailable video"/></WrapPanel>

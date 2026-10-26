@@ -40,7 +40,7 @@ public partial class MainWindow
         guestHomeResume = resume;
         selected = card.Media; ShowPage("Details"); UpdateHostBreadcrumbs();
         DetailTitle.Text = card.DisplayTitle; DetailMeta.Text = card.Caption; DetailContext.Text = HostLibraryName;
-        DetailSummary.Text = card.Media.Overview ?? ""; DetailFile.Text = "";
+        DetailSummary.Text = card.Media.Overview ?? ""; DetailFile.Text = ""; DetailTracks.Visibility = Visibility.Collapsed;
         DetailAvailability.Visibility = Visibility.Collapsed;
         DetailPlay.Content = "Play in room"; DetailPlay.IsEnabled = OwnsLibrary;
         DetailHost.Visibility = DetailWatched.Visibility = RestartButton.Visibility = DetailRemove.Visibility = Visibility.Collapsed;

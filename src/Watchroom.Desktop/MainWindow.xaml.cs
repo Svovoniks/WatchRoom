@@ -206,6 +206,12 @@ public partial class MainWindow : Window
             if (closing) return;
             OpenFilesReady();
             _ = Guard(async () => { if (!closing && await Task.Run(() => library.ExpireTmdbContent(force: true)) && !closing) await RefreshLibrary(); });
+            // Background housekeeping: a failure only means stale entries stay until the next launch.
+            _ = Task.Run(() =>
+            {
+                try { library.RemoveStaleTrackLanguages(); }
+                catch (Exception ex) { PlaybackDiagnostics.Record("track-language-cleanup-failed", new { error = ex.GetType().Name }); }
+            });
             if (closing) return;
             // Starting the native player loads hundreds of DLLs under the process loader lock, which
             // stalls the UI thread's own first-frame work. Wait until the library has rendered unless
@@ -715,6 +721,7 @@ public partial class MainWindow : Window
         _ = UpdateDetailPosterAsync(item);
         if (item.ExtraOf is not null && !ArtworkCache.IsUsable(item.GeneratedEpisodePoster)) _ = ImproveClipArtwork(item);
         DetailFile.Text = item.Path;
+        ShowDetailTracks(item);
         var overviewSource = !string.IsNullOrWhiteSpace(item.EpisodeOverview) ? item.EpisodeSource : !string.IsNullOrWhiteSpace(item.SeasonOverview) ? item.SeasonSource : item.PosterSource;
         DetailSummary.Text = (item.DetailOverview ?? "No overview available yet.") +
             (item.Genres?.Length > 0 ? "\n\nGenres: " + string.Join(", ", item.Genres) : "") + (item.Cast?.Length > 0 ? "\nCast: " + string.Join(", ", item.Cast) : "") +
@@ -1598,8 +1605,9 @@ public partial class MainWindow : Window
         if (player is null || nativeStopCount > 0) return; tracksUpdating = true;
         try
         {
-            var audio = player.AudioTrackDescription.Select(x => new TrackChoice(x.Id, x.Name)).ToArray();
-            var subs = player.SpuDescription.Select(x => new TrackChoice(x.Id, RoomSubtitleName(x.Id, x.Name))).ToArray();
+            DetectTrackLanguages(); DetectSubtitleFiles();
+            var audio = player.AudioTrackDescription.Select(x => new TrackChoice(x.Id, TrackDisplayName(TrackType.Audio, x.Id, x.Name))).ToArray();
+            var subs = player.SpuDescription.Select(x => new TrackChoice(x.Id, TrackDisplayName(TrackType.Text, x.Id, RoomSubtitleName(x.Id, x.Name)))).ToArray();
             ApplyTrackPreferences(audio, subs);
             SynchronizeRoomTracks(audio, subs);
             if (!(AudioTracks.ItemsSource is TrackChoice[] currentAudio) || !currentAudio.SequenceEqual(audio)) AudioTracks.ItemsSource = audio;
@@ -1633,8 +1641,9 @@ public partial class MainWindow : Window
                 catch (IOException ex) { SetStatus(ex.Message); }
                 return;
             }
+            var before = player.SpuDescription.Select(t => t.Id).ToHashSet();
             if (!player.AddSlave(MediaSlaveType.Subtitle, new Uri(picker.FileName).AbsoluteUri, true)) SetStatus("Subtitles could not be loaded. Check the file format and try again.");
-            else { subtitleTrackChosen = subtitleTrackManuallyChosen = true; RefreshTracks(); SetStatus("Subtitles loaded for your player."); }
+            else { subtitleTrackChosen = subtitleTrackManuallyChosen = true; RefreshTracks(); _ = WatchLoadedSubtitle(picker.FileName, before, loadGeneration); SetStatus("Subtitles loaded for your player."); }
         }
     }
     private void CopyInvite(object sender, RoutedEventArgs e)

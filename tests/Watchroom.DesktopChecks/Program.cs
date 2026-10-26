@@ -18,6 +18,7 @@ static class Program
         {
             VideoFrameChecks.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? Path.Combine("artifacts", "video-frames-" + Guid.NewGuid().ToString("N")))).GetAwaiter().GetResult(); return;
         }
+        if (args.FirstOrDefault() == "--language-probe") { LanguageProbe.Run(args.Skip(1)).GetAwaiter().GetResult(); return; }
         if (args.FirstOrDefault() == "--metadata-probe") { MetadataProbe.Run(args[1], args[2]).GetAwaiter().GetResult(); return; }
         if (args.FirstOrDefault() == "--remaining-audit") { MetadataProbe.Audit(args[1], args[2], args.Contains("--apply")).GetAwaiter().GetResult(); return; }
         if (args.FirstOrDefault() == "--render-screens")
@@ -114,6 +115,17 @@ static class Program
             app.Dispatcher.BeginInvoke(async () =>
             {
                 try { await RoomTrackChecks.Run(args[1], directory); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
+        }
+        if (args.FirstOrDefault() == "--language-detection")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                try { await LanguageDetectionChecks.Run(directory); }
                 catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
                 finally { app.Shutdown(); }
             });

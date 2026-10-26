@@ -92,8 +92,11 @@ public partial class MainWindow
     {
         using var media = player?.Media;
         var metadata = media?.Tracks ?? [];
-        return choices.Select(choice => new LanguageTrack(choice.Id, choice.Name,
-            metadata.FirstOrDefault(track => track.Id == choice.Id && track.TrackType == type).Language)).ToArray();
+        return choices.Select(choice =>
+        {
+            var (name, language) = TrackLanguage(type, choice.Id, choice.Name, metadata.FirstOrDefault(track => track.Id == choice.Id && track.TrackType == type).Language);
+            return new LanguageTrack(choice.Id, name, language);
+        }).ToArray();
     }
     private int? ApplySubtitlePreference(LanguageTrack? audio, LanguageTrack[] subtitles, bool restoreDefault = false)
     {
@@ -128,13 +131,13 @@ public partial class MainWindow
             videoSubtitleLanguageRules = subtitleLanguageRules;
         }
         var audioChoices = LanguageTracks(audio, TrackType.Audio);
-        if (room?.Snapshot?.Tracks?.Audio is null && !audioTrackChosen && TrackLanguages.Select(audioChoices, videoAudioLanguages) is { } preferredAudio)
+        if (room?.Snapshot?.Tracks?.Audio is null && !audioTrackChosen && !TrackLanguagesPending(TrackType.Audio) && TrackLanguages.Select(audioChoices, videoAudioLanguages) is { } preferredAudio)
             audioTrackChosen = player.AudioTrack == preferredAudio || player.SetAudioTrack(preferredAudio);
         var selectedAudio = audioChoices.FirstOrDefault(track => track.Id == player.AudioTrack);
         var language = TrackLanguages.LanguageOf(selectedAudio);
         var restoreDefault = language != subtitleAudioLanguage && subtitleTrackChosen;
         if (language != subtitleAudioLanguage) { subtitleAudioLanguage = language; subtitleTrackChosen = false; }
-        if (room?.Snapshot?.Tracks?.Subtitles is null && !subtitleTrackChosen)
+        if (room?.Snapshot?.Tracks?.Subtitles is null && !subtitleTrackChosen && !TrackLanguagesPending())
             ApplySubtitlePreference(selectedAudio, LanguageTracks(subtitles, TrackType.Text), restoreDefault);
     }
 }

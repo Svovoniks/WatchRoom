@@ -55,6 +55,8 @@ jobs:
         run: dotnet run --project tests/Watchroom.Smoke -c Release -- --shared-library
       - name: Player layout checks
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --player-layout
+      - name: Track language detection checks
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --language-detection
       - name: Episode thumbnail checks
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --video-frames
       - name: Full playback and room checks

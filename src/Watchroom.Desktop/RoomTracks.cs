@@ -56,8 +56,9 @@ public partial class MainWindow
         }
         if (room.Identity?.Host == true)
         {
-            var audioChoice = room.Snapshot.Tracks?.Audio is null ? DescribeRoomTrack(player.AudioTrack, audio, false) : null;
-            var subtitleChoice = assetsReady && room.Snapshot.Tracks?.Subtitles is null ? DescribeRoomTrack(player.Spu, subtitles, true) : null;
+            // Publishing fixes the room's tracks, so wait until preferences can see every track's language.
+            var audioChoice = room.Snapshot.Tracks?.Audio is null && !TrackLanguagesPending(TrackType.Audio) ? DescribeRoomTrack(player.AudioTrack, audio, false) : null;
+            var subtitleChoice = assetsReady && room.Snapshot.Tracks?.Subtitles is null && !TrackLanguagesPending() ? DescribeRoomTrack(player.Spu, subtitles, true) : null;
             if (audioChoice is not null || subtitleChoice is not null)
                 room.Send(new("tracks", Data: Wire.Serialize(new RoomTracks(media.Id, audioChoice, subtitleChoice))));
         }
@@ -107,7 +108,7 @@ public partial class MainWindow
                     {
                         token.ThrowIfCancellationRequested();
                         var added = player.SpuDescription.FirstOrDefault(t => t.Id >= 0 && !previous.Contains(t.Id));
-                        if (added.Name is not null) { roomSubtitleIds[asset.Id] = added.Id; break; }
+                        if (added.Name is not null) { roomSubtitleIds[asset.Id] = added.Id; subtitleFiles[added.Id] = new(path, asset.Title, generation); break; }
                         await Task.Delay(50, token);
                     }
                     if (Current() && !roomSubtitleIds.ContainsKey(asset.Id)) throw new IOException("Shared subtitle track did not become available.");
