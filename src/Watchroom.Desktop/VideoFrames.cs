@@ -15,12 +15,14 @@ public static class VideoFrames
 
     public static async Task<bool> CaptureAsync(string video, double seconds, string output, CancellationToken ct)
     {
-        LibVLCSharp.Shared.Core.Initialize();
-        // A private engine per capture: no shared state with the playback engine, which closes independently.
-        using var engine = new LibVLC("--quiet", "--no-audio", "--no-spu", "--no-sub-autodetect-file", "--no-video-title-show", "--no-osd", "--no-stats");
-        using var media = new Media(engine, video, FromType.FromPath);
+        // The background engine: no shared state with the playback engine, which closes independently.
+        using var lease = BackgroundVlc.Acquire();
+        if (lease is null) return false;
+        using var media = new Media(lease.Engine, video, FromType.FromPath);
         media.AddOption(":start-time=" + seconds.ToString(CultureInfo.InvariantCulture));
-        using var player = new MediaPlayer(engine) { EnableHardwareDecoding = false, EnableKeyInput = false, EnableMouseInput = false };
+        media.AddOption(":no-audio");
+        media.AddOption(":no-spu");
+        using var player = new MediaPlayer(lease.Engine) { EnableHardwareDecoding = false, EnableKeyInput = false, EnableMouseInput = false };
         var frame = new TaskCompletionSource<Frame?>(TaskCreationOptions.RunContinuationsAsynchronously);
         IntPtr allocation = IntPtr.Zero, pixels = IntPtr.Zero; int width = 0, height = 0, pitch = 0, captured = 0;
 

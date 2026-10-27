@@ -17,6 +17,9 @@ public static class TrackLanguages
                 result.TryAdd(name, culture.TwoLetterISOLanguageName);
         foreach (var alias in new[] { ("fre", "fr"), ("ger", "de"), ("arm", "hy"), ("chi", "zh"), ("cze", "cs"), ("dut", "nl"), ("gre", "el"), ("rum", "ro"), ("slo", "sk"), ("wel", "cy"), ("alb", "sq"), ("baq", "eu"), ("bur", "my"), ("geo", "ka"), ("ice", "is"), ("mac", "mk"), ("may", "ms"), ("per", "fa"), ("tib", "bo") })
             result[alias.Item1] = alias.Item2;
+        // Files tag Norwegian as Bokmål (nb, nob) or plain Norwegian (no, nor) for the same subtitles; treat them as one.
+        foreach (var name in result.Where(entry => entry.Value == "nb").Select(entry => entry.Key).ToArray())
+            result[name] = "no";
         return result;
     }
     public static string? Normalize(string? language)

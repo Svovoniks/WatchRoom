@@ -71,11 +71,12 @@ public static partial class SubtitleText
         }
     }
 
-    // moov → trak → tkhd (track ID), mdia → mdhd (language), elng (BCP 47 language), hdlr (kind), minf → stbl.
-    // Sample tables are read only for the given track numbers' text tracks.
+    // moov → trak → tkhd (track ID), tref → chap (chapter tracks), mdia → mdhd (language), elng (BCP 47 language), hdlr (kind),
+    // minf → stbl. Sample tables are read only for the given track numbers' text tracks.
     private static List<Mp4Track> ReadMp4Tracks(FileStream file, CancellationToken ct, IReadOnlyCollection<int>? tables = null)
     {
         var tracks = new List<Mp4Track>();
+        var chapters = new HashSet<int>();
         if (Find(Mp4Children(file, 0, file.Length, ct), "moov") is not { } moov) return tracks;
         foreach (var trak in Mp4Children(file, moov.Start, moov.End, ct))
         {
@@ -84,6 +85,11 @@ public static partial class SubtitleText
             foreach (var box in Mp4Children(file, trak.Start, trak.End, ct))
             {
                 if (box.Type == "tkhd") { var header = Read(file, box.Start, (int)Math.Min(24, box.End - box.Start)); if (header.Length < 16 || header[0] == 1 && header.Length < 24) continue; number = (int)BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(header[0] == 1 ? 20 : 12)); }
+                if (box.Type == "tref" && Find(Mp4Children(file, box.Start, box.End, ct), "chap") is { } chap)
+                {
+                    var ids = Read(file, chap.Start, (int)Math.Min(64, chap.End - chap.Start));
+                    for (var i = 0; i + 4 <= ids.Length; i += 4) chapters.Add((int)BinaryPrimitives.ReadUInt32BigEndian(ids.AsSpan(i)));
+                }
                 if (box.Type != "mdia") continue;
                 foreach (var part in Mp4Children(file, box.Start, box.End, ct))
                     switch (part.Type)
@@ -104,7 +110,9 @@ public static partial class SubtitleText
             var (offsets, sizes) = entry.Text && tables?.Contains(number) == true ? Mp4SampleTable(file, entries) : ([], []);
             tracks.Add(new(entry, offsets, sizes));
         }
-        return tracks;
+        // QuickTime chapter titles are text tracks too; players show them as chapters, never as subtitles.
+        return tracks.Select(track => chapters.Contains(track.Entry.Number) && track.Entry.Type == ContainerTrackType.Subtitle
+            ? new Mp4Track(track.Entry with { Type = ContainerTrackType.Other, Text = false }, [], []) : track).ToList();
     }
 
     // ISO 639-2/T packed as three 5-bit letters. Values below 0x400 are QuickTime's Macintosh codes, where 0 (English) is

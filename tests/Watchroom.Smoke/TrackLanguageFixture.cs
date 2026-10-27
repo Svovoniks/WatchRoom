@@ -7,6 +7,8 @@ static class TrackLanguageFixture
         var preferences = TrackLanguages.Parse("Japanese, English, Russian");
         check(preferences.SequenceEqual(["ja", "en", "ru"]), "language names preserve the user's preference order");
         check(TrackLanguages.Parse("eng, en-US, fre, fr, arm, hye").SequenceEqual(["en", "fr", "hy"]), "regional and alternate ISO codes normalize and deduplicate");
+        check(TrackLanguages.Parse("nb, nob, Norwegian, nor").SequenceEqual(["no"]) && TrackLanguages.Parse("nn").SequenceEqual(["nn"]),
+            "Bokmål and Norwegian codes are one language, while Nynorsk stays separate");
         LanguageTrack[] tracks = [new(0, "English", "eng"), new(1, "Russian", "rus"), new(2, "Japanese", "jpn")];
         check(TrackLanguages.Select(tracks, preferences) == 2, "most preferred language wins regardless of track order");
         check(TrackLanguages.Select(tracks[..2], preferences) == 0, "missing first preference falls back to the next available language");
@@ -101,6 +103,11 @@ static class TrackLanguageFixture
             check(text[3].Contains("Where are you going?") && text[3].Contains("Not without me") && !text[3].Contains('<'), "tx3g samples yield their text without markup");
             check(text[4].Contains("- Привет.") && text[4].Contains("- Как дела?") && !text[4].Contains("Anna"), "WebVTT samples yield the cue text of their payload boxes");
             check(text[3].Split('\n').Count(line => line == "Where are you going?") == 4, "every MP4 cue is read once, and empty samples between cues are skipped");
+            var chaptered = Path.Combine(directory, "chapters.mp4");
+            Mp4Fixture.Write(chaptered, [new(new short[8000 * 20], 8000, "rus")], [new("tx3g", ["Chapter 1", "Chapter 2"], Chapters: true), new("tx3g", ["Hallo."], "deu")]);
+            check(SubtitleText.Tracks(chaptered).Select(t => (t.Number, t.Type, t.Text)).SequenceEqual([(1, ContainerTrackType.Audio, false),
+                (2, ContainerTrackType.Other, false), (3, ContainerTrackType.Subtitle, true)]) && SubtitleText.Sample(chaptered, [2]).Count == 0,
+                "QuickTime chapter title tracks are not listed or sampled as subtitles");
             check(SubtitleText.Tracks(Path.Combine(directory, "missing.mp4")).Count == 0, "missing MP4 files have no tracks");
             File.WriteAllBytes(Path.Combine(directory, "broken.mp4"), [0, 0, 0, 8, .. "moov"u8, 0, 0, 0, 99, .. "trak"u8]);
             check(SubtitleText.Tracks(Path.Combine(directory, "broken.mp4")).Count == 0 && SubtitleText.Sample(Path.Combine(directory, "broken.mp4"), [1]).Count == 0,
@@ -146,7 +153,7 @@ static class TrackLanguageFixture
             var path = Path.Combine(directory, "untagged.mkv");
             MatroskaFixture.Write(path, [new(new short[16000 * 30], 16000), new(new short[16000 * 30], 16000, "jpn", "Commentary")],
             [
-                new("S_TEXT/UTF8", ["<i>Where are you going?</i>", "I told you, I'm going home.", "Not without me, you aren't."]),
+                new("S_TEXT/UTF8", [@"{\an8}<i>Where are you going?</i>", "I told you, I'm going home.", "Not without me, you aren't."]),
                 new("S_TEXT/ASS", [@"{\an8\c&H00FFFF&}Bonjour,\Nça va?", @"{\p1}m 0 0 l 100 0 100 100{\p0}", "Je ne sais pas."], "und", "zlib"),
                 new("S_TEXT/UTF8", ["- Привет.", "- Как дела?", "- Хорошо, спасибо."], null, "strip"),
                 new("S_TEXT/UTF8", ["Hallo."], "ger", Name: "Signs", Forced: true),
@@ -159,18 +166,30 @@ static class TrackLanguageFixture
                 "Matroska track names and forced flags are read");
             var text = SubtitleText.Sample(path, [3, 4, 5, 1]);
             check(text.Keys.Order().SequenceEqual([3, 4, 5]), "dialogue is sampled only from requested text subtitle tracks");
-            check(text[3].Contains("Where are you going?") && text[3].Contains("Not without me") && !text[3].Contains('<'), "plain subtitle events lose their markup");
+            check(text[3].Contains("Where are you going?") && text[3].Contains("Not without me") && !text[3].Contains('<') && !text[3].Contains('{'), "plain subtitle events lose their markup and positioning tags");
             check(text[4].Contains("Bonjour, ça va?") && text[4].Contains("Je ne sais pas.") && !text[4].Contains('{') && !text[4].Contains("m 0 0"),
                 "zlib-compressed ASS events keep only their dialogue, without overrides or drawings");
             check(text[5].Contains("- Привет.") && text[5].Contains("- Как дела?"), "header-stripped events are restored before reading");
             // 15 events cycle through three lines: five of each when the file is read once.
             check(text[3].Split('\n').Count(line => line == "Where are you going?") == 5, "short files are read once rather than once per sampling window");
+            var checksummed = Path.Combine(directory, "checksums.mkv");
+            MatroskaFixture.Write(checksummed, [new(new short[16000 * 30], 16000)], [new("S_TEXT/UTF8", ["Where are you going?"])], checksums: true);
+            check(SubtitleText.Sample(checksummed, [2]).GetValueOrDefault(2)?.Contains("Where are you going?") == true,
+                "dialogue is read from clusters that start with a CRC-32 element, as ffmpeg writes them");
+            var karaoke = Path.Combine(directory, "karaoke.mkv");
+            MatroskaFixture.Write(karaoke, [new(new short[16000 * 20], 16000)],
+                [new("S_TEXT/ASS", ["sa", "sa", "些", "些", "Why don't we take these good times", "Why don't we take these good times", "chi"])]);
+            check(SubtitleText.Sample(karaoke, [2]).GetValueOrDefault(2) == "Why don't we take these good times",
+                "karaoke syllables and layered repeats of a line are left out of the sampled dialogue");
             check(SubtitleText.Tracks(Path.Combine(directory, "missing.mkv")).Count == 0 && SubtitleText.Tracks(typeof(TrackLanguageFixture).Assembly.Location).Count == 0,
                 "missing files and other containers have no Matroska tracks");
 
             var srt = Path.Combine(directory, "sidecar.srt");
             File.WriteAllText(srt, "1\r\n00:00:01,000 --> 00:00:02,000\r\n<b>Hello</b> there.\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\nGeneral Kenobi!\r\n");
             check(SubtitleText.FromFile(srt) == "Hello there.\nGeneral Kenobi!", "subtitle files yield their dialogue without numbers, timings or tags");
+            var marked = Path.Combine(directory, "marked.srt");
+            File.WriteAllText(marked, "1\r\n00:00:01,000 --> 00:00:02,000\r\n&lrm;ทีนี้ก็อยู่นิ่งๆ\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\n‫אל תזוזי.‬ Tom &amp; Jerry\r\n");
+            check(SubtitleText.FromFile(marked) == "ทีนี้ก็อยู่นิ่งๆ\nאל תזוזי. Tom & Jerry", "HTML entities are decoded and invisible direction marks dropped");
             var ass = Path.Combine(directory, "sidecar.ass");
             File.WriteAllText(ass, "[Script Info]\nTitle: x\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\i1}Hola, amigo{\\i0}\n");
             check(SubtitleText.FromFile(ass) == "Hola, amigo", "ASS files yield the text field of dialogue lines");

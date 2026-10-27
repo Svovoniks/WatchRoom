@@ -118,12 +118,34 @@ public static partial class SubtitleText
         if (DrawingMode().IsMatch(text)) return "";
         return Clean(OverrideBlock().Replace(text, "").Replace("\\N", " ").Replace("\\n", " ").Replace("\\h", " "));
     }
-    private static string Clean(string text) => Whitespace().Replace(MarkupTag().Replace(text, " "), " ").Trim();
+    // SRT and Matroska text subtitles carry ASS-style override tags too, such as {\an8} to place a line at the top. Some
+    // carry HTML entities such as &lrm; as text, and right-to-left subtitles invisible direction marks; neither is a word.
+    private static string Clean(string text)
+    {
+        text = MarkupTag().Replace(OverrideTag().Replace(text, ""), " ");
+        if (text.Contains('&')) text = System.Net.WebUtility.HtmlDecode(text);
+        return Whitespace().Replace(DirectionMark().Replace(text, ""), " ").Trim();
+    }
+    // Karaoke splits song lyrics into one event per syllable ("sa", "些"), layered several times over, and typesetting
+    // repeats a sign for each layer: they say little about the language and can crowd out the dialogue. Events shorter
+    // than four characters, and repeats of either of the two previous ones, are left out.
     private static void Append(StringBuilder text, string value)
     {
-        if (value.Length == 0) return;
+        if (value.Length < 4 || Recent(text, value)) return;
         if (text.Length > 0) text.Append('\n');
         text.Append(value);
+    }
+    private static bool Recent(StringBuilder text, string value)
+    {
+        var end = text.Length;
+        for (var line = 0; line < 2 && end > 0; line++)
+        {
+            var start = end;
+            while (start > 0 && text[start - 1] != '\n') start--;
+            if (end - start == value.Length && text.ToString(start, end - start) == value) return true;
+            end = start - 1;
+        }
+        return false;
     }
     private static string Decode(byte[] bytes)
     {
@@ -137,7 +159,9 @@ public static partial class SubtitleText
     [GeneratedRegex(@"\{[^}]*\}")] private static partial Regex OverrideBlock();
     [GeneratedRegex(@"\{[^}]*\\p[1-9]")] private static partial Regex DrawingMode();
     [GeneratedRegex(@"<[^>]*>")] private static partial Regex MarkupTag();
+    [GeneratedRegex(@"\{\\[^}]*\}")] private static partial Regex OverrideTag();
     [GeneratedRegex(@"\s+")] private static partial Regex Whitespace();
+    [GeneratedRegex(@"[‎‏‪-‮⁦-⁩]")] private static partial Regex DirectionMark();
     [GeneratedRegex(@"^(\{\d+\}){1,2}")] private static partial Regex MicroDvdTiming();
 
     private sealed record Track(ContainerTrack Entry, int Compression, byte[] Stripped);
@@ -253,11 +277,15 @@ public static partial class SubtitleText
             for (var i = 0; i + 3 < read; i++)
             {
                 if (buffer[i] != 0x1f || buffer[i + 1] != 0x43 || buffer[i + 2] != 0xb6 || buffer[i + 3] != 0x75) continue;
-                // Confirm the match: a sane size, then the cluster's Timestamp element.
+                // Confirm the match: a sane size, then the cluster's Timestamp element, after a CRC-32 element when the muxer
+                // writes one (ffmpeg does, in every cluster).
                 try
                 {
                     file.Position = position + i + 4; var size = Vint(file, false);
-                    if ((size == ulong.MaxValue || size < 1UL << 30) && Vint(file, true) == 0xe7) return position + i;
+                    if (size != ulong.MaxValue && size >= 1UL << 30) continue;
+                    var first = Vint(file, true);
+                    if (first == 0xbf && Vint(file, false) == 4) { file.Position += 4; first = Vint(file, true); }
+                    if (first == 0xe7) return position + i;
                 }
                 catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException) { }
             }

@@ -9,8 +9,9 @@ using System.Text;
 internal static class Mp4Fixture
 {
     public sealed record Audio(short[] Samples, int SampleRate, string? Language = null);
-    /// <summary>Codec: "tx3g" or "wvtt". One cue every other second, cycling through the lines.</summary>
-    public sealed record Subtitle(string Codec, string[] Lines, string? Language = null);
+    /// <summary>Codec: "tx3g" or "wvtt". One cue every other second, cycling through the lines. Chapters: a QuickTime chapter
+    /// title track instead, a text track that the audio tracks reference.</summary>
+    public sealed record Subtitle(string Codec, string[] Lines, string? Language = null, bool Chapters = false);
 
     public static void Write(string path, IReadOnlyList<Audio> audio, IReadOnlyList<Subtitle> subtitles)
     {
@@ -19,6 +20,8 @@ internal static class Mp4Fixture
         var data = new MemoryStream();
         var traks = new List<byte[]>();
         var number = 1;
+        var chapters = subtitles.Select((track, index) => (track, index)).Where(entry => entry.track.Chapters)
+            .Select(entry => U32((uint)(audio.Count + 1 + entry.index))).ToArray();
         long Offset() => ftyp.Length + 8 + data.Length;
         foreach (var track in audio)
         {
@@ -30,7 +33,8 @@ internal static class Mp4Fixture
             var table = Box("stbl", Box("stsd", U32(0), U32(1), entry), Box("stts", U32(0), U32(1), U32((uint)track.Samples.Length), U32(1)),
                 Box("stsc", U32(0), U32(1), U32(1), U32((uint)track.Samples.Length), U32(1)), Box("stsz", U32(0), U32(2), U32((uint)track.Samples.Length)),
                 Box("stco", U32(0), U32(1), U32((uint)offset)));
-            traks.Add(Trak(number++, "soun", track.Language, (uint)track.SampleRate, (uint)track.Samples.Length, (uint)seconds * 1000, Box("smhd", U32(0), U32(0)), table));
+            traks.Add(Trak(number++, "soun", track.Language, (uint)track.SampleRate, (uint)track.Samples.Length, (uint)seconds * 1000, Box("smhd", U32(0), U32(0)), table,
+                chapters.Length == 0 ? null : Box("tref", Box("chap", chapters))));
         }
         foreach (var track in subtitles)
         {
@@ -51,7 +55,7 @@ internal static class Mp4Fixture
             var table = Box("stbl", Box("stsd", U32(0), U32(1), entry), Box("stts", U32(0), U32(1), U32((uint)seconds), U32(1000)),
                 Box("stsc", U32(0), U32(1), U32(1), U32((uint)seconds), U32(1)), Box("stsz", U32(0), U32(0), U32((uint)seconds), [.. sizes.SelectMany(U32)]),
                 Box("stco", U32(0), U32(1), U32((uint)offset)));
-            traks.Add(Trak(number++, "sbtl", track.Language, 1000, (uint)seconds * 1000, (uint)seconds * 1000, Box(track.Codec == "wvtt" ? "sthd" : "nmhd", U32(0)), table));
+            traks.Add(Trak(number++, track.Chapters ? "text" : "sbtl", track.Language, 1000, (uint)seconds * 1000, (uint)seconds * 1000, Box(track.Codec == "wvtt" ? "sthd" : "nmhd", U32(0)), table));
         }
         var mvhd = Box("mvhd", U32(0), U32(0), U32(0), U32(1000), U32((uint)seconds * 1000), U32(0x10000), U16(0x100), new byte[10], Matrix(), new byte[24], U32((uint)number));
         using var file = File.Create(path);
@@ -60,7 +64,7 @@ internal static class Mp4Fixture
         file.Write(Box("moov", [mvhd, .. traks]));
     }
 
-    private static byte[] Trak(int number, string handler, string? language, uint timescale, uint duration, uint movieDuration, byte[] header, byte[] table)
+    private static byte[] Trak(int number, string handler, string? language, uint timescale, uint duration, uint movieDuration, byte[] header, byte[] table, byte[]? reference = null)
     {
         var code = language ?? "und";
         var packed = (ushort)((code[0] - 0x60) << 10 | (code[1] - 0x60) << 5 | (code[2] - 0x60));
@@ -69,7 +73,7 @@ internal static class Mp4Fixture
         var mdhd = Box("mdhd", U32(0), U32(0), U32(0), U32(timescale), U32(duration), U16(packed), U16(0));
         var hdlr = Box("hdlr", U32(0), U32(0), Ascii(handler), new byte[12], [0]);
         var dinf = Box("dinf", Box("dref", U32(0), U32(1), Box("url ", U32(1))));
-        return Box("trak", tkhd, Box("mdia", mdhd, hdlr, Box("minf", header, dinf, table)));
+        return Box("trak", [tkhd, .. reference is null ? Array.Empty<byte[]>() : [reference], Box("mdia", mdhd, hdlr, Box("minf", header, dinf, table))]);
     }
     private static byte[] Matrix() => [.. U32(0x10000), .. U32(0), .. U32(0), .. U32(0), .. U32(0x10000), .. U32(0), .. U32(0), .. U32(0), .. U32(0x40000000)];
     private static byte[] Box(string type, params byte[][] parts)

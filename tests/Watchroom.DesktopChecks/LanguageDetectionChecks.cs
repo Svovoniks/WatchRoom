@@ -36,11 +36,21 @@ static class LanguageDetectionChecks
         void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); }
 
         Check(LanguageDetection.SpeechAvailable, "the Whisper tiny model is bundled next to the app");
+        // libVLC 3 aborts the process after about 80 engines have been created and released.
+        using (var first = BackgroundVlc.Acquire())
+        using (var second = BackgroundVlc.Acquire())
+            Check(first is not null && ReferenceEquals(first.Engine, second?.Engine), "frame captures and audio decoding share one long-lived libVLC engine");
         Check(LanguageDetection.Written(string.Join("\n", English)) == "en", "English dialogue is identified from its text");
         Check(LanguageDetection.Written(string.Join("\n", Russian)) == "ru", "Russian dialogue is identified from its text");
         Check(LanguageDetection.Written("夜遅くにどこへ行くの？\nもう言ったでしょ、家に帰るの。\n私も一緒に行く。\n急いで、最終電車は十分後に出るよ。") == "ja", "Japanese dialogue is identified from its text");
         Check(LanguageDetection.Written("Où vas-tu à cette heure-ci ?\nJe te l'ai déjà dit, je rentre à la maison.\nPas sans moi.\nAlors dépêche-toi, le dernier train part dans dix minutes.") == "fr",
             "French dialogue is identified from its text");
+        // Read whole, a Latin title line ahead of the dialogue makes CLD3 call Arabic Swedish and Korean Hindi.
+        string Long(params string[] lines) => "DARK MATTER\n" + string.Join("\n", Enumerable.Repeat(lines, 20).SelectMany(line => line));
+        Check(LanguageDetection.Written(Long("أي واحد أنت؟", "أظن أنك تعرف.", "ماذا تفعل في هذا العالم؟", "لم أنت هنا؟", "أكفّر عن ذنوبي.")) == "ar" &&
+            LanguageDetection.Written(Long("Ποιος απ' όλους είσαι;", "Νομίζω πως ξέρεις.", "Τι κάνεις σ' αυτόν τον κόσμο;", "Γιατί ήρθες εδώ;")) == "el" &&
+            LanguageDetection.Written(Long("넌 어떤 제이슨이야?", "알 텐데", "들어가도 될까?", "이 세계에서 뭐 하는 거야?", "여긴 왜 왔어?", "속죄하러")) == "ko",
+            "Arabic, Greek and Korean dialogue is identified despite a Latin title line before it");
         Check(LanguageDetection.Written("Hi.") is null && LanguageDetection.Written("") is null, "too little text claims no language");
 
         // Speech in every language Windows has a voice for; machines without voices only check the subtitle path.
@@ -290,24 +300,76 @@ static class LanguageDetectionChecks
 // Read-only diagnostics: what the app would detect for untagged tracks of real files. Nothing is cached.
 static class LanguageProbe
 {
-    public static async Task Run(IEnumerable<string> paths)
+    // Arguments: files, or @list (a file with one path per line). --tagged also identifies tagged subtitles, and tagged audio
+    // of every fourth file, to compare with their tags. --no-audio and --no-text skip either kind. --tsv prints one
+    // tab-separated line per track for analysis.
+    public static async Task Run(IEnumerable<string> arguments)
     {
+        var options = arguments.Where(a => a.StartsWith("--", StringComparison.Ordinal)).ToHashSet();
+        var paths = arguments.Where(a => !a.StartsWith("--", StringComparison.Ordinal))
+            .SelectMany(a => a.StartsWith('@') ? File.ReadAllLines(a[1..]) : [a]).Where(p => p.Length > 0).ToArray();
+        bool tagged = options.Contains("--tagged"), tsv = options.Contains("--tsv");
+        var files = 0;
         foreach (var path in paths)
         {
+            files++;
             var started = System.Diagnostics.Stopwatch.StartNew();
-            var tracks = SubtitleText.Tracks(path);
-            Console.WriteLine(Path.GetFileName(path));
-            var text = SubtitleText.Sample(path, tracks.Where(t => t.Text && t.Untagged).Select(t => t.Number).ToArray());
-            for (var index = 0; index < tracks.Count; index++)
+            try
             {
-                var track = tracks[index];
-                if (track.Type is not (ContainerTrackType.Audio or ContainerTrackType.Subtitle)) continue;
-                var detected = !track.Untagged ? "" : track.Type == ContainerTrackType.Audio
-                    ? await LanguageDetection.SpokenAsync(path, index, 0, CancellationToken.None) ?? "unknown"
-                    : track.Text ? LanguageDetection.Written(text.GetValueOrDefault(track.Number)) ?? "unknown" : "image subtitles";
-                Console.WriteLine($"  #{track.Number} {track.Type} {track.Codec} tag={track.Language ?? "-"}{(detected.Length > 0 ? " → " + detected : "")}");
+                var tracks = SubtitleText.Tracks(path);
+                if (!tsv) Console.WriteLine(Path.GetFileName(path));
+                // Other containers (AVI, TS…): the tracks as VLC's parser lists them, as the app reads them; with --tagged
+                // every audio track is identified. Embedded subtitles there are only listed.
+                foreach (var track in tracks.Count == 0 ? await ParseWithVlc(path) : [])
+                {
+                    var audio = track.Type == TrackType.Audio;
+                    var detected = audio && (track.Language is null || tagged) && !options.Contains("--no-audio")
+                        ? await LanguageDetection.SpokenAsync(path, track.Id, 0, CancellationToken.None, tsv ? null : line => Console.WriteLine("      " + line)) ?? "unknown"
+                        : audio ? "" : "not read";
+                    if (tsv) Console.WriteLine(string.Join('\t', path, track.Id, audio ? "Audio" : "Subtitle", track.Codec, track.Language ?? "-", (track.Name ?? "").Replace('\t', ' '), "", detected, -1));
+                    else Console.WriteLine($"  id {track.Id} {(audio ? "Audio" : "Subtitle")} {track.Codec} tag={track.Language ?? "-"}{(track.Name is null ? "" : $" \"{track.Name}\"")}{(detected.Length > 0 ? " → " + detected : "")}");
+                }
+                var text = SubtitleText.Sample(path, tracks.Where(t => t.Text && (tagged || t.Untagged)).Select(t => t.Number).ToArray());
+                for (var index = 0; index < tracks.Count; index++)
+                {
+                    var track = tracks[index];
+                    if (track.Type is not (ContainerTrackType.Audio or ContainerTrackType.Subtitle)) continue;
+                    var identify = (track.Untagged || tagged && (track.Type == ContainerTrackType.Subtitle || files % 4 == 0)) &&
+                        !options.Contains(track.Type == ContainerTrackType.Audio ? "--no-audio" : "--no-text");
+                    var detected = !identify ? "" : track.Type == ContainerTrackType.Audio
+                        ? await LanguageDetection.SpokenAsync(path, index, 0, CancellationToken.None, tsv ? null : line => Console.WriteLine("      " + line)) ?? "unknown"
+                        : track.Text ? LanguageDetection.Written(text.GetValueOrDefault(track.Number)) ?? "unknown" : "image";
+                    var chars = track.Text && identify ? text.GetValueOrDefault(track.Number)?.Length ?? 0 : -1;
+                    if (tsv)
+                        Console.WriteLine(string.Join('\t', path, track.Number, track.Type, track.Codec, TrackLanguages.Normalize(track.Language) ?? "-",
+                            (track.Name ?? "").Replace('\t', ' '), track.Forced ? "forced" : "", detected, chars));
+                    else
+                        Console.WriteLine($"  #{track.Number} {track.Type} {track.Codec} tag={track.Language ?? "-"}{(track.Name is null ? "" : $" \"{track.Name}\"")}{(detected.Length > 0 ? " → " + detected + (chars >= 0 ? $" ({chars} chars)" : "") : "")}");
+                }
+                foreach (var file in SubtitleFiles.VlcSidecars(path))
+                {
+                    var detected = LanguageDetection.Written(SubtitleText.FromFile(file)) ?? "unknown";
+                    if (tsv) Console.WriteLine(string.Join('\t', path, "file", "Sidecar", Path.GetExtension(file), SubtitleFiles.Language(Path.GetFileName(file)) ?? "-", Path.GetFileName(file), "", detected, -1));
+                    else Console.WriteLine($"  file {Path.GetFileName(file)} → {detected}");
+                }
             }
-            Console.WriteLine($"  {started.ElapsedMilliseconds} ms");
+            catch (Exception ex) { Console.WriteLine(tsv ? string.Join('\t', path, "error", "", "", "", "", "", ex.GetType().Name + ": " + ex.Message, -1) : "  error " + ex.Message); }
+            if (!tsv) Console.WriteLine($"  {started.ElapsedMilliseconds} ms");
+            else Console.Error.WriteLine($"{files}/{paths.Length} {started.ElapsedMilliseconds} ms");
         }
+    }
+
+    private sealed record VlcTrack(int Id, TrackType Type, string Codec, string? Language, string? Name);
+    private static async Task<IReadOnlyList<VlcTrack>> ParseWithVlc(string path)
+    {
+        using var lease = BackgroundVlc.Acquire();
+        if (lease is null) return [];
+        using var media = new Media(lease.Engine, path, FromType.FromPath);
+        var status = await media.Parse(MediaParseOptions.ParseLocal, 10000);
+        await Task.Yield(); // leave VLC's event thread before touching the media
+        if (status != MediaParsedStatus.Done) return [];
+        return media.Tracks.Where(track => track.TrackType is TrackType.Audio or TrackType.Text && track.Id >= 0)
+            .Select(track => new VlcTrack(track.Id, track.TrackType, System.Text.Encoding.ASCII.GetString(BitConverter.GetBytes(track.Codec)).Trim('\0', ' '),
+                TrackLanguages.Normalize(track.Language), string.IsNullOrWhiteSpace(track.Description) ? null : track.Description.Trim())).ToList();
     }
 }

@@ -8,6 +8,8 @@ namespace Watchroom.Core;
 public sealed partial class LibraryStore
 {
     private const string TrackLanguagePrefix = "trackLanguage:", TrackLanguageFilePrefix = "trackLanguageFile:";
+    // Part of every file key: raising it when detection improves makes earlier results stale, so files are identified again.
+    private const int DetectionVersion = 3;
 
     public static string? TrackLanguageFile(string path)
     {
@@ -15,7 +17,7 @@ public sealed partial class LibraryStore
         {
             var file = new FileInfo(path);
             if (!file.Exists) return null;
-            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(path.ToUpperInvariant() + "|" + file.Length + "|" + file.LastWriteTimeUtc.Ticks)))[..24];
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(path.ToUpperInvariant() + "|" + file.Length + "|" + file.LastWriteTimeUtc.Ticks + "|" + DetectionVersion)))[..24];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return null; }
     }

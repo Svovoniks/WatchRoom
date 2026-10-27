@@ -10,7 +10,8 @@ internal static class MatroskaFixture
     /// <summary>Compression: null, "zlib" or "strip" (header stripping of the first bytes of every event).</summary>
     public sealed record Subtitle(string Codec, string[] Lines, string? Language = null, string? Compression = null, string? Name = null, bool Forced = false);
 
-    public static void Write(string path, IReadOnlyList<Audio> audio, IReadOnlyList<Subtitle> subtitles)
+    /// <summary>Checksums: every cluster starts with a CRC-32 element, as ffmpeg writes them.</summary>
+    public static void Write(string path, IReadOnlyList<Audio> audio, IReadOnlyList<Subtitle> subtitles, bool checksums = false)
     {
         var seconds = audio.Count == 0 ? 20 : audio.Max(a => (a.Samples.Length + a.SampleRate - 1) / a.SampleRate);
         var tracks = new List<byte[]>();
@@ -37,6 +38,7 @@ internal static class MatroskaFixture
         for (var second = 0; second < seconds; second++)
         {
             var blocks = new List<byte[]> { UInt(0xe7, (ulong)(second * 1000)) };
+            if (checksums) blocks.Insert(0, Binary(0xbf, [0x12, 0x34, 0x56, 0x78]));
             for (var i = 0; i < audio.Count; i++)
             {
                 var track = audio[i];

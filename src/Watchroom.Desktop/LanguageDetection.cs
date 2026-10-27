@@ -22,16 +22,32 @@ public static class LanguageDetection
     public static string ModelPath => Path.Combine(AppContext.BaseDirectory, "Models", "ggml-tiny-q5_1.bin");
     public static bool SpeechAvailable => File.Exists(ModelPath);
 
-    /// <summary>The language of dialogue text, when CLD3 is confident.</summary>
+    /// <summary>The language of dialogue text, when CLD3 is confident about most of it.</summary>
     public static string? Written(string? text)
     {
-        if (string.IsNullOrWhiteSpace(text) || text.Length < 40) return null;
+        // A few short lines, as in many forced tracks, read as a neighbouring language too easily (Portuguese as Galician),
+        // and sign and song tracks with romanized lyrics as Māori or Javanese. Across a real library, short samples were
+        // wrong one time in twenty at CLD3's usual confidence and rarely at 95%; longer ones almost never.
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var bytes = System.Text.Encoding.UTF8.GetByteCount(text);
+        if (bytes < 150) return null;
+        var confidence = bytes < 400 ? 0.95 : 0.7;
         try
         {
-            using var detector = new CLD3Detector(0, 8192);
-            var prediction = detector.PredictLanguage(text);
-            if (prediction is null || prediction.IsUnknown() || !prediction.IsReliable || prediction.Probability < 0.7) return null;
-            return Code(prediction.Language);
+            using var detector = new CLD3Detector(0, ChunkBytes);
+            var votes = new Dictionary<string, int>();
+            var chunks = 0;
+            foreach (var chunk in Chunks(text))
+            {
+                chunks++;
+                // The language of most of the chunk: CLD3's mixed-text reading weighs every stretch of one script by its size.
+                var prediction = detector.PredictLanguages(chunk, 3).MaxBy(candidate => candidate.Proportion);
+                if (prediction is null || prediction.IsUnknown() || !prediction.IsReliable || prediction.Probability < confidence || prediction.Proportion < 0.5) continue;
+                votes[prediction.Language] = votes.GetValueOrDefault(prediction.Language) + 1;
+            }
+            if (votes.Count == 0) return null;
+            var (language, count) = votes.MaxBy(vote => vote.Value);
+            return count * 2 > chunks ? Code(language) : null;
         }
         catch (Exception ex) when (ex is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException or NotSupportedException) { return null; }
     }
@@ -40,11 +56,13 @@ public static class LanguageDetection
     /// The spoken language of one audio track: the track's first minutes are decoded to 16 kHz mono and Whisper
     /// listens to three windows of them. Silent windows are skipped; the languages heard must agree on average.
     /// </summary>
-    public static async Task<string?> SpokenAsync(string path, int trackId, long durationMs, CancellationToken ct)
+    /// <param name="trace">Receives what was decoded and heard, for diagnostics.</param>
+    public static async Task<string?> SpokenAsync(string path, int trackId, long durationMs, CancellationToken ct, Action<string>? trace = null)
     {
         if (!SpeechAvailable) return null;
         var listen = durationMs > 0 ? Math.Min(ListenSeconds, durationMs / 1000.0) : ListenSeconds;
-        var samples = await DecodeAsync(path, trackId, listen, ct);
+        var samples = await DecodeAsync(path, trackId, listen, ct, trace);
+        trace?.Invoke($"decoded {(samples?.Length ?? 0) / (double)SampleRate:0.0} s");
         if (samples is null || samples.Length < SampleRate * 5) return null;
         ct.ThrowIfCancellationRequested();
         var windows = Windows(samples.Length).Select(w => samples.AsMemory(w.Start, w.Length)).Where(w => Loudness(w.Span) > 0.005).ToArray();
@@ -61,6 +79,7 @@ public static class LanguageDetection
                 {
                     ct.ThrowIfCancellationRequested();
                     var (language, probability) = processor.DetectLanguageWithProbability(window.ToArray());
+                    trace?.Invoke($"heard {language} {probability:0.00} at loudness {Loudness(window.Span):0.000}");
                     if (Code(language) is { } code) votes[code] = votes.GetValueOrDefault(code) + probability;
                 }
                 if (votes.Count == 0) return null;
@@ -89,6 +108,23 @@ public static class LanguageDetection
         foreach (var sample in samples) energy += sample * sample;
         return samples.Length == 0 ? 0 : Math.Sqrt(energy / samples.Length);
     }
+    // CLD3's single-language reading judges an input mostly by its first stretch of one script: a Latin title or credit line
+    // ahead of Arabic or Korean dialogue reads as Swedish or Hindi. Dialogue is read in chunks of its default 1000 bytes,
+    // split between lines, with the mixed-text reading, and the chunks vote.
+    private const int ChunkBytes = 1000;
+    private static IEnumerable<string> Chunks(string text)
+    {
+        var chunk = new System.Text.StringBuilder();
+        var bytes = 0;
+        foreach (var line in text.Split('\n'))
+        {
+            var size = System.Text.Encoding.UTF8.GetByteCount(line) + 1;
+            if (bytes > 0 && bytes + size > ChunkBytes) { yield return chunk.ToString(); chunk.Clear(); bytes = 0; }
+            chunk.Append(line).Append('\n'); bytes += size;
+        }
+        // A short remainder is too little to vote with on its own.
+        if (chunk.Length >= 40) yield return chunk.ToString();
+    }
     private static string? Code(string? language) => language?.ToLowerInvariant() switch
     {
         null or "" or "und" or "unknown" => null,
@@ -99,8 +135,8 @@ public static class LanguageDetection
     };
 
     // VLC's stream output decodes faster than real time but ignores start positions, so the track is decoded
-    // from the beginning to a WAV file and stopped once playback time passes the listening span.
-    private static async Task<float[]?> DecodeAsync(string path, int trackId, double seconds, CancellationToken ct)
+    // from the beginning to a WAV file and stopped once it holds the listening span.
+    private static async Task<float[]?> DecodeAsync(string path, int trackId, double seconds, CancellationToken ct, Action<string>? trace = null)
     {
         var directory = Path.Combine(Path.GetTempPath(), "Watchroom");
         if (directory.Contains('\'') || directory.Contains('"')) directory = Path.Combine(App.DataDirectory, "temp");
@@ -108,15 +144,21 @@ public static class LanguageDetection
         var wav = Path.Combine(directory, "language-" + Guid.NewGuid().ToString("N") + ".wav");
         try
         {
-            LibVLCSharp.Shared.Core.Initialize();
-            // A private engine: no shared state with the playback engine, and nothing rendered or heard.
-            using (var engine = new LibVLC("--quiet", "--no-video", "--no-spu", "--no-sub-autodetect-file", "--no-stats", "--no-osd"))
-            using (var media = new Media(engine, path, FromType.FromPath))
-            using (var player = new MediaPlayer(engine))
+            // The background engine: no shared state with the playback engine, and nothing rendered or heard.
+            using (var lease = BackgroundVlc.Acquire())
             {
+                if (lease is null) return null;
+                using var media = new Media(lease.Engine, path, FromType.FromPath);
+                using var player = new MediaPlayer(lease.Engine);
+                media.AddOption(":no-video");
+                media.AddOption(":no-spu");
                 media.AddOption(":sout-all");
                 media.AddOption(":no-sout-video");
                 media.AddOption(":no-sout-spu");
+                // VLC's own Matroska demuxer stops feeding some Opus tracks to the transcoder minutes in. FFmpeg's numbers
+                // Matroska and MP4 tracks by position too, so the same track ids select the same tracks.
+                if (Path.GetExtension(path).ToLowerInvariant() is ".mkv" or ".mka" or ".webm" or ".mp4" or ".m4v" or ".m4a" or ".mov")
+                    media.AddOption(":demux=avformat,any");
                 media.AddOption(":sout=#duplicate{dst=\"transcode{acodec=s16l,channels=1,samplerate=" + SampleRate +
                     "}:std{access=file,mux=wav,dst='" + wav + "'}\",select=\"es=" + trackId.ToString(CultureInfo.InvariantCulture) + "\"}");
                 // Continuations must leave VLC's event thread: stopping from it deadlocks.
@@ -124,13 +166,16 @@ public static class LanguageDetection
                 player.EndReached += (_, _) => ended.TrySetResult();
                 player.EncounteredError += (_, _) => ended.TrySetResult();
                 if (!player.Play(media)) return null;
-                var until = (long)(seconds * 1000);
-                var deadline = Environment.TickCount64 + 120_000;
+                // The demuxer runs far ahead of slower decoders such as Opus, and stopping discards what is still queued,
+                // so wait for the audio actually written rather than for the playback time.
+                var until = 44 + (long)(seconds * SampleRate) * 2;
+                var started = Environment.TickCount64;
                 try
                 {
-                    while (!ended.Task.IsCompleted && player.Time < until && Environment.TickCount64 < deadline)
+                    while (!ended.Task.IsCompleted && WavLength(wav) < until && Environment.TickCount64 - started < 120_000)
                         await Task.WhenAny(ended.Task, Task.Delay(25, ct));
                     ct.ThrowIfCancellationRequested();
+                    trace?.Invoke($"stopped at {player.Time / 1000.0:0.0} s, ended {ended.Task.IsCompleted}, after {Environment.TickCount64 - started} ms");
                 }
                 finally { await Task.Run(player.Stop); }
             }
@@ -138,6 +183,11 @@ public static class LanguageDetection
         }
         catch (IOException) { return null; }
         finally { try { File.Delete(wav); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+    private static long WavLength(string path)
+    {
+        try { var file = new FileInfo(path); return file.Exists ? file.Length : 0; }
+        catch (IOException) { return 0; }
     }
     private static float[]? ReadWav(string path)
     {
