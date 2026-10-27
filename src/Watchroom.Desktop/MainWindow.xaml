@@ -84,9 +84,8 @@
      </Style>
      <Style x:Key="CardBack" TargetType="Border">
       <Setter Property="Width" Value="128"/><Setter Property="Height" Value="190"/><Setter Property="CornerRadius" Value="11"/><Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="BorderBrush" Value="#59A991FF"/><Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentEdge}"/><Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
      </Style>
-     <LinearGradientBrush x:Key="CardStripes" MappingMode="Absolute" StartPoint="0,0" EndPoint="13,13" SpreadMethod="Repeat"><GradientStop Color="#00A991FF" Offset="0"/><GradientStop Color="#00A991FF" Offset="0.5"/><GradientStop Color="#1FA991FF" Offset="0.5"/><GradientStop Color="#1FA991FF" Offset="1"/></LinearGradientBrush>
      <DataTemplate x:Key="HomePill">
       <Button Click="OpenHomeCard" Loaded="HomeItemLoaded" Style="{StaticResource HomeTile}" Margin="0,0,8,8" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}">
        <Border x:Name="PillFrame" Background="{DynamicResource Elevated}" CornerRadius="9" Padding="6">
@@ -195,9 +194,9 @@
      </Border>
 
      <!-- Mystery deck: filter, then play the drawn card or draw another. -->
-     <Border x:Name="HomeMysteryPanel" CornerRadius="14" BorderThickness="1" BorderBrush="#59A991FF" Background="{DynamicResource Surface}" Margin="0,0,0,34" ClipToBounds="True">
+     <Border x:Name="HomeMysteryPanel" CornerRadius="14" BorderThickness="1" BorderBrush="{DynamicResource AccentEdge}" Background="{DynamicResource Surface}" Margin="0,0,0,34" ClipToBounds="True">
       <Grid>
-       <Rectangle IsHitTestVisible="False"><Rectangle.Fill><RadialGradientBrush Center="0.82,0.5" GradientOrigin="0.82,0.5" RadiusX="0.4" RadiusY="0.8"><GradientStop Color="#38A991FF" Offset="0"/><GradientStop Color="#00A991FF" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
+       <Rectangle IsHitTestVisible="False"><Rectangle.Fill><RadialGradientBrush Center="0.82,0.5" GradientOrigin="0.82,0.5" RadiusX="0.4" RadiusY="0.8" Opacity="0.22"><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="{DynamicResource AccentClear}" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
        <Grid Margin="30,26,40,24"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
         <StackPanel VerticalAlignment="Center">
          <TextBlock Text="Can't decide?" FontSize="28" FontWeight="Bold"/>
@@ -223,8 +222,8 @@
         </StackPanel>
         <Grid Grid.Column="1" Height="262" VerticalAlignment="Center">
          <Grid Height="214" VerticalAlignment="Top" Margin="0,6,0,0">
-          <Grid Width="128" Height="190" VerticalAlignment="Top" RenderTransformOrigin="0.5,1"><Grid.RenderTransform><TransformGroup><RotateTransform x:Name="MysteryLeftTilt" Angle="-11"/><TranslateTransform x:Name="MysteryLeftShift" X="-78" Y="8"/></TransformGroup></Grid.RenderTransform><Image Source="{x:Static local:SoftShadow.Card}" Margin="-30" IsHitTestVisible="False"/><Border Style="{StaticResource CardBack}"><Grid><Border CornerRadius="10" Background="{StaticResource CardStripes}"/><TextBlock Text="?" FontSize="46" FontWeight="Bold" Foreground="{DynamicResource Accent}" Opacity="0.55" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Border></Grid>
-          <Grid Width="128" Height="190" VerticalAlignment="Top" RenderTransformOrigin="0.5,1"><Grid.RenderTransform><TransformGroup><RotateTransform x:Name="MysteryRightTilt" Angle="11"/><TranslateTransform x:Name="MysteryRightShift" X="78" Y="8"/></TransformGroup></Grid.RenderTransform><Image Source="{x:Static local:SoftShadow.Card}" Margin="-30" IsHitTestVisible="False"/><Border Style="{StaticResource CardBack}"><Grid><Border CornerRadius="10" Background="{StaticResource CardStripes}"/><TextBlock Text="?" FontSize="46" FontWeight="Bold" Foreground="{DynamicResource Accent}" Opacity="0.55" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Border></Grid>
+          <Grid Width="128" Height="190" VerticalAlignment="Top" RenderTransformOrigin="0.5,1"><Grid.RenderTransform><TransformGroup><RotateTransform x:Name="MysteryLeftTilt" Angle="-11"/><TranslateTransform x:Name="MysteryLeftShift" X="-78" Y="8"/></TransformGroup></Grid.RenderTransform><Image Source="{x:Static local:SoftShadow.Card}" Margin="-30" IsHitTestVisible="False"/><Border Style="{StaticResource CardBack}"><Grid><Border CornerRadius="10" Background="{DynamicResource CardStripes}"/><TextBlock Text="?" FontSize="46" FontWeight="Bold" Foreground="{DynamicResource Accent}" Opacity="0.55" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Border></Grid>
+          <Grid Width="128" Height="190" VerticalAlignment="Top" RenderTransformOrigin="0.5,1"><Grid.RenderTransform><TransformGroup><RotateTransform x:Name="MysteryRightTilt" Angle="11"/><TranslateTransform x:Name="MysteryRightShift" X="78" Y="8"/></TransformGroup></Grid.RenderTransform><Image Source="{x:Static local:SoftShadow.Card}" Margin="-30" IsHitTestVisible="False"/><Border Style="{StaticResource CardBack}"><Grid><Border CornerRadius="10" Background="{DynamicResource CardStripes}"/><TextBlock Text="?" FontSize="46" FontWeight="Bold" Foreground="{DynamicResource Accent}" Opacity="0.55" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Border></Grid>
           <Button x:Name="HomeMysteryCard" Click="OpenHomeCard" Style="{StaticResource HomeTile}" Width="128" Height="190" Margin="0" VerticalContentAlignment="Stretch" VerticalAlignment="Top" AutomationProperties.Name="{Binding DisplayTitle, StringFormat=Mystery pick: {0}}">
            <Border Style="{StaticResource HomeArtwork}" CornerRadius="11" local:RoundedClip.Radius="11"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
             <Grid><TextBlock Text="{Binding DisplayTitle}" Margin="12" FontSize="15" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/><Border Style="{StaticResource HoverRing}" CornerRadius="10"/></Grid>
@@ -695,11 +694,29 @@
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="AppearancePreferences" Tag="Appearance" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,0,12">
+      <StackPanel.Resources>
+       <!-- A colour theme tile: MainWindow fills in a small preview of the theme in the current mode. -->
+       <Style x:Key="ThemeChoice" TargetType="RadioButton">
+        <Setter Property="Width" Value="156"/><Setter Property="Margin" Value="0,0,10,10"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+         <Grid><Border x:Name="Frame" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="9"><ContentPresenter/></Border><Border x:Name="Ring" BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="10" Visibility="Collapsed" IsHitTestVisible="False"/></Grid>
+         <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger>
+          <Trigger Property="IsChecked" Value="True"><Setter TargetName="Ring" Property="Visibility" Value="Visible"/><Setter TargetName="Frame" Property="Background" Value="{DynamicResource AccentSoft}"/></Trigger>
+         </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+       </Style>
+      </StackPanel.Resources>
       <Border Style="{StaticResource Card}"><DockPanel>
        <Button DockPanel.Dock="Right" Content="Switch light / dark" Click="ToggleTheme" VerticalAlignment="Center" Margin="16,0,0,0"/>
        <Border DockPanel.Dock="Left" Width="40" Height="40" CornerRadius="10" Background="{DynamicResource AccentSoft}" Margin="0,0,14,0"><TextBlock Text="&#xE790;" Style="{StaticResource Icon}" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border>
-       <StackPanel VerticalAlignment="Center"><TextBlock Text="Theme" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="ThemeStatus" Style="{StaticResource Hint}"/><TextBlock Text="Saved immediately." Style="{StaticResource Hint}"/></StackPanel>
+       <StackPanel VerticalAlignment="Center"><TextBlock Text="Mode" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="ThemeStatus" Style="{StaticResource Hint}"/><TextBlock Text="Saved immediately." Style="{StaticResource Hint}"/></StackPanel>
       </DockPanel></Border>
+      <Border Style="{StaticResource Card}"><StackPanel>
+       <TextBlock Text="Color theme" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
+       <TextBlock Text="Every theme has a light and a dark version. The player stays dark and uses the theme's accent. Saved immediately." Style="{StaticResource Hint}"/>
+       <WrapPanel x:Name="ThemeChoices" Margin="0,14,0,-10" AutomationProperties.Name="Color theme"/>
+      </StackPanel></Border>
      </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="UpdatePreferences" Tag="Updates" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,18,12">
       <Border Style="{StaticResource Card}"><StackPanel>
@@ -729,12 +746,12 @@
       <Grid HorizontalAlignment="Right" Width="460" ClipToBounds="True">
        <Grid.OpacityMask><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#FF000000" Offset="0.45"/></LinearGradientBrush></Grid.OpacityMask>
        <Grid x:Name="RoomHeroBadge">
-        <Rectangle><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#1C1A2B" Offset="0"/><GradientStop Color="#2A2442" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
-        <Rectangle><Rectangle.Fill><RadialGradientBrush Center="0.78,0.3" GradientOrigin="0.78,0.3" RadiusX="0.55" RadiusY="0.9"><GradientStop Color="#47A991FF" Offset="0"/><GradientStop Color="#00A991FF" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
+        <Rectangle><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="{DynamicResource ElevatedColor}" Offset="0"/><GradientStop Color="{DynamicResource AccentSoftColor}" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
+        <Rectangle><Rectangle.Fill><RadialGradientBrush Center="0.78,0.3" GradientOrigin="0.78,0.3" RadiusX="0.55" RadiusY="0.9" Opacity="0.28"><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="{DynamicResource AccentClear}" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
         <Grid HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,64,0">
-         <Ellipse x:Name="RoomHeroBadgeHalo" Width="160" Height="160" Fill="#0DA991FF"/>
-         <Ellipse x:Name="RoomHeroBadgeHaloInner" Width="132" Height="132" Fill="#14A991FF"/>
-         <Ellipse Width="112" Height="112" Fill="{DynamicResource AccentSoft}" Stroke="#59A991FF" StrokeThickness="1"/>
+         <Ellipse x:Name="RoomHeroBadgeHalo" Width="160" Height="160" Fill="{DynamicResource Accent}" Opacity="0.05"/>
+         <Ellipse x:Name="RoomHeroBadgeHaloInner" Width="132" Height="132" Fill="{DynamicResource Accent}" Opacity="0.08"/>
+         <Ellipse Width="112" Height="112" Fill="{DynamicResource AccentSoft}" Stroke="{DynamicResource AccentEdge}" StrokeThickness="1"/>
          <TextBlock x:Name="RoomHeroBadgeText" FontSize="44" FontWeight="Bold" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
         </Grid>
        </Grid>
@@ -803,7 +820,7 @@
         <!-- The room: its state, the invitation, and what it watched last. -->
         <Border Grid.RowSpan="3" Style="{StaticResource Tile}" Padding="0" local:RoundedClip.Radius="12">
          <Grid>
-          <Rectangle IsHitTestVisible="False"><Rectangle.Fill><RadialGradientBrush Center="0.9,0" GradientOrigin="0.9,0" RadiusX="0.75" RadiusY="0.6"><GradientStop Color="#33A991FF" Offset="0"/><GradientStop Color="#00A991FF" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
+          <Rectangle IsHitTestVisible="False"><Rectangle.Fill><RadialGradientBrush Center="0.9,0" GradientOrigin="0.9,0" RadiusX="0.75" RadiusY="0.6" Opacity="0.20"><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="{DynamicResource AccentClear}" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
           <StackPanel Margin="20,18,20,18">
            <TextBlock x:Name="SavedRoomHeading" Text="Choose a room" FontSize="20" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
            <DockPanel Margin="0,4,0,0">
@@ -881,14 +898,14 @@
    <!-- Player. Always dark: the app palette keys are remapped for everything inside it. -->
    <Grid x:Name="RoomPage" Visibility="Collapsed" Background="#0B0B0E" TextElement.Foreground="#F4F4F7">
     <Grid.Resources>
-     <SolidColorBrush x:Key="Canvas" Color="#0B0B0E"/><SolidColorBrush x:Key="Surface" Color="#17181F"/><SolidColorBrush x:Key="Elevated" Color="#23242E"/><SolidColorBrush x:Key="Ink" Color="#F4F4F7"/><SolidColorBrush x:Key="Muted" Color="#B4B6C2"/><SolidColorBrush x:Key="Line" Color="#2E303B"/><SolidColorBrush x:Key="Accent" Color="#A991FF"/><SolidColorBrush x:Key="AccentInk" Color="#160E2E"/><SolidColorBrush x:Key="Hover" Color="#2A2C37"/><SolidColorBrush x:Key="AccentSoft" Color="#2A2442"/>
+     <SolidColorBrush x:Key="Canvas" Color="#0B0B0E"/><SolidColorBrush x:Key="Surface" Color="#17181F"/><SolidColorBrush x:Key="Elevated" Color="#23242E"/><SolidColorBrush x:Key="Ink" Color="#F4F4F7"/><SolidColorBrush x:Key="Muted" Color="#B4B6C2"/><SolidColorBrush x:Key="Line" Color="#2E303B"/><SolidColorBrush x:Key="Accent" Color="#9FD4A8"/><SolidColorBrush x:Key="AccentInk" Color="#0E2A15"/><SolidColorBrush x:Key="Hover" Color="#2A2C37"/><SolidColorBrush x:Key="AccentSoft" Color="#1F3324"/>
     </Grid.Resources>
     <Grid>
      <Border x:Name="VideoFrame" Background="Black" SizeChanged="VideoFrameSizeChanged">
       <vlc:VideoView x:Name="Video">
        <!-- A nonzero alpha keeps the native overlay hit-testable over the video. -->
        <Grid x:Name="PlayerOverlay" Background="#01000000" Focusable="True" PreviewMouseLeftButtonDown="PlayerOverlayPressed" MouseMove="PlayerMouseMoved" MouseLeftButtonDown="VideoClicked" MouseLeave="PlayerMouseLeft" MouseWheel="VideoWheel" PreviewKeyDown="KeyPressed" PreviewKeyUp="KeyReleased">
-        <Border x:Name="PlayerEmpty" Background="#0B0B0E"><Viewbox x:Name="PlayerEmptyContent" Stretch="Uniform" StretchDirection="DownOnly" Margin="16,72,16,128"><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"><Border Width="76" Height="76" CornerRadius="38" Background="#2A2442" HorizontalAlignment="Center"><TextBlock Text="&#xF5B0;" FontFamily="{StaticResource IconFont}" FontSize="28" Foreground="#A991FF" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0,0,0"/></Border><TextBlock Text="Choose a video to play" FontSize="21" FontWeight="SemiBold" Foreground="#F4F4F7" HorizontalAlignment="Center" Margin="0,20,0,20"/><Button Content="Browse library" Tag="Library" Click="Navigate" Style="{StaticResource PlayerButton}" HorizontalAlignment="Center" Margin="0"/></StackPanel></Viewbox></Border>
+        <Border x:Name="PlayerEmpty" Background="#0B0B0E"><Viewbox x:Name="PlayerEmptyContent" Stretch="Uniform" StretchDirection="DownOnly" Margin="16,72,16,128"><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"><Border Width="76" Height="76" CornerRadius="38" Background="{DynamicResource AccentSoft}" HorizontalAlignment="Center"><TextBlock Text="&#xF5B0;" FontFamily="{StaticResource IconFont}" FontSize="28" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0,0,0"/></Border><TextBlock Text="Choose a video to play" FontSize="21" FontWeight="SemiBold" Foreground="#F4F4F7" HorizontalAlignment="Center" Margin="0,20,0,20"/><Button Content="Browse library" Tag="Library" Click="Navigate" Style="{StaticResource PlayerButton}" HorizontalAlignment="Center" Margin="0"/></StackPanel></Viewbox></Border>
         <StackPanel x:Name="PlayerTopChrome" VerticalAlignment="Top">
          <!-- Top bar: floating pills for back, the title, room status and room actions, centred on the window buttons. It hides and shows together with the dock. -->
          <Border x:Name="RoomHeader" Background="{StaticResource PlayerHeaderFade}" Padding="9,9,14,24" PreviewMouseMove="ControlsMouseMoved" PreviewKeyDown="ControlsKeyPressed" SizeChanged="RoomHeaderSizeChanged" MouseLeftButtonDown="RoomHeaderPressed">
@@ -937,12 +954,12 @@
           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
            <Border x:Name="UpNextThumb" Width="96" Height="54" CornerRadius="8" local:RoundedClip.Radius="8" Background="#23242E" Margin="0,0,12,0" VerticalAlignment="Center"><Image x:Name="UpNextImage" Stretch="UniformToFill"/></Border>
            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-            <TextBlock Text="UP NEXT" Foreground="#A991FF" FontSize="10" FontWeight="SemiBold" Margin="0,0,0,3"/>
+            <TextBlock Text="UP NEXT" Foreground="{DynamicResource PlayerAccent}" FontSize="10" FontWeight="SemiBold" Margin="0,0,0,3"/>
             <TextBlock x:Name="UpNextSeries" Foreground="#F4F4F7" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
             <TextBlock x:Name="UpNextEpisode" Foreground="#A9ABB8" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
            </StackPanel>
            <!-- The fill shrinks with a render transform animation so it drains smoothly. -->
-           <Border x:Name="UpNextProgress" Grid.Row="1" Grid.ColumnSpan="2" Height="3" CornerRadius="1.5" Background="#26FFFFFF" Margin="0,12,2,0" IsHitTestVisible="False"><Border x:Name="UpNextFill" CornerRadius="1.5" Background="#A991FF" RenderTransformOrigin="0,0.5"><Border.RenderTransform><ScaleTransform x:Name="UpNextFillScale"/></Border.RenderTransform></Border></Border>
+           <Border x:Name="UpNextProgress" Grid.Row="1" Grid.ColumnSpan="2" Height="3" CornerRadius="1.5" Background="#26FFFFFF" Margin="0,12,2,0" IsHitTestVisible="False"><Border x:Name="UpNextFill" CornerRadius="1.5" Background="{DynamicResource PlayerAccent}" RenderTransformOrigin="0,0.5"><Border.RenderTransform><ScaleTransform x:Name="UpNextFillScale"/></Border.RenderTransform></Border></Border>
            <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <TextBlock x:Name="UpNextCountdown" Foreground="#A9ABB8" FontSize="11.5" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular" AutomationProperties.LiveSetting="Polite"/>
             <StackPanel Grid.Column="1" Orientation="Horizontal">
@@ -985,7 +1002,7 @@
                <TextBlock Text="Subtitles" Style="{StaticResource PlayerMenuCaption}"/>
                <ListBox x:Name="SubtitleTracks" Style="{StaticResource PlayerMenuList}" ItemTemplate="{StaticResource PlayerTrackRow}" SelectionChanged="SubtitlesChanged" PreviewMouseLeftButtonUp="TrackMenuClicked" AutomationProperties.Name="Subtitle track"/>
                <Border Height="1" Background="{StaticResource PlayerLine}" Margin="6,4"/>
-               <Button x:Name="LoadSubtitlesButton" Click="LoadSubtitles" Style="{StaticResource PlayerMenuButton}" AutomationProperties.Name="Load subtitles from file"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8E5;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{StaticResource PlayerAccent}" Width="24" VerticalAlignment="Center"/><TextBlock Text="Load from file…"/></StackPanel></Button>
+               <Button x:Name="LoadSubtitlesButton" Click="LoadSubtitles" Style="{StaticResource PlayerMenuButton}" AutomationProperties.Name="Load subtitles from file"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8E5;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource PlayerAccent}" Width="24" VerticalAlignment="Center"/><TextBlock Text="Load from file…"/></StackPanel></Button>
               </StackPanel></ContentControl></local:MenuSizer>
              </local:PlayerMenuPopup>
              <ToggleButton x:Name="QueuePill" Style="{StaticResource PlayerMenuPill}" ToolTip="Queue" AutomationProperties.Name="Queue"><StackPanel Orientation="Horizontal"><TextBlock x:Name="QueuePillIcon" Text="&#xE8FD;" Style="{StaticResource PlayerPillIcon}"/><TextBlock x:Name="QueuePillText" Text="Queue" Style="{StaticResource PlayerPillText}"/><TextBlock x:Name="QueuePillDetail" Style="{StaticResource PlayerPillDetail}" Typography.NumeralAlignment="Tabular"/><TextBlock Text="&#xE70E;" Style="{StaticResource PlayerPillChevron}"/></StackPanel></ToggleButton>
@@ -1095,12 +1112,12 @@
         <Border x:Name="PictureInPictureUpNext" Visibility="Collapsed" VerticalAlignment="Bottom" Background="#F217181F" Padding="10,6,6,0" MouseLeftButtonDown="UpNextCardClicked" AutomationProperties.Name="Up next">
          <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
           <StackPanel VerticalAlignment="Center" Margin="0,0,6,0">
-           <TextBlock Text="UP NEXT" Foreground="#A991FF" FontSize="10" FontWeight="SemiBold"/>
+           <TextBlock Text="UP NEXT" Foreground="{DynamicResource PlayerAccent}" FontSize="10" FontWeight="SemiBold"/>
            <TextBlock Text="{Binding Text, ElementName=UpNextEpisode}" ToolTip="{Binding Text, ElementName=UpNextCountdown}" Foreground="#F4F4F7" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
           </StackPanel>
           <Button Grid.Column="1" Content="&#xE711;" Click="UpNextCancelClicked" Style="{StaticResource PlayerIconButton}" Width="30" MinWidth="30" Height="30" FontSize="11" Margin="0" ToolTip="Stay on this episode (Esc)" AutomationProperties.Name="Cancel up next"/>
-          <Button Grid.Column="2" Content="Play now" Click="UpNextPlayClicked" Style="{StaticResource PlayerButton}" Background="#A991FF" Foreground="#160E2E" FontWeight="SemiBold" FontSize="12" MinHeight="30" Height="30" Padding="10,0" Margin="4,0,0,0" ToolTip="Play the next episode now"/>
-          <Border Grid.Row="1" Grid.ColumnSpan="3" Height="3" Margin="-10,6,-6,0" Background="#2E303B" Visibility="{Binding Visibility, ElementName=UpNextProgress}" IsHitTestVisible="False"><Border Background="#A991FF" RenderTransformOrigin="0,0.5"><Border.RenderTransform><ScaleTransform x:Name="PictureInPictureUpNextFillScale"/></Border.RenderTransform></Border></Border>
+          <Button Grid.Column="2" Content="Play now" Click="UpNextPlayClicked" Style="{StaticResource PlayerButton}" Background="{DynamicResource PlayerAccent}" Foreground="{DynamicResource PlayerAccentInk}" FontWeight="SemiBold" FontSize="12" MinHeight="30" Height="30" Padding="10,0" Margin="4,0,0,0" ToolTip="Play the next episode now"/>
+          <Border Grid.Row="1" Grid.ColumnSpan="3" Height="3" Margin="-10,6,-6,0" Background="#2E303B" Visibility="{Binding Visibility, ElementName=UpNextProgress}" IsHitTestVisible="False"><Border Background="{DynamicResource PlayerAccent}" RenderTransformOrigin="0,0.5"><Border.RenderTransform><ScaleTransform x:Name="PictureInPictureUpNextFillScale"/></Border.RenderTransform></Border></Border>
          </Grid>
         </Border>
        </Grid>

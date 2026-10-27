@@ -90,7 +90,8 @@ public partial class MainWindow : Window
     private MediaBridge? bridge;
     private PlaybackState? target;
     private string? loadedMedia;
-    private bool scanning, seeking, tracksUpdating, ready, closing, fullscreen, light;
+    private bool scanning, seeking, tracksUpdating, ready, closing, fullscreen, light, updatingThemeChoices;
+    private ThemePalette palette = ThemePalette.All[0];
     private long appliedRevision = -1;
     private readonly PlaybackSettling settling = new();
     private readonly PlaybackIntent playbackIntent = new();
@@ -139,7 +140,7 @@ public partial class MainWindow : Window
         // The TMDB retention sweep reads every record; it runs in the background once the library has rendered.
         library = new LibraryStore(App.DataDirectory, deferRetention: true);
         InitializeUpdates();
-        light = library.Setting("theme") == "light";
+        light = library.Setting("theme") == "light"; palette = ThemePalette.Find(library.Setting("colorTheme"));
         ApplyTheme();
         if (startupFile is null) ShowPage("Home");
         foreach (var f in Wire.Read<List<LibraryFolder>>(library.Setting("folders") ?? "[]")) folders.Add(f);
@@ -2039,25 +2040,79 @@ public partial class MainWindow : Window
         library.Setting("theme", light ? "light" : "dark");
         ApplyTheme();
     }
+    private void ChooseColorTheme(object sender, RoutedEventArgs e)
+    {
+        if (updatingThemeChoices || sender is not FrameworkElement { Tag: ThemePalette chosen } || chosen == palette) return;
+        palette = chosen;
+        library.Setting("colorTheme", palette.Id);
+        ApplyTheme();
+    }
+    // One tile per palette; each preview shows the palette in the current light or dark mode.
+    private void BuildThemeChoices()
+    {
+        foreach (var option in ThemePalette.All)
+        {
+            var choice = new RadioButton { Tag = option, Style = (Style)ThemeChoices.FindResource("ThemeChoice"), GroupName = "ColorTheme" };
+            System.Windows.Automation.AutomationProperties.SetName(choice, option.Name + " theme");
+            choice.Checked += ChooseColorTheme;
+            ThemeChoices.Children.Add(choice);
+        }
+    }
+    private void UpdateThemeChoices()
+    {
+        if (ThemeChoices is null) return;
+        if (ThemeChoices.Children.Count == 0) BuildThemeChoices();
+        Brush Solid(Color color) { var brush = new SolidColorBrush(color); brush.Freeze(); return brush; }
+        updatingThemeChoices = true;
+        foreach (RadioButton choice in ThemeChoices.Children)
+        {
+            var option = (ThemePalette)choice.Tag; var c = option.Colors(light);
+            var bar = new Border { Height = 6, Width = 44, CornerRadius = new(3), Background = Solid(c[4]), Opacity = 0.6, HorizontalAlignment = HorizontalAlignment.Left, Margin = new(0, 0, 0, 7) };
+            var pill = new Border { Height = 12, Width = 34, CornerRadius = new(6), Background = Solid(c[6]), HorizontalAlignment = HorizontalAlignment.Left };
+            var side = new Border { Width = 26, Background = Solid(c[1]), BorderBrush = Solid(c[5]), BorderThickness = new(0, 0, 1, 0) };
+            var body = new StackPanel { Margin = new(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Children = { new Border { Height = 7, Width = 64, CornerRadius = new(3.5), Background = Solid(c[3]), HorizontalAlignment = HorizontalAlignment.Left, Margin = new(0, 0, 0, 6) }, bar, pill } };
+            var preview = new DockPanel { Children = { side, body } }; DockPanel.SetDock(side, Dock.Left);
+            choice.Content = new StackPanel
+            {
+                Children =
+                {
+                    new Border { Height = 62, CornerRadius = new(6), Background = Solid(c[0]), BorderBrush = Solid(c[5]), BorderThickness = new(1), Child = preview, ClipToBounds = true },
+                    new TextBlock { Text = option.Name, FontWeight = FontWeights.SemiBold, FontSize = 13, Margin = new(2, 8, 0, 0) },
+                },
+            };
+            choice.IsChecked = option == palette;
+        }
+        updatingThemeChoices = false;
+    }
     private void ApplyTheme()
     {
-        if (ThemeStatus is not null) ThemeStatus.Text = light ? "Current theme: Light" : "Current theme: Dark";
-        var colors = light
-            ? new[] { "#F5F5F8", "#FFFFFF", "#ECECF2", "#1B1C24", "#5C5F70", "#E0E1E9", "#6A47DE", "#FFFFFF", "#E6E6EE", "#EEE9FD", "#1F9D5C", "#C8F5F5F8", "#D33A47" }
-            : new[] { "#0F1015", "#16171E", "#20212B", "#EEEEF3", "#9A9CAB", "#2A2C37", "#A991FF", "#160E2E", "#272935", "#2A2442", "#3FB97A", "#C80F1015", "#F0616D" };
-        var keys = new[] { "Canvas", "Surface", "Elevated", "Ink", "Muted", "Line", "Accent", "AccentInk", "Hover", "AccentSoft", "Success", "Scrim", "Danger" };
-        for (int i = 0; i < keys.Length; i++) Application.Current.Resources[keys[i]] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(colors[i]));
-        var canvas = (Color)ColorConverter.ConvertFromString(colors[0]);
-        var fade = new LinearGradientBrush([new(Color.FromArgb(0, canvas.R, canvas.G, canvas.B), 0),
-            new(Color.FromArgb(0x4F, canvas.R, canvas.G, canvas.B), 0.45), new(canvas, 1)], 90);
-        fade.Freeze(); Application.Current.Resources["BackdropFade"] = fade;
-        var surface = (Color)ColorConverter.ConvertFromString(colors[1]);
-        var hero = new LinearGradientBrush([new(surface, 0), new(Color.FromArgb(0xE6, surface.R, surface.G, surface.B), 0.38),
-            new(Color.FromArgb(0, surface.R, surface.G, surface.B), 0.8)], 0);
-        hero.Freeze(); Application.Current.Resources["HeroFade"] = hero;
-        Color Faded(byte alpha) => Color.FromArgb(alpha, canvas.R, canvas.G, canvas.B);
-        var fadeLeft = new LinearGradientBrush(canvas, Faded(0), 0); fadeLeft.Freeze(); Application.Current.Resources["EdgeFadeLeft"] = fadeLeft;
-        var fadeRight = new LinearGradientBrush(Faded(0), canvas, 0); fadeRight.Freeze(); Application.Current.Resources["EdgeFadeRight"] = fadeRight;
+        if (ThemeStatus is not null) ThemeStatus.Text = light ? "Current mode: Light" : "Current mode: Dark";
+        var resources = Application.Current.Resources;
+        SolidColorBrush Solid(Color color) { var brush = new SolidColorBrush(color); brush.Freeze(); return brush; }
+        static Color Alpha(Color color, byte alpha) => Color.FromArgb(alpha, color.R, color.G, color.B);
+        var colors = palette.Colors(light);
+        for (int i = 0; i < ThemePalette.Keys.Length; i++) resources[ThemePalette.Keys[i]] = Solid(colors[i]);
+        var canvas = colors[0]; var surface = colors[1]; var accent = colors[6];
+        resources["Scrim"] = Solid(Alpha(canvas, 0xC8));
+        // Accent glows and outlines are drawn with these, so they follow the theme instead of a fixed colour.
+        resources["AccentEdge"] = Solid(Alpha(accent, 0x59));
+        resources["AccentColor"] = accent; resources["AccentClear"] = Alpha(accent, 0);
+        resources["ElevatedColor"] = colors[2]; resources["AccentSoftColor"] = colors[9];
+        var stripes = new LinearGradientBrush([new(Alpha(accent, 0), 0), new(Alpha(accent, 0), 0.5), new(Alpha(accent, 0x1F), 0.5), new(Alpha(accent, 0x1F), 1)], new Point(0, 0), new Point(13, 13))
+            { MappingMode = BrushMappingMode.Absolute, SpreadMethod = GradientSpreadMethod.Repeat };
+        stripes.Freeze(); resources["CardStripes"] = stripes;
+        var fade = new LinearGradientBrush([new(Alpha(canvas, 0), 0), new(Alpha(canvas, 0x4F), 0.45), new(canvas, 1)], 90);
+        fade.Freeze(); resources["BackdropFade"] = fade;
+        var hero = new LinearGradientBrush([new(surface, 0), new(Alpha(surface, 0xE6), 0.38), new(Alpha(surface, 0), 0.8)], 0);
+        hero.Freeze(); resources["HeroFade"] = hero;
+        var fadeLeft = new LinearGradientBrush(canvas, Alpha(canvas, 0), 0); fadeLeft.Freeze(); resources["EdgeFadeLeft"] = fadeLeft;
+        var fadeRight = new LinearGradientBrush(Alpha(canvas, 0), canvas, 0); fadeRight.Freeze(); resources["EdgeFadeRight"] = fadeRight;
+        // The player stays dark in both modes and uses the theme's dark accent.
+        var player = palette.Colors(light: false); var playerAccent = player[6];
+        resources["PlayerAccent"] = Solid(playerAccent); resources["PlayerAccentInk"] = Solid(player[7]); resources["PlayerAccentSoft"] = Solid(player[9]);
+        resources["PlayerAccentTint"] = Solid(Alpha(playerAccent, 0x38)); resources["PlayerAccentEdge"] = Solid(Alpha(playerAccent, 0x73));
+        RoomPage.Resources["Accent"] = resources["PlayerAccent"]; RoomPage.Resources["AccentInk"] = resources["PlayerAccentInk"]; RoomPage.Resources["AccentSoft"] = resources["PlayerAccentSoft"];
+        UpdateThemeChoices();
         ApplyTitleBarTheme();
     }
     protected override void OnSourceInitialized(EventArgs e)
