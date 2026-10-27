@@ -17,6 +17,8 @@ public partial class MainWindow
     private readonly Dictionary<(TrackType Type, int Id), string?> detectedLanguages = [];
     private readonly HashSet<(TrackType Type, int Id)> namedLanguages = []; // from a subtitle file's name, not detected
     private readonly HashSet<(TrackType Type, int Id)> pendingLanguages = [];
+    // Tracks the file leaves untagged: VLC calls them English (Matroska's default), which is no more than a guess.
+    private readonly HashSet<(TrackType Type, int Id)> untaggedLanguages = [];
     // Subtitle tracks known to come from a file: shared with the room, or loaded from a file in local playback.
     private readonly Dictionary<int, SubtitleFile> subtitleFiles = [];
     private readonly List<object> loadingSubtitles = []; // files loaded in local playback, waiting for their tracks
@@ -38,7 +40,7 @@ public partial class MainWindow
     {
         if (languageDetectionGeneration != loadGeneration) return (name, metadata);
         if (detectedLanguages.TryGetValue((type, id), out var detected) && detected is not null) return (name, detected);
-        return pendingLanguages.Contains((type, id)) ? (TrackTitle(name), null) : (name, metadata);
+        return pendingLanguages.Contains((type, id)) || untaggedLanguages.Contains((type, id)) ? (TrackTitle(name), null) : (name, metadata);
     }
 
     private string TrackDisplayName(TrackType type, int id, string name)
@@ -51,7 +53,8 @@ public partial class MainWindow
         if (detectedLanguages.TryGetValue((type, id), out var detected) && detected is not null)
             return namedLanguages.Contains((type, id)) ? (title.Length == 0 ? "Track" : title) + " - [" + LanguageName(detected) + "]"
                 : (generic ? "Detected" : title + " · detected") + " - [" + LanguageName(detected) + "]";
-        return pendingLanguages.Contains((type, id)) ? (title.Length == 0 ? "Track" : title) + " · identifying language" : name;
+        if (pendingLanguages.Contains((type, id))) return (title.Length == 0 ? "Track" : title) + " · identifying language";
+        return untaggedLanguages.Contains((type, id)) ? (title.Length == 0 ? "Track" : title) + " - [Unknown language]" : name;
     }
     private static string TrackTitle(string name) => TrackNamePattern().Match(name) is { Success: true } match ? match.Groups[1].Value.Trim() : name;
     private static string LanguageName(string code)
@@ -72,7 +75,7 @@ public partial class MainWindow
         if (player is null || !ready || languageDetectionGeneration == loadGeneration) return;
         languageDetectionCancellation?.Cancel(); languageDetectionCancellation = null;
         languageDetectionGeneration = loadGeneration;
-        detectedLanguages.Clear(); namedLanguages.Clear(); pendingLanguages.Clear();
+        detectedLanguages.Clear(); namedLanguages.Clear(); pendingLanguages.Clear(); untaggedLanguages.Clear();
         foreach (var stale in subtitleFiles.Where(pair => pair.Value.Generation != loadGeneration).Select(pair => pair.Key).ToArray()) subtitleFiles.Remove(stale);
         PrefetchNextLanguages();
         if (room?.Identity?.Host == false || LocalMediaPath() is not { } path) return;
@@ -90,8 +93,13 @@ public partial class MainWindow
                 {
                     if (track.Id < 0 || track.Id >= container.Count) continue;
                     var entry = container[track.Id];
-                    if (track.TrackType == TrackType.Audio && entry.Type == ContainerTrackType.Audio && entry.Untagged) audio.Add(track.Id);
-                    else if (track.TrackType == TrackType.Text && entry.Type == ContainerTrackType.Subtitle && entry.Untagged && entry.Text) subtitles[track.Id] = entry.Number;
+                    if (!entry.Untagged) continue;
+                    if (track.TrackType == TrackType.Audio && entry.Type == ContainerTrackType.Audio) { audio.Add(track.Id); untaggedLanguages.Add((TrackType.Audio, track.Id)); }
+                    else if (track.TrackType == TrackType.Text && entry.Type == ContainerTrackType.Subtitle)
+                    {
+                        untaggedLanguages.Add((TrackType.Text, track.Id));
+                        if (entry.Text || entry.Image && SubtitleOcr.Available) subtitles[track.Id] = entry.Number;
+                    }
                 }
             else
                 audio.AddRange(player.AudioTrackDescription.Where(choice => choice.Id >= 0 && TrackLanguages.LanguageOf(new LanguageTrack(choice.Id, choice.Name,

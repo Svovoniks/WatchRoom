@@ -54,8 +54,12 @@ try {
     $asset = [pscustomobject]@{ name=$fileName; size=4; digest="sha256:$hash"; browser_download_url="https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/$fileName" }
     $sumPath = Join-Path $testRoot 'SHA256SUMS.txt'
     [IO.File]::WriteAllText($sumPath, "$hash  $fileName`n")
-    $release = [pscustomobject]@{ tag_name='v0.3.18'; draft=$false; prerelease=$false; assets=@($asset, [pscustomobject]@{name='SHA256SUMS.txt';browser_download_url='https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/SHA256SUMS.txt'}) }
+    $fileList = [pscustomobject]@{ name='Watchroom-files-0.3.18-win-x64.txt'; size=10; digest="sha256:$('a' * 64)"; browser_download_url='https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/Watchroom-files-0.3.18-win-x64.txt' }
+    $release = [pscustomobject]@{ tag_name='v0.3.18'; draft=$false; prerelease=$false; assets=@($asset, [pscustomobject]@{name='SHA256SUMS.txt';browser_download_url='https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/SHA256SUMS.txt'}, $fileList) }
     $null = Assert-ReleaseMetadata $release '0.3.18'
+    $release.assets = @($release.assets | Where-Object { $_ -ne $fileList })
+    Expect-Rejected { Assert-ReleaseMetadata $release '0.3.18' } 'a release without its file list cannot be reported as shipped'
+    $release.assets = @($release.assets) + $fileList
     Check ((Assert-InstallerBytes $filePath $sumPath $asset) -eq $hash) 'correct installer matches both public digests'
     $release.draft=$true
     Expect-Rejected { Assert-ReleaseMetadata $release '0.3.18' } 'draft cannot be reported as shipped'
@@ -74,6 +78,24 @@ try {
     [IO.File]::WriteAllBytes($filePath, [byte[]](1,2,3,4))
     [IO.File]::WriteAllText($sumPath, ('0' * 64) + "  $fileName`n")
     Expect-Rejected { Assert-InstallerBytes $filePath $sumPath $asset } 'checksum-file disagreement is rejected'
+    [IO.File]::WriteAllText($sumPath, "$hash  $fileName`n")
+    $updateName = 'Watchroom-Update-0.3.17-to-0.3.18-win-x64.exe'
+    $updatePath = Join-Path $testRoot $updateName
+    [IO.File]::WriteAllBytes($updatePath, [byte[]](5,6))
+    $updateHash = (Get-FileHash $updatePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    [IO.File]::AppendAllText($sumPath, "$updateHash  $updateName`n")
+    $update = [pscustomobject]@{ name=$updateName; size=2; digest="sha256:$updateHash"; browser_download_url="https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/$updateName" }
+    $release.assets = @($release.assets) + @($update, [pscustomobject]@{ name='Watchroom-Update-0.3.16-to-0.3.17-win-x64.exe'; size=1; digest=''; browser_download_url='https://example.com/old.exe' })
+    $verified = Assert-ReleaseMetadata $release '0.3.18'
+    Check (@($verified.Updates | Where-Object name -like 'Watchroom-Update-*').Count -eq 1 -and (Assert-InstallerBytes $updatePath $sumPath $update) -eq $updateHash) 'update installers for this version are verified like the full installer'
+    $update.browser_download_url = 'https://example.com/update.exe'
+    Expect-Rejected { Assert-ReleaseMetadata $release '0.3.18' } 'update installer URL must belong to the expected release'
+    $update.browser_download_url = "https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/$updateName"
+    $update.digest = ''
+    Expect-Rejected { Assert-ReleaseMetadata $release '0.3.18' } 'update installer without a GitHub digest prevents verification'
+    $update.digest = "sha256:$updateHash"
+    [IO.File]::WriteAllBytes($updatePath, [byte[]](6,5))
+    Expect-Rejected { Assert-InstallerBytes $updatePath $sumPath $update } 'corrupted update installer is rejected'
     function Get-PublicJson {
         param([string]$Url)
         return @{ workflow_runs = @(

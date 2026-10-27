@@ -65,6 +65,9 @@ PowerShell checks (use `dotnet` instead of the workspace SDK path on other machi
 .tools/dotnet/dotnet.exe run --project tests/Watchroom.DesktopChecks -c Release
 ```
 
+When packaging or the updater changes, also run `./scripts/update-package-checks.ps1`.
+The release workflow runs it on every packaged build.
+
 Example release after checks, using an example version (replace it with the
 version actually chosen; do not rerun an existing tag):
 
@@ -215,9 +218,30 @@ as workflow artifacts for 14 days.
 
 Push a version tag such as `v0.2.1` to publish a GitHub Release. Tags must use
 `vMAJOR.MINOR.PATCH`; the same version is embedded in the application and installer.
-The workflow uploads `Watchroom-Setup-VERSION-win-x64.exe` and `SHA256SUMS.txt`.
-Only tagged builds publish releases. Do not replace an existing release with
-different bytes; publish a new version instead.
+The workflow uploads `Watchroom-Setup-VERSION-win-x64.exe`, the file list
+`Watchroom-files-VERSION-win-x64.txt` (SHA-256, size and path of every installed
+file), update installers `Watchroom-Update-FROM-to-VERSION-win-x64.exe` from
+each of the 40 previous stable releases, and `SHA256SUMS.txt` covering all of
+them. Only tagged builds publish releases. Do not replace an existing release
+with different bytes; publish a new version instead.
+
+An update installer holds only the files that differ from release FROM, plus
+deletions of files the new version dropped, so an update usually downloads a few
+megabytes instead of the whole app with its .NET runtime, VLC and models.
+`scripts/package-updates.ps1` builds them on CI from the earlier releases'
+published file lists. The most recent release, and up to three releases from
+before file lists were published, are instead installed from their published
+installers (digest verified) into a scratch folder; the most recent one's
+update installer is applied over that installation, and the build fails unless
+the folder then matches the new build exactly and the installation matched its
+file list. The script refuses to run outside CI because it installs releases
+into the current user profile. An update installer has the same AppId, so the
+uninstaller also removes the files it added; it refuses to run unless the
+registered installation is FROM in the target folder.
+`scripts/update-package-checks.ps1` exercises this offline with a fixture under
+a separate test identity, without file associations or shortcuts, in a scratch
+folder under `artifacts/`: file lists, a direct update, refusals, a two-step
+chain run the way the app runs it, and uninstalling.
 
 The Windows app checks GitHub's latest stable release 15 seconds after startup
 and every six hours. Settings offers **Check for updates** and a saved preference
@@ -227,7 +251,19 @@ different release.
 
 **Update** streams the installer into the profile's `updates` folder, reports
 progress, and verifies its length and GitHub-provided SHA-256 digest. Failed or
-interrupted downloads never launch an installer. After successful verification,
+interrupted downloads never launch an installer. When the release has an update
+installer from the running version, the updater downloads that one. An
+installation older than the last 40 releases chains update installers through
+intermediate releases (the cheapest chain among the last 100 releases) when the
+chain is smaller than half the full installer; a short script in the `updates`
+folder runs them one after another once the app has closed, only the last one
+reopens Watchroom, and a failed step reopens the version installed by then.
+Before using update installers the app checks its installed files against its
+own release's published file list. If the files differ, any download fails
+verification, or an installer cannot be started (antivirus software may hold
+back a fresh download briefly, which is retried, or remove it), the full
+installer is downloaded instead; update installers that ran without reaching a
+version are not offered for it again. The update card shows the download size. After successful verification,
 the per-user Inno Setup installer updates the installed app's directory, and
 reopens Watchroom. Only the copy running from the installer-registered folder (or
 the default folder when none is registered) updates itself; development builds and

@@ -52,6 +52,17 @@ static class LanguageDetectionChecks
             LanguageDetection.Written(Long("넌 어떤 제이슨이야?", "알 텐데", "들어가도 될까?", "이 세계에서 뭐 하는 거야?", "여긴 왜 왔어?", "속죄하러")) == "ko",
             "Arabic, Greek and Korean dialogue is identified despite a Latin title line before it");
         Check(LanguageDetection.Written("Hi.") is null && LanguageDetection.Written("") is null, "too little text claims no language");
+        // Just over one chunk: the short remainder can't be read confidently, and mustn't outvote the chunk before it.
+        var overOne = new List<string>();
+        while (System.Text.Encoding.UTF8.GetByteCount(string.Join("\n", overOne)) < 1010) overOne.Add(English[overOne.Count % English.Length]);
+        Check(LanguageDetection.Written(string.Join("\n", overOne)) == "en", "dialogue a little longer than one chunk is identified");
+
+        // Picture subtitles: the bundled Tesseract script models read rendered lines, and CLD3 names their language.
+        Check(SubtitleOcr.Available, "Tesseract's script models are bundled next to the app");
+        Check(LanguageDetection.Written(SubtitleOcr.Read(English.Select(Picture).ToArray(), CancellationToken.None)) == "en" &&
+            LanguageDetection.Written(SubtitleOcr.Read(Russian.Select(Picture).ToArray(), CancellationToken.None)) == "ru",
+            "English and Russian picture subtitles are read and identified");
+        Check(SubtitleOcr.Read([Picture("")], CancellationToken.None) is null, "a picture without text yields no text");
 
         // Speech in every language Windows has a voice for; machines without voices only check the subtitle path.
         var spoken = new List<(string Language, MatroskaFixture.Audio Audio)>();
@@ -69,7 +80,7 @@ static class LanguageDetectionChecks
         var path = Path.Combine(directory, "untagged-languages.mkv");
         var silence = new MatroskaFixture.Audio(new short[16000 * 24], 16000);
         MatroskaFixture.Write(path, spoken.Count == 0 ? [silence] : spoken.Select(s => s.Audio).ToArray(),
-            [new("S_TEXT/UTF8", English), new("S_TEXT/UTF8", Russian, "und", "zlib"), new("S_TEXT/UTF8", ["Hallo, wie geht's?"], "ger")]);
+            [new("S_TEXT/UTF8", English), new("S_TEXT/UTF8", Russian, "und", "zlib"), new("S_TEXT/UTF8", ["Hallo, wie geht's?"], "ger"), new("S_TEXT/UTF8", ["Hm."])]);
         var audioCount = Math.Max(1, spoken.Count);
         for (var i = 0; i < spoken.Count; i++)
             Check(await LanguageDetection.SpokenAsync(path, i, 0, CancellationToken.None) == spoken[i].Language,
@@ -100,16 +111,19 @@ static class LanguageDetectionChecks
             Check((bool)Call("SaveTrackPreferences")!, "subtitle preferences naming an untagged track's language save");
             Field("player", player); Field("vlc", engine); Field("loadGeneration", 1);
             player.Play(media);
-            await Wait(() => player.SpuDescription.Count(t => t.Id >= 0) == 3 && player.AudioTrackDescription.Count(t => t.Id >= 0) == audioCount, "native tracks");
+            await Wait(() => player.SpuDescription.Count(t => t.Id >= 0) == 4 && player.AudioTrackDescription.Count(t => t.Id >= 0) == audioCount, "native tracks");
             Field("ready", true);
             Call("RefreshTracks");
-            Check(Names("SubtitleTracks").Count(name => name.Contains("identifying language")) == 2 && player.Spu != russian,
+            Check(Names("SubtitleTracks").Count(name => name.Contains("identifying language")) == 3 && player.Spu != russian,
                 "untagged subtitles are marked as being identified and preferences wait for them");
             await Wait(() => !(bool)Call("TrackLanguagesPending", (TrackType?)null)!, "language detection");
             Call("RefreshTracks");
             var subtitles = Names("SubtitleTracks");
             Check(subtitles.Any(name => name.Contains("[English]") && name.Contains("Detected")) && subtitles.Any(name => name.Contains("[Russian]") && name.Contains("Detected")),
                 "detected subtitle languages name their tracks");
+            // VLC calls an untagged Matroska track English, as the format's default says; too little text to tell keeps it unknown.
+            Check(subtitles.Count(name => name.EndsWith("[Unknown language]")) == 1 && !subtitles.Any(name => name.Contains("[English]") && !name.Contains("Detected")),
+                "an untagged track whose language can't be identified is named as unknown rather than English");
             await Wait(() => player.Spu == russian, "preferred subtitles");
             Check(true, "a preferred language found by detection selects the untagged subtitle track ahead of a tagged one");
             if (spoken.Count > 0)
@@ -277,6 +291,20 @@ static class LanguageDetectionChecks
         finally { player.Stop(); Field("player", null); Field("vlc", null); Field("closing", true); window.Close(); }
     }
 
+    // One subtitle line as a decoded picture: dark text on white, about as tall as the decoder scales lines to.
+    private static SubtitleImage Picture(string line)
+    {
+        using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.Black, IsAntialias = true, Typeface = SkiaSharp.SKTypeface.FromFamilyName("Arial"), TextSize = 36 };
+        var width = Math.Max(40, (int)paint.MeasureText(line) + 24); const int height = 64;
+        using var bitmap = new SkiaSharp.SKBitmap(new SkiaSharp.SKImageInfo(width, height, SkiaSharp.SKColorType.Gray8));
+        using (var canvas = new SkiaSharp.SKCanvas(bitmap))
+        {
+            canvas.Clear(SkiaSharp.SKColors.White);
+            canvas.DrawText(line, 12, 44, paint);
+        }
+        return new SubtitleImage(width, height, bitmap.Bytes);
+    }
+
     private static MatroskaFixture.Audio? Wav(byte[] bytes)
     {
         int rate = 0, channels = 0, bits = 0, offset = 12;
@@ -302,7 +330,7 @@ static class LanguageProbe
 {
     // Arguments: files, or @list (a file with one path per line). --tagged also identifies tagged subtitles, and tagged audio
     // of every fourth file, to compare with their tags. --no-audio and --no-text skip either kind. --tsv prints one
-    // tab-separated line per track for analysis.
+    // tab-separated line per track for analysis. --text prints the text read from each subtitle track.
     public static async Task Run(IEnumerable<string> arguments)
     {
         var options = arguments.Where(a => a.StartsWith("--", StringComparison.Ordinal)).ToHashSet();
@@ -330,6 +358,12 @@ static class LanguageProbe
                     else Console.WriteLine($"  id {track.Id} {(audio ? "Audio" : "Subtitle")} {track.Codec} tag={track.Language ?? "-"}{(track.Name is null ? "" : $" \"{track.Name}\"")}{(detected.Length > 0 ? " → " + detected : "")}");
                 }
                 var text = SubtitleText.Sample(path, tracks.Where(t => t.Text && (tagged || t.Untagged)).Select(t => t.Number).ToArray());
+                // Picture subtitles are read as the app reads them; their text is counted like a text track's.
+                var pictures = options.Contains("--no-text") ? new Dictionary<int, IReadOnlyList<SubtitleImage>>() :
+                    SubtitleText.SampleImages(path, tracks.Where(t => t.Image && (tagged || t.Untagged)).Select(t => t.Number).ToArray());
+                foreach (var (number, images) in pictures)
+                    if (SubtitleOcr.Read(images, CancellationToken.None, tsv ? null : line => Console.WriteLine($"      #{number} {line}")) is { } read)
+                        text = new Dictionary<int, string>(text) { [number] = read };
                 for (var index = 0; index < tracks.Count; index++)
                 {
                     var track = tracks[index];
@@ -338,8 +372,9 @@ static class LanguageProbe
                         !options.Contains(track.Type == ContainerTrackType.Audio ? "--no-audio" : "--no-text");
                     var detected = !identify ? "" : track.Type == ContainerTrackType.Audio
                         ? await LanguageDetection.SpokenAsync(path, index, 0, CancellationToken.None, tsv ? null : line => Console.WriteLine("      " + line)) ?? "unknown"
-                        : track.Text ? LanguageDetection.Written(text.GetValueOrDefault(track.Number)) ?? "unknown" : "image";
-                    var chars = track.Text && identify ? text.GetValueOrDefault(track.Number)?.Length ?? 0 : -1;
+                        : track.Text || track.Image ? LanguageDetection.Written(text.GetValueOrDefault(track.Number)) ?? "unknown" : "image";
+                    var chars = (track.Text || track.Image) && identify ? text.GetValueOrDefault(track.Number)?.Length ?? 0 : -1;
+                    if (options.Contains("--text") && text.GetValueOrDefault(track.Number) is { } read) Console.WriteLine($"  #{track.Number} text:\n{read}");
                     if (tsv)
                         Console.WriteLine(string.Join('\t', path, track.Number, track.Type, track.Codec, TrackLanguages.Normalize(track.Language) ?? "-",
                             (track.Name ?? "").Replace('\t', ' '), track.Forced ? "forced" : "", detected, chars));

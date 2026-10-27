@@ -18,6 +18,8 @@ Watchroom dynamically links the following components. Package versions and conte
 | Whisper.net / whisper.cpp runtime (spoken-language identification) | 1.9.1 | https://github.com/sandrohanea/whisper.net |
 | Whisper tiny model, ggml `ggml-tiny-q5_1.bin` (MIT, OpenAI) | whisper.cpp revision 5359861c | https://huggingface.co/ggerganov/whisper.cpp |
 | Panlingo CLD3 / Google CLD3 (subtitle-language identification) | 0.8.1 | https://github.com/gluschenko/panlingo, https://github.com/google/cld3 |
+| TesseractOCR / Tesseract 5.5 and Leptonica 1.85 natives (reading picture subtitles) | 5.5.2 | https://github.com/Sicos1977/TesseractOCR, https://github.com/tesseract-ocr/tesseract, http://www.leptonica.org |
+| Tesseract script models, `tessdata_fast` without word lists (Apache-2.0) | revision 87416418 | https://github.com/tesseract-ocr/tessdata_fast |
 | Microsoft.Data.Sqlite | 10.0.12 | https://github.com/dotnet/efcore |
 | SQLitePCLRaw | 3.0.5 | https://github.com/ericsink/SQLitePCL.raw |
 | .NET / WPF | Runtime selected by .NET 10 SDK | https://github.com/dotnet |

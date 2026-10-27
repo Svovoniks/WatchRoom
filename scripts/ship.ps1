@@ -189,11 +189,20 @@ function Assert-ReleaseMetadata {
     if ($installer.Count -ne 1 -or $installer[0].size -le 0 -or $installer[0].digest -cnotmatch '^sha256:[a-f0-9]{64}$' -or $checksums.Count -ne 1) {
         throw 'Missing installer, size, SHA-256 digest, or checksum asset.'
     }
-    foreach ($asset in @($installer[0], $checksums[0])) {
+    # Update installers carry only the files changed since an earlier version and are verified like the full one.
+    $updates = @($Release.assets | Where-Object name -CMatch "^Watchroom-Update-\d+\.\d+\.\d+-to-$([regex]::Escape($ExpectedVersion))-win-x64\.exe$")
+    foreach ($update in $updates) {
+        if ($update.size -le 0 -or $update.digest -cnotmatch '^sha256:[a-f0-9]{64}$') { throw "Missing size or SHA-256 digest for $($update.name)." }
+    }
+    # The file list lets later releases build update installers from this one and lets the app check its files.
+    $files = @($Release.assets | Where-Object name -CEQ "Watchroom-files-$ExpectedVersion-win-x64.txt")
+    if ($files.Count -ne 1 -or $files[0].size -le 0 -or $files[0].digest -cnotmatch '^sha256:[a-f0-9]{64}$') { throw 'Missing file list, size, or SHA-256 digest.' }
+    $updates = @($updates) + $files
+    foreach ($asset in @($installer[0], $checksums[0]) + $updates) {
         $expected = "https://github.com/Svovoniks/WatchRoom/releases/download/v$ExpectedVersion/$($asset.name)"
         if ($asset.browser_download_url -cne $expected) { throw 'Unexpected release asset URL.' }
     }
-    return @{ Installer = $installer[0]; Checksums = $checksums[0] }
+    return @{ Installer = $installer[0]; Checksums = $checksums[0]; Updates = $updates }
 }
 function Assert-InstallerBytes {
     param([string]$InstallerPath, [string]$ChecksumPath, $Asset)
@@ -243,14 +252,19 @@ function Test-PublishedRelease {
     Write-Host "Downloading $($assets.Installer.name) for verification…"
     Invoke-WebRequest -Uri $assets.Installer.browser_download_url -OutFile $installerPath -TimeoutSec 600
     $hash = Assert-InstallerBytes $installerPath $checksumPath $assets.Installer
+    foreach ($update in $assets.Updates) {
+        $updatePath = Join-Path $Destination $update.name
+        Invoke-WebRequest -Uri $update.browser_download_url -OutFile $updatePath -TimeoutSec 600
+        $null = Assert-InstallerBytes $updatePath $checksumPath $update
+    }
     $url = "https://github.com/$repository/releases/tag/v$ExpectedVersion"
     $page = Invoke-WebRequest -Uri $url -TimeoutSec 60
     $links = Invoke-WebRequest -Uri "https://github.com/$repository/releases/expanded_assets/v$ExpectedVersion" -TimeoutSec 60
-    foreach ($asset in @($assets.Installer, $assets.Checksums)) {
+    foreach ($asset in @($assets.Installer, $assets.Checksums) + $assets.Updates) {
         if (!$links.Content.Contains("/releases/download/v$ExpectedVersion/$($asset.name)")) { throw 'Public release page is missing asset links.' }
     }
     if ($page.StatusCode -ne 200) { throw 'Public release page is unavailable.' }
-    return @{ Version = $ExpectedVersion; Release = $url; Sha256 = $hash; Installer = $installerPath }
+    return @{ Version = $ExpectedVersion; Release = $url; Sha256 = $hash; Installer = $installerPath; Updates = @($assets.Updates | ForEach-Object { "$($_.name) ($([Math]::Round($_.size / 1MB, 1)) MB)" }) }
 }
 
 # Dot-sourcing exposes helpers for offline safety checks without starting a release.
@@ -360,6 +374,7 @@ try {
     Write-Host "$outcome Watchroom ${Version}: $($result.Release)"
     Write-Host "Actions: $($run.html_url)"
     Write-Host "Verified SHA-256: $($result.Sha256)"
+    Write-Host "Verified file list and update installers: $(if ($result.Updates.Count) { $result.Updates -join ', ' } else { 'none' })"
     Write-Host "Verification record: $record"
     Write-Host "Local master synchronized: $($result.LocalMaster.Commit)"
 }

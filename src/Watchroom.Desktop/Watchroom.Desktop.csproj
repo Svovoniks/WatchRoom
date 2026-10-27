@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows10.0.17763.0</TargetFramework><UseWPF>true</UseWPF><PlatformTarget>x64</PlatformTarget><AssemblyName>Watchroom</AssemblyName><ApplicationIcon>Assets/Watchroom.ico</ApplicationIcon><ApplicationManifest>app.manifest</ApplicationManifest></PropertyGroup><ItemGroup><PackageReference Include="NAudio.Wasapi" Version="3.3.0" /><ProjectReference Include="../Watchroom.Core/Watchroom.Core.csproj" /><PackageReference Include="LibVLCSharp.WPF" Version="3.10.1" /><PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" /><PackageReference Include="Whisper.net" Version="1.9.1" /><PackageReference Include="Whisper.net.Runtime" Version="1.9.1" /><PackageReference Include="Whisper.net.Runtime.NoAvx" Version="1.9.1" /><PackageReference Include="Panlingo.LanguageIdentification.CLD3" Version="0.8.1" /></ItemGroup><ItemGroup><Resource Include="Assets/Watchroom.ico" /><Resource Include="Assets/Watchroom.png" /><Resource Include="Assets/Tmdb.png" /></ItemGroup><ItemGroup><AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" /><InternalsVisibleTo Include="Watchroom.DesktopChecks" /></ItemGroup>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows10.0.17763.0</TargetFramework><UseWPF>true</UseWPF><PlatformTarget>x64</PlatformTarget><AssemblyName>Watchroom</AssemblyName><ApplicationIcon>Assets/Watchroom.ico</ApplicationIcon><ApplicationManifest>app.manifest</ApplicationManifest></PropertyGroup><ItemGroup><PackageReference Include="NAudio.Wasapi" Version="3.3.0" /><ProjectReference Include="../Watchroom.Core/Watchroom.Core.csproj" /><PackageReference Include="LibVLCSharp.WPF" Version="3.10.1" /><PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" /><PackageReference Include="Whisper.net" Version="1.9.1" /><PackageReference Include="Whisper.net.Runtime" Version="1.9.1" /><PackageReference Include="Whisper.net.Runtime.NoAvx" Version="1.9.1" /><PackageReference Include="Panlingo.LanguageIdentification.CLD3" Version="0.8.1" /><PackageReference Include="TesseractOCR" Version="5.5.2" /></ItemGroup><ItemGroup><Resource Include="Assets/Watchroom.ico" /><Resource Include="Assets/Watchroom.png" /><Resource Include="Assets/Tmdb.png" /></ItemGroup><ItemGroup><AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" /><InternalsVisibleTo Include="Watchroom.DesktopChecks" /></ItemGroup>
   <!-- Whisper tiny (MIT, OpenAI; ggml conversion by whisper.cpp) identifies spoken languages of untagged audio tracks.
        Downloaded once per checkout from a pinned revision and verified before it is bundled under Models/. -->
   <PropertyGroup><LanguageModelName>ggml-tiny-q5_1.bin</LanguageModelName><LanguageModelSha256>818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7</LanguageModelSha256><LanguageModelUrl>https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/$(LanguageModelName)</LanguageModelUrl><LanguageModelDirectory>$(MSBuildThisFileDirectory)../../.tools/models/</LanguageModelDirectory><LanguageModelPath>$(LanguageModelDirectory)$(LanguageModelName)</LanguageModelPath></PropertyGroup>
@@ -7,5 +7,70 @@
     <DownloadFile SourceUrl="$(LanguageModelUrl)" DestinationFolder="$(LanguageModelDirectory)" DestinationFileName="$(LanguageModelName).download" Retries="3" RetryDelayMilliseconds="2000" />
     <VerifyFileHash File="$(LanguageModelDirectory)$(LanguageModelName).download" Hash="$(LanguageModelSha256)" Algorithm="SHA256" />
     <Move SourceFiles="$(LanguageModelDirectory)$(LanguageModelName).download" DestinationFiles="$(LanguageModelPath)" />
+  </Target>
+  <!-- Tesseract script models (Apache-2.0, tessdata_fast) read picture subtitles (PGS, VobSub) for language identification.
+       Downloaded once per checkout from a pinned revision and verified, then bundled under Models/tessdata without their
+       word lists: those are most of each file (87 of Latin's 89 MB) and would lean the text toward one language. -->
+  <PropertyGroup><TextModelRevision>87416418657359cb625c412a48b6e1d6d41c29bd</TextModelRevision><TextModelDirectory>$(MSBuildThisFileDirectory)../../.tools/models/tessdata/</TextModelDirectory></PropertyGroup>
+  <ItemGroup>
+    <TextModel Include="Latin" Sha256="6dbdaf8ecc6c40f025c2648bf3b3f3fbffe073e1fd2df2047fde2e2b2f020d53" />
+    <TextModel Include="Cyrillic" Sha256="a80325ebb1c7aa2dca5002ec05b15052a51dcb2e9e65373c264a3df7ac284358" />
+    <TextModel Include="Greek" Sha256="52e201e4a22336d89ee202b579aca04f15ffd6e5e6af1fe164498f2c7de898e6" />
+    <TextModel Include="Arabic" Sha256="47c262ac4e843c024df87ffa1363b77a821a843c069c71ef7650f4d2ecfea1e8" />
+    <TextModel Include="Hebrew" Sha256="4f4f3405404a61e21e5c16316ed5c3052ddb3572a75e0b3dc3fe118b12dea76e" />
+    <TextModel Include="Devanagari" Sha256="3bbb87c1de2a6a2ef0a97dc041e6eea2723a1c22d638f5e38157a5cd441c12b7" />
+    <TextModel Include="Thai" Sha256="d9e34be94556ddb65fd7e04892ff606e1a5b696d0eb422b5a7efc6859943702d" />
+    <TextModel Include="Hangul" Sha256="cae2d12b8cdac6b62643b65915bec347e80970adc55228ca42ac1ec8909b198a" />
+    <TextModel Include="Japanese" Sha256="c176cdca0c17e9be97bda854ac91baea90b92e2813b45749ad05e409477ba8b2" />
+    <TextModel Include="HanS" Sha256="d03c250faaa48015bfde2213f3d7d5bda82bcee93422fceac5906a32073d9152" />
+    <TextModel Include="HanT" Sha256="29588327f0d830b5c112209045d826b9be014138266b20f2b08843aac2730fbb" />
+    <TextModel Include="Vietnamese" Sha256="30546eea618459e79761f962391e6879778b026ad7b4459a11664a1b654758bd" />
+  </ItemGroup>
+  <ItemGroup><None Include="@(TextModel->'$(TextModelDirectory)%(Identity).traineddata')" Link="Models/tessdata/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" /><None Include="Models/LICENSE-tesseract.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
+  <Target Name="FetchTextModels" BeforeTargets="AssignTargetPaths;PrepareForBuild">
+    <ItemGroup><MissingTextModel Include="@(TextModel)" Condition="!Exists('$(TextModelDirectory)%(Identity).traineddata')" /></ItemGroup>
+    <DownloadFile Condition="'@(MissingTextModel)' != ''" SourceUrl="https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/$(TextModelRevision)/script/%(MissingTextModel.Identity).traineddata" DestinationFolder="$(TextModelDirectory)download/" DestinationFileName="%(MissingTextModel.Identity).traineddata" Retries="3" RetryDelayMilliseconds="2000" />
+    <VerifyFileHash Condition="'@(MissingTextModel)' != ''" File="$(TextModelDirectory)download/%(MissingTextModel.Identity).traineddata" Hash="%(MissingTextModel.Sha256)" Algorithm="SHA256" />
+    <StripTextModels Condition="'@(MissingTextModel)' != ''" Models="@(MissingTextModel->'$(TextModelDirectory)download/%(Identity).traineddata')" Destination="$(TextModelDirectory)" />
+    <RemoveDir Condition="'@(MissingTextModel)' != ''" Directories="$(TextModelDirectory)download/" />
+  </Target>
+  <!-- A traineddata file: the number of components, each one's offset (-1 when absent), then the components in order.
+       The LSTM word list is component 19. -->
+  <UsingTask TaskName="StripTextModels" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup><Models ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" /><Destination Required="true" /></ParameterGroup>
+    <Task><Code Type="Fragment" Language="cs"><![CDATA[
+      foreach (var model in Models)
+      {
+          var bytes = System.IO.File.ReadAllBytes(model.ItemSpec);
+          var count = System.BitConverter.ToInt32(bytes, 0);
+          var offsets = new long[count];
+          for (var i = 0; i < count; i++) offsets[i] = System.BitConverter.ToInt64(bytes, 4 + 8 * i);
+          var kept = new long[count];
+          var parts = new byte[count][];
+          var position = 4L + 8L * count;
+          for (var i = 0; i < count; i++)
+          {
+              kept[i] = -1;
+              if (offsets[i] < 0 || i == 19) continue;
+              var end = (long)bytes.Length;
+              for (var j = i + 1; j < count; j++) if (offsets[j] >= 0) { end = offsets[j]; break; }
+              parts[i] = new byte[end - offsets[i]];
+              System.Array.Copy(bytes, offsets[i], parts[i], 0, parts[i].Length);
+              kept[i] = position; position += parts[i].Length;
+          }
+          var output = new System.IO.MemoryStream();
+          output.Write(System.BitConverter.GetBytes(count), 0, 4);
+          foreach (var offset in kept) output.Write(System.BitConverter.GetBytes(offset), 0, 8);
+          foreach (var part in parts) if (part != null) output.Write(part, 0, part.Length);
+          var target = System.IO.Path.Combine(Destination, System.IO.Path.GetFileName(model.ItemSpec));
+          System.IO.File.WriteAllBytes(target + ".tmp", output.ToArray());
+          if (System.IO.File.Exists(target)) System.IO.File.Delete(target);
+          System.IO.File.Move(target + ".tmp", target);
+      }
+    ]]></Code></Task>
+  </UsingTask>
+  <!-- The app is x64 only. -->
+  <Target Name="DropX86Tesseract" BeforeTargets="AssignTargetPaths">
+    <ItemGroup><None Remove="@(None)" Condition="$([System.String]::Copy('%(None.Link)').StartsWith('x86'))" /></ItemGroup>
   </Target>
 </Project>

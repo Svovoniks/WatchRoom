@@ -50,12 +50,15 @@ public partial class MainWindow
             using var checkTimeout = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
             checkTimeout.CancelAfter(TimeSpan.FromSeconds(30));
             availableUpdate = await new GitHubUpdates(updateHttp, UpdateRepository).CheckAsync(InstalledVersion, checkTimeout.Token);
+            // Update installers that ran without reaching this version (refused, blocked or interrupted) are not tried twice.
+            if (availableUpdate is { Partial: true } && library.Setting("partialUpdate") == availableUpdate.Version.ToString())
+                availableUpdate = availableUpdate with { Steps = [availableUpdate.Full] };
             if (closing) return;
             UpdateStatus.Text = availableUpdate is null ? $"Version {InstalledVersion} · No newer release available." : $"Version {availableUpdate.Version} is available.";
             if (availableUpdate is not null && (manual || library.Setting("dismissedUpdate") != availableUpdate.Version.ToString()))
             {
                 UpdateCardTitle.Text = $"Watchroom {availableUpdate.Version} is available";
-                UpdateCardStatus.Text = "Download and install the latest version from GitHub. The app will close and reopen; your library and settings are kept.";
+                UpdateCardStatus.Text = $"Download and install the latest version from GitHub ({availableUpdate.Size / 1048576.0:0.#} MB). The app will close and reopen; your library and settings are kept.";
                 UpdateCard.Visibility = Visibility.Visible;
             }
         }
@@ -81,20 +84,70 @@ public partial class MainWindow
         UpdateDownloadProgress.Visibility = Visibility.Visible;
         try
         {
-            UpdateCardStatus.Text = "Downloading and verifying the installer…";
+            var update = availableUpdate;
+            UpdateCardStatus.Text = update.Partial ? "Checking the installed files, then downloading the update…" : "Downloading and verifying the installer…";
             var progress = new Progress<double>(value => { UpdateDownloadProgress.Value = value; });
-            var installer = await new GitHubUpdates(updateHttp, UpdateRepository).DownloadAsync(availableUpdate, Path.Combine(App.DataDirectory, "updates"), progress, lifetime.Token);
+            var updates = new GitHubUpdates(updateHttp, UpdateRepository);
+            var folder = Path.Combine(App.DataDirectory, "updates");
+            var installers = await updates.DownloadAsync(update, folder, updateDirectory, progress, lifetime.Token);
             if (closing) return;
-            var start = new ProcessStartInfo(installer) { UseShellExecute = false };
             UpdateDownloadProgress.IsIndeterminate = true;
             UpdateCardStatus.Text = "Installing and restarting Watchroom… The installer will show progress.";
-            foreach (var argument in new[] { "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/WATCHROOMUPDATE=1", "/LOG=" + Path.Combine(App.DataDirectory, "updates", "install.log"), "/DIR=" + updateDirectory }) start.ArgumentList.Add(argument);
-            if (Process.Start(start) is null) throw new IOException("Could not start the installer.");
+            var partial = Path.GetFileName(installers[0]) != update.Full.Name;
+            if (partial) library.Setting("partialUpdate", update.Version.ToString());
+            try { await StartInstallers(installers); }
+            // Antivirus software may hold back or remove a downloaded installer; the full one is the well-known file.
+            catch (System.ComponentModel.Win32Exception) when (partial)
+            {
+                UpdateDownloadProgress.IsIndeterminate = false;
+                UpdateCardStatus.Text = "Downloading the full installer…";
+                installers = await updates.DownloadAsync(update with { Steps = [update.Full] }, folder, null, progress, lifetime.Token);
+                if (closing) return;
+                UpdateDownloadProgress.IsIndeterminate = true;
+                UpdateCardStatus.Text = "Installing and restarting Watchroom… The installer will show progress.";
+                await StartInstallers(installers);
+            }
             Close();
         }
         catch (OperationCanceledException) { if (!closing) UpdateCardStatus.Text = "Download interrupted. Try again."; }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or HttpRequestException or System.ComponentModel.Win32Exception)
         { UpdateCardStatus.Text = "Update failed: " + ex.Message; }
         finally { installingUpdate = false; InstallUpdateButton.IsEnabled = true; DismissUpdateButton.IsEnabled = true; UpdateDownloadProgress.IsIndeterminate = false; UpdateDownloadProgress.Visibility = Visibility.Collapsed; }
+    }
+    // A chain of update installers runs one after another from a small script once the app has closed. Only the last
+    // one reopens Watchroom; when a step fails the script reopens the version that is installed by then. cmd reads the
+    // script in the console code page, so it names only its own folder (%~dp0, where the installers are downloaded) and
+    // takes the installation folder from the environment; profile paths in any language stay intact.
+    private async Task StartInstallers(IReadOnlyList<string> installers)
+    {
+        if (installers.Count == 1) { await StartInstaller(installers[0]); return; }
+        var folder = Path.Combine(App.DataDirectory, "updates");
+        if (installers.Any(x => !string.Equals(Path.GetDirectoryName(x), folder, StringComparison.OrdinalIgnoreCase) || !System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(x), @"^[A-Za-z0-9.-]+$")))
+            throw new IOException("Unexpected installer location.");
+        var script = new System.Text.StringBuilder("@echo off\r\n");
+        for (var i = 0; i < installers.Count; i++)
+        {
+            var last = i == installers.Count - 1;
+            script.Append($"start \"\" /wait \"%~dp0{Path.GetFileName(installers[i])}\" /SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS")
+                .Append(last ? " /WATCHROOMUPDATE=1" : "").Append($" \"/LOG=%~dp0install-{i + 1}.log\" \"/DIR=%WATCHROOM_INSTALL%\"\r\nif errorlevel 1 goto failed\r\n");
+        }
+        script.Append("exit /b 0\r\n:failed\r\nstart \"\" \"%WATCHROOM_INSTALL%\\Watchroom.exe\"\r\nexit /b 1\r\n");
+        var path = Path.Combine(folder, "install-chain.cmd");
+        await File.WriteAllTextAsync(path, script.ToString(), lifetime.Token);
+        // /s with doubled quotes keeps the script path intact even when the profile folder has spaces or parentheses.
+        var start = new ProcessStartInfo("cmd.exe", $"/d /s /c \"\"{path}\"\"") { UseShellExecute = false, CreateNoWindow = true };
+        start.Environment["WATCHROOM_INSTALL"] = updateDirectory;
+        if (Process.Start(start) is null) throw new IOException("Could not start the update.");
+    }
+    // Antivirus software can deny or lock a just-downloaded installer while it scans it, so those errors are retried.
+    private async Task StartInstaller(string installer)
+    {
+        var start = new ProcessStartInfo(installer) { UseShellExecute = false };
+        foreach (var argument in new[] { "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/WATCHROOMUPDATE=1", "/LOG=" + Path.Combine(App.DataDirectory, "updates", "install.log"), "/DIR=" + updateDirectory }) start.ArgumentList.Add(argument);
+        for (var attempt = 1; ; attempt++)
+        {
+            try { if (Process.Start(start) is null) throw new IOException("Could not start the installer."); return; }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode is 5 or 32 && attempt < 8) { await Task.Delay(2000, lifetime.Token); }
+        }
     }
 }

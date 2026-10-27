@@ -10,6 +10,8 @@ namespace Watchroom.Core;
 /// </summary>
 public record ContainerTrack(int Number, ContainerTrackType Type, string Codec, string? Language, bool Text, string? Name = null, bool Forced = false)
 {
+    /// <summary>Picture subtitles that can be read: Blu-ray PGS and DVD VobSub (Matroska only).</summary>
+    public bool Image => Type == ContainerTrackType.Subtitle && SubtitleText.ImageCodec(Codec);
     /// <summary>
     /// Matroska defaults an absent language to English, and players report it so, but muxers omit it for unknown
     /// languages too; "und" says so outright. Either way the file doesn't really say.
@@ -53,17 +55,8 @@ public static partial class SubtitleText
             var wanted = header.Tracks.Where(t => t.Entry.Text && numbers.Contains(t.Entry.Number)).ToDictionary(t => t.Entry.Number);
             if (wanted.Count == 0) return result;
             var text = wanted.Keys.ToDictionary(n => n, _ => new StringBuilder());
-            var length = file.Length - header.ClustersStart;
-            var window = Math.Max(4L << 20, length / 40);
-            var scanned = header.ClustersStart; // windows of small files overlap; read each part once
-            for (var i = 0; i < Windows && scanned < file.Length && text.Values.Any(b => b.Length < EnoughCharacters); i++)
-            {
-                ct.ThrowIfCancellationRequested();
-                var start = header.ClustersStart + length * (2 * i + 1) / (2 * Windows) - window / 2;
-                if (FindCluster(file, Math.Max(scanned, start), ct) is not { } cluster) continue;
-                scanned = Math.Min(file.Length, cluster + window);
-                ScanBlocks(file, cluster, scanned, wanted, text, ct);
-            }
+            ScanWindows(file, header, wanted, number => text[number].Length < EnoughCharacters, () => { },
+                (entry, payload) => Append(text[entry.Entry.Number], EventText(entry.Entry.Codec, Encoding.UTF8.GetString(payload))), 64 << 10, ct);
             foreach (var (number, builder) in text)
                 if (builder.Length > 0) result[number] = builder.ToString();
         }
@@ -164,7 +157,7 @@ public static partial class SubtitleText
     [GeneratedRegex(@"[‎‏‪-‮⁦-⁩]")] private static partial Regex DirectionMark();
     [GeneratedRegex(@"^(\{\d+\}){1,2}")] private static partial Regex MicroDvdTiming();
 
-    private sealed record Track(ContainerTrack Entry, int Compression, byte[] Stripped);
+    private sealed record Track(ContainerTrack Entry, int Compression, byte[] Stripped, byte[] Private);
     private sealed record Header(List<Track> Tracks, long ClustersStart);
 
     private static bool IsMatroska(string path) => Path.GetExtension(path).ToLowerInvariant() is ".mkv" or ".mka" or ".mks" or ".webm";
@@ -224,7 +217,7 @@ public static partial class SubtitleText
             var id = Vint(file, true); var length = Vint(file, false); var next = checked(file.Position + (long)length);
             if (id == 0xae)
             {
-                int number = 0; ulong type = 0; string codec = ""; string? language = null, bcp47 = null, name = null; var forced = false; var compression = -1; byte[] stripped = [];
+                int number = 0; ulong type = 0; string codec = ""; string? language = null, bcp47 = null, name = null; var forced = false; var compression = -1; byte[] stripped = [], codecPrivate = [];
                 while (file.Position < next)
                 {
                     var field = Vint(file, true); var size = Vint(file, false); var fieldEnd = checked(file.Position + (long)size);
@@ -238,12 +231,13 @@ public static partial class SubtitleText
                         case 0x536e: name = Ascii(file, size).Trim(); break;
                         case 0x55aa: forced = UInt(file, size) != 0; break;
                         case 0x6d80: (compression, stripped) = ReadEncodings(file, fieldEnd); break;
+                        case 0x63a2: codecPrivate = Bytes(file, size); break;
                     }
                     file.Position = fieldEnd;
                 }
                 var kind = type switch { 1 => ContainerTrackType.Video, 2 => ContainerTrackType.Audio, 0x11 => ContainerTrackType.Subtitle, _ => ContainerTrackType.Other };
                 var text = kind == ContainerTrackType.Subtitle && (codec.StartsWith("S_TEXT/", StringComparison.Ordinal) || codec is "S_ASS" or "S_SSA");
-                tracks.Add(new(new(number, kind, codec, bcp47 ?? language, text, string.IsNullOrEmpty(name) ? null : name, forced), compression, stripped));
+                tracks.Add(new(new(number, kind, codec, bcp47 ?? language, text, string.IsNullOrEmpty(name) ? null : name, forced), compression, stripped, codecPrivate));
             }
             file.Position = next;
         }
@@ -293,8 +287,28 @@ public static partial class SubtitleText
         }
         return null;
     }
+    // A few windows spread across the file, each from the first cluster at or after its start. Windows of small files
+    // overlap; each part is read once. Next is called before each window.
+    private static void ScanWindows(FileStream file, Header header, Dictionary<int, Track> wanted, Func<int, bool> needs, Action next,
+        Action<Track, byte[]> add, int largest, CancellationToken ct)
+    {
+        var length = file.Length - header.ClustersStart;
+        var window = Math.Max(4L << 20, length / 40);
+        var scanned = header.ClustersStart;
+        for (var i = 0; i < Windows && scanned < file.Length; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            next();
+            if (!wanted.Keys.Any(needs)) return;
+            var start = header.ClustersStart + length * (2 * i + 1) / (2 * Windows) - window / 2;
+            if (FindCluster(file, Math.Max(scanned, start), ct) is not { } cluster) continue;
+            scanned = Math.Min(file.Length, cluster + window);
+            ScanBlocks(file, cluster, scanned, wanted, needs, add, largest, ct);
+        }
+    }
     // A flat walk: Segment, Cluster and BlockGroup are entered, every other element skipped. Their IDs don't collide.
-    private static void ScanBlocks(FileStream file, long from, long until, Dictionary<int, Track> wanted, Dictionary<int, StringBuilder> text, CancellationToken ct)
+    private static void ScanBlocks(FileStream file, long from, long until, Dictionary<int, Track> wanted, Func<int, bool> needs,
+        Action<Track, byte[]> add, int largest, CancellationToken ct)
     {
         file.Position = from;
         try
@@ -310,18 +324,17 @@ public static partial class SubtitleText
                 if (id is 0xa3 or 0xa1 && length > 4)
                 {
                     var track = (int)Vint(file, false);
-                    if (wanted.TryGetValue(track, out var entry) && text[track].Length < EnoughCharacters)
+                    if (wanted.TryGetValue(track, out var entry) && needs(track))
                     {
                         file.Position += 2; var flags = file.ReadByte();
                         var size = next - file.Position;
-                        if ((flags & 0x06) == 0 && size is > 0 and < 64 << 10)
+                        if ((flags & 0x06) == 0 && size > 0 && size < largest)
                         {
                             var payload = new byte[size]; file.ReadExactly(payload);
-                            if (Payload(entry, payload) is { } decoded)
-                                Append(text[track], EventText(entry.Entry.Codec, Encoding.UTF8.GetString(decoded)));
+                            if (Payload(entry, payload) is { } decoded) add(entry, decoded);
                         }
                     }
-                    if (wanted.Keys.All(n => text[n].Length >= EnoughCharacters)) return;
+                    if (!wanted.Keys.Any(needs)) return;
                 }
                 file.Position = next;
             }

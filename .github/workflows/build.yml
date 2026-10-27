@@ -66,6 +66,7 @@ jobs:
         shell: pwsh
         env:
           WATCHROOM_TMDB_API_KEY: ${{ secrets.WATCHROOM_TMDB_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           $keyFile = Join-Path $env:RUNNER_TEMP "watchroom-tmdb-key.txt"
           if ([string]::IsNullOrWhiteSpace($env:WATCHROOM_TMDB_API_KEY)) { throw "WATCHROOM_TMDB_API_KEY repository secret is required for packaged builds." }
@@ -74,10 +75,15 @@ jobs:
           dotnet publish src/Watchroom.Desktop -c Release -r win-x64 --self-contained true -o artifacts/Watchroom -p:Version=$env:APP_VERSION -p:VlcWindowsX86Enabled=false -p:VlcWindowsArm64Enabled=false
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           ./scripts/package.ps1 -SkipPublish -Version $env:APP_VERSION
+          ./scripts/update-package-checks.ps1
+          ./scripts/package-updates.ps1 -Version $env:APP_VERSION
       - uses: actions/upload-artifact@v4
         with:
           name: Watchroom-windows-${{ env.APP_VERSION }}
-          path: artifacts/Watchroom-Setup-*-win-x64.exe
+          path: |
+            artifacts/Watchroom-Setup-*-win-x64.exe
+            artifacts/Watchroom-Update-*-win-x64.exe
+            artifacts/Watchroom-files-*-win-x64.txt
           retention-days: 14
       - name: Publish GitHub release
         if: startsWith(github.ref, 'refs/tags/')
@@ -85,10 +91,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $installer = "artifacts/Watchroom-Setup-$env:APP_VERSION-win-x64.exe"
-          $checksum = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$checksum  $(Split-Path $installer -Leaf)" | Set-Content artifacts/SHA256SUMS.txt
-          gh release create $env:GITHUB_REF_NAME $installer artifacts/SHA256SUMS.txt --verify-tag --draft --title "Watchroom $env:APP_VERSION" --generate-notes
+          $files = @("artifacts/Watchroom-Setup-$env:APP_VERSION-win-x64.exe", "artifacts/Watchroom-files-$env:APP_VERSION-win-x64.txt") +
+            @(Get-ChildItem "artifacts/Watchroom-Update-*-to-$env:APP_VERSION-win-x64.exe" | ForEach-Object { $_.FullName })
+          $files | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $(Split-Path $_ -Leaf)" } | Set-Content artifacts/SHA256SUMS.txt
+          gh release create $env:GITHUB_REF_NAME @files artifacts/SHA256SUMS.txt --verify-tag --draft --title "Watchroom $env:APP_VERSION" --generate-notes
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           gh release edit $env:GITHUB_REF_NAME --draft=false --latest
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

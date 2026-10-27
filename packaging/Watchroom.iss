@@ -1,25 +1,53 @@
 #ifndef AppVersion
 #error "Build with scripts/package.ps1 so the installer uses the app version"
 #endif
+; UpdateFrom builds an update installer from scripts/package-updates.ps1: only the files staged in AppFiles, plus
+; deletion of files the new version no longer has, applied over an installed UpdateFrom. TestInstall gives the update
+; checks their own identity, without file associations or shortcuts, so they never touch the real installation.
+#ifndef AppGuid
+#define AppGuid "90B3BA58-BBC8-4993-A0EA-25C68D8B1DA6"
+#endif
+#ifndef AppFiles
+#define AppFiles "..\artifacts\Watchroom"
+#endif
+#ifndef OutputFolder
+#define OutputFolder "..\artifacts"
+#endif
 [Setup]
-AppId={{90B3BA58-BBC8-4993-A0EA-25C68D8B1DA6}
+AppId={{{#AppGuid}}
+#ifdef TestInstall
+AppName=Watchroom update check
+#else
 AppName=Watchroom
+#endif
 AppVersion={#AppVersion}
 DefaultDirName={localappdata}\Programs\Watchroom
 DefaultGroupName=Watchroom
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-OutputDir=..\artifacts
+OutputDir={#OutputFolder}
+#ifdef UpdateFrom
+OutputBaseFilename=Watchroom-Update-{#UpdateFrom}-to-{#AppVersion}-win-x64
+#else
 OutputBaseFilename=Watchroom-Setup-{#AppVersion}-win-x64
+#endif
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\Watchroom.exe
 CloseApplications=yes
+#ifndef TestInstall
 ChangesAssociations=yes
+#endif
 [Files]
-Source: "..\artifacts\Watchroom\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+#ifdef UpdateFrom
+Source: "{#AppFiles}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+#include UpdateRemoved
+#else
+Source: "{#AppFiles}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
+#ifndef TestInstall
 [Icons]
 Name: "{group}\Watchroom"; Filename: "{app}\Watchroom.exe"
 [Registry]
@@ -75,6 +103,7 @@ Root: HKCU; Subkey: "Software\Classes\Applications\Watchroom.exe\SupportedTypes"
 Root: HKCU; Subkey: "Software\Watchroom\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ogv"; ValueData: "Watchroom.Video"
 [Run]
 Filename: "{app}\Watchroom.exe"; Description: "Open Watchroom"; Flags: nowait postinstall skipifsilent
+#endif
 
 [Code]
 function IsWatchroomUpdate: Boolean;
@@ -82,6 +111,20 @@ begin
   Result := ExpandConstant('{param:WATCHROOMUPDATE|0}') = '1';
 end;
 
+#ifdef UpdateFrom
+// An update installer carries only what changed since UpdateFrom, so it refuses any other installation.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Key, Installed, Location: String;
+begin
+  Result := '';
+  Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{{#AppGuid}}_is1';
+  if not RegQueryStringValue(HKCU, Key, 'DisplayVersion', Installed) then Installed := '';
+  if not RegQueryStringValue(HKCU, Key, 'InstallLocation', Location) then Location := '';
+  if (Installed <> '{#UpdateFrom}') or (CompareText(AddBackslash(Location), AddBackslash(ExpandConstant('{app}'))) <> 0) then
+    Result := 'This update applies to Watchroom {#UpdateFrom} installed in this folder. Download the full installer from GitHub instead.';
+end;
+#endif
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode, Attempts: Integer;

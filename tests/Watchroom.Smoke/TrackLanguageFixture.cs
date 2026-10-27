@@ -181,6 +181,29 @@ static class TrackLanguageFixture
                 [new("S_TEXT/ASS", ["sa", "sa", "些", "些", "Why don't we take these good times", "Why don't we take these good times", "chi"])]);
             check(SubtitleText.Sample(karaoke, [2]).GetValueOrDefault(2) == "Why don't we take these good times",
                 "karaoke syllables and layered repeats of a line are left out of the sampled dialogue");
+            var pictures = Path.Combine(directory, "pictures.mkv");
+            var bars = PictureSubtitleFixture.Bars(3, 4, 8, 20);
+            var italic = PictureSubtitleFixture.Bars(3, 4, 12, 20, 0.3);
+            MatroskaFixture.Write(pictures, [new(new short[16000 * 20], 16000)],
+            [
+                new("S_HDMV/PGS", [], Payloads: [PictureSubtitleFixture.Pgs(bars), [0x16, 0, 0, 0x80, 0, 0]], Compression: "zlib"),
+                new("S_VOBSUB", [], Payloads: [PictureSubtitleFixture.VobSub(italic)], Private: PictureSubtitleFixture.VobSubPrivate()),
+                new("S_TEXT/UTF8", ["Where are you going?"]),
+            ]);
+            var pictureTracks = SubtitleText.Tracks(pictures);
+            check(pictureTracks.Select(t => t.Image).SequenceEqual([false, true, true, false]) && !pictureTracks[1].Text, "PGS and VobSub tracks are picture subtitles");
+            var images = SubtitleText.SampleImages(pictures, [2, 3, 4]);
+            check(images.Keys.Order().SequenceEqual([2, 3]) && images[2].Count > 0 && images[3].Count > 0,
+                "pictures are sampled from PGS and VobSub tracks, and display sets that only clear the screen have none");
+            var pgs = images[2][0];
+            var middle = PictureSubtitleFixture.DarkRuns(pgs, pgs.Height / 2);
+            check(middle.Count == 3 && pgs.Pixels[0] == 255 && PictureSubtitleFixture.DarkRuns(pgs, 2).Count == 0,
+                "a picture's bright fill becomes dark text on white, without its outline or transparent background");
+            check(Math.Abs(pgs.Height - 24 - 40) <= 2, "pictures are scaled so a line of text is about 40 pixels tall");
+            var vobsub = images[3][0];
+            var topRuns = PictureSubtitleFixture.DarkRuns(vobsub, 12 + 4); var bottomRuns = PictureSubtitleFixture.DarkRuns(vobsub, vobsub.Height - 12 - 5);
+            check(topRuns.Count == 3 && bottomRuns.Count == 3 && topRuns.Zip(bottomRuns).All(pair => Math.Abs(pair.First.Start - pair.Second.Start) <= 3),
+                "interlaced VobSub pictures are decoded with their palette, and italic text is set upright");
             check(SubtitleText.Tracks(Path.Combine(directory, "missing.mkv")).Count == 0 && SubtitleText.Tracks(typeof(TrackLanguageFixture).Assembly.Location).Count == 0,
                 "missing files and other containers have no Matroska tracks");
 

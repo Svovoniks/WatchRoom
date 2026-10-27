@@ -11,8 +11,11 @@ namespace Watchroom.Desktop;
 // The video page also lists the file's audio and subtitles, with languages as they're identified.
 public partial class MainWindow
 {
-    /// <summary>An audio or subtitle track as the player numbers it. Untagged: the file doesn't name its language.</summary>
-    private sealed record FileTrack(TrackType Type, int Id, string? Language, string? Name, bool Forced, bool Untagged, bool Text, int Number);
+    /// <summary>
+    /// An audio or subtitle track as the player numbers it. Untagged: the file doesn't name its language. Readable: subtitles
+    /// whose language can be identified, text or pictures.
+    /// </summary>
+    private sealed record FileTrack(TrackType Type, int Id, string? Language, string? Name, bool Forced, bool Untagged, bool Readable, int Number);
     /// <summary>A subtitle file the player loads beside the video, with the language its name or text gives.</summary>
     private sealed record SidecarFile(string Path, string? Language, bool Named);
     /// <summary>Complete is false when the file needed VLC's parser before playback had loaded VLC: its tracks are read again later.</summary>
@@ -40,15 +43,21 @@ public partial class MainWindow
             return language;
         });
 
-    /// <summary>Identifies a file's untagged text subtitles (player track id → container track number) from one read of the file.</summary>
+    /// <summary>
+    /// Identifies a file's untagged subtitles (player track id → container track number): text tracks from one read of the
+    /// file, picture tracks from another, read with text recognition.
+    /// </summary>
     private Task<Dictionary<int, string?>> IdentifyWritten(string path, string fileKey, IReadOnlyDictionary<int, int> tracks) =>
         SharedLanguageWork(fileKey + ":text:" + string.Join(",", tracks.Keys.Order()), async () =>
         {
             var token = lifetime.Token;
             var languages = await Task.Run(() =>
             {
-                var text = SubtitleText.Sample(path, tracks.Values.ToArray(), token);
-                return tracks.ToDictionary(pair => pair.Key, pair => LanguageDetection.Written(text.GetValueOrDefault(pair.Value)));
+                var numbers = tracks.Values.ToArray();
+                var text = SubtitleText.Sample(path, numbers, token);
+                var pictures = SubtitleOcr.Available ? SubtitleText.SampleImages(path, numbers, token) : new Dictionary<int, IReadOnlyList<SubtitleImage>>();
+                return tracks.ToDictionary(pair => pair.Key, pair => LanguageDetection.Written(text.GetValueOrDefault(pair.Value) ??
+                    (pictures.TryGetValue(pair.Value, out var images) ? SubtitleOcr.Read(images, token) : null)));
             }, token);
             foreach (var (id, language) in languages) library.CacheTrackLanguage(path, fileKey, false, id, language);
             return languages;
@@ -84,7 +93,8 @@ public partial class MainWindow
                 // VLC numbers Matroska and MP4 tracks by their position in the file.
                 ? container.Select((track, id) => (Track: track, Id: id)).Where(entry => entry.Track.Type is ContainerTrackType.Audio or ContainerTrackType.Subtitle)
                     .Select(entry => new FileTrack(entry.Track.Type == ContainerTrackType.Audio ? TrackType.Audio : TrackType.Text, entry.Id,
-                        TrackLanguages.Normalize(entry.Track.Language), entry.Track.Name, entry.Track.Forced, entry.Track.Untagged, entry.Track.Text, entry.Track.Number)).ToList()
+                        TrackLanguages.Normalize(entry.Track.Language), entry.Track.Name, entry.Track.Forced, entry.Track.Untagged,
+                        entry.Track.Text || entry.Track.Image && SubtitleOcr.Available, entry.Track.Number)).ToList()
                 : parse ? await ParseTracks(path, token) : null;
             var sidecars = SubtitleFiles.VlcSidecars(path).Select(file =>
             {
@@ -177,7 +187,7 @@ public partial class MainWindow
         finally { prefetching = false; }
     }
 
-    /// <summary>The next piece of work for a file: its subtitle text, then each untagged audio track. Null when all are known.</summary>
+    /// <summary>The next piece of work for a file: its subtitles, then each untagged audio track. Null when all are known.</summary>
     private Func<Task>? NextPrefetchStep(FileTracks file)
     {
         bool Unknown(TrackType type, int id)
@@ -185,7 +195,7 @@ public partial class MainWindow
             var key = LibraryStore.TrackLanguageKey(file.FileKey, type == TrackType.Audio, id);
             return !languageWorkFailed.Contains(key) && library.Setting(key) is null;
         }
-        var text = file.Tracks.Where(track => track.Type == TrackType.Text && track.Untagged && track.Text).ToDictionary(track => track.Id, track => track.Number);
+        var text = file.Tracks.Where(track => track.Type == TrackType.Text && track.Untagged && track.Readable).ToDictionary(track => track.Id, track => track.Number);
         if (text.Keys.Any(id => Unknown(TrackType.Text, id)) && !languageWorkFailed.Contains(file.FileKey + ":text:" + string.Join(",", text.Keys.Order())))
             return () => IdentifyWritten(file.Path, file.FileKey, text);
         if (!LanguageDetection.SpeechAvailable) return null;
@@ -225,7 +235,7 @@ public partial class MainWindow
                 var cached = library.Setting(key);
                 if (!string.IsNullOrEmpty(cached)) { language = cached; detected = true; }
                 pending = cached is null && (languageWork.ContainsKey(key) || identifying && !languageWorkFailed.Contains(key) &&
-                    (track.Type == TrackType.Audio ? LanguageDetection.SpeechAvailable : track.Text));
+                    (track.Type == TrackType.Audio ? LanguageDetection.SpeechAvailable : track.Readable));
             }
             var name = language is null ? "Unknown language" : LanguageName(language);
             if (track.Name is { } title && !string.Equals(title, name, StringComparison.OrdinalIgnoreCase)) name += " – " + title;

@@ -7,8 +7,12 @@ using System.Text;
 internal static class MatroskaFixture
 {
     public sealed record Audio(short[] Samples, int SampleRate, string? Language = null, string? Name = null);
-    /// <summary>Compression: null, "zlib" or "strip" (header stripping of the first bytes of every event).</summary>
-    public sealed record Subtitle(string Codec, string[] Lines, string? Language = null, string? Compression = null, string? Name = null, bool Forced = false);
+    /// <summary>
+    /// Compression: null, "zlib" or "strip" (header stripping of the first bytes of every event). Payloads replace the lines
+    /// as raw events, for picture subtitles; Private is their CodecPrivate.
+    /// </summary>
+    public sealed record Subtitle(string Codec, string[] Lines, string? Language = null, string? Compression = null, string? Name = null, bool Forced = false,
+        byte[][]? Payloads = null, byte[]? Private = null);
 
     /// <summary>Checksums: every cluster starts with a CRC-32 element, as ffmpeg writes them.</summary>
     public static void Write(string path, IReadOnlyList<Audio> audio, IReadOnlyList<Subtitle> subtitles, bool checksums = false)
@@ -29,7 +33,8 @@ internal static class MatroskaFixture
                 _ => []
             };
             var codecPrivate = track.Codec == "S_TEXT/ASS" ? Binary(0x63a2, Encoding.UTF8.GetBytes(
-                "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,40\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")) : [];
+                "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize\nStyle: Default,Arial,40\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"))
+                : track.Private is { } raw ? Binary(0x63a2, raw) : [];
             tracks.Add(Element(0xae, UInt(0xd7, (ulong)number), UInt(0x73c5, (ulong)number++), UInt(0x83, 0x11), Text(0x86, track.Codec),
                 track.Language is null ? [] : Text(0x22b59c, track.Language), track.Name is null ? [] : Text(0x536e, track.Name),
                 track.Forced ? UInt(0x55aa, 1) : [], codecPrivate, encoding));
@@ -54,9 +59,9 @@ internal static class MatroskaFixture
                 // One event every other second, cycling through the lines.
                 if (second % 2 != 0) continue;
                 var index = second / 2;
-                var line = track.Lines[index % track.Lines.Length];
+                var line = track.Lines.Length == 0 ? "" : track.Lines[index % track.Lines.Length];
                 var payload = track.Codec == "S_TEXT/ASS" ? $"{index},0,Default,,0,0,0,,{line}" : line;
-                var bytes = Encoding.UTF8.GetBytes(payload);
+                var bytes = track.Payloads is { } payloads ? payloads[index % payloads.Length] : Encoding.UTF8.GetBytes(payload);
                 bytes = track.Compression switch
                 {
                     "zlib" => Zlib(bytes),

@@ -115,15 +115,16 @@ public static class LanguageDetection
     private static IEnumerable<string> Chunks(string text)
     {
         var chunk = new System.Text.StringBuilder();
-        var bytes = 0;
+        var bytes = 0; var count = 0;
         foreach (var line in text.Split('\n'))
         {
             var size = System.Text.Encoding.UTF8.GetByteCount(line) + 1;
-            if (bytes > 0 && bytes + size > ChunkBytes) { yield return chunk.ToString(); chunk.Clear(); bytes = 0; }
+            if (bytes > 0 && bytes + size > ChunkBytes) { yield return chunk.ToString(); chunk.Clear(); bytes = 0; count++; }
             chunk.Append(line).Append('\n'); bytes += size;
         }
-        // A short remainder is too little to vote with on its own.
-        if (chunk.Length >= 40) yield return chunk.ToString();
+        // A short remainder is too little to vote with on its own, and it would count against the chunks before it: a
+        // language must carry most of the chunks.
+        if (count == 0 ? chunk.Length >= 40 : bytes >= ChunkBytes / 2) yield return chunk.ToString();
     }
     private static string? Code(string? language) => language?.ToLowerInvariant() switch
     {
