@@ -79,6 +79,10 @@ static class ScreenRender
             }
             var movie = items.FirstOrDefault(item => item.Series is null && item.Kind == "Movie");
             if (movie is not null) { Call("Select", movie); await Capture($"{theme}-movie-details"); }
+            var store = (LibraryStore)Field("library")!; var wanted = store.Wanted();
+            if (wanted.Count > 0) { Call("NavigateLibrary", 5, null, null, null); await Capture($"{theme}-missing"); }
+            if (wanted.FirstOrDefault(x => !x.IsMovie) is { } wantedShow) { Call("NavigateLibrary", wantedShow.Kind == "Anime" ? 3 : 2, wantedShow.Id, wantedShow.Kind, null); await Capture($"{theme}-wanted-show"); }
+            if (wanted.FirstOrDefault(x => x.IsMovie) is { } wantedFilm && store.Get(wantedFilm.Id) is { } placeholder) { Call("Select", placeholder); await Capture($"{theme}-wanted-film"); }
             foreach (var page in new[] { "Queues", "Rooms", "Folders", "Room" }) { Call("ShowPage", page); await Capture($"{theme}-{page.ToLowerInvariant()}"); }
             Call("ShowPage", "Settings");
             foreach (var section in new[] { "Profile", "Metadata", "Playback", "Appearance", "Updates" })

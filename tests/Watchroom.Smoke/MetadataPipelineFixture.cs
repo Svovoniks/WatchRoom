@@ -207,6 +207,12 @@ static class MetadataPipelineFixture
         new MetadataOptions().Save(numberedStore);
         using (var http = new HttpClient(new ArtworkFixture())) await SeriesMetadata.FetchAsync(numberedStore,directory,null,null,default,http);
         check(numberedStore.All().All(x => !x.IsVirtual), "disabling placeholder imports removes them even when metadata is fresh");
+        new MetadataOptions(ImportMissing:true,ImportUpcoming:true).Save(numberedStore);
+        using (var handler = new PipelineHandler())
+        using (var tmdb = new MetadataClient("fixture",handler))
+        using (var http = new HttpClient(new ArtworkFixture()))
+            await SeriesMetadata.FetchAsync(numberedStore,directory,"fixture",null,default,http,metadata:tmdb);
+        check(numberedStore.All().Count(x => x.IsVirtual) == 3, "enabling placeholder imports adds them even when metadata is fresh");
 
         var refreshStore = new LibraryStore(Path.Combine(directory,"refresh-db"));
         var poster = Path.Combine(directory,"old.png"); await File.WriteAllBytesAsync(poster,ArtworkFixture.Png);

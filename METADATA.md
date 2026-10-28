@@ -86,6 +86,16 @@ DVD order uses a unique TMDB DVD episode group. If the group is unavailable or a
 
 **Show missing episodes** and **Show upcoming episodes** are opt-in and default off. Placeholders have metadata but cannot play or enter queues. They browse inside shows that have a playable file and are not listed under **Unavailable**, which holds only files that have gone missing. Disabling imports removes them on the next fetch, even if normal metadata is fresh. **Show specials within their aired seasons** uses known NFO `airsbefore_season`, `airsbefore_episode`, and `airsafter_season` placement for both browsing and Windows season queues.
 
+## Titles without files
+
+**Add title** (end of the library toolbar, Ctrl+N, an empty library search, the empty library and welcome screens, and the Folders page) searches the enabled providers and adds a show or film before any of its files are in the library. Results already in the library open instead of being added again. A show needs a TMDB or TVmaze result for its episode list; Wikipedia results add films only.
+
+A wanted title is stored as a setting (`wanted:<id>`) holding its provider identity, category, tracked seasons and whether new seasons are tracked automatically. Its episodes, or the film itself, are placeholders under the data folder, kept regardless of **Show missing episodes** and pruning. Cards with no file are dimmed with a dashed edge and a Missing or Upcoming badge; shows with files and aired placeholders show `N missing` or `S2 missing`. The **Missing** library category lists these titles while there are any; the status filter adds **Missing** and **Upcoming**. Placeholders never reach Home, mystery picks, queues or guests.
+
+After each scan, files certainly belonging to a wanted title join it: the same provider identity, or the same title and year with no other candidate and no conflicting identity. Their placeholders give way and pass on watched marks; a film's file takes its identity and the title is done. Files that only look like the title (no year, a year one off, or several folders of one name) are offered as **Found possible files** with **Link** and **Not this**; nothing links automatically, and rejected files are not offered again. **Link a folder** joins a chosen folder's files to the title, adding it as a library folder first when it lies outside them, and warns when the files look like a different title.
+
+Metadata fetches refresh wanted titles every refresh interval: new episodes become placeholders, and newly announced seasons are tracked when the title follows new seasons. **Stop tracking** removes only placeholders; files already here stay. Placeholder text and artwork follow the TMDB retention limit; their title, kind, identity and numbering do not expire.
+
 ## NFO files
 
 The scanner reads `tvshow.nfo`, `season.nfo`, `movie.nfo`, and video-name `.nfo` sidecars. Supported data includes titles, plots, dates, numbering, original title, genres, cast, ratings, provider IDs, local artwork, and metadata locks. Plain IMDb/TMDB URL NFO files can identify shows or movies. Episode IDs are never mistaken for show IDs. XML external entities are prohibited. NFO remote artwork supports the TMDB, TVmaze, and Wikimedia image hosts already used by WatchRoom.

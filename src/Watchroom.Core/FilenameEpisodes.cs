@@ -71,7 +71,10 @@ internal static class FilenameEpisodes
         }
         var labelled = Match(name, @"(?:\b" + Label + @"[ #:-]*|#\s*)" + Number + @"\b");
         var acronymYear = Match(Path.GetFileNameWithoutExtension(path), @"(?:[a-z]\.){2,}E[. _-]*(?:19|20)\d{2}\b").Success;
-        if (labelled.Success && !acronymYear) return Finish(name, labelled, 1, false);
+        // "30. Title (Серия 1)" is episode 30 in two parts; a bracketed label after a leading number names the part.
+        var leading = seriesContext ? Match(name, @"^" + Number + @"(?=\s)") : System.Text.RegularExpressions.Match.Empty;
+        var part = leading.Success && !Year(int.Parse(leading.Groups["n"].Value)) && name[..labelled.Index].TrimEnd().EndsWith('(');
+        if (labelled.Success && !acronymYear && !part) return Finish(name, labelled, 1, false);
         labelled = Match(name, @"\b" + Number + @"\s*(?:серия|эпизод)\b");
         if (labelled.Success) return Finish(name, labelled, 1, false);
 
@@ -82,15 +85,15 @@ internal static class FilenameEpisodes
         {
             var number = int.Parse(numbered.Groups["n"].Value);
             var tail = name[(numbered.Index + numbered.Length)..];
-            // A bare release year or a one-digit film sequel with a subtitle isn't an episode.
-            if (!Year(number) && !Resolution(number) && (seriesContext || numbered.Groups["n"].Value.Length >= 2 || Trim(tail).Length == 0))
+            // A bare release year or a one-digit film sequel with a subtitle isn't an episode; in a show, "- 720" is one.
+            if (!Year(number) && (seriesContext || !Resolution(number)) &&(seriesContext || numbered.Groups["n"].Value.Length >= 2 || Trim(tail).Length == 0))
                 return Finish(name, numbered, 1, false);
         }
         if (!seriesContext) return null;
         var middle = Match(name, @"\s+(?<n>0\d{1,3}|\d{2})(?:v\d+)?\s+(?=\p{L})");
         if (middle.Success) return Finish(name, middle, 1, false);
         var prefix = Match(name, @"^" + Number + @"(?=\s|$|-\d{1,4}\b)");
-        if (prefix.Success && !Year(int.Parse(prefix.Groups["n"].Value)) && !Resolution(int.Parse(prefix.Groups["n"].Value)))
+        if (prefix.Success && !Year(int.Parse(prefix.Groups["n"].Value)))
             return Finish(name, prefix, 1, false) with { Series = "" };
         var suffix = Match(name, @"\s+" + Number + @"\s*$");
         if (!suffix.Success || Year(int.Parse(suffix.Groups["n"].Value)) || Resolution(int.Parse(suffix.Groups["n"].Value))) return null;

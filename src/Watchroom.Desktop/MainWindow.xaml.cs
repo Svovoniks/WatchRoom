@@ -225,7 +225,7 @@ public partial class MainWindow : Window
             }
             await playerStart;
             if (closing) return;
-            if (folders.Count == 0 && savedRooms.Count == 0 && !openedFile && currentPage is "Home" or "Library") ShowPage("Welcome");
+            if (folders.Count == 0 && savedRooms.Count == 0 && wanted.Count == 0 && !openedFile && currentPage is "Home" or "Library") ShowPage("Welcome");
             else if (SavedAutoArtwork) await Guard(FetchArtwork);
         };
     }
@@ -373,13 +373,16 @@ public partial class MainWindow : Window
         ShowPage(page);
     }
     private static int CategoryFor(MediaItem item) => item.Kind == "Anime" ? 3 : item.Series is not null ? 2 : 1;
-    private static string CategoryName(int category) => category switch { 1 => "Movies", 2 => "Shows", 3 => "Anime", 4 => "Unavailable", _ => "All" };
+    private static string CategoryName(int category) => category switch { 1 => "Movies", 2 => "Shows", 3 => "Anime", 4 => "Unavailable", 5 => "Missing", _ => "All" };
     private static string SeasonName(int season, IEnumerable<MediaItem>? members = null) => LibraryCatalog.SeasonName(season, members);
     private void UpdateLibraryCategorySelection(bool active)
     {
         UnavailableLibraryNav.Visibility = !GuestLibrary && items.Any(item => !item.Available && !item.IsExtra && !item.IsVirtual)
             ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var button in new[] { AllLibraryNav, AnimeLibraryNav, ShowsLibraryNav, MoviesLibraryNav, UnavailableLibraryNav })
+        MissingLibraryNav.Visibility = !GuestLibrary && missingTitleCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+        MissingLibraryCount.Text = missingTitleCount.ToString();
+        System.Windows.Automation.AutomationProperties.SetName(MissingLibraryNav, $"Missing, {missingTitleCount} {(missingTitleCount == 1 ? "title" : "titles")}");
+        foreach (var button in new[] { AllLibraryNav, AnimeLibraryNav, ShowsLibraryNav, MoviesLibraryNav, UnavailableLibraryNav, MissingLibraryNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, active && int.Parse((string)button.Tag) == libraryCategory ? "Selected" : "");
     }
     private void LibraryMenuClick(object sender, RoutedEventArgs e)
@@ -478,6 +481,7 @@ public partial class MainWindow : Window
     {
         room?.SetHostedLibrary(refreshedItems);
         items = refreshedItems; RefreshPlayingItem();
+        ReloadWanted(); CountMissingTitles();
         RefreshHome();
         UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
         if (browseSeries is not null && !items.Any(x => LibraryIdentity.InShow(x, browseSeries, browseKind)))
@@ -520,7 +524,7 @@ public partial class MainWindow : Window
             { updated[id] = item; changed = true; }
         if (!changed) return;
         var browsedId = items.FirstOrDefault(item => LibraryIdentity.InShow(item, browseSeries, browseKind))?.Id;
-        items = updated.Values.ToList(); RefreshPlayingItem();
+        items = updated.Values.ToList(); RefreshPlayingItem(); CountMissingTitles();
         room?.SetHostedLibrary(items);
         RefreshHome();
         UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
@@ -551,16 +555,18 @@ public partial class MainWindow : Window
         var cancellation = request.Token;
         // Capture one immutable library and navigation state before leaving the UI thread.
         var status = LibraryStatusFilter.SelectedIndex;
-        // Missing and upcoming episode placeholders browse inside shows that still have a playable file;
-        // Unavailable lists only files that have gone missing.
+        // Missing and upcoming episode placeholders browse inside shows that still have a playable file, and in
+        // wanted titles, which have their placeholders before any file; Unavailable lists only files that have gone missing.
         var playableShows = items.Where(x => x.Available && x.Series is not null).Select(LibraryIdentity.ShowKey).ToHashSet();
-        var source = items.Where(x => libraryCategory == 4 ? !x.Available && !x.IsVirtual : x.Available || x.IsVirtual && playableShows.Contains(LibraryIdentity.ShowKey(x))).ToList();
+        var wantedKeys = wanted.Keys.ToHashSet();
+        var source = items.Where(x => libraryCategory == 4 ? !x.Available && !x.IsVirtual : x.Available || x.IsVirtual && (playableShows.Contains(LibraryIdentity.ShowKey(x)) || wantedKeys.Contains(LibraryIdentity.ShowKey(x)))).ToList();
+        var missingOnly = libraryCategory == 5 && browseSeries is null;
         var series = browseSeries; var kind = browseKind; var season = browseSeason;
         var showTitle = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind))?.Series ?? browseSeries;
         SearchHint.Text = browseSeries is null ? "Search your library" : browseSeason is null ? "Search seasons" : "Search episodes";
         SearchBox.ToolTip = browseSeries is null ? "Search your library (Ctrl+F)" : "Search within " + showTitle + (browseSeason is null ? "" : $" · Season {browseSeason}");
         System.Windows.Automation.AutomationProperties.SetName(SearchBox, SearchHint.Text);
-        var filter = libraryCategory == 4 ? 0 : libraryCategory;
+        var filter = libraryCategory is 4 or 5 ? 0 : libraryCategory;
         var query = SearchBox.Text.Trim();
         if (!backgroundUpdate)
         {
@@ -575,6 +581,7 @@ public partial class MainWindow : Window
         SeasonInformation.Visibility = seasonItem is null ? Visibility.Collapsed : Visibility.Visible;
         SeasonSummary.Text = seasonItem is null ? "" : (string.IsNullOrWhiteSpace(seasonItem.SeasonTitle) ? "" : seasonItem.SeasonTitle + "\n\n") + (seasonItem.SeasonOverview ?? seasonItem.Overview ?? "No season overview available.") + (seasonItem.SeasonSource is null ? "" : "\n\nMetadata: " + seasonItem.SeasonSource);
         EmptyLibrary.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ShowWantedPanels();
         try
         {
             if (debounce) await Task.Delay(200, cancellation);
@@ -584,6 +591,7 @@ public partial class MainWindow : Window
             try { cards = await LibraryCatalog.SearchAsync(source, query, filter, series, kind, season, cancellation, displaySpecialsWithinSeasons, season is null ? null : PreferredVersion(series)); }
             finally { librarySearchGate.Release(); }
             if (status == 1) cards = cards.Where(card => card.Poster is null).ToList();
+            if (missingOnly) cards = cards.Where(card => card.Status is not null).ToList();
             var views = libraryCards.ToDictionary(view => view.Key);
             // Read playback flags once and calculate aggregate show progress off-thread.
             var playback = await Task.Run(() =>
@@ -591,16 +599,20 @@ public partial class MainWindow : Window
                 var settings = library.PlaybackSettings();
                 var shows = source.Where(item => item.Series is not null).GroupBy(LibraryIdentity.ShowKey)
                     .ToDictionary(group => group.Key, group => group.ToArray());
+                var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                bool Aired(MediaItem x) => !DateOnly.TryParse(x.AirDate, out var date) || date <= today;
                 return cards.Select(card =>
                 {
                     cancellation.ThrowIfCancellationRequested();
                     var members = card.Media.Series is null ? Array.Empty<MediaItem>() : shows.GetValueOrDefault(LibraryIdentity.ShowKey(card.Media)) ?? [];
+                    var placeholders = (card.Level switch { "series" => members, "season" => members.Where(x => (x.Season ?? -1) == card.Season), _ => [card.Media] }).Where(x => x.IsVirtual).ToArray();
                     var position = card.Level is "episode" or "movie" && long.TryParse(settings.GetValueOrDefault("position:" + card.Media.Id), out var saved) ? saved : 0;
                     var existing = views.GetValueOrDefault(LibraryCardView.Identity(card));
                     return (Card: card, View: existing ?? new LibraryCardView(card),
                         PosterFile: existing is null ? default : LibraryCardView.Version(card.Poster), Position: position, Watched: LibraryWatchProgress.IsWatched(members, card, id => settings.GetValueOrDefault("watched:" + id) == "true"),
-                        Continuing: status == 2 && LibraryWatchProgress.CanContinue(members, card, settings));
-                }).Where(state => status switch { 2 => state.Continuing, 3 => !state.Watched, 4 => state.Watched, _ => true }).ToArray();
+                        Continuing: status == 2 && LibraryWatchProgress.CanContinue(members, card, settings),
+                        Missing: placeholders.Any(Aired), Upcoming: placeholders.Any(x => !Aired(x)));
+                }).Where(state => status switch { 2 => state.Continuing, 3 => !state.Watched, 4 => state.Watched, 5 => state.Missing, 6 => state.Upcoming, _ => true }).ToArray();
             }, cancellation);
             if (cancellation.IsCancellationRequested || librarySearchCancellation != request) return;
             cards = playback.Select(state => state.Card).ToList();
@@ -643,6 +655,7 @@ public partial class MainWindow : Window
             if (initialBatch is not null) libraryCards.AddBatch(initialBatch);
             ResultCount.Text = $"{cards.Count} {(cards.Count == 1 ? "item" : "items")}";
             NoResults.Visibility = items.Count > 0 && cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            ShowFindTitle(query, cards.Count == 0 && series is null);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex)
@@ -704,11 +717,15 @@ public partial class MainWindow : Window
         ShowPage("Details"); UpdateBreadcrumbs(); DetailTitle.Text = item.EpisodeDisplayTitle;
         restoringNavigation = restoring;
         DetailPlay.IsEnabled = DetailHost.IsEnabled = DetailQueue.IsEnabled = item.Available && File.Exists(item.Path);
-        DetailAvailability.Text = DetailPlay.IsEnabled ? "" : item.IsVirtual
-            ? "This episode isn't in your folders yet. Add the video and rescan to watch it."
+        DetailAvailability.Text = DetailPlay.IsEnabled ? "" : item.IsVirtual ? PlaceholderNotice(item)
             : "Video file unavailable. Reconnect its drive, then rescan your library.";
+        // A wanted film's own panel says when it comes out and what can be done; its play buttons have nothing to play.
+        var wantedFilm = item.IsVirtual && item.Series is null && wanted.ContainsKey(item.Id);
+        if (wantedFilm) DetailAvailability.Text = "";
+        DetailPlay.Visibility = DetailHost.Visibility = DetailQueue.Visibility = wantedFilm ? Visibility.Collapsed : Visibility.Visible;
         DetailAvailability.Visibility = DetailAvailability.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-        DetailRemove.Visibility = item.Available ? Visibility.Collapsed : Visibility.Visible;
+        DetailRemove.Visibility = item.Available || item.IsVirtual ? Visibility.Collapsed : Visibility.Visible;
+        DetailWatched.Visibility = item.IsVirtual && item.Series is null ? Visibility.Collapsed : Visibility.Visible;
         DetailRemove.IsEnabled = !scanning;
         UpdateDetailPlayback(item);
         var film = item.ExtraOf is { } parent ? items.FirstOrDefault(x => x.Id == parent) : null;
@@ -716,12 +733,13 @@ public partial class MainWindow : Window
         ShowDetailExtras(item, film);
         var versions = LibraryCatalog.Versions(items, item);
         var version = versions.Length > 1 ? LibraryCatalog.VersionLabel(item, versions) : null;
-        DetailMeta.Text = item.Caption + " · " + Path.GetExtension(item.Path).TrimStart('.').ToUpperInvariant() + (string.IsNullOrWhiteSpace(item.AirDate) ? "" : " · " + item.AirDate) + (item.RuntimeMinutes is > 0 ? $" · {item.RuntimeMinutes} min" : "") +
+        DetailMeta.Text = item.Caption + (item.IsVirtual ? "" : " · " + Path.GetExtension(item.Path).TrimStart('.').ToUpperInvariant()) + (string.IsNullOrWhiteSpace(item.AirDate) ? "" : " · " + item.AirDate) + (item.RuntimeMinutes is > 0 ? $" · {item.RuntimeMinutes} min" : "") +
             (version is null ? "" : " · " + version);
         ShowDetailVersions(item, versions);
         _ = UpdateDetailPosterAsync(item);
         if (item.ExtraOf is not null && !ArtworkCache.IsUsable(item.GeneratedEpisodePoster)) _ = ImproveClipArtwork(item);
-        DetailFile.Text = item.Path;
+        DetailFile.Text = item.IsVirtual ? "" : item.Path;
+        ShowWantedPanels();
         ShowDetailTracks(item);
         var overviewSource = !string.IsNullOrWhiteSpace(item.EpisodeOverview) ? item.EpisodeSource : !string.IsNullOrWhiteSpace(item.SeasonOverview) ? item.SeasonSource : item.PosterSource;
         DetailSummary.Text = (item.DetailOverview ?? "No overview available yet.") +
@@ -850,7 +868,9 @@ public partial class MainWindow : Window
             var progress = new ScanProgressSink(this);
             var scannedItems = await library.ScanAsync(folders.ToArray(), progress, scanCancellation.Token, exclusions.ToArray());
             Interlocked.Exchange(ref pendingScanStatus, null);
+            var candidates = wanted.Values.Where(x => x.Candidate is not null).Select(x => x.Id).ToHashSet();
             RefreshLibraryFromItems(scannedItems);
+            AnnounceArrivals(candidates);
             ScanStatus.Text = $"Scan complete · {items.Count} videos indexed.";
             // A watcher scan that changed nothing has nothing new to identify.
             if (SavedAutoArtwork && !scanCancellation.IsCancellationRequested && (!fromWatcher || library.LastScanChanges > 0)) await FetchArtwork(scanCancellation.Token);
@@ -2020,6 +2040,8 @@ public partial class MainWindow : Window
             var search = SearchBox;
             search.Focus(); search.SelectAll(); e.Handled = true; return;
         }
+        if (e.Key == Key.N && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen && !GuestLibrary && InAppDialog.Open.Count == 0 && !inPlayer)
+        { AddTitleClick(sender, e); e.Handled = true; return; }
         if (e.Key == Key.Escape && LibraryPage.Visibility == Visibility.Visible && SearchBox.IsKeyboardFocused)
         { SearchBox.Clear(); e.Handled = true; return; }
         if (Keyboard.FocusedElement is TextBox or PasswordBox or ComboBox or ListBox or ListBoxItem || !inPlayer) return;

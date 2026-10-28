@@ -50,7 +50,7 @@ public partial class MainWindow
         if (GuestLibraryStatus is null) return;
         var guest = GuestLibrary;
         if (guest && !OwnsLibrary && !guestBrowsePending) ClearHostArtworkRequests();
-        LibraryStatusFilter.Visibility = RescanButton.Visibility = guest ? Visibility.Collapsed : Visibility.Visible;
+        LibraryStatusFilter.Visibility = RescanButton.Visibility = AddTitleButton.Visibility = guest ? Visibility.Collapsed : Visibility.Visible;
         GuestLibraryStatus.Visibility = guest ? Visibility.Visible : Visibility.Collapsed;
         HostLibraryActivity.Visibility = room?.Identity?.Host == true ? Visibility.Visible : Visibility.Collapsed;
         var activity = room?.Snapshot?.LibraryActivity;

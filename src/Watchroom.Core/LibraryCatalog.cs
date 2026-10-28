@@ -84,18 +84,20 @@ public static class LibraryCatalog
                 var item = g.OrderBy(x => x.IsVirtual).ThenByDescending(x => x.Available).First();
                 var seasons = g.Select(x => x.Season).Distinct().Count();
                 var clips = item.Series is null ? filmExtras[item.Id].Count() : 0;
-                return new LibraryCard(item.DisplayTitle, item.Series is null ? item.Caption + (clips > 0 ? $" · {clips} {(clips == 1 ? "extra" : "extras")}" : "") + (item.Available ? "" : " · Unavailable") :
+                var status = TitleStatus(g.ToArray());
+                return new LibraryCard(item.DisplayTitle, item.Series is null ? item.Caption + (clips > 0 ? $" · {clips} {(clips == 1 ? "extra" : "extras")}" : "") +
+                    (item.IsVirtual ? " · " + status + (status == "Upcoming" && DateOnly.TryParse(item.AirDate, out var release) ? " · " + release.ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture) : "") : item.Available ? "" : " · Unavailable") :
                     (item.Year is null ? "" : item.Year + " · ") + $"{seasons} {(seasons == 1 ? "season" : "seasons")} · {LibraryIdentity.EpisodeCount(g)} episodes" +
-                    (g.Any(x => x.IsVirtual) ? $" · {g.Count(x => x.IsVirtual)} missing/upcoming" : "") + (g.Any(x => x.Available) ? "" : " · Unavailable"),
-                    Existing(g.Select(x => x.SeriesPoster).Concat(g.Select(x => x.Poster)).Concat(g.Select(x => x.SeasonPoster)), cancellation), item, item.Series is null ? "movie" : "series");
+                    (g.Any(x => x.IsVirtual) ? $" · {g.Count(x => x.IsVirtual)} missing/upcoming" : "") + (g.Any(x => x.Available) || g.All(x => x.IsVirtual) ? "" : " · Unavailable"),
+                    Existing(g.Select(x => x.SeriesPoster).Concat(g.Select(x => x.Poster)).Concat(g.Select(x => x.SeasonPoster)), cancellation), item, item.Series is null ? "movie" : "series", Status: status);
             }).OrderBy(x => x.DisplayTitle).ToList();
         }
         var episodes = items.Where(x => LibraryIdentity.InShow(x, series, kind));
         if (season is null)
-            // Specials and extras follow the numbered seasons they accompany.
+            // Specials and extras follow the numbered seasons they accompany; a season counts its missing episodes as its show does.
             return episodes.GroupBy(x => x.Season ?? -1).OrderBy(g => g.Key < 0 ? int.MaxValue : g.Key == 0 ? int.MaxValue - 1 : g.Key).Select(g =>
             {
-                var status = SeasonStatus(g);
+                var status = TitleStatus(g.ToArray());
                 return new LibraryCard(SeasonName(g.Key, g),
                     SeasonCaption(g) + (g.Key > 0 && episodes.Count(x => SeasonExtra(x, g.Key)) is > 0 and var clips ? $" · {clips} {(clips == 1 ? "extra" : "extras")}" : "") + (status is null ? "" : " · " + status),
                     Existing(g.Select(x => x.SeasonPoster).Concat(g.Select(x => x.SeriesPoster)).Concat(g.Select(x => x.Poster)), cancellation), g.First(), "season", g.Key, Status: status);
@@ -127,6 +129,19 @@ public static class LibraryCatalog
         if (items.Count == 0 || !items.All(x => x.IsVirtual)) return null;
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return items.All(x => DateOnly.TryParse(x.AirDate, out var date) && date > today) ? "Upcoming" : "Missing";
+    }
+    // A show or film with no file at all is missing, or upcoming before anything has aired; a show with files is missing
+    // the episodes whose placeholders have aired, named by season when they make up one season.
+    public static string? TitleStatus(IReadOnlyCollection<MediaItem> members)
+    {
+        if (members.Count == 0 || !members.Any(x => x.IsVirtual)) return null;
+        if (members.All(x => x.IsVirtual)) return SeasonStatus(members);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var aired = members.Where(x => x.IsVirtual && DateOnly.TryParse(x.AirDate, out var date) && date <= today).ToArray();
+        if (aired.Length == 0) return null;
+        var seasons = aired.Select(x => x.Season).Distinct().ToArray();
+        return seasons.Length == 1 && seasons[0] is { } season && members.Where(x => x.Season == season).All(x => x.IsVirtual)
+            ? (season == 0 ? "Specials" : "S" + season) + " missing" : $"{aired.Length} missing";
     }
     private static string SeasonCaption(IEnumerable<MediaItem> members)
     {

@@ -210,6 +210,7 @@ public static class AutomaticArtwork
         }
         if (mode != MetadataRefresh.RetryArtwork) library.GroupShowsByProvider();
         var seriesReport = await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, refresh);
+        if (mode != MetadataRefresh.RetryArtwork) await WantedTitles.RefreshAsync(library, directory, token, progress, ct, refresh is MetadataRefresh.RefreshText, metadata: tmdb, client: http);
         var unresolved = outstanding.Snapshot();
         var summary = $"Posters: {fetched} added · Overviews: {overviews} added · {missing} incomplete/unmatched · {failed} provider failures · {artworkFailed} artwork failures · {deferred} titles deferred. Outstanding issues: {unresolved.Length}." + (error is null ? "" : " " + error) + " " + seriesReport;
         Directory.CreateDirectory(directory);

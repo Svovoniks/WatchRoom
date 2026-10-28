@@ -61,10 +61,15 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         (Card.Media.RuntimeMinutes is > 0 ? $" · {Card.Media.RuntimeMinutes} min" : "") +
         (Card.Version is { Length: > 0 } version ? $" · {version} · {Card.Versions} versions" : "");
     // Shown in red beside the episode details and as a badge on the artwork.
-    public string EpisodeStatus => IsRemote ? "" : Card.Status ?? (Card.Media.IsVirtual ? "Missing" : Card.Media.Available ? "" : "Unavailable");
+    public string EpisodeStatus => IsRemote ? "" : Card.Status ?? (Card.Media.IsVirtual ? DateOnly.TryParse(Card.Media.AirDate, out var date) && date > DateOnly.FromDateTime(DateTime.UtcNow) ? "Upcoming" : "Missing" : Card.Media.Available ? "" : "Unavailable");
     public string EpisodeStatusSuffix => EpisodeStatus.Length > 0 ? " · " + EpisodeStatus : "";
     // Season cards carry the badge too when every episode of the season is a placeholder.
     public bool HasEpisodeStatus => (IsEpisode || Card.Status is not null) && EpisodeStatus.Length > 0;
+    // A show or film with no file at all, added before its files were here: dimmed, with a dashed edge.
+    public bool HasNoFiles => !IsRemote && Card.Level is "series" or "movie" && Card.Media.IsVirtual;
+    // Episodes and seasons that are only placeholders dim; a show with some files keeps its artwork bright.
+    public bool DimArtwork => HasEpisodeStatus && Card.Level is "episode" or "season";
+    public bool IsUpcoming => EpisodeStatus == "Upcoming";
     public double Progress { get; private set; }
     public bool IsWatched { get; private set; }
     public string PlaybackLabel { get; private set; } = "";
@@ -99,8 +104,11 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         if (previous.Media.DisplayTitle != card.Media.DisplayTitle || previous.DisplayTitle != card.DisplayTitle) Changed(nameof(HomeTitle));
         if (previous.Caption != card.Caption) Changed(nameof(Caption));
         if (previous.Media.Season != card.Media.Season || previous.Media.Episode != card.Media.Episode || previous.Media.EpisodeEnd != card.Media.EpisodeEnd ||
-            previous.Media.RuntimeMinutes != card.Media.RuntimeMinutes || previous.Media.IsVirtual != card.Media.IsVirtual || previous.Media.Available != card.Media.Available)
-        { Changed(nameof(EpisodeMeta)); Changed(nameof(EpisodeStatus)); Changed(nameof(EpisodeStatusSuffix)); Changed(nameof(HasEpisodeStatus)); }
+            previous.Media.RuntimeMinutes != card.Media.RuntimeMinutes || previous.Media.IsVirtual != card.Media.IsVirtual || previous.Media.Available != card.Media.Available || previous.Status != card.Status)
+        {
+            Changed(nameof(EpisodeMeta)); Changed(nameof(EpisodeStatus)); Changed(nameof(EpisodeStatusSuffix)); Changed(nameof(HasEpisodeStatus));
+            Changed(nameof(HasNoFiles)); Changed(nameof(DimArtwork)); Changed(nameof(IsUpcoming));
+        }
         var version = posterFile ?? Version(card.Poster);
         var changed = previous.Poster != card.Poster || posterVersion != version;
         if (changed) { imageGeneration++; requestedPath = null; }

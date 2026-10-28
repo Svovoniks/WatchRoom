@@ -207,12 +207,16 @@ public partial class MainWindow
         PersistTrackPreferences(audio, subtitles, subtitleRules);
         library.Setting(StreamingBufferOptions.SettingKey, int.Parse(StreamingBufferSeconds.Text, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture));
         var days = NeverRefresh.IsChecked == true ? 0 : int.Parse(MetadataRefreshDays.Text, CultureInfo.InvariantCulture);
+        var before = MetadataOptions.Load(library);
         new MetadataOptions(providerChoices.Where(p => p.Enabled).Select(p => p.Id).ToArray(), language, country, days,
             ImportMissing.IsChecked == true, ImportUpcoming.IsChecked == true, SaveNfo.IsChecked == true,
             DisplaySpecials.IsChecked == true, GroupShows.IsChecked == true).Save(library);
         displaySpecialsWithinSeasons = DisplaySpecials.IsChecked == true;
         library.Setting("name", DisplayNameBox.Text.Trim()); library.Setting("server", ServerBox.Text.Trim().TrimEnd('/'));
         library.Setting("artwork", AutoArtwork.IsChecked == true ? "true" : "false");
+        // Missing and upcoming episodes follow their settings now rather than at the next scan.
+        if (SavedAutoArtwork && (before.ImportMissing != (ImportMissing.IsChecked == true) || before.ImportUpcoming != (ImportUpcoming.IsChecked == true)))
+            _ = Guard(async () => { await FetchArtwork(); await RefreshLibrary(); });
         SaveVoicePreferences();
         preferencesBaseline = PreferenceSnapshot();
         SavePreferencesButton.IsEnabled = CancelPreferencesButton.IsEnabled = false;

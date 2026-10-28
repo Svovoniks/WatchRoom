@@ -122,14 +122,14 @@ static class LibraryVersionsFixture
         File.Delete(clipPaths[0]);
         await store.ScanAsync([new(desktop), new(movies)]);
         check(store.All().Single(x => x.Path == clipPaths[0]) is { IsBonus: true, IsExtra: false, Available: false }, "a bonus clip whose file is gone turns unavailable instead of hidden");
-        // A season with no file at all is missing as a whole; a season that has not aired is upcoming.
+        // A season with no file at all is missing as a whole, a season that has not aired is upcoming, and a season with files counts its aired gaps.
         var placeholder = episode with { Id = "missing-1", Path = "missing-1.mkv", Season = 3, Episode = 1, IsVirtual = true, AirDate = "2020-01-01" };
         var future = DateOnly.FromDateTime(DateTime.UtcNow).AddYears(1).ToString("yyyy-MM-dd");
         var seasonCards = LibraryCatalog.Browse([episode, placeholder, placeholder with { Id = "missing-2", Episode = 2 },
             placeholder with { Id = "soon-1", Season = 4, AirDate = future }, placeholder with { Id = "partial", Season = 1, Episode = 2 }], episode.ShowId, "Show");
         check(seasonCards.Single(card => card.Season == 3) is { Status: "Missing" } missingSeason && missingSeason.Caption.EndsWith("2 episodes · Missing") &&
-            seasonCards.Single(card => card.Season == 4) is { Status: "Upcoming" } && seasonCards.Single(card => card.Season == 1) is { Status: null },
-            "seasons made only of placeholders are marked missing or upcoming while seasons with files are not");
+            seasonCards.Single(card => card.Season == 4) is { Status: "Upcoming" } && seasonCards.Single(card => card.Season == 1) is { Status: "1 missing" } partialSeason && partialSeason.Caption.EndsWith("2 episodes · 1 missing"),
+            "seasons made only of placeholders are marked missing or upcoming, and a season with files shows how many of its episodes are missing");
         // A second copy of the show in another library folder is the same show: the batch joins the anime copy, extras included.
         await FileAt(anime, "Komi Can't Communicate", "Season 1", "[EMBER] Komi Can't Communicate - S01E02.mkv");
         var mergeStore = new LibraryStore(Path.Combine(directory, "merge-db"));

@@ -227,6 +227,22 @@ if (args.FirstOrDefault() == "--library-versions")
     Console.WriteLine($"{checks} library version and extras checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--missing-episodes")
+{
+    var checks = 0;
+    MissingEpisodesFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/missing-episodes-check"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} missing episode checks passed."); return;
+}
+
+if (args.FirstOrDefault() == "--wanted-titles")
+{
+    var checks = 0;
+    await WantedTitlesFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/wanted-titles-check"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} wanted title checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--library-ingestion")
 {
     var checks = 0;
@@ -369,6 +385,8 @@ await MetadataEvidenceFixture.Run(Path.Combine(root, "metadata-evidence"), Check
 await MetadataCacheFixture.Run(Path.Combine(root, "metadata-cache"), Check);
 await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
 await LibraryVersionsFixture.Run(Path.Combine(root, "library-versions"), Check);
+await WantedTitlesFixture.Run(Path.Combine(root, "wanted-titles"), Check);
+MissingEpisodesFixture.Run(Path.Combine(root, "missing-episodes"), Check);
 await FilenameSchemaFixture.Run(Path.Combine(root, "filename-schemas"), Check);
 await GroupingAuditFixture.Run(Path.Combine(root, "grouping-audit"), Check);
 HostRoomFixture.Run(Check);

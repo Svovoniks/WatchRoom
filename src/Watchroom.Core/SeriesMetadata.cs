@@ -6,6 +6,7 @@ namespace Watchroom.Core;
 
 public static class SeriesMetadata
 {
+    private const string MissingChecked = "missing-episodes-checked";
     private static string? Text(JsonElement value, string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
     private static int? Number(JsonElement value, string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.Number && field.TryGetInt32(out var number) ? number : null;
     private static string? Plain(string? html) => html is null ? null : WebUtility.HtmlDecode(Regex.Replace(Regex.Replace(html, @"(?i)</p>|<br\s*/?>", "\n"), "<[^>]*>", "")).Trim();
@@ -30,10 +31,17 @@ public static class SeriesMetadata
                 AirDate = LibraryIdentity.Locked(compilation, "AirDate") ? compilation.AirDate : null, EpisodeSource = null,
                 NumberingConflict = "Compilation file numbers are not verified episode numbers; identify the contained episode range before fetching episode details." });
         }
+        // Every show's placeholders are redone when the missing or upcoming setting changes, however fresh its metadata,
+        // and once for placeholders made before missing episodes were checked against the files' numbering.
+        var missingState = $"2:{options.ImportMissing}:{options.ImportUpcoming}";
+        var recheck = mode != MetadataRefresh.RetryArtwork && library.Setting(MissingChecked) != missingState;
+        var rechecking = recheck && (options.ImportMissing || options.ImportUpcoming);
         if (mode != MetadataRefresh.RetryArtwork)
         {
-            var stale = catalog.Where(x => x.IsVirtual &&
-                (DateOnly.TryParse(x.AirDate, out var date) && date > DateOnly.FromDateTime(DateTime.UtcNow) ? !options.ImportUpcoming : !options.ImportMissing)).Select(x => x.Id).ToArray();
+            // Wanted titles keep their placeholders whatever the missing-episode settings say; other shows don't get specials.
+            var wanted = library.Wanted().Select(x => x.Id).ToHashSet();
+            var stale = catalog.Where(x => x.IsVirtual && !wanted.Contains(LibraryIdentity.ShowKey(x)) && (x.Season == 0 ||
+                (DateOnly.TryParse(x.AirDate, out var date) && date > DateOnly.FromDateTime(DateTime.UtcNow) ? !options.ImportUpcoming : !options.ImportMissing))).Select(x => x.Id).ToArray();
             library.RemoveVirtual(stale); catalogChanged |= stale.Length > 0;
         }
         int seasons = 0, episodes = 0, failed = 0, unmatched = 0, incomplete = 0, artworkFailed = 0, deferred = 0;
@@ -56,13 +64,13 @@ public static class SeriesMetadata
         foreach (var group in groups)
         {
             ct.ThrowIfCancellationRequested();
-            if (mode == MetadataRefresh.FillMissing && group.All(x => x.MetadataFetchedAt > 0 &&
+            if (mode == MetadataRefresh.FillMissing && !rechecking && group.All(x => x.MetadataFetchedAt > 0 &&
                 (options.RefreshDays <= 0 || x.MetadataFetchedAt > Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds) &&
                 (!force && refresh is null || x.Episode is null || !string.IsNullOrWhiteSpace(x.EpisodeTitle)) &&
                 (x.SeasonPoster is null || ArtworkCache.IsUsable(x.SeasonPoster)) &&
                 (x.EpisodePoster is null || ArtworkCache.IsUsable(x.EpisodePoster)))) continue;
             var entries = group.ToArray(); var item = entries[0];
-            if (!force && refresh is null && MetadataFetchPolicy.Deferred(library, "episodes", entries, options, token))
+            if (!force && refresh is null && !rechecking && MetadataFetchPolicy.Deferred(library, "episodes", entries, options, token))
             { deferred++; MetadataDiagnostics.Record("metadata-fetch-deferred", new { Stage = "episodes", item.Title, RetryAt = MetadataFetchPolicy.RetryAt(library, "episodes", item.Id) }); continue; }
             if (mode == MetadataRefresh.RetryArtwork && entries.All(x => x.MetadataId is null && (x.ProviderIds?.Count ?? 0) == 0)) continue;
             var replaceText = mode != MetadataRefresh.RetryArtwork && (mode != MetadataRefresh.FillMissing || refresh is null && options.RefreshDays > 0 && entries.Any(x =>
@@ -231,9 +239,10 @@ public static class SeriesMetadata
                 MetadataFetchPolicy.Record(library, "episodes", library.ByIds(ids), options, token, attemptFailed && !matched || groupArtworkFailed, !matched);
             }
         }
+        if (recheck) library.Setting(MissingChecked, missingState);
         return $"Seasons: {seasons} · Episodes: {episodes} · {unmatched} shows need matching · {incomplete} shows missing episode metadata · {failed} metadata failures · {artworkFailed} artwork failures · {deferred} shows deferred.";
     }
-    private static async Task<MetadataSeason[]> TvmazeSeasons(HttpClient http, int id, CancellationToken ct)
+    internal static async Task<MetadataSeason[]> TvmazeSeasons(HttpClient http, int id, CancellationToken ct)
     {
         using var seasonJson = await Json(http, $"https://api.tvmaze.com/shows/{id}/seasons", ct);
         using var episodeJson = await Json(http, $"https://api.tvmaze.com/shows/{id}/episodes?specials=1", ct);
@@ -244,14 +253,30 @@ public static class SeriesMetadata
                 .GroupBy(e => Number(e, "number")).Where(g => g.Count() == 1).Select(g => g.Single()).Select(e =>
                     new MetadataEpisode(Number(e, "number")!.Value, Text(e, "name"), Plain(Text(e, "summary")), Image(e), Text(e, "airdate"), Number(e, "runtime"))).ToArray())).ToArray();
     }
-    private static void ReconcileMissing(LibraryStore library, string directory, MediaItem show, MetadataSeason[] seasons, string provider, int id, MetadataOptions options)
+    internal static void ReconcileMissing(LibraryStore library, string directory, MediaItem show, MetadataSeason[] seasons, string provider, int id, MetadataOptions options)
     {
+        // A wanted show follows its tracked seasons instead.
+        if (library.Wanted(LibraryIdentity.ShowKey(show)) is { } tracked) { WantedTitles.Reconcile(library, directory, tracked, tracked.Provider == provider ? seasons : null); return; }
         var existing = library.InShow(show).ToArray();
-        var physical = existing.Where(x => !x.IsVirtual).SelectMany(x => LibraryIdentity.EpisodeNumbers(x).Select(n => (x.Season, Number: n))).ToHashSet();
+        var files = existing.Where(x => !x.IsVirtual && !x.IsExtra && !x.IsBonus).ToArray();
+        var physical = files.SelectMany(x => LibraryIdentity.EpisodeNumbers(x).Select(n => (x.Season, Number: n))).ToHashSet();
+        var listed = seasons.SelectMany(s => s.Episodes.Select(e => ((int?)s.Number, e.Number))).ToHashSet();
+        // Files numbered another way than this provider's list (another provider's seasons, numbers running on across
+        // seasons, a wrong match) can't tell what is missing, so a show only gets placeholders when at most one file, or 5% of them, doesn't fit.
+        var regular = files.Where(x => x.Season is not 0).ToArray();
+        var misfits = regular.Count(x => x.Episode is null || LibraryIdentity.EpisodeNumbers(x).Any(n => !listed.Contains((x.Season, n))));
+        var fits = !files.Any(x => x.MetadataProvider is { } other && other != provider) && misfits <= Math.Max(1, regular.Length / 20);
+        // A file whose number the scan couldn't read, such as "One Piece - 492A", still holds the episode its name gives,
+        // and a provider listing one episode in two seasons has it once the file of either is here.
+        var unread = files.Where(x => x.Episode is null).SelectMany(x => Regex.Matches(Path.GetFileNameWithoutExtension(x.Path), @"(?<![\d.])\d{2,4}(?=[ab]?(?![\d.p]))")
+            .Select(m => int.Parse(m.Value))).ToHashSet();
+        var aired = files.Where(x => x.AirDate is not null && !string.IsNullOrWhiteSpace(x.EpisodeTitle)).Select(x => (x.AirDate, x.EpisodeTitle)).ToHashSet();
         var wanted = new HashSet<string>();
-        foreach (var season in seasons) foreach (var episode in season.Episodes)
+        // Specials are left out: providers list promos, shorts and featurettes there that few libraries keep.
+        foreach (var season in seasons.Where(s => fits && s.Number > 0)) foreach (var episode in season.Episodes)
         {
-            if (physical.Contains(((int?)season.Number, episode.Number)) || !DateOnly.TryParse(episode.AirDate, out var date)) continue;
+            if (physical.Contains(((int?)season.Number, episode.Number)) || unread.Contains(episode.Number) || aired.Contains((episode.AirDate, episode.Title)) ||
+                !DateOnly.TryParse(episode.AirDate, out var date)) continue;
             var upcoming = date > DateOnly.FromDateTime(DateTime.UtcNow);
             if (upcoming ? !options.ImportUpcoming : !options.ImportMissing) continue;
             var key = "missing-" + LibraryIdentity.Hash($"{LibraryIdentity.ShowKey(show)}:{season.Number}:{episode.Number}"); wanted.Add(key);

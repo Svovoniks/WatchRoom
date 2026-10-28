@@ -319,6 +319,7 @@ static class Program
                 await CheckBackNavigation(window, Check);
                 PlayerInteractionChecks.Run(window, Check);
                 UnavailableLibraryChecks.Run(window, activeStore, directory, Check);
+                WantedLibraryChecks.Run(window, activeStore, directory, Check);
                 await PlayerShutdownChecks.Run(window, Check);
                 await RoomRecoveryChecks.Run(window, directory, Check);
                 await GuestRecoveryChecks.Run(window, directory, Check);

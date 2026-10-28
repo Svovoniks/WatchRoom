@@ -6,7 +6,7 @@ namespace Watchroom.Core;
 public record MetadataMatch(int Id, string Type, string Title, string? Year, string? Poster, string Overview, string? Kind = null,
     string? OriginalTitle = null, Dictionary<string, string>? ProviderIds = null, string[]? Genres = null, string[]? Cast = null, double? Rating = null, bool? Animated = null,
     string[]? Aliases = null, string Provider = "tmdb", string? Source = null, string? Evidence = null,
-    int? RuntimeMinutes = null, int? EpisodeCount = null, int? SeasonCount = null, bool NumberedSeries = false)
+    int? RuntimeMinutes = null, int? EpisodeCount = null, int? SeasonCount = null, bool NumberedSeries = false, string? ReleaseDate = null)
 {
     public string Description => $"{Year ?? "Unknown year"} · {(Animated == true ? "Animation" : Type == "tv" && Animated == false ? "Live action" : Type == "tv" ? "Series" : "Film")} · {Provider}";
     public override string ToString() => $"{Title} · {Description}";
@@ -60,7 +60,7 @@ public sealed partial class MetadataClient : IDisposable
             return new MetadataMatch(x.GetProperty("id").GetInt32(), type, x.GetProperty(series ? "name" : "title").GetString()!,
                 date?.Length >= 4 ? date[..4] : null, x.TryGetProperty("poster_path", out var p) ? p.GetString() : null,
                 x.TryGetProperty("overview", out var o) ? o.GetString() ?? "" : "", MetadataClassification.Tmdb(x, type),
-                x.TryGetProperty(series ? "original_name" : "original_title", out var original) ? original.GetString() : null, Animated: MetadataClassification.Animation(x));
+                x.TryGetProperty(series ? "original_name" : "original_title", out var original) ? original.GetString() : null, Animated: MetadataClassification.Animation(x), ReleaseDate: string.IsNullOrEmpty(date) ? null : date);
         }).ToList();
     }
     public async Task<MetadataMatch> DetailsAsync(MetadataMatch match, CancellationToken ct = default)
@@ -84,7 +84,7 @@ public sealed partial class MetadataClient : IDisposable
             Genres = root.TryGetProperty("genres", out var genres) ? genres.EnumerateArray().Select(g => g.TryGetProperty("name", out var name) ? name.GetString() : null).OfType<string>().ToArray() : null,
             Cast = root.TryGetProperty("credits", out var credits) && credits.TryGetProperty("cast", out var cast) ? cast.EnumerateArray().Take(20).Select(g => g.GetProperty("name").GetString()).OfType<string>().ToArray() : null,
             Rating = root.TryGetProperty("vote_average", out var rating) && rating.ValueKind == JsonValueKind.Number && rating.TryGetDouble(out var value) ? value : null,
-            Poster = Text("poster_path") ?? match.Poster, Overview = overview ?? match.Overview, Year = date?.Length >= 4 ? date[..4] : match.Year,
+            Poster = Text("poster_path") ?? match.Poster, Overview = overview ?? match.Overview, Year = date?.Length >= 4 ? date[..4] : match.Year, ReleaseDate = string.IsNullOrEmpty(date) ? match.ReleaseDate : date,
             RuntimeMinutes = root.TryGetProperty("runtime", out var runtime) && runtime.ValueKind == JsonValueKind.Number && runtime.TryGetInt32(out var minutes) && minutes > 0 ? minutes : null,
             EpisodeCount = root.TryGetProperty("number_of_episodes", out var episodes) && episodes.ValueKind == JsonValueKind.Number && episodes.TryGetInt32(out var count) ? count : null,
             SeasonCount = root.TryGetProperty("number_of_seasons", out var seasons) && seasons.ValueKind == JsonValueKind.Number && seasons.TryGetInt32(out var seasonCount) ? seasonCount : null };

@@ -12,11 +12,13 @@ public sealed partial class LibraryStore
     // cache of 15 holds, which would rebuild patterns for every scanned file.
     static LibraryStore() { if (Regex.CacheSize < 256) Regex.CacheSize = 256; }
     private readonly string connection;
+    // Placeholders of wanted titles keep their paths under the data folder.
+    internal string DataDirectory { get; }
     internal string MetadataCacheDirectory => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(new SqliteConnectionStringBuilder(connection).DataSource))!, "metadata-http-cache");
     // The desktop app defers the startup retention sweep until its library has rendered; see DeferRetention.
     public LibraryStore(string directory, bool deferRetention = false)
     {
-        Directory.CreateDirectory(directory);
+        Directory.CreateDirectory(directory); DataDirectory = directory;
         connection = new SqliteConnectionStringBuilder { DataSource = System.IO.Path.Combine(directory, "library.db") }.ToString();
         using var db = Open();
         using var cmd = db.CreateCommand();
@@ -247,11 +249,11 @@ public sealed partial class LibraryStore
     private void MergeDuplicateShows()
     {
         var items = All().Where(x => x.Series is not null && x.SeriesPath is not null && !x.IsExtra && !x.IsVirtual).ToArray();
-        var providers = new[] { "tmdb", "tvdb", "imdb", "tvmaze" };
+        var providers = new[] { "tmdb", "tvdb", "imdb", "tvmaze" }; var wanted = Wanted().Select(x => x.Id).ToHashSet();
         foreach (var name in items.GroupBy(x => LibraryIdentity.Normalize(x.Series!)).Where(g => g.Select(LibraryIdentity.ShowKey).Distinct().Count() > 1))
         {
             var shows = name.GroupBy(LibraryIdentity.ShowKey).Select(g => g.ToArray())
-                .OrderByDescending(show => show.Any(x => providers.Any(p => LibraryIdentity.ProviderId(x, p) is not null)))
+                .OrderByDescending(show => wanted.Contains(LibraryIdentity.ShowKey(show[0]))).ThenByDescending(show => show.Any(x => providers.Any(p => LibraryIdentity.ProviderId(x, p) is not null)))
                 .ThenByDescending(show => show.Any(x => x.Kind == "Anime")).ThenByDescending(show => show.Length).ThenBy(show => LibraryIdentity.ShowKey(show[0]), StringComparer.Ordinal).ToArray();
             var target = shows[0];
             string? Id(MediaItem[] show, string provider) => show.Select(x => LibraryIdentity.ProviderId(x, provider)).FirstOrDefault(id => id is not null);
@@ -527,7 +529,7 @@ public sealed partial class LibraryStore
     public void GroupShowsByProvider()
     {
         if (!MetadataOptions.Load(this).GroupShowsByProvider) return;
-        MediaItem[]? items = null;
+        MediaItem[]? items = null; var wanted = Wanted().Select(x => x.Id).ToHashSet();
         foreach (var provider in new[] { "tmdb", "tvdb", "imdb" })
         {
             // Re-read only after a provider's grouping changed records.
@@ -537,7 +539,8 @@ public sealed partial class LibraryStore
             {
                 if (group.Select(x => x.MetadataKind ?? x.Kind).Distinct().Count() > 1) continue;
                 if (provider != "tmdb" && group.Select(x => LibraryIdentity.ProviderId(x, "tmdb")).OfType<string>().Distinct().Count() > 1) continue;
-                var ids = group.Select(LibraryIdentity.ShowKey).Distinct().Order(StringComparer.Ordinal).ToArray();
+                // A wanted title's show stays the show the others join.
+                var ids = group.Select(LibraryIdentity.ShowKey).Distinct().OrderByDescending(wanted.Contains).ThenBy(x => x, StringComparer.Ordinal).ToArray();
                 if (ids.Length < 2) continue;
                 foreach (var entry in items.Where(x => ids.Contains(LibraryIdentity.ShowKey(x)))) { Save(entry with { ShowId = ids[0] }); merged = true; }
             }
@@ -567,7 +570,8 @@ public sealed partial class LibraryStore
     {
         var roots = folders.ToArray(); var excluded = exclusions?.ToArray() ?? [];
         bool Retained(MediaItem item) => roots.Any(f => IsWithin(item.Path, f.Path)) && !excluded.Any(f => IsWithin(item.Path, f));
-        var retainedShows = all.Where(x => !x.IsVirtual && Retained(x)).Select(LibraryIdentity.ShowKey).ToHashSet();
+        // A wanted title keeps its placeholders while none of its files are here.
+        var retainedShows = all.Where(x => !x.IsVirtual && Retained(x)).Select(LibraryIdentity.ShowKey).Concat(Wanted().Select(x => x.Id)).ToHashSet();
         var removed = all.Where(x => x.IsVirtual ? !retainedShows.Contains(LibraryIdentity.ShowKey(x)) : !Retained(x)).ToArray();
         using var db = Open(); using var transaction = db.BeginTransaction();
         foreach (var item in removed)
@@ -641,6 +645,7 @@ public sealed partial class LibraryStore
             AttachLooseReleases();
             MergeDuplicateShows();
             GroupShowsByProvider();
+            changes += WantedTitles.Attach(this, DataDirectory);
             LastScanChanges = changes;
             return All();
         }, cancellation);
