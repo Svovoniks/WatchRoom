@@ -643,6 +643,7 @@ public partial class MainWindow
             PublishQueue(); RefreshQueuePickers(); NextQueued(button, new RoutedEventArgs());
         };
         menu.Items.Add(play); menu.Items.Add(QueueMenu(videos));
+        if (AcquireMenu(card) is { } acquire) menu.Items.Add(acquire);
         var unavailable = UnavailableCardItems(card).ToArray();
         if (unavailable.Length > 0)
         {

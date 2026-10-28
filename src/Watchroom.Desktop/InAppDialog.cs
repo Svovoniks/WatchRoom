@@ -185,20 +185,27 @@ public class InAppDialog : ContentControl
         SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // HWND_TOP: above the owner's other windows.
     }
 
-    // A short notice in the corner of the owner window. When the app is in the background its taskbar button flashes.
+    // A short notice in the corner of the owner window. It fades and rises in, waits while the pointer is over it, and
+    // fades out on its own or from its close button. When the app is in the background its taskbar button flashes.
     // Returns an action that dismisses the notice early.
     public static Action Toast(Window owner, string text, TimeSpan duration)
     {
         var message = new TextBlock { Text = text, FontSize = 16, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
         message.SetResourceReference(TextBlock.ForegroundProperty, "Ink");
-        var toastCard = new Border { Width = 340, Padding = new Thickness(18, 14, 18, 14), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), Child = message, Margin = new Thickness(16) };
+        var close = new Button { Content = "", Width = 28, Height = 28, MinHeight = 0, Padding = new Thickness(0), Margin = new Thickness(10, -4, -8, 0), FontSize = 10, VerticalAlignment = VerticalAlignment.Top, ToolTip = "Dismiss" };
+        close.SetResourceReference(FrameworkElement.StyleProperty, "IconButton");
+        AutomationProperties.SetName(close, "Dismiss notification");
+        var row = new DockPanel();
+        DockPanel.SetDock(close, Dock.Right); row.Children.Add(close); row.Children.Add(message);
+        var shift = new TranslateTransform();
+        var toastCard = new Border { Width = 360, Padding = new Thickness(18, 14, 18, 14), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), Child = row, Margin = new Thickness(16), RenderTransform = shift };
         toastCard.SetResourceReference(Border.BackgroundProperty, "Surface");
         toastCard.SetResourceReference(Border.BorderBrushProperty, "Accent");
         toastCard.SetResourceReference(EffectProperty, "PopupShadow");
         TextElement.SetFontFamily(toastCard, new FontFamily("Segoe UI"));
         AutomationProperties.SetLiveSetting(message, AutomationLiveSetting.Assertive);
         var target = owner.Content as FrameworkElement;
-        var toast = new Popup { Child = toastCard, AllowsTransparency = true, Placement = PlacementMode.Relative, PlacementTarget = target ?? (UIElement)owner, StaysOpen = true, IsHitTestVisible = false };
+        var toast = new Popup { Child = toastCard, AllowsTransparency = true, Placement = PlacementMode.Relative, PlacementTarget = target ?? (UIElement)owner, StaysOpen = true };
         void Place()
         {
             toastCard.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -206,12 +213,35 @@ public class InAppDialog : ContentControl
             toast.VerticalOffset = Math.Max(0, (target?.ActualHeight ?? owner.ActualHeight) - toastCard.DesiredSize.Height - 28);
         }
         void Moved(object? sender, EventArgs e) => Place();
+        // Windows' "Show animations" setting turns the motion off; the notice then just appears and goes.
+        var animate = SystemParameters.ClientAreaAnimation;
+        void Animate(double opacity, double offset, TimeSpan time, IEasingFunction ease, EventHandler? done = null)
+        {
+            var fade = new DoubleAnimation(opacity, time) { EasingFunction = ease };
+            if (done is not null) fade.Completed += done;
+            toastCard.BeginAnimation(UIElement.OpacityProperty, fade);
+            shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(offset, time) { EasingFunction = ease });
+        }
         var timer = new DispatcherTimer { Interval = duration };
-        void Dismiss() { timer.Stop(); toast.IsOpen = false; owner.SizeChanged -= Moved; owner.LocationChanged -= Moved; }
+        var dismissed = false;
+        void Closed() { toast.IsOpen = false; owner.SizeChanged -= Moved; owner.LocationChanged -= Moved; }
+        void Dismiss()
+        {
+            if (dismissed) return;
+            dismissed = true; timer.Stop(); toastCard.IsHitTestVisible = false;
+            if (animate && toast.IsOpen) Animate(0, 10, TimeSpan.FromMilliseconds(180), new CubicEase { EasingMode = EasingMode.EaseIn }, (_, _) => Closed());
+            else Closed();
+        }
         timer.Tick += (_, _) => Dismiss();
+        close.Click += (_, _) => Dismiss();
+        // Reading a long notice shouldn't race its timer.
+        toastCard.MouseEnter += (_, _) => timer.Stop();
+        toastCard.MouseLeave += (_, _) => { if (!dismissed) timer.Start(); };
         toast.Opened += (_, _) => { if (PresentationSource.FromVisual(toastCard) is HwndSource source) StayWithOwner(source.Handle, owner); };
         owner.SizeChanged += Moved; owner.LocationChanged += Moved;
+        if (animate) { toastCard.Opacity = 0; shift.Y = 14; }
         Place(); toast.IsOpen = true; timer.Start();
+        if (animate) Animate(1, 0, TimeSpan.FromMilliseconds(240), new CubicEase { EasingMode = EasingMode.EaseOut });
         if (!owner.IsActive && new WindowInteropHelper(owner).Handle is var handle && handle != IntPtr.Zero)
         {
             var flash = new FlashInfo { Size = (uint)Marshal.SizeOf<FlashInfo>(), Window = handle, Flags = 0x3 | 0xC, Count = 0, Timeout = 0 }; // all, until foreground

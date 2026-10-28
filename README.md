@@ -35,6 +35,8 @@ Headset and keyboard media buttons can play or pause the current video, includin
 
 Search covers the whole library, including when browsing a season. Missing files have an **Unavailable** filter and disabled playback actions. A rescan recognizes a file moved or renamed within the library folders and keeps its watch progress, queue entries and metadata. **Correct title** works without a metadata token and survives rescanning. Folder categories can be edited in place; folder changes trigger scanning, and an active scan can be cancelled while keeping videos already indexed.
 
+Acquisition plugins can get missing and upcoming episodes, seasons and films. **Acquire** hands a plugin that supports the title's type (anime, show or movie) the video's name, the folder where it belongs and the library folders with their categories. See [acquisition plugins](PLUGINS.md).
+
 ## Build and test
 
 Requires the .NET 10 SDK on Windows x64. This workspace has a local SDK in `.tools/dotnet`.

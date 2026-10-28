@@ -235,6 +235,14 @@ if (args.FirstOrDefault() == "--missing-episodes")
     Console.WriteLine($"{checks} missing episode checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--acquisition-plugins")
+{
+    var checks = 0;
+    await AcquisitionPluginsFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/acquisition-plugins-check"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} acquisition plugin checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--wanted-titles")
 {
     var checks = 0;
@@ -387,6 +395,7 @@ await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
 await LibraryVersionsFixture.Run(Path.Combine(root, "library-versions"), Check);
 await WantedTitlesFixture.Run(Path.Combine(root, "wanted-titles"), Check);
 MissingEpisodesFixture.Run(Path.Combine(root, "missing-episodes"), Check);
+await AcquisitionPluginsFixture.Run(Path.Combine(root, "acquisition-plugins"), Check);
 await FilenameSchemaFixture.Run(Path.Combine(root, "filename-schemas"), Check);
 await GroupingAuditFixture.Run(Path.Combine(root, "grouping-audit"), Check);
 HostRoomFixture.Run(Check);

@@ -144,7 +144,7 @@ public partial class MainWindow : Window
         ApplyTheme();
         if (startupFile is null) ShowPage("Home");
         foreach (var f in Wire.Read<List<LibraryFolder>>(library.Setting("folders") ?? "[]")) folders.Add(f);
-        FolderList.ItemsSource = folders; InitializePlayerChrome();
+        FolderList.ItemsSource = folders; InitializePlayerChrome(); LoadAcquisitionPlugins();
         ScanButton.IsEnabled = folders.Count > 0;
         try
         {
@@ -581,7 +581,7 @@ public partial class MainWindow : Window
         SeasonInformation.Visibility = seasonItem is null ? Visibility.Collapsed : Visibility.Visible;
         SeasonSummary.Text = seasonItem is null ? "" : (string.IsNullOrWhiteSpace(seasonItem.SeasonTitle) ? "" : seasonItem.SeasonTitle + "\n\n") + (seasonItem.SeasonOverview ?? seasonItem.Overview ?? "No season overview available.") + (seasonItem.SeasonSource is null ? "" : "\n\nMetadata: " + seasonItem.SeasonSource);
         EmptyLibrary.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        ShowWantedPanels();
+        ShowWantedPanels(); ShowAcquireSeason();
         try
         {
             if (debounce) await Task.Delay(200, cancellation);
@@ -740,6 +740,7 @@ public partial class MainWindow : Window
         if (item.ExtraOf is not null && !ArtworkCache.IsUsable(item.GeneratedEpisodePoster)) _ = ImproveClipArtwork(item);
         DetailFile.Text = item.IsVirtual ? "" : item.Path;
         ShowWantedPanels();
+        ShowAcquireDetail(item);
         ShowDetailTracks(item);
         var overviewSource = !string.IsNullOrWhiteSpace(item.EpisodeOverview) ? item.EpisodeSource : !string.IsNullOrWhiteSpace(item.SeasonOverview) ? item.SeasonSource : item.PosterSource;
         DetailSummary.Text = (item.DetailOverview ?? "No overview available yet.") +
