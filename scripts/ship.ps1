@@ -1,23 +1,24 @@
 #Requires -Version 7.0
+# Ships an app update through a reviewed pull request; see UPDATES.md.
+#   ship.ps1 -Message ... -BodyFile ...   check the branch, push it, and open or update its pull request
+#   ship.ps1 -Merge                       merge the approved pull request, tag it, and verify the release
+#   ship.ps1 -VerifyOnly -Version x.y.z   finish verifying an already pushed tag
 [CmdletBinding()]
 param(
-    [string[]]$Paths = @(),
+    [string]$Message = '',
+    [string]$BodyFile = '',
+    [string]$Title = '',
     [string]$Version = '',
-    [string]$Message = 'Usability improvements',
     [string]$Sdk = '',
+    [int]$Pr = 0,
     [switch]$Plan,
+    [switch]$Merge,
     [switch]$VerifyOnly,
     [ValidateRange(1, 120)][int]$TimeoutMinutes = 60
 )
 $ErrorActionPreference = 'Stop'
-$repository = 'Svovoniks/WatchRoom'
-$apiRoot = "https://api.github.com/repos/$repository"
+. (Join-Path $PSScriptRoot 'github-pr.ps1')
 
-function Invoke-Native {
-    param([string]$Command, [string[]]$Arguments)
-    & $Command @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "$Command failed (exit $LASTEXITCODE): $($Arguments -join ' ')" }
-}
 function Get-ShipVersion {
     param([string]$Requested, [string]$Latest, [string]$Source)
     foreach ($value in @($Latest, $Source)) {
@@ -30,41 +31,60 @@ function Get-ShipVersion {
     }
     return $Requested
 }
-function Assert-ShipPath {
-    param([string]$Root, [string]$Path)
-    $absolute = [IO.Path]::GetFullPath($Path, $Root)
-    $relative = [IO.Path]::GetRelativePath($Root, $absolute).Replace('\', '/')
+function Get-PullRequestVersion {
+    param([string]$Requested, [string]$Latest, [string]$MasterVersion, [string]$BranchVersion)
+    # A branch already above every release keeps its version across review rounds.
+    if (!$Requested -and $BranchVersion -match '^\d+\.\d+\.\d+$' -and
+        [version]$BranchVersion -gt [version]$Latest -and [version]$BranchVersion -gt [version]$MasterVersion) {
+        return $BranchVersion
+    }
+    return Get-ShipVersion $Requested $Latest $MasterVersion
+}
+function Get-PropsVersion {
+    param([string]$Root, [string]$Revision)
+    $props = (Invoke-Native git @('-C', $Root, 'show', "${Revision}:Directory.Build.props")) -join "`n"
+    return ([xml]$props).Project.PropertyGroup.Version
+}
+function Assert-ShipPathName {
+    param([string]$Path)
+    $relative = $Path.Replace('\', '/')
     # The approved attribution logo and postplay promo belong to the app, unlike local
     # reports and generated media. Keep the exception to these exact source paths.
     $attributionLogo = $relative -ceq 'src/Watchroom.Desktop/Assets/Tmdb.png' -or $relative -ceq 'src/Watchroom.Desktop/Assets/Promo/teaser-clam-intro.mp4'
     if ($relative -match '^\.\.(?:/|$)' -or [IO.Path]::IsPathRooted($relative) -or
         $relative -match '(^|/)(sites|artifacts|\.tools|\.nuget|bin|obj|node_modules|data|logs|credentials)(/|$)' -or
         ($relative -match '(?i)(^|/)(\.env[^/]*|.*\.(html?|png|jpe?g|mp4|mkv|sqlite|db|pfx|pem|key))$' -and !$attributionLogo) -or
-        $relative -notmatch '^(src/|tests/|scripts/|packaging/|\.github/workflows/|[^/]+\.(md|props|targets|slnx|ps1)|NuGet\.Config$|global\.json$)') {
+        $relative -notmatch '^(src/|tests/|scripts/|packaging/|\.github/workflows/|\.claude/skills/|[^/]+\.(md|props|targets|slnx|ps1)|NuGet\.Config$|global\.json$)') {
         throw "Not a release source path: $Path"
-    }
-    if (!(Test-Path -LiteralPath $absolute)) {
-        & git -C $Root ls-files --error-unmatch -- $relative 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { return $relative } # Explicitly selected tracked deletion.
-        throw "Source file does not exist and is not a tracked deletion: $Path"
-    }
-    $item = Get-Item -LiteralPath $absolute
-    if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw "Select individual regular files, not directories or links: $Path"
     }
     return $relative
 }
-function Get-PublicJson {
-    param([string]$Url)
-    # Public verification deliberately does not use GH_TOKEN or a GitHub CLI session.
-    Invoke-RestMethod -Uri $Url -Headers @{ 'User-Agent' = 'Watchroom-release-verification' } -TimeoutSec 60
+function Get-CheckRecordPath {
+    param([string]$Root, [string]$Commit)
+    # Shared by every worktree, so -Merge can run anywhere and still see what was checked.
+    $common = (Invoke-Native git @('-C', $Root, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
+    return Join-Path $common "watchroom-checks/$Commit.json"
 }
-function Stage-ShipSources {
-    param([string]$Root, [string[]]$Selected)
-    # git apply --index already stages tracked deletions. Adding their now
-    # absent pathspecs again fails; only new/modified files need this step.
-    $existing = @($Selected | Where-Object { Test-Path -LiteralPath (Join-Path $Root $_) -PathType Leaf })
-    if ($existing.Count) { Invoke-Native git (@('-C', $Root, 'add', '--') + $existing) }
+function Invoke-ReleaseChecks {
+    param([string]$Checkout, [string]$Sdk, [string]$PackagePath)
+    Push-Location $Checkout
+    try {
+        Invoke-Native $Sdk @('restore', 'Watchroom.slnx', '--locked-mode', "-p:RestorePackagesPath=$PackagePath")
+        Invoke-Native $Sdk @('build', 'Watchroom.slnx', '-c', 'Release', '--no-restore', "-p:RestorePackagesPath=$PackagePath")
+        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.UpdateChecks', '-c', 'Release', '--no-build')
+        foreach ($check in @('--metadata-cache', '--tmdb-access', '--shared-library')) {
+            Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', $check)
+        }
+        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build')
+        foreach ($check in @('--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout', '--language-detection', '--voice-processing')) {
+            Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build', '--', $check)
+        }
+        # Some nested metadata fixtures also create long SQLite backup filenames.
+        $freshSmoke = Join-Path ([IO.Path]::GetTempPath()) ('wr-smoke-' + [guid]::NewGuid().ToString('N'))
+        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', $freshSmoke)
+        Invoke-Native git @('diff', '--exit-code')
+    }
+    finally { Pop-Location }
 }
 function Get-SyncTree {
     param([string]$Root, [string]$Base, [string]$Master, [string]$Local)
@@ -267,6 +287,7 @@ function Test-PublishedRelease {
     return @{ Version = $ExpectedVersion; Release = $url; Sha256 = $hash; Installer = $installerPath; Updates = @($assets.Updates | ForEach-Object { "$($_.name) ($([Math]::Round($_.size / 1MB, 1)) MB)" }) }
 }
 
+
 # Dot-sourcing exposes helpers for offline safety checks without starting a release.
 if ($MyInvocation.InvocationName -eq '.') { return }
 $root = Split-Path -Parent $PSScriptRoot
@@ -276,100 +297,147 @@ Push-Location $root
 try {
     $remote = Invoke-Native git @('remote', 'get-url', 'origin')
     if ($remote.Trim() -notmatch '^(https://github\.com/|git@github\.com:)Svovoniks/WatchRoom(?:\.git)?$') { throw 'origin must be the public Svovoniks/WatchRoom repository.' }
-    Invoke-Native git @('fetch', 'origin', '--tags')
-    $head = (Invoke-Native git @('rev-parse', 'HEAD')).Trim()
-    $releaseHead = (Invoke-Native git @('rev-parse', 'origin/master')).Trim()
-    if (!$VerifyOnly -and $head -cne $releaseHead) {
-        throw 'Start from origin/master before shipping. This prevents releasing an old checkout or unrelated local commits.'
-    }
+    Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', '--tags')
+    $deadline = [datetime]::UtcNow.AddMinutes($TimeoutMinutes)
     if ($VerifyOnly) {
         if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw '-VerifyOnly requires -Version major.minor.patch.' }
         $commit = (Invoke-Native git @('rev-parse', "v$Version^{commit}")).Trim()
     }
+    elseif ($Merge) {
+        if ($Pr) { $pull = Invoke-GitHub "/pulls/$Pr" }
+        else {
+            $branch = (Invoke-Native git @('rev-parse', '--abbrev-ref', 'HEAD')).Trim()
+            $pull = Find-BranchPullRequest $branch
+            if (!$pull) { throw "No open pull request for branch $branch. Pass -Pr." }
+        }
+        if ($pull.state -ne 'open' -or $pull.draft -or $pull.base.ref -cne 'master' -or $pull.head.repo.full_name -cne $repository) {
+            throw 'Only an open, non-draft pull request from Svovoniks/WatchRoom into master can be shipped.'
+        }
+        $number = $pull.number; $head = $pull.head.sha
+        Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', "pull/$number/head")
+        if ((Invoke-Native git @('rev-parse', 'FETCH_HEAD')).Trim() -cne $head) { throw 'The pull request head changed while it was being read. Rerun -Merge.' }
+        if (!(Test-Path -LiteralPath (Get-CheckRecordPath $root $head))) {
+            throw "Release checks have not passed on $head. Rerun ship.ps1 from the pull request's worktree; it checks and pushes the branch."
+        }
+        & git merge-base --is-ancestor origin/master $head
+        if ($LASTEXITCODE -ne 0) { throw 'master advanced since this pull request was checked. Merge origin/master into the branch, rerun ship.ps1, and request a re-review.' }
+        $approval = Assert-ReviewApproval (Get-PullRequestComments $number) $head
+        $Version = Get-PropsVersion $root $head
+        $latest = (Get-PublicJson "$apiRoot/releases/latest").tag_name -replace '^v', ''
+        if ([version]$Version -le [version]$latest) { throw "The pull request ships $Version, but $latest is already published. Rerun ship.ps1 to raise the version, then request a re-review." }
+        & git show-ref --verify --quiet "refs/tags/v$Version"
+        if ($LASTEXITCODE -eq 0) { throw "Tag v$Version already exists. Rerun ship.ps1 with a higher -Version, then request a re-review." }
+        $note = Get-ReleaseNote $pull.body
+        if (!$note) { $note = $pull.title }
+        Write-Host "Merge #$number ($head) as Watchroom $Version, approved in $($approval.Url)"
+        if ($Plan) { Write-Host 'Preview complete. Nothing was merged, tagged, or released.'; return }
+        $checks = $null
+        while (!$checks) {
+            $state = Get-HeadCheckState (Invoke-GitHub "/actions/runs?head_sha=$head&per_page=100").workflow_runs $head
+            if ($state.Detail -ne $lastState) { Write-Host "Pull request checks: $($state.Detail)"; $lastState = $state.Detail }
+            if ($state.State -eq 'failure') { throw "$($state.Detail). Fix the failure, or rerun the failed jobs only if the failure is unrelated to this change, then rerun -Merge." }
+            if ($state.State -eq 'success') { $checks = $state; break }
+            if ([datetime]::UtcNow -ge $deadline) { throw 'Timed out waiting for pull request checks. Rerun -Merge.' }
+            Start-Sleep -Seconds 30
+        }
+        # Merge only the exact reviewed head, and only while it still contains master.
+        Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', 'master')
+        & git merge-base --is-ancestor origin/master $head
+        if ($LASTEXITCODE -ne 0) { throw 'master advanced while waiting for checks. Merge origin/master into the branch, rerun ship.ps1, and request a re-review.' }
+        $merged = Invoke-GitHub "/pulls/$number/merge" -Method Put -Body @{
+            merge_method = 'squash'; sha = $head
+            commit_title = "Release Watchroom ${Version}: $note"
+            commit_message = "Reviewed and merged in #$number."
+        }
+        $commit = $merged.sha
+        Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', 'master')
+        Invoke-Native git @('merge-base', '--is-ancestor', $commit, 'origin/master') | Out-Null
+        if ((Invoke-Native git @('rev-parse', "$commit^{tree}")).Trim() -cne (Invoke-Native git @('rev-parse', "$head^{tree}")).Trim()) {
+            throw "Merged commit $commit differs from the reviewed head $head. It was not tagged; ship a higher version once master is correct."
+        }
+        Invoke-Native git @('tag', '-a', "v$Version", $commit, '-m', "Watchroom ${Version}: $note")
+        Invoke-Native git @('push', 'origin', "v$Version")
+        try { Invoke-GitHub "/git/refs/heads/$($pull.head.ref)" -Method Delete | Out-Null }
+        catch { Write-Warning "Could not delete merged branch $($pull.head.ref): $($_.Exception.Message)" }
+    }
     else {
-        if (!$Paths.Count) { throw 'Pass -Paths with the individual files to ship.' }
-        $selected = @($Paths | ForEach-Object { Assert-ShipPath $root $_ } | Sort-Object -Unique)
-        if ($selected -notcontains 'Directory.Build.props') { $selected += 'Directory.Build.props' }
-        $latest = Get-PublicJson "$apiRoot/releases/latest"
-        $source = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
-        $Version = Get-ShipVersion $Version ($latest.tag_name -replace '^v', '') $source
-        $tag = "v$Version"
-        & git show-ref --verify --quiet "refs/tags/$tag"
-        if ($LASTEXITCODE -eq 0) { throw "Tag $tag already exists. Choose a higher version." }
-        Write-Host "Release $tag from $head with these files:"
-        $selected | ForEach-Object { Write-Host "  $_" }
-        if ($Plan) { Write-Host 'Preview complete. No files, commits, tags, or releases changed.'; return }
+        # Open or update the pull request for this worktree's branch.
+        $branch = (Invoke-Native git @('rev-parse', '--abbrev-ref', 'HEAD')).Trim()
+        if ($branch -in 'HEAD', 'master') { throw 'Ship from a feature branch in your own worktree, not from master or a detached HEAD.' }
+        $gitDir = (Invoke-Native git @('rev-parse', '--path-format=absolute', '--git-dir')).Trim()
+        $commonDir = (Invoke-Native git @('rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
+        if ($gitDir -eq $commonDir) { throw 'Agents ship from a linked worktree: git worktree add -b <branch> <path> origin/master.' }
+        if (@(Invoke-Native git @('status', '--porcelain', '--untracked-files=no')).Count) { throw 'Commit or discard tracked changes first; only committed work is reviewed and shipped.' }
+        & git merge-base --is-ancestor origin/master HEAD
+        if ($LASTEXITCODE -ne 0) { throw 'The branch does not contain the latest origin/master. Merge it (git merge origin/master), resolve conflicts, and rerun.' }
+        $changed = @(Invoke-Native git @('diff', '--name-only', '--no-renames', 'origin/master', 'HEAD'))
+        if (!$changed.Count) { throw 'The branch has no changes from origin/master.' }
+        $changed | ForEach-Object { $null = Assert-ShipPathName $_ }
+        $untracked = @(Invoke-Native git @('ls-files', '--others', '--exclude-standard'))
+        if ($untracked.Count) { Write-Warning "Untracked files are not shipped: $($untracked -join ', ')" }
+        $existing = Find-BranchPullRequest $branch
+        if (!$existing -and !$Message) { throw 'Pass -Message with the release note users will read.' }
+        if (!$existing -and !$BodyFile) { throw 'Pass -BodyFile with the pull request description for the reviewer.' }
+        $latest = (Get-PublicJson "$apiRoot/releases/latest").tag_name -replace '^v', ''
+        $branchVersion = Get-PropsVersion $root 'HEAD'
+        $Version = Get-PullRequestVersion $Version $latest (Get-PropsVersion $root 'origin/master') $branchVersion
+        & git show-ref --verify --quiet "refs/tags/v$Version"
+        if ($LASTEXITCODE -eq 0) { throw "Tag v$Version already exists. Choose a higher version." }
+        Write-Host "$(if ($existing) { "Update #$($existing.number)" } else { 'Open a pull request' }) for $branch as Watchroom $Version with these files:"
+        $changed | ForEach-Object { Write-Host "  $_" }
+        if ($Plan) { Write-Host 'Preview complete. No files, commits, branches, or pull requests changed.'; return }
         if (!$Sdk) {
             $Sdk = Join-Path $root '.tools/dotnet/dotnet.exe'
             if (!(Test-Path -LiteralPath $Sdk)) {
-                $commonGit = (Invoke-Native git @('rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
-                $Sdk = Join-Path (Split-Path -Parent $commonGit) '.tools/dotnet/dotnet.exe'
+                $Sdk = Join-Path (Split-Path -Parent $commonDir) '.tools/dotnet/dotnet.exe'
                 if (!(Test-Path -LiteralPath $Sdk)) { $Sdk = (Get-Command dotnet -ErrorAction Stop).Source }
             }
         }
         $Sdk = (Resolve-Path -LiteralPath $Sdk).Path
         $env:PATH = (Split-Path -Parent $Sdk) + [IO.Path]::PathSeparator + $env:PATH
-    }
-    $record = Join-Path $root ('artifacts/ship-' + $Version + '-' + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $record | Out-Null
-    if (!$VerifyOnly) {
-        $patch = Join-Path $record 'selected.patch'
-        Invoke-Native git (@('diff', 'HEAD', '--binary', "--output=$patch", '--') + $selected)
-        # SQLite fixture paths can exceed legacy Windows limits under a nested worktree.
-        $checkout = Join-Path ([IO.Path]::GetTempPath()) ('watchroom-ship-' + [guid]::NewGuid().ToString('N'))
-        Invoke-Native git @('worktree', 'add', '--detach', $checkout, 'origin/master')
-        if ((Get-Item -LiteralPath $patch).Length -gt 0) { Invoke-Native git @('-C', $checkout, 'apply', '--index', $patch) }
-        foreach ($path in $selected) {
-            & git ls-files --error-unmatch -- $path 2>$null | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                $target = Join-Path $checkout $path
-                New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-                Copy-Item -LiteralPath (Join-Path $root $path) -Destination $target
-            }
-        }
-        Push-Location $checkout
-        try {
-            $propsPath = Join-Path $checkout 'Directory.Build.props'
+        if ($branchVersion -cne $Version) {
+            $propsPath = Join-Path $root 'Directory.Build.props'
             $props = Get-Content -LiteralPath $propsPath -Raw
             if ([regex]::Matches($props, '<Version>[^<]+</Version>').Count -ne 1) { throw 'Expected exactly one Version property.' }
             [IO.File]::WriteAllText($propsPath, [regex]::Replace($props, '<Version>[^<]+</Version>', "<Version>$Version</Version>"))
-            Stage-ShipSources $checkout $selected
-            Invoke-Native git @('diff', '--cached', '--check')
-            $packagePath = Join-Path $root '.nuget/packages'
-            Invoke-Native $Sdk @('restore', 'Watchroom.slnx', '--locked-mode', "-p:RestorePackagesPath=$packagePath")
-            Invoke-Native $Sdk @('build', 'Watchroom.slnx', '-c', 'Release', '--no-restore', "-p:RestorePackagesPath=$packagePath")
-            Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.UpdateChecks', '-c', 'Release', '--no-build')
-            foreach ($check in @('--metadata-cache', '--tmdb-access', '--shared-library')) {
-                Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', $check)
-            }
-            Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build')
-            foreach ($check in @('--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout', '--language-detection', '--voice-processing')) {
-                Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build', '--', $check)
-            }
-            # Some nested metadata fixtures also create long SQLite backup filenames.
-            $freshSmoke = Join-Path ([IO.Path]::GetTempPath()) ('wr-smoke-' + [guid]::NewGuid().ToString('N'))
-            Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', $freshSmoke)
-            Invoke-Native git @('diff', '--exit-code')
-            Invoke-Native git @('fetch', 'origin')
-            if ((Invoke-Native git @('rev-parse', 'origin/master')).Trim() -cne $releaseHead) { throw 'master advanced during testing. Integrate it and rerun shipping.' }
-            Invoke-Native git @('commit', '-m', "Release Watchroom ${Version}: $Message")
-            $commit = (Invoke-Native git @('rev-parse', 'HEAD')).Trim()
-            Invoke-Native git @('push', 'origin', 'HEAD:master')
-            Invoke-Native git @('tag', '-a', "v$Version", '-m', "Watchroom ${Version}: $Message")
-            Invoke-Native git @('push', 'origin', "v$Version")
+            Invoke-Native git @('commit', '--quiet', '-m', "Set version $Version", '--', 'Directory.Build.props')
         }
-        finally { Pop-Location }
+        $head = (Invoke-Native git @('rev-parse', 'HEAD')).Trim()
+        # Check a clean copy of the commit: untracked files in the worktree cannot affect the result,
+        # and SQLite fixture paths stay within legacy Windows limits under the temp directory.
+        $checkout = Join-Path ([IO.Path]::GetTempPath()) ('watchroom-ship-' + [guid]::NewGuid().ToString('N'))
+        Invoke-Native git @('worktree', 'add', '--detach', $checkout, $head)
+        Invoke-ReleaseChecks $checkout $Sdk (Join-Path (Split-Path -Parent $commonDir) '.nuget/packages')
+        Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', 'master')
+        & git merge-base --is-ancestor origin/master $head
+        if ($LASTEXITCODE -ne 0) { throw 'master advanced during checks. Merge origin/master into the branch and rerun.' }
+        $recordPath = Get-CheckRecordPath $root $head
+        New-Item -ItemType Directory -Path (Split-Path -Parent $recordPath) -Force | Out-Null
+        @{ Commit = $head; Version = $Version; Checked = [datetime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content -LiteralPath $recordPath
+        Invoke-Native git @('push', '--set-upstream', 'origin', "HEAD:refs/heads/$branch")
+        $summary = if ($BodyFile) { Get-Content -LiteralPath $BodyFile -Raw } else { Get-PullRequestSummary $existing.body }
+        $note = if ($Message) { $Message } else { Get-ReleaseNote $existing.body }
+        $body = Format-PullRequestBody $summary $note $Version
+        $prTitle = if ($Title) { $Title } elseif ($existing) { $existing.title } elseif ($Message.Length -le 100) { $Message } else { $Message.Substring(0, 99) + '…' }
+        $pull = if ($existing) { Invoke-GitHub "/pulls/$($existing.number)" -Method Patch -Body @{ title = $prTitle; body = $body } }
+        else { Invoke-GitHub '/pulls' -Method Post -Body @{ title = $prTitle; head = $branch; base = 'master'; body = $body } }
+        Invoke-Native git @('worktree', 'remove', '--force', $checkout); $checkout = $null
+        Write-Host "Pull request: $($pull.html_url)"
+        Write-Host "Head: $head (Watchroom $Version, release checks passed)"
+        Write-Host "Next: ask a separate reviewer agent to review #$($pull.number) at $head with the review-pr skill (.claude/skills/review-pr/SKILL.md)."
+        Write-Host 'Fix what it finds and rerun this script until it approves, then run ship.ps1 -Merge.'
+        return
     }
-    $deadline = [datetime]::UtcNow.AddMinutes($TimeoutMinutes)
+    $record = Join-Path $root ('artifacts/ship-' + $Version + '-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $record | Out-Null
     $run = Wait-ReleaseBuild $Version $commit $deadline
     $result = Test-PublishedRelease $Version $record $deadline
     $result.Actions = $run.html_url
     $result.Commit = $commit
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $record 'verified.json')
-    try { $result.LocalMaster = Sync-ShippedMaster $root $commit $record $selected }
+    try { $result.LocalMaster = Sync-ShippedMaster $root $commit $record }
     catch { throw "Release v$Version is publicly verified, but local master was not synchronized. $_" }
     $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $record 'verified.json')
-    if ($checkout) { Invoke-Native git @('worktree', 'remove', $checkout) }
     $outcome = if ($VerifyOnly) { 'Verified existing release' } else { 'Shipped' }
     Write-Host "$outcome Watchroom ${Version}: $($result.Release)"
     Write-Host "Actions: $($run.html_url)"
@@ -379,7 +447,8 @@ try {
     Write-Host "Local master synchronized: $($result.LocalMaster.Commit)"
 }
 catch {
-    if ($checkout) { Write-Warning "Release checkout retained at $checkout. If the tag was pushed, recheck with -VerifyOnly -Version $Version. Never move a published tag." }
+    if ($checkout) { Write-Warning "Check checkout retained at $checkout for investigation." }
+    if ($Merge -and $Version) { Write-Warning "If v$Version was pushed, recheck with -VerifyOnly -Version $Version. Never move a published tag." }
     throw
 }
 finally { $env:PATH = $originalPath; Pop-Location }

@@ -4,42 +4,150 @@
 
 The public source and release repository is `Svovoniks/WatchRoom`, and the release
 branch is `master`. The updater uses its public `/releases/latest` endpoint.
-Shipping is authorized when the user asks to ship an update; complete the steps
-below rather than stopping at a source commit or workflow artifact.
+Shipping is authorized when the user asks to ship an update. Complete the whole
+flow below rather than stopping at a pushed branch, an open pull request, or a
+workflow artifact.
 
-Shipping means publishing and verifying the GitHub release. Do not open, control,
-or update the user's desktop app as part of shipping. Install a release locally
-only when the user explicitly requests a local installation. Computer use is not
-part of this release checklist.
+Shipping means a reviewed pull request merged into `master`, then publishing and
+verifying the GitHub release. Agents never push to `master` directly, and all agent
+work happens in git worktrees (see AGENTS.md). Do not open, control, or update the
+user's desktop app as part of shipping. Install a release locally only when the user
+explicitly requests a local installation. Computer use is not part of this release
+checklist.
 
-Preferred release flow for agents: use `./scripts/ship.ps1` for the full release
-and reserve manual commands for exception handling, inspection, or recovery. The
-script already performs the work that would otherwise be repeated across many
-steps: it selects the intended paths, runs in an isolated worktree, bumps the
-version, executes the release checks and smoke suite, commits, pushes, tags, waits
-for the tag workflow, verifies the public release and installer checksums, then
-pulls `origin/master` into the local master checkout.
+1. **Open the pull request.** Commit the change on your worktree's branch. Write the
+   description to a file outside the repository: what changed and why, intentional
+   behavior changes, removals, or performance costs, and how it was tested. Then run
+   `./scripts/ship.ps1 -Message '<release note>' -BodyFile <path>`.
+2. **Get an independent review.** Ask a separate agent with fresh context to review
+   the PR with the `review-pr` skill (`.claude/skills/review-pr/SKILL.md`), giving it
+   the PR number and head commit. The reviewer posts its verdict on the pull request
+   with `scripts/review-pr.ps1`. It blocks on bugs, performance regressions, and
+   broken existing features unless the description says the change is intentional.
+3. **Fix until approved.** Fix the blocking findings, commit, rerun
+   `./scripts/ship.ps1` (no arguments are needed to update the same PR), and ask for
+   a re-review of the new head with the earlier findings and your replies. If the
+   same point is disputed twice, or after five rounds without approval, ask the user.
+4. **Merge and release.** Run `./scripts/ship.ps1 -Merge`. Report the PR, version,
+   release URL, Actions result, local sync result, and any validation limitations.
 
-If you must fall back to the manual path, keep it brief and explicit:
+Use the scripted flow by default. The goal is to let the automation do the bulk
+of the work while agents stay focused on the change, the review, failure triage,
+and release validation.
 
-1. Inspect `git status`, fetch `origin`, and inspect the latest GitHub release.
-   Preserve unrelated changes. Stage only the intended source, tests, build files,
-   and general documentation. Keep personal HTML investigations, library
-   snapshots, credentials, and unrelated `sites` submodule changes out of commits.
+## Shipping with the release script
+
+Run `scripts/ship.ps1` in PowerShell 7 from your worktree, on a feature branch that
+contains the latest `origin/master` and has no uncommitted tracked changes.
+
+**Open or update a pull request** (default mode). The script rejects branches whose
+diff from `origin/master` touches anything other than release source paths:
+`sites`, `artifacts/`, `.tools/`, databases, credentials, local HTML reports, and
+generated media are refused. It picks a version above both the latest public release
+and `master`, and commits `Set version X` on the branch if needed. A branch that
+already has such a version keeps it across review rounds. The script then runs the
+release checks below plus the full smoke suite against a fresh test directory. It
+runs them in a detached copy of the commit under the system temp directory, so
+untracked files cannot affect the result and SQLite paths stay within Windows
+limits. If the checks pass, it records the checked commit and pushes the branch. It
+creates the pull request, or updates the existing one's title, description, and
+release note. The release note is kept in the description under `### Release note`
+and becomes the release commit message and tag message.
+
+**Review.** `scripts/review-pr.ps1 -Pr N` checks out the head in a fresh temp
+worktree and prints the description, changed files, CI state, and earlier verdicts.
+`-Verdict approve|changes -Head <sha> -BodyFile <path>` posts the verdict as a PR
+comment with a `watchroom-review` marker for that exact commit. Every account here
+is the repository owner, and GitHub does not let authors approve their own pull
+requests, so the marker comment is the approval. Only markers from the owner,
+members, or collaborators count. The newest one wins.
+
+**Merge** (`-Merge`, optionally `-Pr N`). The script refuses unless all of these
+hold:
+
+- The pull request is open, not a draft, and from this repository into `master`.
+- The release checks passed locally on its exact head.
+- The head contains the current `origin/master`.
+- The newest reviewer verdict approves that head.
+- Its version is higher than the latest release and has no tag.
+
+It waits for the `Build and release` workflow runs on the head to succeed. It then
+squash-merges with GitHub's head-SHA guard and the title `Release Watchroom X:
+<release note>`. It confirms the merged tree is exactly the reviewed tree, then
+tags and pushes `vX`. It deletes the merged branch, waits for the tag workflow, and
+verifies the public release, updater feed, installer size, and SHA-256 against both
+GitHub and `SHA256SUMS.txt`. Finally, it pulls `master` into the checkout that owns
+that branch. If `master` has no checkout, it fast-forwards the local branch without
+switching any checkout.
+
+Any new commit, including a merge of `master` into the branch, needs another
+`ship.ps1` run and a re-review, because approval covers one exact commit.
+
+Local work is saved in a recovery stash and under the ignored verification
+directory before synchronizing a dirty master. The script merges the worktree
+and index separately to preserve staged and unstaged edits, retains untracked
+files, and leaves unrelated `sites` contents alone. Already-shipped changes do
+not remain as duplicate local edits. Divergence or conflicting local work stops
+the sync without resetting commits or overwriting files. The recovery stash is
+retained, and the error explicitly distinguishes a verified public release from
+an incomplete local sync. `-VerifyOnly` also runs this final synchronization step
+so it can complete a previously interrupted ship.
+
+```powershell
+# Preview the branch's files and version without changing anything.
+./scripts/ship.ps1 -Plan
+
+# Check, push, and open the pull request.
+./scripts/ship.ps1 -Message 'Clarify playback language preferences' -BodyFile $env:TEMP/pr-body.md
+
+# After fixing review findings: check, push, and update the same pull request.
+./scripts/ship.ps1
+
+# Reviewer: check out, then post a verdict for the exact reviewed head.
+./scripts/review-pr.ps1 -Pr 12
+./scripts/review-pr.ps1 -Pr 12 -Verdict approve -Head <sha> -BodyFile $env:TEMP/review.md
+
+# Preview the merge gates, then merge, tag, and verify the release.
+./scripts/ship.ps1 -Merge -Plan
+./scripts/ship.ps1 -Merge
+
+# Recheck an already pushed tag after a timeout or network interruption.
+./scripts/ship.ps1 -VerifyOnly -Version 0.3.18
+
+# Offline safety checks for the scripts; no pull request or release is created.
+./scripts/ship-checks.ps1
+```
+
+Use `-Sdk C:/path/to/dotnet.exe` when the SDK is outside the main checkout.
+Otherwise the script uses `.tools/dotnet/dotnet.exe` from the worktree or the main
+checkout, then `dotnet` from PATH. Pull requests, reviews, and merges use the GitHub
+credential git already uses for pushes, read through `git credential fill`; it is
+never printed. Public release verification stays unauthenticated. No GitHub CLI is
+needed. `-TimeoutMinutes` defaults to 60. Verification records and downloaded
+installers remain under ignored `artifacts/`. Failed check copies are retained at
+the printed path for investigation. A failed workflow stops the script. It never
+rewrites a tag, overwrites a published installer, or installs the app locally.
+
+### Manual fallback
+
+Use this only to recover when the scripts cannot run:
+
+1. Work on a branch in a worktree. Keep personal HTML investigations, library
+   snapshots, credentials, and `sites` changes out of commits.
 2. Choose a version higher than the latest published stable release. Update
    `<Version>` in `Directory.Build.props` (the single source of the app version).
    Use three numeric components, such as `0.2.1`; the release tag must be exactly
    `v0.2.1`. The workflow rejects tags that disagree with the source version.
-3. Run the checks below from the repository root and resolve failures. For
-   playback or room-networking changes, also run the full smoke suite against a
-   fresh test directory. Do not reuse previous smoke data.
-4. Commit the intended changes. Push the release commit to `master`, or merge an
-   approved PR there if repository protections require it. Ensure the tag points
-   to that exact commit, then push the annotated version tag. Never force-push or
-   move an existing release tag.
-5. Wait for the **tag's** `Build and release` Actions run to succeed. A branch
-   build does not publish a release. The tag workflow builds, tests, packages,
-   uploads assets to a draft release, then publishes it as the latest release.
+3. Run the checks below from the worktree root and resolve failures. For playback
+   or room-networking changes, also run the full smoke suite against a fresh test
+   directory. Do not reuse previous smoke data.
+4. Push the branch, open a pull request, and get the reviewer's approval as above.
+   Merge only the approved head. Then tag that exact merge commit with an annotated
+   tag and push the tag. Never force-push or move an existing release tag.
+5. Wait for the **tag's** `Build and release` Actions run to succeed. A branch or
+   pull request build does not publish a release. The tag workflow builds, tests,
+   packages, uploads assets to a draft release, then publishes it as the latest
+   release.
 6. Verify without authentication that `/releases/latest` returns the expected
    tag, `draft=false`, and `prerelease=false`. Check that the Windows installer has
    the exact expected filename, a nonzero size, and a `sha256:` digest. Download
@@ -49,12 +157,7 @@ If you must fall back to the manual path, keep it brief and explicit:
    installer and checksums.
 8. Synchronize local `master` with `origin/master` and confirm it contains the
    published commit. Preserve unrelated staged/unstaged edits, untracked files,
-   and `sites` work. Report the version, release URL, Actions result, local sync
-   result, and any validation limitations. Leave the user's installed app unchanged.
-
-Use the scripted flow by default. The goal is to let the automation do the bulk
-of the work while agents stay focused on explicit file selection, failure
-triage, and release validation.
+   and `sites` work. Leave the user's installed app unchanged.
 
 PowerShell checks (use `dotnet` instead of the workspace SDK path on other machines):
 
@@ -71,22 +174,9 @@ the voice processing libraries once, which needs Visual Studio's C++ tools and R
 When packaging or the updater changes, also run `./scripts/update-package-checks.ps1`.
 The release workflow runs it on every packaged build.
 
-Example release after checks, using an example version (replace it with the
-version actually chosen; do not rerun an existing tag):
-
-```powershell
-git add <explicit intended paths>
-git commit -m 'Release Watchroom 0.2.1 with back navigation'
-git push origin HEAD:master
-git tag -a v0.2.1 -m 'Watchroom 0.2.1: back and swipe navigation'
-git push origin v0.2.1
-```
-
 Inspect Actions at https://github.com/Svovoniks/WatchRoom/actions and releases at
-https://github.com/Svovoniks/WatchRoom/releases. With GitHub CLI authentication,
-`gh run list --repo Svovoniks/WatchRoom` and `gh run watch RUN_ID --repo
-Svovoniks/WatchRoom --exit-status` can monitor the run. Public REST endpoints also
-work without authentication; never print credentials when using authenticated APIs.
+https://github.com/Svovoniks/WatchRoom/releases. Public REST endpoints work without
+authentication; never print credentials when using authenticated APIs.
 
 Public updater verification:
 
@@ -104,61 +194,10 @@ app whose embedded version does not match. Do not call Inno Setup directly.
 If a run fails before publication, inspect its logs and fix the failure. A draft
 release is not shipped. If a failure leaves a draft behind, finish that draft only
 when it still corresponds to the same validated commit and installer; otherwise
-ship a higher version and leave the failed draft unpublished. Never overwrite
-bytes for an already published version. For a defective published version,
-release a higher patch version with the fix; the updater refuses downgrades.
-
-## Shipping with the release script
-
-Run `scripts/ship.ps1` in PowerShell 7 from a checkout at `origin/master`.
-Select individual files explicitly; unrelated staged and unstaged changes are
-preserved. The script applies only those files to an isolated Git worktree, bumps
-the version, runs the release checks plus the full smoke suite in a fresh test
-directory, commits, pushes `master`, and pushes an annotated version tag. It waits
-for the tag workflow and verifies the public release, updater feed, installer size,
-and SHA-256 against both GitHub and `SHA256SUMS.txt`. After public verification,
-it pulls master into the checkout that owns that branch, even when shipping was
-started from another worktree. If master has no checkout, it fast-forwards the
-local branch without switching the current checkout.
-
-Local work is saved in a recovery stash and under the ignored verification
-directory before synchronizing a dirty master. The script merges the worktree
-and index separately to preserve staged and unstaged edits, retains untracked
-files, and leaves unrelated `sites` contents alone. Already-shipped changes do
-not remain as duplicate local edits. Divergence or conflicting local work stops
-the sync without resetting commits or overwriting files. The recovery stash is
-retained, and the error explicitly distinguishes a verified public release from
-an incomplete local sync. `-VerifyOnly` also runs this final synchronization step
-so it can complete a previously interrupted ship.
-
-```powershell
-# Preview the selected paths and next patch version without changing files or publishing.
-./scripts/ship.ps1 -Paths src/Watchroom.Desktop/MainWindow.xaml -Plan
-
-# Ship those changes. Omit Version to choose the next patch automatically.
-./scripts/ship.ps1 -Paths src/Watchroom.Desktop/MainWindow.xaml -Version 0.3.18 -Message 'Clarify playback language preferences'
-
-# For multiple files, use a comma-separated PowerShell array.
-./scripts/ship.ps1 -Paths 'src/Watchroom.Desktop/MainWindow.xaml','scripts/ship.ps1','scripts/ship-checks.ps1','scripts/ship-sync-checks.ps1','UPDATES.md' -Plan
-
-# Recheck an already pushed tag after a timeout or network interruption.
-./scripts/ship.ps1 -VerifyOnly -Version 0.3.18
-
-# Offline safety checks for the script; no release is created.
-./scripts/ship-checks.ps1
-```
-
-Use `-Sdk C:/path/to/dotnet.exe` when the SDK is outside this checkout. Otherwise
-the script uses `.tools/dotnet/dotnet.exe` from this checkout or its main checkout,
-then `dotnet` from PATH. Git authentication
-must allow pushes to the public repository; public Actions and release verification
-do not require a GitHub CLI installation or token. `-TimeoutMinutes` defaults to 60.
-Verification records and downloaded installers remain under ignored `artifacts/`.
-Release checkouts and fresh smoke data use short paths under the system temp
-directory to keep SQLite paths within Windows limits; failed checkouts are retained at the printed path
-for investigation. A failed workflow
-stops the script; it never rewrites a tag, overwrites a published installer, or
-installs the app locally. If master advances during checks, integrate it and rerun.
+ship a higher version through a new pull request and leave the failed draft
+unpublished. Never overwrite bytes for an already published version. For a
+defective published version, release a higher patch version with the fix; the
+updater refuses downgrades.
 
 ## Diagnosing room and playback failures
 
