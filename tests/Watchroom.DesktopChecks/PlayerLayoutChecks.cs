@@ -332,6 +332,9 @@ static class PlayerLayoutChecks
         Check(header.Visibility == Visibility.Visible && header.ActualHeight > 0, "leaving fullscreen restores the docked top bar");
         var updateCard = (Border)window.FindName("UpdateCard");
         Check(updateCard.Parent == window.FindName("PlayerUpdateHost"), "the update card shows in the video overlay so the video cannot cover it");
+        // The overlay is its own window and does not inherit the app's text colour, which left the title black on the dark card.
+        Check(updateCard.ReadLocalValue(System.Windows.Documents.TextElement.ForegroundProperty) != DependencyProperty.UnsetValue &&
+            ((TextBlock)window.FindName("UpdateCardTitle")).Foreground == window.FindResource("Ink"),"the update card title uses the app's text colour inside the video overlay");
         var captionButtons = (FrameworkElement)window.FindName("PlayerCaptionButtons");
         var dockedOverlay = (Grid)window.FindName("PlayerOverlay");
         dockedOverlay.Measure(new Size(video.ActualWidth, video.ActualHeight)); dockedOverlay.Arrange(new Rect(0, 0, video.ActualWidth, video.ActualHeight)); dockedOverlay.UpdateLayout();
