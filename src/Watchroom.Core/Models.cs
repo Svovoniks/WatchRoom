@@ -56,7 +56,11 @@ public record AdmittedGuest(string Id, string Name);
 public record RoomSnapshot(Participant[] People, SharedMedia? Media, PlaybackState? Playback, bool SharedControls, string[]? Queue = null, AdmittedGuest[]? AdmittedGuests = null, string? Name = null,
     bool LibraryBrowsing = false, LibraryBrowseActivity? LibraryActivity = null, RoomTracks? Tracks = null, RoomSession? LastSession = null,
     // Null from hosts without voice chat; otherwise everyone whose app supports voice, in or out of it.
-    VoiceMember[]? Voice = null);
+    VoiceMember[]? Voice = null,
+    // Null from hosts without the postplay promo.
+    RoomPostplay? Postplay = null);
+// Who in the room has not seen the promo yet, and how many times the host has started it for everyone.
+public record RoomPostplay(string[] Pending, long Round);
 
 public static class Wire
 {

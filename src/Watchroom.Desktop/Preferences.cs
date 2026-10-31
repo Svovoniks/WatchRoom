@@ -217,6 +217,7 @@ public partial class MainWindow
         library.Setting("artwork", AutoArtwork.IsChecked == true ? "true" : "false");
         library.Setting(PostplayDisabledSetting, ForceDisablePostplay.IsChecked == true ? "true" : "false");
         if (SavedPostplayDisabled) EndPostplay("disabled");
+        UpdatePostplayPending();
         // Missing and upcoming episodes follow their settings now rather than at the next scan.
         if (SavedAutoArtwork && (before.ImportMissing != (ImportMissing.IsChecked == true) || before.ImportUpcoming != (ImportUpcoming.IsChecked == true)))
             _ = Guard(async () => { await FetchArtwork(); await RefreshLibrary(); });

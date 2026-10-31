@@ -202,7 +202,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     {
         if (!IsConnected) throw new IOException("Room connection is closed. Rejoin the room to reconnect.");
         if (message.Type == "remove" && !DiscoveryOnline) throw new IOException("Reconnect to the room service before revoking saved guest access.");
-        if (message.Type is "tracks" or "catalog-follow" or "catalog-artwork" or "catalog-watch" or "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "last-session" or "session-artwork" or "artwork-ack" or "queue" or "playback" or "ready" or "buffering" or "remove")
+        if (message.Type is "tracks" or "catalog-follow" or "catalog-artwork" or "catalog-watch" or "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "last-session" or "session-artwork" or "artwork-ack" or "queue" or "playback" or "ready" or "buffering" or "remove" or "postplay-start")
         {
             if (Identity?.Host != true && !directConnected.Task.IsCompletedSuccessfully)
                 throw new IOException("Waiting for the host's direct control connection. All participants need the updated app.");
@@ -341,7 +341,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                                 PlaybackDiagnostics.Record("peer-unresponsive", new { room = diagnosticId, silentMs = Environment.TickCount64 - lastHostMessageMs });
                                 DepartPeer(hostPeer, "Host control replies stopped arriving");
                             }
-                            ReconcileVoice();
+                            ReconcileVoice(); ReconcilePostplay();
                             break;
                         case "discovery": HandleDiscovery(item.Message!); break;
                         case "discovery-lost":
@@ -351,6 +351,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                             break;
                         case "local": HandleLocal(item.Message!); break;
                         case "voice-local": ApplyLocalVoice(); break;
+                        case "postplay-local": ApplyLocalPostplay(); break;
                         case "subtitle-selection":
                             if (coordinator?.Media?.Id != item.MediaId || item.Subtitle is null) break;
                             assets[item.Subtitle.Media.Id] = item.Subtitle;
@@ -433,6 +434,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                     coordinator.Apply(Identity.Peer, new("catalog-permission", Number: settings?.Setting(RoomSetting(Identity.Room, "libraryBrowsing")) == "true" ? 1 : 0), clock.Now, out _);
                     if (roomControlsRestored) TryQueueDiscovery(new("settings", Text: coordinator.Name, Number: coordinator.SharedControls ? 1 : 0));
                     coordinator.Apply(Identity.Peer, new("voice", Number: Volatile.Read(ref voiceDesired)), clock.Now, out _);
+                    coordinator.Apply(Identity.Peer, new("postplay", Number: Volatile.Read(ref postplayDesired)), clock.Now, out _);
                     UpdateVoiceRoutes();
                     Snapshot = coordinator.Snapshot; directConnected.TrySetResult();
                 }
@@ -539,7 +541,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                     if (clockHost != sender) { clock.Initialize(state.HostNowMs); clockHost = sender; }
                     receivedSequence = state.Sequence; ApplySnapshot(state.Snapshot);
                     directConnected.TrySetResult();
-                    ReconcileVoice();
+                    ReconcileVoice(); ReconcilePostplay();
                     if (Interlocked.Exchange(ref peerRecovering, 0) != 0)
                     {
                         PlaybackDiagnostics.Record("peer-recovered", new { room = diagnosticId, transport = peers.GetValueOrDefault(sender)?.DiagnosticId });

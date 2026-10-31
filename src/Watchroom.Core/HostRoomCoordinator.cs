@@ -16,7 +16,12 @@ internal sealed class HostRoomCoordinator(string host)
     private bool resumeWhenReady;
     public AdmittedGuest[] AdmittedGuests { get; set; } = [];
     public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name, LibraryBrowsing, LibraryActivity, Tracks, LastSession,
-        voice.Values.Where(v => people.ContainsKey(v.Peer)).OrderBy(v => v.Slot).ToArray());
+        voice.Values.Where(v => people.ContainsKey(v.Peer)).OrderBy(v => v.Slot).ToArray(),
+        new(postplayPending.Where(people.ContainsKey).Order(StringComparer.Ordinal).ToArray(), postplayRound));
+    // Everyone whose app has the promo reports whether its user still has to see it; when anyone has,
+    // the host starts a round and everyone in the room watches it together.
+    private readonly HashSet<string> postplayPending = [];
+    private long postplayRound;
     // Everyone whose app supports voice reports its state once connected; each keeps a small slot that
     // labels its relayed audio frames, so listeners can tell speakers apart without per-frame names.
     private readonly Dictionary<string, VoiceMember> voice = [];
@@ -52,7 +57,7 @@ internal sealed class HostRoomCoordinator(string host)
     public void Discover(Participant[] members, long now)
     {
         var ids = members.Select(p => p.Id).ToHashSet();
-        foreach (var id in people.Keys.Where(id => !ids.Contains(id)).ToArray()) { people.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); voice.Remove(id); }
+        foreach (var id in people.Keys.Where(id => !ids.Contains(id)).ToArray()) { people.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); voice.Remove(id); postplayPending.Remove(id); }
         foreach (var p in members)
             if (!departed.Contains(p.Id)) people[p.Id] = p with { Ready = people.GetValueOrDefault(p.Id)?.Ready ?? false };
         if (LibraryActivity is { } activity && !Approved(activity.Peer)) LibraryActivity = null;
@@ -60,7 +65,7 @@ internal sealed class HostRoomCoordinator(string host)
     }
     public void Depart(string id, long now)
     {
-        departed.Add(id); people.Remove(id); limits.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); voice.Remove(id);
+        departed.Add(id); people.Remove(id); limits.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); voice.Remove(id); postplayPending.Remove(id);
         if (LibraryActivity?.Peer == id) LibraryActivity = null;
         TryResume(now);
     }
@@ -181,6 +186,12 @@ internal sealed class HostRoomCoordinator(string host)
                 if (slot == 0) return false;
                 voice[sender] = new(sender, slot, (message.Number & 1) != 0, (message.Number & 2) != 0);
                 return true;
+            case "postplay":
+                if (message.Number is not (0 or 1)) return false;
+                if (message.Number == 1) postplayPending.Add(sender); else postplayPending.Remove(sender);
+                return true;
+            case "postplay-start" when sender == host:
+                postplayRound++; return true;
             default: return false;
         }
     }

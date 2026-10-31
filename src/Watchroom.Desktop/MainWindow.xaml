@@ -673,7 +673,7 @@
       <Border Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="After a video" Style="{StaticResource CardTitle}" Margin="0,0,0,6"/>
        <WrapPanel><CheckBox x:Name="ForceDisablePostplay" Content="Force disable postplay" VerticalAlignment="Center" Margin="0,0,18,0"/><Button x:Name="PlayPostplayButton" Content="Play promo" ContentTemplate="{StaticResource PlayContent}" Click="PlayPostplayClicked" ToolTip="Watch the promo now" Margin="0"/></WrapPanel>
-       <TextBlock Text="The first time you finish a video, a short promo plays once before the next video. Turn this on to never show it. Play promo shows it now, even when turned off." Style="{StaticResource Hint}" Margin="0,4,0,0"/>
+       <TextBlock Text="The first time you finish a video, a short promo plays once before the next video. In a room, everyone watches it while anyone there has not seen it. Turn this on to never show it. Play promo shows it now, even when turned off." Style="{StaticResource Hint}" Margin="0,4,0,0"/>
       </StackPanel></Border>
       <Border Style="{StaticResource Card}"><DockPanel>
        <Button DockPanel.Dock="Right" Content="Open default apps" Click="OpenDefaultAppsSettings" VerticalAlignment="Center" Margin="16,0,0,0" AutomationProperties.HelpText="Opens Windows Settings, where you can choose Watchroom for video files"/>

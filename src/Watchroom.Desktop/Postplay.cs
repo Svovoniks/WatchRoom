@@ -19,16 +19,51 @@ public partial class MainWindow
     private long postplayDeadline;
     private bool PostplayActive => postplayDone is not null;
     private bool SavedPostplayDisabled => library.Setting(PostplayDisabledSetting) == "true";
+    // Whether this user still has to see the promo; rooms share it so everyone watches while anyone has not.
+    private bool PostplayPending => !SavedPostplayDisabled && library.Setting(PostplayShownSetting) != "true";
+    private void UpdatePostplayPending() => room?.SetPostplayPending(PostplayPending);
+    // The last promo round seen in the current room; a later round from the host starts the promo here.
+    private RoomClient? postplayRoundRoom;
+    private long postplayRound;
 
     // Plays the promo if it has not been shown yet; returns once it ends, or at once when it does not play.
     // pauseVideo pauses a video that is still playing, and plays it again afterwards unless something replaced it.
+    // In a room whose host has the promo, the host starts it for everyone when anyone there has not seen it,
+    // and guests follow those rounds instead of deciding on their own.
     private async Task PlayPostplayOnce(bool pauseVideo = false)
     {
         if (postplayDone is { } running) { await running.Task; return; }
-        if (closing || SavedPostplayDisabled || library.Setting(PostplayShownSetting) == "true" || !File.Exists(PostplayPath)) return;
+        if (closing) return;
+        if (room is { } client && client.Snapshot?.Postplay is { } shared)
+        {
+            if (client.Identity is not { Host: true } identity) return;
+            if (!PostplayPending && !shared.Pending.Any(id => id != identity.Peer)) return;
+            try { client.Send(new("postplay-start")); }
+            catch (IOException) { return; }
+            // The host's own snapshot echoes the round; it is already playing here.
+            postplayRoundRoom = client; postplayRound = shared.Round + 1;
+            PlaybackDiagnostics.Record("postplay-round", new { round = postplayRound, pending = shared.Pending.Length });
+            if (!SavedPostplayDisabled) await PlayRoomPostplay(pauseVideo);
+            return;
+        }
+        if (SavedPostplayDisabled || library.Setting(PostplayShownSetting) == "true") return;
+        await PlayRoomPostplay(pauseVideo);
+    }
+    // Starts the promo when the host has started a new round; joining a room only notes the current one.
+    private void ObservePostplayRound(RoomSnapshot snapshot)
+    {
+        if (snapshot.Postplay is not { } shared || room is null) return;
+        if (postplayRoundRoom != room) { postplayRoundRoom = room; postplayRound = shared.Round; return; }
+        if (shared.Round <= postplayRound) return;
+        postplayRound = shared.Round;
+        if (SavedPostplayDisabled || PostplayActive || closing) return;
+        _ = Guard(() => PlayRoomPostplay(pauseVideo: true));
+    }
+    private async Task PlayRoomPostplay(bool pauseVideo)
+    {
         // Only shown where the player is on screen.
-        if (RoomPage.Visibility != Visibility.Visible && !pictureInPicture) return;
-        library.Setting(PostplayShownSetting, "true");
+        if (!File.Exists(PostplayPath) || RoomPage.Visibility != Visibility.Visible && !pictureInPicture) return;
+        library.Setting(PostplayShownSetting, "true"); UpdatePostplayPending();
         await PlayPostplay(pauseVideo);
     }
     // Plays the promo in the player, which must be on screen, and returns once it ends.

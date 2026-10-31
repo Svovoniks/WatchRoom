@@ -1097,6 +1097,7 @@ public partial class MainWindow : Window
         guestBrowse = new(); guestLibraryNotice = null; guestBrowsePending = false; ++guestBrowseRequest;
         guestCurrentBrowse = null; guestHadLibraryLease = false; guestParentTitle = null;
         client.LibraryThumbnail = CachedLibraryThumbnail;
+        client.SetPostplayPending(PostplayPending);
         client.LibraryArtwork = HighResolutionLibraryArtwork;
         client.FullHdArtwork = FullHdLibraryArtwork;
         ResetGuestMirror();
@@ -1201,6 +1202,7 @@ public partial class MainWindow : Window
                 SharedControls.IsEnabled = room.Identity?.Host == true; SharedControls.IsChecked = snapshot.SharedControls; RefreshSharedControlsChip();
                 if (room.Identity?.Host != true && !snapshot.SharedControls) { playbackPause.Clear(); playbackIntent.Clear(); }
                 if (snapshot.Playback is not null) AcceptState(snapshot.Playback);
+                ObservePostplayRound(snapshot);
                 // A new video waits until the promo ends.
                 if (snapshot.Media is not null && snapshot.Media.Id != loadedMedia && !PostplayActive) await LoadRoomMedia(snapshot.Media);
                 if (ready) RefreshTracks();

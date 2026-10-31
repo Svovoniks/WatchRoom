@@ -73,6 +73,27 @@ static class PostplayChecks
             for (var wait = 0; wait < 40 && ((Grid)window.FindName("SettingsPage")).IsVisible is false; wait++) await Task.Delay(50);
             check(!Active() && ((Grid)window.FindName("SettingsPage")).IsVisible && store.Setting("postplayShown") == "true",
                 "after a promo from Settings the app returns to Settings");
+
+            // In a room, a round started by the host plays the promo here even when it was seen already; joining only notes the round.
+            store.Setting("postplayDisabled", "false");
+            var roomField = typeof(MainWindow).GetField("room", flags)!; var previousRoom = roomField.GetValue(window);
+            var client = new RoomClient(store);
+            try
+            {
+                roomField.SetValue(window, client); Call("ShowPage", "Room");
+                RoomSnapshot Round(long round) => new([], null, null, false, Postplay: new(["guest"], round));
+                Call("ObservePostplayRound", Round(4));
+                check(!Active(), "joining a room notes its promo round without playing it");
+                Call("ObservePostplayRound", Round(5));
+                check(Active() && layer.IsVisible, "a new promo round from the host plays the promo for everyone in the room");
+                Call("EndPostplay", "check"); await Task.Delay(100);
+                Call("ObservePostplayRound", Round(5));
+                check(!Active(), "a promo round plays only once");
+                store.Setting("postplayDisabled", "true");
+                Call("ObservePostplayRound", Round(6));
+                check(!Active(), "force disable postplay also skips the room's promo rounds");
+            }
+            finally { roomField.SetValue(window, previousRoom); await client.DisposeAsync(); }
         }
         finally
         {
