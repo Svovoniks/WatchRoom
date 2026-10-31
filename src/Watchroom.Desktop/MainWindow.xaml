@@ -1007,6 +1007,7 @@
               <Button x:Name="PlayButton" Content="&#xF5B0;" Click="TogglePlayback" Style="{StaticResource PlayerSegmentPlay}" ToolTip="Play / pause (Space)" AutomationProperties.Name="Play or pause"/>
               <Button x:Name="NextButton" IsEnabled="False" ToolTipService.ShowOnDisabled="True" Content="&#xE893;" Click="NextQueued" Style="{StaticResource PlayerSegmentIcon}" ToolTip="Next video (N)" AutomationProperties.Name="Next video"/>
               <Button x:Name="StopButton" Content="&#xEE95;" Click="StopPlayback" Style="{StaticResource PlayerSegmentIcon}" ToolTip="Stop (S)" AutomationProperties.Name="Stop playback"/>
+              <ToggleButton x:Name="LoopButton" Content="&#xE8EE;" Click="LoopClicked" Style="{StaticResource PlayerSegmentToggle}" ToolTipService.ShowOnDisabled="True" ToolTip="Loop off (L)" AutomationProperties.Name="Loop off"/>
              </StackPanel></Border>
              <Border x:Name="PlaybackTimePill" Style="{StaticResource PlayerPillGroup}" Padding="10,0"><TextBlock x:Name="PlaybackTime" Text="00:00 / 00:00" Foreground="#D9DAE2" FontSize="11.5" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular"/></Border>
             </StackPanel>
