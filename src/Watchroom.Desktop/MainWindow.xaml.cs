@@ -1520,6 +1520,32 @@ public partial class MainWindow : Window
         }
         if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("control-request", new { command.CommandId, playing, position, revision = target?.Revision });
     }
+    // Like VLC: off, then the whole queue or show, then just this video.
+    private enum LoopMode { Off, All, One }
+    private LoopMode loopMode;
+    private void LoopClicked(object sender, RoutedEventArgs e) => ToggleLoop(sender, e);
+    // The button, the L key and the … menu row all step to the next mode.
+    private void ToggleLoop(object sender, RoutedEventArgs e)
+    {
+        if (!LoopButton.IsEnabled) { RefreshLoopButton(); SetStatus("The host controls looping."); return; }
+        loopMode = loopMode switch { LoopMode.Off => LoopMode.All, LoopMode.All => LoopMode.One, _ => LoopMode.Off };
+        RefreshLoopButton();
+        SetStatus(loopMode switch
+        {
+            LoopMode.All => "Loop all: the queue or show starts again after the last video.",
+            LoopMode.One => "Loop one: this video replays when it ends.",
+            _ => "Loop off.",
+        });
+    }
+    private void RefreshLoopButton()
+    {
+        // The toggle's own click flips IsChecked; the mode decides it.
+        LoopButton.IsChecked = loopMode != LoopMode.Off;
+        LoopButton.Content = loopMode == LoopMode.One ? "" : "";
+        var label = loopMode switch { LoopMode.All => "Loop all", LoopMode.One => "Loop one", _ => "Loop off" };
+        LoopButton.ToolTip = !LoopButton.IsEnabled ? "The host controls looping" : label + " (L)";
+        System.Windows.Automation.AutomationProperties.SetName(LoopButton, label);
+    }
     private void TogglePlayback(object sender, RoutedEventArgs e)
     {
         RequestPlayback(!WantsMediaPlayback);
@@ -1868,6 +1894,9 @@ public partial class MainWindow : Window
             : QueuePlayback.FindNext(queue, queuePosition, 1, x => RecentlyExists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
         PreviousButton.IsEnabled = ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(-1) is not null
             : QueuePlayback.FindNext(queue, queuePosition, -1, x => RecentlyExists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
+        // Looping restarts the video when it ends, which only the host decides in a room.
+        LoopButton.IsEnabled = canManageEpisodes;
+        RefreshLoopButton();
         ReturnToRoomButton.IsEnabled = ready || room is not null;
         var canManageQueue = room is null || connectedRoom && room!.Identity?.Host == true;
         QueueEditActions.Visibility = canManageQueue && QueueList.HasItems ? Visibility.Visible : Visibility.Collapsed;
@@ -2055,6 +2084,7 @@ public partial class MainWindow : Window
         else if (e.Key == Key.S) { StopPlayback(sender, e); e.Handled = true; }
         else if (e.Key == Key.P) { PreviousQueued(sender, e); e.Handled = true; }
         else if (e.Key == Key.N) { NextQueued(sender, e); e.Handled = true; }
+        else if (e.Key == Key.L) { ToggleLoop(sender, e); e.Handled = true; }
         else if (Keyboard.FocusedElement is not Slider && e.Key is Key.Up or Key.Down) { ShowPlayerControls(); Volume.Value = Math.Clamp(Volume.Value + (e.Key == Key.Up ? 5 : -5), 0, 100); e.Handled = true; }
     }
     private void ToggleTheme(object sender, RoutedEventArgs e)
