@@ -10,12 +10,19 @@ appears on:
 - a film added with **Add title** that has no file yet: its card's menu and its page.
 
 Watchroom only offers plugins that support the title's content type: `anime`,
-`show` or `movie`. With one such plugin, Acquire runs it. With several, you
-choose one. The plugin downloads the video or hands it to a downloader. When the
+`show` or `movie`. Interactive plugins open a picker for provider titles, quality,
+filters and release selection before downloading. Command-only plugins run
+directly, with a provider menu when several are available. The plugin downloads
+the video or hands it to a downloader. When the
 files reach a library folder, the next scan adds them to the library and removes
 the placeholders.
 
 ## Installing
+
+SubsPlease, EZTV, TokyoToshokan and TheRARBG are available as Sparrow provider
+ports in [BlackPearlPlugins](https://github.com/Svovoniks/BlackPearlPlugins). Run
+`./install.ps1` from a checkout of that repository, then Reload. Its README covers
+provider setup and downloader settings.
 
 Each plugin is a folder in the plugins folder:
 
@@ -51,6 +58,70 @@ plugins folder.
 | `command` | Required. A file in the plugin folder, an absolute path or a program on `PATH`. `.ps1` scripts run with Windows PowerShell (`-NoProfile -ExecutionPolicy Bypass`). `.cmd`, `.bat` and `.exe` files run directly. |
 | `arguments` | Optional. `{request}` is replaced with the path of the request file. |
 | `timeoutSeconds` | Optional, 5–3600, default 120. Watchroom stops the plugin after this time. Long downloads should be handed to a downloader instead of waited for. |
+| `interactive` | Optional, default false. Opens Watchroom's provider/title/release picker. The plugin must support the interactive actions below. |
+| `settingsSchema` | Optional path relative to the plugin folder. A JSON array of settings fields; Watchroom displays a Settings button and preserves other fields when saving `settings.json`. |
+
+## Interactive plugins
+
+Interactive requests use the same JSON process protocol. Additional fields are:
+
+```json
+{
+  "action": "search",
+  "options": {
+    "query": "Provider title",
+    "sourceUrl": null,
+    "resolution": 1080,
+    "filter": "",
+    "episodeOffset": null,
+    "providerSeason": null
+  },
+  "selectedReleases": null
+}
+```
+
+`search` and `releases` must be read-only. `search` returns catalog choices with
+`stage: "shows"`, or release choices with `stage: "releases"` for a provider that
+searches releases directly. After choosing a catalog title, Watchroom sends
+`releases` with its title as `options.query` and its ID as `options.sourceUrl`.
+The plugin's final output line can be:
+
+```json
+{"success":true,"stage":"releases","message":"Choose releases","choices":[{"id":"release-id","title":"Show S01E02 1080p","detail":"Requested: S01E02 | 1080p","matches":true,"episode":"S01E02","resolution":1080,"suggestedFilter":"Show <<episode_number>> 1080p"}]}
+```
+
+For releases, `matches` indicates whether the release satisfies the requested
+missing episodes, quality, filter and numbering. `episode` groups alternate
+versions so Watchroom can select one release per episode. IDs are opaque to the
+host; the provider must revalidate them. `suggestedFilter` is an optional editable
+Sparrow-style literal template. Catalog choices need only `id`, `title`, `detail`.
+
+Confirmation sends `action: "acquire"`, the chosen options and an explicit
+`selectedReleases` ID array. Download only those IDs. Reject empty, stale or
+incompatible selections before handing anything to a downloader. The original
+episode request still defines what is missing and its destination. Legacy
+requests omit `action`, `options` and `selectedReleases` (or send null); existing
+command-only plugins retain their direct acquisition behavior.
+
+Watchroom saves opted-in choices by plugin, title, year, content type and season.
+It cancels pending searches on edits or close and ignores stale responses.
+
+### Settings form
+
+A `settingsSchema` file contains fields such as:
+
+```json
+[
+  { "key": "downloader", "label": "Download with", "type": "choice", "choices": ["magnet", "qbittorrent"], "default": "magnet" },
+  { "key": "qbittorrent.password", "label": "Web UI password", "type": "password" }
+]
+```
+
+Supported types are `text` (default), `password`, `choice` and `number` (integer).
+Optional `help` adds field guidance; dotted keys address nested JSON properties.
+Passwords are masked in the form and stored in the plugin's local `settings.json`.
+Saving validates numeric fields and atomically replaces the settings file while
+preserving keys absent from the schema, including existing title bindings.
 
 ## The request
 

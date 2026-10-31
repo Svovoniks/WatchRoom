@@ -48,6 +48,8 @@ jobs:
         run: dotnet run --project tests/Watchroom.Smoke -c Release -- --tmdb-access
       - name: Desktop regression checks
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release
+      - name: Acquisition dialog layout checks
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --acquisition-layout
       - name: Home regression checks
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --home
       - name: UI findings regression checks
