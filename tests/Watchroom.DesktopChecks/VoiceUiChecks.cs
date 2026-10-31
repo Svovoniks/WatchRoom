@@ -107,6 +107,29 @@ static class VoiceUiChecks
             store.Setting("voiceInput", ""); store.Setting("voiceOutput", "");
             SetField("voicePreferences", Call("LoadVoicePreferences")); Call("LoadPreferences");
 
+            // Record a test in settings: without speech nothing would be sent; with speech, what was sent plays back.
+            Call("ShowPage", "Settings"); Call("ShowPreferenceSection", "Voice");
+            var recordButton = Named<Button>("VoiceRecordButton"); var testStatus = Named<TextBlock>("VoiceTestStatus");
+            await Wait(() => Field("voiceTest") is VoiceAudio { MicrophoneReady: true }, "the settings microphone test runs on the simulated microphone");
+            Call("RecordVoiceTest", recordButton, new RoutedEventArgs());
+            await Wait(() => (string)recordButton.Content == "Stop and play back" && testStatus.Text.StartsWith("Recording, ", StringComparison.Ordinal), "Record a test starts recording and says how to finish");
+            await Task.Delay(300);
+            Call("RecordVoiceTest", recordButton, new RoutedEventArgs());
+            await Wait(() => testStatus.Text == "Nothing would have been sent: Watchroom didn't hear any speech." && (string)recordButton.Content == "Record a test",
+                "a test without speech says nothing would have been sent");
+            var meter = (VoiceCapture)Field("voiceTestCapture")!;
+            Call("RecordVoiceTest", recordButton, new RoutedEventArgs());
+            // A tone is not speech to Silero VAD, so the recording is told it is.
+            meter.SpeechDetected = true;
+            for (var i = 0; i < 25; i++) meter.Write(Tone(i * 960, 960, 300, 0.3f));
+            Call("RecordVoiceTest", recordButton, new RoutedEventArgs());
+            await Wait(() => testStatus.Text.StartsWith("Playing back what others would hear: ", StringComparison.Ordinal) && (string)recordButton.Content == "Stop playback",
+                "stopping a test with speech plays back what would have been sent");
+            await Wait(() => (string)recordButton.Content == "Record a test", "the playback ends and another test can be recorded");
+            meter.SpeechDetected = false;
+            check(!meter.Transmitting, "the settings microphone stops sending once the test ends");
+            Call("ShowPage", "Room");
+
             var host = (RoomClient)Call("NewRoom")!;
             await host.ConnectAsync(url, "Voice Host", persistent: true);
             Call("ShowPage", "Room");
@@ -148,6 +171,8 @@ static class VoiceUiChecks
             {
                 check(guest.VoiceState(host.Identity.Peer)?.Muted == false && (string)muteButton.Content == "", "with a working microphone the host's microphone is on");
                 var hostSlot = host.VoiceState(host.Identity.Peer)!.Slot;
+                // A tone is not speech to Silero VAD (see VoiceProcessingChecks for real speech), so these writes say it is.
+                Capture().SpeechDetected = true;
                 for (var i = 0; i < 20; i++) Capture().Write(Tone(i * 960, 960, 300, 0.3f));
                 await Wait(() => sink.Slots.Count(s => s == hostSlot) >= 15, "what the host says reaches the guest");
                 Keyboard.ClearFocus();
@@ -157,6 +182,7 @@ static class VoiceUiChecks
                 for (var i = 0; i < 20; i++) Capture().Write(Tone(i * 960, 960, 300, 0.3f));
                 await Task.Delay(400);
                 check(sink.Slots.IsEmpty, "a muted host sends nothing while talking");
+                Capture().SpeechDetected = false;
                 Key(System.Windows.Input.Key.V, true); Key(System.Windows.Input.Key.V, false);
                 await Wait(() => guest.VoiceState(host.Identity.Peer)?.Muted == false, "pressing V again unmutes");
             }

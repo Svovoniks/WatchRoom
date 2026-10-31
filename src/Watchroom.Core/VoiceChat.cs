@@ -45,8 +45,9 @@ public interface IVoiceSink
 // the voice band, a pre-roll keeps the first syllable, and a hangover keeps pauses between words and sentences.
 public sealed class VoiceCapture
 {
-    // 100 ms of pre-roll keeps word onsets; 600 ms of hangover keeps the pauses inside a sentence.
-    public const int PrerollFrames = 5, HangoverFrames = 30;
+    // 200 ms of pre-roll keeps word onsets, which a speech model confirms only after hearing some of them; 600 ms of
+    // hangover keeps the pauses inside a sentence.
+    public const int PrerollFrames = 10, HangoverFrames = 30;
     private readonly IOpusEncoder encoder;
     private readonly short[] frame = new short[VoicePacket.FrameSamples];
     private readonly short[][] preroll = Enumerable.Range(0, PrerollFrames).Select(_ => new short[VoicePacket.FrameSamples]).ToArray();
@@ -59,7 +60,7 @@ public sealed class VoiceCapture
     private ushort sequence = (ushort)Random.Shared.Next(ushort.MaxValue);
     private double noiseFloor = -60;
     private bool open;
-    private long lastSpeech;
+    private long lastSpeech, lastHeard;
     // Raised on the capture thread with a complete frame; slot 0 lets the host fill in the speaker.
     public event VoiceFrameHandler? Frame;
     public delegate void VoiceFrameHandler(ReadOnlySpan<byte> frame);
@@ -69,10 +70,14 @@ public sealed class VoiceCapture
     public bool PushToTalk { get; set; }
     // Sends the microphone continuously while transmitting; frames without speech are marked silent for listeners.
     public bool AlwaysOn { get; set; }
+    // Set by a speech model that hears the audio before it is written here; null leaves the decision to the level gate.
+    public bool? SpeechDetected { get; set; }
     public double LevelDb { get; private set; } = -100;
     // The background level in the voice band that speech has to rise above, for diagnostics and tests.
     public double NoiseFloorDb { get { lock (gate) return noiseFloor; } }
     public bool Speaking => Environment.TickCount64 - Volatile.Read(ref lastSpeech) < 250;
+    // Whether speech was heard just now, sent or not: the settings meter shows it while nothing is transmitted.
+    public bool HearsSpeech => Environment.TickCount64 - Volatile.Read(ref lastHeard) < 250;
     public VoiceCapture()
     {
         encoder = OpusCodecFactory.CreateEncoder(VoicePacket.SampleRate, 1, OpusApplication.OPUS_APPLICATION_VOIP);
@@ -108,13 +113,16 @@ public sealed class VoiceCapture
         var bandLevel = 10 * Math.Log10(band / frame.Length + 1e-10);
         LevelDb = level;
         // Speech rises well above the background in the voice band and keeps most of its energy there; loud
-        // sounds count regardless. Windows noise suppression leaves a very low floor, so the floor's own level
-        // is the reference rather than a fixed threshold, with only a faint absolute minimum.
-        var speech = bandLevel > Math.Max(-60, noiseFloor + 9) && (band > sum * 0.4 || level > -30);
+        // sounds count regardless. Noise suppression leaves a very low floor, so the floor's own level is the
+        // reference rather than a fixed threshold, with only a faint absolute minimum. A speech model, when
+        // there is one, decides instead; the floor is still tracked for diagnostics.
+        var heard = bandLevel > Math.Max(-60, noiseFloor + 9) && (band > sum * 0.4 || level > -30);
+        var speech = SpeechDetected ?? heard;
+        if (speech) Volatile.Write(ref lastHeard, Environment.TickCount64);
         // The floor follows frames without speech quickly. During speech it creeps up slowly, and never past
         // -50 dBFS, so a steady hum that passes for speech is learned within seconds while a long sentence
         // can never raise the bar above its own quiet tail.
-        noiseFloor = speech ? (noiseFloor < -50 ? noiseFloor + Math.Clamp(bandLevel - noiseFloor, 0, 6) * 0.002 : noiseFloor)
+        noiseFloor = heard ? (noiseFloor < -50 ? noiseFloor + Math.Clamp(bandLevel - noiseFloor, 0, 6) * 0.002 : noiseFloor)
             : bandLevel < noiseFloor ? noiseFloor + (bandLevel - noiseFloor) * 0.3 : noiseFloor + (bandLevel - noiseFloor) * 0.1;
         if (!Transmitting)
         {
@@ -423,6 +431,51 @@ public sealed class VoiceMixer : IVoiceSink
         {
             var sample = mixed[i];
             if (sample is > 0.9f or < -0.9f) mixed[i] = MathF.Sign(sample) * (0.9f + 0.1f * MathF.Tanh((MathF.Abs(sample) - 0.9f) * 10));
+        }
+    }
+}
+
+// A short recording of what a VoiceCapture sends, played back as a listener hears it: each frame in the 20 ms slot it
+// was sent in, frames sent together (the pre-roll) one after another, and silence wherever nothing was sent.
+public sealed class VoiceRecording
+{
+    public const int MaxSeconds = 10;
+    private readonly object gate = new();
+    private readonly List<(long Slot, byte[] Payload)> frames = [];
+    private readonly Func<long> clock;
+    private readonly long started;
+    private long nextSlot;
+    // The clock gives elapsed milliseconds; tests drive it, the app uses real time.
+    public VoiceRecording(Func<long>? clock = null)
+    {
+        this.clock = clock ?? (() => Environment.TickCount64);
+        started = this.clock();
+    }
+    public long ElapsedMs => clock() - started;
+    public bool Full => ElapsedMs >= MaxSeconds * 1000;
+    public int Frames { get { lock (gate) return frames.Count; } }
+    // A packet from VoiceCapture.Frame, on the capture thread.
+    public void Add(ReadOnlySpan<byte> packet)
+    {
+        if (!VoicePacket.TryRead(packet, out _, out _, out _, out var payload)) return;
+        lock (gate)
+        {
+            var slot = Math.Max(nextSlot, ElapsedMs / VoicePacket.FrameMs);
+            frames.Add((slot, payload.ToArray()));
+            nextSlot = slot + 1;
+        }
+    }
+    // The whole recording as 48 kHz mono samples, decoded with Opus as a listener's app does.
+    public float[] Render()
+    {
+        lock (gate)
+        {
+            var slots = Math.Max(ElapsedMs / VoicePacket.FrameMs, nextSlot);
+            var samples = new float[slots * VoicePacket.FrameSamples];
+            var decoder = OpusCodecFactory.CreateDecoder(VoicePacket.SampleRate, 1);
+            foreach (var (slot, payload) in frames)
+                decoder.Decode(payload, samples.AsSpan((int)slot * VoicePacket.FrameSamples, VoicePacket.FrameSamples), VoicePacket.FrameSamples, false);
+            return samples;
         }
     }
 }

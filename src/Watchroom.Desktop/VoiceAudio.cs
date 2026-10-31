@@ -11,9 +11,10 @@ namespace Watchroom.Desktop;
 internal sealed class VoiceAudio : IAsyncDisposable
 {
     public sealed record Device(string Id, string Name);
-    // How Windows treats the microphone: its communications pipeline (echo cancellation, noise suppression and
-    // gain control together; Windows offers no separate switches), the device's standard processing, or raw.
-    public enum Processing { Windows, Standard, Raw }
+    // Watchroom's own microphone processing (see VoiceProcessor): echo and noise removal with DeepFilterNet, the same
+    // with the lighter RNNoise for slower computers, or none. The microphone is always opened raw where the device
+    // allows, so neither Windows' voice pipeline nor the device's own effects process it first.
+    public enum Processing { Standard, Light, Off }
     public sealed record Settings(string? Input, string? Output, Processing Processing);
     // Automated checks set WATCHROOM_SIMULATED_AUDIO=1 so voice never opens Windows audio devices, which would ask
     // for microphone access: a test microphone sends silence and test speakers take the room's mix.
@@ -28,7 +29,11 @@ internal sealed class VoiceAudio : IAsyncDisposable
     });
 
     // Plays a short chime on the chosen output so people can check where voice will come from.
-    public static Task PlayTestSoundAsync(string? output) => Simulated ? Task.Delay(VoiceCues.Test.Length * 1000 / VoicePacket.SampleRate) : Task.Run(async () =>
+    public static Task PlayTestSoundAsync(string? output) => PlayAsync(output, VoiceCues.Test, CancellationToken.None);
+    // Plays 48 kHz mono samples on the chosen output, as voice plays; cancelling stops it early.
+    public static Task PlayAsync(string? output, float[] samples, CancellationToken cancel) => Simulated
+        ? Task.Delay(samples.Length * 1000 / VoicePacket.SampleRate, cancel).ContinueWith(_ => { }, TaskScheduler.Default)
+        : Task.Run(async () =>
     {
         using var devices = new MMDeviceEnumerator();
         MMDevice? device = null;
@@ -37,11 +42,12 @@ internal sealed class VoiceAudio : IAsyncDisposable
         using (device)
         {
             var mixer = new VoiceMixer();
-            mixer.Cue(VoiceCues.Test);
+            mixer.Cue(samples);
             using var player = new WasapiPlayerBuilder().WithDevice(device).WithLatency(60).WithCategory(AudioStreamCategory.GameChat).Build();
             player.Init(new MixerProvider(mixer));
             player.Play();
-            await Task.Delay(VoiceCues.Test.Length * 1000 / VoicePacket.SampleRate + 250);
+            try { await Task.Delay(samples.Length * 1000 / VoicePacket.SampleRate + 250, cancel); }
+            catch (OperationCanceledException) { }
             player.Stop();
         }
     });
@@ -52,7 +58,8 @@ internal sealed class VoiceAudio : IAsyncDisposable
     private readonly CancellationTokenSource lifetime = new();
     private MMDeviceEnumerator? devices;
     private MMDeviceNotificationClient? notifications;
-    private WasapiRecorder? recorder;
+    private WasapiRecorder? recorder, loopback;
+    private VoiceProcessor? processor;
     private WasapiPlayer? player;
     private Settings settings;
     private int restartQueued;
@@ -84,6 +91,8 @@ internal sealed class VoiceAudio : IAsyncDisposable
         {
             // Following the Windows default: move to the new device, as other apps do.
             if (e.Role == Role.Console && (e.Flow == DataFlow.Capture ? settings.Input : mixer is null ? "" : settings.Output) is null) QueueRestart(500);
+            // The echo reference is whatever the default output plays, as that is where the movie goes.
+            else if (e.Role == Role.Console && e.Flow == DataFlow.Render && loopback is not null) QueueRestart(500);
         };
         notifications.DeviceStateChanged += (_, _) => { if (!MicrophoneReady || mixer is not null && player is null) QueueRestart(500); };
         notifications.DeviceAdded += (_, _) => { if (!MicrophoneReady || mixer is not null && player is null) QueueRestart(500); };
@@ -145,30 +154,32 @@ internal sealed class VoiceAudio : IAsyncDisposable
     private void OpenInput()
     {
         MicrophoneBlocked = false; MicrophoneReady = false; InputName = null;
+        var started = Stopwatch.StartNew();
+        var processing = processor = new VoiceProcessor(capture, settings.Processing);
+        PlaybackDiagnostics.Record("voice-processing", new { mode = settings.Processing.ToString(), echo = processing.EchoCancelling, denoiser = processing.DenoiserName, speech = processing.DetectsSpeech, ms = started.ElapsedMilliseconds });
         if (Simulated) { InputName = SimulatedInput.Name; simulatedInput = true; Simulate(); MicrophoneReady = true; return; }
         using var enumerator = new MMDeviceEnumerator();
         using var device = Find(enumerator, DataFlow.Capture, settings.Input);
         if (device is null) return;
         InputName = device.FriendlyName;
-        WasapiRecorder Build(Processing processing)
+        WasapiRecorder Build(bool raw)
         {
             var builder = new WasapiRecorderBuilder().WithDevice(device).WithFormat(new WaveFormat(VoicePacket.SampleRate, 16, 1)).WithBufferLength(20);
-            // Communications mode turns on Windows echo cancellation, noise suppression and gain control where available,
-            // so speakers playing the movie do not feed it back to the room. Raw mode bypasses all of the device's effects.
-            return (processing switch { Processing.Windows => builder.WithCommunicationsMode(), Processing.Raw => builder.WithRawMode(), _ => builder }).Build();
+            // Raw mode bypasses the device's own effects, so the models get the microphone as it is.
+            return (raw ? builder.WithRawMode() : builder).Build();
         }
         WasapiRecorder created;
-        try { created = Build(settings.Processing); }
-        catch (Exception ex) when (settings.Processing != Processing.Standard && (ex is COMException or InvalidOperationException or NotSupportedException) && ex.HResult != unchecked((int)0x80070005))
+        try { created = Build(true); }
+        catch (Exception ex) when ((ex is COMException or InvalidOperationException or NotSupportedException) && ex.HResult != unchecked((int)0x80070005))
         {
-            // A device without the requested mode still works with its standard processing.
-            PlaybackDiagnostics.Record("voice-input-mode-unavailable", new { mode = settings.Processing.ToString(), error = ex.GetType().Name, code = ex.HResult });
-            created = Build(Processing.Standard);
+            // A device without a raw mode still works with its standard processing.
+            PlaybackDiagnostics.Record("voice-input-mode-unavailable", new { mode = "Raw", error = ex.GetType().Name, code = ex.HResult });
+            created = Build(false);
         }
         created.DataAvailable += (buffer, flags, _, _) =>
         {
-            if ((flags & AudioClientBufferFlags.Silent) != 0) { Span<short> silence = stackalloc short[buffer.Length / 2]; silence.Clear(); capture.Write(silence); }
-            else capture.Write(MemoryMarshal.Cast<byte, short>(buffer));
+            if ((flags & AudioClientBufferFlags.Silent) != 0) { Span<short> silence = stackalloc short[buffer.Length / 2]; silence.Clear(); processing.Write(silence); }
+            else processing.Write(MemoryMarshal.Cast<byte, short>(buffer));
         };
         created.RecordingStopped += (_, e) =>
         {
@@ -181,6 +192,36 @@ internal sealed class VoiceAudio : IAsyncDisposable
         recorder = created;
         created.StartRecording();
         MicrophoneReady = true;
+        if (processing.EchoCancelling) OpenReference(enumerator, processing);
+    }
+    // Records what the default output plays, the movie and the room's voices included, for the echo canceller.
+    // Without it voice still works; only echo from speakers is no longer removed.
+    private void OpenReference(MMDeviceEnumerator enumerator, VoiceProcessor processing)
+    {
+        try
+        {
+            using var output = Find(enumerator, DataFlow.Render, null);
+            if (output is null) return;
+            var created = new WasapiRecorderBuilder().WithDevice(output).WithLoopbackCapture().WithFormat(new WaveFormat(VoicePacket.SampleRate, 16, 1)).WithBufferLength(20).Build();
+            created.DataAvailable += (buffer, flags, _, _) =>
+            {
+                if ((flags & AudioClientBufferFlags.Silent) != 0) { Span<short> silence = stackalloc short[buffer.Length / 2]; silence.Clear(); processing.Reference(silence); }
+                else processing.Reference(MemoryMarshal.Cast<byte, short>(buffer));
+            };
+            created.RecordingStopped += (_, e) =>
+            {
+                if (e.Exception is null || lifetime.IsCancellationRequested) return;
+                PlaybackDiagnostics.Record("voice-reference-stopped", new { error = e.Exception.GetType().Name, code = e.Exception.HResult });
+                QueueRestart(1500);
+            };
+            loopback = created;
+            created.StartRecording();
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException or UnauthorizedAccessException or NotSupportedException)
+        {
+            PlaybackDiagnostics.Record("voice-reference-failed", new { error = ex.GetType().Name, code = ex.HResult });
+            CloseReference();
+        }
     }
     private void OpenOutput()
     {
@@ -222,7 +263,7 @@ internal sealed class VoiceAudio : IAsyncDisposable
         lock (simulationGate)
             simulation ??= new Timer(_ =>
             {
-                if (simulatedInput) { Span<short> silence = stackalloc short[VoicePacket.FrameSamples]; silence.Clear(); capture.Write(silence); }
+                if (simulatedInput && processor is { } processing) { Span<short> silence = stackalloc short[VoicePacket.FrameSamples]; silence.Clear(); processing.Write(silence); }
                 if (simulatedOutput && provider is { } played) played.Read(new byte[VoicePacket.FrameSamples * 8]);
             }, null, 0, 20);
     }
@@ -230,6 +271,15 @@ internal sealed class VoiceAudio : IAsyncDisposable
     {
         simulatedInput = false;
         var old = recorder; recorder = null; MicrophoneReady = false;
+        try { old?.Dispose(); } catch (Exception ex) when (ex is COMException or InvalidOperationException) { }
+        CloseReference();
+        // The recorders have stopped calling it, so the models can be released.
+        var models = processor; processor = null;
+        models?.Dispose();
+    }
+    private void CloseReference()
+    {
+        var old = loopback; loopback = null;
         try { old?.Dispose(); } catch (Exception ex) when (ex is COMException or InvalidOperationException) { }
     }
     private void CloseOutput()

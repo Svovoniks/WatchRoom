@@ -14,6 +14,11 @@ Watchroom dynamically links the following components. Package versions and conte
 | libdatachannel and bundled OpenSSL | Included in DataChannelDotnet | https://github.com/paullouisageneau/libdatachannel |
 | Concentus (managed Opus voice codec) | 2.2.2 | https://github.com/lostromb/concentus |
 | NAudio Core / WASAPI (voice microphone and playback) | 3.3.0 | https://github.com/naudio/NAudio |
+| WebRTC audio processing, `webrtc-apm.dll` (voice echo cancellation and gain control; BSD-3-Clause, C interface MIT) | 2.1, from SoundFlow.Extensions.WebRtc.Apm 1.4.0 | https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing, https://github.com/LSXPrime/SoundFlow |
+| RNNoise, `rnnoise.dll` built from the release (lighter voice noise removal; BSD-3-Clause) | 0.2 | https://github.com/xiph/rnnoise |
+| DeepFilterNet 3 and its Rust dependencies, `deepfilter.dll` built from `src/native/deepfilter` (voice noise removal; MIT or Apache-2.0) | revision d375b2d8 | https://github.com/Rikorose/DeepFilterNet |
+| Silero VAD model `silero_vad.onnx` (voice speech detection; MIT) | 6.2.3 | https://github.com/snakers4/silero-vad |
+| ONNX Runtime (runs the speech detection model; MIT) | 1.31.1 | https://github.com/microsoft/onnxruntime |
 | SkiaSharp / native Skia (artwork decoding) | 2.88.9 | https://github.com/mono/SkiaSharp |
 | Whisper.net / whisper.cpp runtime (spoken-language identification) | 1.9.1 | https://github.com/sandrohanea/whisper.net |
 | Whisper tiny model, ggml `ggml-tiny-q5_1.bin` (MIT, OpenAI) | whisper.cpp revision 5359861c | https://huggingface.co/ggerganov/whisper.cpp |

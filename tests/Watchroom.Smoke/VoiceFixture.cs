@@ -97,6 +97,21 @@ static class VoiceFixture
         always.Transmitting = false; always.Write(Tone(0, Frame, 440, 0));
         check(alwaysFlags.Count == 56 && alwaysFlags[^1] == VoicePacket.EndOfSpeech, "muting a continuous microphone sends one end marker");
 
+        // A test recording plays each frame where it was sent, frames sent together back to back, and silence between.
+        var recordedAt = 0L; var recording = new VoiceRecording(() => recordedAt);
+        var talker = new VoiceCapture { PushToTalk = true, Transmitting = true }; talker.Frame += recording.Add;
+        talker.Write(Tone(0, 3 * Frame, 220, 0.2f));
+        recordedAt = 1000; talker.Write(Tone(0, Frame, 220, 0.2f));
+        recordedAt = 2000;
+        var played = recording.Render();
+        check(recording.Frames == 4 && played.Length == 100 * Frame && Rms(played[Frame..(3 * Frame)]) > 0.08 && Rms(played[(5 * Frame)..(49 * Frame)]) < 0.001
+            && Rms(played[(50 * Frame)..(51 * Frame)]) > 0.05 && Rms(played[(52 * Frame)..]) < 0.001,
+            "a test recording plays what was sent where it was sent, with silence where nothing was");
+        var later = 0L; var limited = new VoiceRecording(() => later);
+        later = VoiceRecording.MaxSeconds * 1000 - 1; var before = limited.Full;
+        later = VoiceRecording.MaxSeconds * 1000;
+        check(!recording.Full && !before && limited.Full, "a test recording stops at its time limit");
+
         // Opus round trip through the jitter buffer keeps the pitch and level of speech.
         var encoder = OpusCodecFactory.CreateEncoder(48000, 1, OpusApplication.OPUS_APPLICATION_VOIP);
         encoder.UseInbandFEC = true; encoder.PacketLossPercent = 10; encoder.Bitrate = 32000;

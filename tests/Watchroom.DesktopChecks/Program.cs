@@ -158,6 +158,19 @@ static class Program
             });
             app.Run(); return;
         }
+        if (args.FirstOrDefault() == "--voice-probe") { VoiceProbe.Run(args[1], args.ElementAtOrDefault(2)); return; }
+        if (args.FirstOrDefault() == "--voice-processing")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                var count = 0;
+                try { await VoiceProcessingChecks.Run((condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); count++; }); Console.WriteLine($"{count} voice processing checks passed."); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
+        }
         if (args.FirstOrDefault() == "--home")
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;

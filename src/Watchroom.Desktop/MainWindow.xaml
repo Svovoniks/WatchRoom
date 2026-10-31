@@ -686,7 +686,10 @@
         <TextBlock Text="&#xE720;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Margin="0,0,8,0"/>
         <Border Grid.Column="1" x:Name="VoiceTestTrack" Height="6" CornerRadius="3" Background="{DynamicResource Line}" VerticalAlignment="Center" AutomationProperties.Name="Microphone level"><Border x:Name="VoiceTestFill" CornerRadius="3" Background="#3FB97A" HorizontalAlignment="Left" Width="0"/></Border>
        </Grid>
-       <TextBlock x:Name="VoiceTestStatus" Style="{StaticResource Hint}" AutomationProperties.LiveSetting="Polite" Margin="0,0,0,14"/>
+       <TextBlock x:Name="VoiceTestStatus" Style="{StaticResource Hint}" AutomationProperties.LiveSetting="Polite" Margin="0,0,0,8"/>
+       <!-- Records what the room would receive with the settings on this page, then plays it back. -->
+       <Button x:Name="VoiceRecordButton" Content="Record a test" Click="RecordVoiceTest" Style="{StaticResource SettingsButton}" HorizontalAlignment="Left" Margin="0,0,0,4"/>
+       <TextBlock Text="Talk, drop something or type, then listen: you hear exactly what others in the room would hear with these settings, for up to 10 seconds." Style="{StaticResource Hint}" Margin="0,0,0,14"/>
        <TextBlock Text="Speakers or headphones" Style="{StaticResource FieldLabel}"/>
        <WrapPanel><ComboBox x:Name="VoiceOutputPicker" DisplayMemberPath="Name" SelectedValuePath="Id" AutomationProperties.Name="Speakers or headphones for voice chat" Margin="0,6,8,8" MinWidth="320" MaxWidth="460"/><Button x:Name="VoiceTestSoundButton" Content="Play test sound" Click="PlayVoiceTestSound" Style="{StaticResource SettingsButton}" Margin="0,6,0,8"/></WrapPanel>
        <TextBlock Text="Windows default follows the device you choose in Windows sound settings, including when you plug in a headset. A Bluetooth headset's own microphone makes Windows switch the headset to call-quality sound, movie included; a separate or built-in microphone keeps full quality." Style="{StaticResource Hint}"/>
@@ -695,7 +698,7 @@
        <TextBlock Text="Talking" Style="{StaticResource CardTitle}"/>
        <TextBlock Text="Microphone processing" Style="{StaticResource FieldLabel}"/>
        <ComboBox x:Name="VoiceProcessingPicker" DisplayMemberPath="Name" SelectedValuePath="Id" AutomationProperties.Name="Microphone processing" Margin="0,6,0,6" MaxWidth="460" HorizontalAlignment="Left" MinWidth="320"/>
-       <TextBlock Text="Windows voice processing keeps the movie and other people's voices coming from your speakers out of your microphone, and also suppresses noise and evens out your level. If it swallows quiet words or makes your voice sound wrong, try Standard; Raw bypasses every effect, including any the microphone's own software adds." Style="{StaticResource Hint}" Margin="0,0,0,12"/>
+       <TextBlock Text="Watchroom keeps the movie and other people's voices coming from your speakers out of your microphone, removes background noise such as fans, typing and things being dropped, and evens out your level. Speech models decide when you are talking, so other sounds are not sent; the bar above turns green when Watchroom hears speech. Lighter processing removes less noise and uses less of the processor." Style="{StaticResource Hint}" Margin="0,0,0,12"/>
        <CheckBox x:Name="VoicePushToTalk" Content="Push to talk: hold V to speak"/>
        <TextBlock Text="Otherwise Watchroom sends your voice when you speak, and V mutes or unmutes you. Keys work while Watchroom is the active window." Style="{StaticResource Hint}" Margin="28,0,0,10"/>
        <CheckBox x:Name="VoiceAlwaysOn" Content="Send my microphone continuously"/>
