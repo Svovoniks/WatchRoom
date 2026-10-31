@@ -160,9 +160,10 @@ Use this only to recover when the scripts cannot run:
    Merge only the approved head. Then tag that exact merge commit with an annotated
    tag and push the tag. Never force-push or move an existing release tag.
 5. Wait for the **tag's** `Build and release` Actions run to succeed. A branch or
-   pull request build does not publish a release. The tag workflow builds, tests,
-   packages, uploads assets to a draft release, then publishes it as the latest
-   release.
+   pull request build does not publish a release. The tag workflow packages the
+   installers, uploads them to a draft release, then publishes it as the latest
+   release. It runs the checks first unless a pull request run already passed them
+   on the exact same tree, as it has for every merge from `ship.ps1`.
 6. Verify without authentication that `/releases/latest` returns the expected
    tag, `draft=false`, and `prerelease=false`. Check that the Windows installer has
    the exact expected filename, a nonzero size, and a `sha256:` digest. Download
@@ -268,10 +269,12 @@ The logger keeps four files of up to 5 MiB each and writes asynchronously.
 
 ## Build and updater behavior
 
-GitHub Actions builds the Windows x64 app and installer on pushes, pull requests,
-and manual runs. The workflow checks metadata caching, desktop interactions, and
-update download verification before packaging. Successful builds retain installers
-as workflow artifacts for 14 days.
+GitHub Actions runs the checks on pull requests, split across two runners: the
+desktop suites and the full smoke suite. Pushes to `master`, version tags, and
+manual runs build the Windows x64 app and installers, and skip the checks when a
+pull request run already passed them on the same tree; otherwise the checks run
+beside packaging and a tag publishes only after they pass. Successful builds
+retain installers as workflow artifacts for 14 days.
 
 Push a version tag such as `v0.2.1` to publish a GitHub Release. Tags must use
 `vMAJOR.MINOR.PATCH`; the same version is embedded in the application and installer.

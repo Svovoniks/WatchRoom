@@ -73,20 +73,31 @@ function Invoke-ReleaseChecks {
     try {
         Invoke-Native $Sdk @('restore', 'Watchroom.slnx', '--locked-mode', "-p:RestorePackagesPath=$PackagePath")
         Invoke-Native $Sdk @('build', 'Watchroom.slnx', '-c', 'Release', '--no-restore', "-p:RestorePackagesPath=$PackagePath")
-        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.UpdateChecks', '-c', 'Release', '--no-build')
-        foreach ($check in @('--metadata-cache', '--tmdb-access', '--shared-library')) {
-            Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', $check)
-        }
+        # The main desktop suite's input responsiveness gates are timing-sensitive, so it runs alone first.
         Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build')
+        # The full smoke suite, the longest, then runs in the background beside the other checks. It includes the
+        # metadata cache and shared library transport checks. Some nested metadata fixtures create long SQLite backup
+        # filenames, so it gets a short directory under the temp folder.
+        $freshSmoke = Join-Path ([IO.Path]::GetTempPath()) ('wr-smoke-' + [guid]::NewGuid().ToString('N'))
+        $smokeLog = "$freshSmoke.log"
+        $smoke = Start-Process -FilePath $Sdk -ArgumentList @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', "`"$freshSmoke`"") `
+            -WorkingDirectory $Checkout -RedirectStandardOutput $smokeLog -RedirectStandardError "$smokeLog.err" -NoNewWindow -PassThru
+        $null = $smoke.Handle # keeps the exit code readable after the process ends
+        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.UpdateChecks', '-c', 'Release', '--no-build')
+        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', '--tmdb-access')
         foreach ($check in @('--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout', '--language-detection', '--voice-processing')) {
             Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build', '--', $check)
         }
-        # Some nested metadata fixtures also create long SQLite backup filenames.
-        $freshSmoke = Join-Path ([IO.Path]::GetTempPath()) ('wr-smoke-' + [guid]::NewGuid().ToString('N'))
-        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', $freshSmoke)
+        Write-Host 'Waiting for the full smoke suite...'
+        $smoke.WaitForExit()
+        Get-Content -LiteralPath $smokeLog, "$smokeLog.err" -Tail 20 | Write-Host
+        if ($smoke.ExitCode -ne 0) { throw "The full smoke suite failed with exit code $($smoke.ExitCode). Output: $smokeLog" }
         Invoke-Native git @('diff', '--exit-code')
     }
-    finally { Pop-Location }
+    finally {
+        if ($smoke -and !$smoke.HasExited) { $smoke.Kill($true) }
+        Pop-Location
+    }
 }
 function Get-SyncTree {
     param([string]$Root, [string]$Base, [string]$Master, [string]$Local)

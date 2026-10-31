@@ -12,6 +12,7 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        if (HiddenDesktop.Relaunch(out var hiddenExitCode)) { Environment.ExitCode = hiddenExitCode; return; }
         // Voice runs on simulated devices so the checks never open the microphone; --voice-devices checks the real ones.
         if (args.FirstOrDefault() != "--voice-devices") Environment.SetEnvironmentVariable("WATCHROOM_SIMULATED_AUDIO", "1");
         if (args.FirstOrDefault() == "--video-frames")
