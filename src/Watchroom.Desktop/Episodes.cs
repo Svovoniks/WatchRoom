@@ -142,14 +142,34 @@ public partial class MainWindow
             library.Setting("position:" + endedItem.Id, "0");
             SetWatched(endedItem, true);
         }
+        // Looping is the host's choice in a room, and applies to everyone there.
+        var loop = room is null || room.Identity?.Host == true && room.IsConnected ? loopMode : LoopMode.Off;
+        var current = endedItem is null ? null : items.FirstOrDefault(item => item.Id == endedItem.Id) ?? endedItem;
+        // Loop all wraps a finished queue to its first video, and a show's last episode to its first episode.
+        var firstQueued = loop == LoopMode.All && PlayingFromQueue(endedItem) ? QueuePlayback.FindNext(queue, -1, 1, QueueItemAvailable) : -1;
+        var nextEpisode = loop == LoopMode.All && firstQueued < 0 && current is not null
+            ? EpisodePlayback.Next(items, current, false, item => File.Exists(item.Path), PreferredVersion(current)) : null;
+        // The show starts again at its first regular episode; specials (season 0) come first only when there is nothing else.
+        var firstEpisode = loop == LoopMode.All && firstQueued < 0 && nextEpisode is null && current?.Series is not null
+            ? FirstPlayable(EpisodePlayback.Episodes(items, current, PreferredVersion(current)), current)
+            : null;
+        // Loop one, or Loop all with nothing else to play, replays the video from the start; in a room it restarts for everyone.
+        if (loop == LoopMode.One || loop == LoopMode.All && !ContinuesQueue(endedItem) && firstQueued < 0 && nextEpisode is null &&
+            (firstEpisode is null || firstEpisode.Id == current?.Id))
+        {
+            if (room is not null) SendPlayback(true, 0);
+            else { player!.Stop(); localResume = 0; endedSeek = null; player.Play(); }
+            return;
+        }
         if (room?.Identity?.Host == true) SendPlayback(false, Math.Max(0, player!.Length), stopReason: "ended");
         if (ContinuesQueue(endedItem))
         {
             if (room is null || room.Identity?.Host == true) await PlayQueueStep(1);
             return;
         }
-        if (endedItem is null || room is not null && (room.Identity?.Host != true || !room.IsConnected)) return;
-        var next = EpisodePlayback.Next(items, items.FirstOrDefault(item => item.Id == endedItem.Id) ?? endedItem, false, item => File.Exists(item.Path), PreferredVersion(endedItem));
+        if (firstQueued >= 0) { await PlayQueueAt(firstQueued); return; }
+        if (endedItem is null || current is null || room is not null && (room.Identity?.Host != true || !room.IsConnected)) return;
+        var next = firstEpisode ?? nextEpisode ?? EpisodePlayback.Next(items, current, false, item => File.Exists(item.Path), PreferredVersion(endedItem));
         if (next is null) return;
         nextEpisodePromptOpen = true;
         try
@@ -162,6 +182,13 @@ public partial class MainWindow
             await PlayFollowingEpisode(next);
         }
         finally { nextEpisodePromptOpen = false; RefreshEpisodeEndAction(); }
+    }
+
+    // Checks the disk in episode order and stops at the first regular episode that plays.
+    private static MediaItem? FirstPlayable(MediaItem[] episodes, MediaItem current)
+    {
+        bool Plays(MediaItem item) => item.Id == current.Id || File.Exists(item.Path);
+        return episodes.FirstOrDefault(item => item.Season != 0 && Plays(item)) ?? episodes.FirstOrDefault(Plays);
     }
 
     private const int UpNextCountdownMs = 15000;
