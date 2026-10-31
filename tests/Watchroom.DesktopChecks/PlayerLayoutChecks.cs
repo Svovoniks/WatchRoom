@@ -213,12 +213,13 @@ static class PlayerLayoutChecks
         foreach (var width in new[] { 320, 400, 480, 560, 700 })
         {
             Invoke(window, "ClosePlayerMenus"); Settle(width, 360);
-            var shown = new[] { "PlayButton", "PreviousButton", "NextButton", "MuteButton", "FullscreenButton", "OverflowPill", "AudioPill", "SubtitlePill", "QueuePill", "StopButton", "PictureInPictureButton", "PlaybackTime" }
+            var shown = new[] { "PlayButton", "PreviousButton", "NextButton", "MuteButton", "FullscreenButton", "OverflowPill", "AudioPill", "SubtitlePill", "QueuePill", "StopButton", "LoopButton", "PictureInPictureButton", "PlaybackTime" }
                 .Select(name => (FrameworkElement)window.FindName(name)).Where(element => element.Visibility == Visibility.Visible).ToList();
             Check(shown.All(InBar), $"every control shown in a {width}px player bar fits inside it");
             var folded = pills.Folded.Count; var stopHidden = ((Button)window.FindName("StopButton")).Visibility != Visibility.Visible;
-            Check((folded > 0 || stopHidden) == (overflowPill.Visibility == Visibility.Visible) &&
-                overflowItems.Children.OfType<Button>().Count() == folded + (stopHidden ? 1 : 0) + (((Button)window.FindName("PictureInPictureButton")).Visibility != Visibility.Visible ? 1 : 0),
+            var loopHidden = ((FrameworkElement)window.FindName("LoopButton")).Visibility != Visibility.Visible;
+            Check((folded > 0 || stopHidden || loopHidden) == (overflowPill.Visibility == Visibility.Visible) &&
+                overflowItems.Children.OfType<Button>().Count() == folded + (stopHidden ? 1 : 0) + (loopHidden ? 1 : 0) + (((Button)window.FindName("PictureInPictureButton")).Visibility != Visibility.Visible ? 1 : 0),
                 $"the … pill appears only when something is folded and lists each folded control at {width}px");
             if (width == 400) Save(bar, "player-bar-narrow.png");
         }
