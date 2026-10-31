@@ -1530,6 +1530,8 @@ public partial class MainWindow : Window
         if (!LoopButton.IsEnabled) { RefreshLoopButton(); SetStatus("The host controls looping."); return; }
         loopMode = loopMode switch { LoopMode.Off => LoopMode.All, LoopMode.All => LoopMode.One, _ => LoopMode.Off };
         RefreshLoopButton();
+        // A folded Loop row in the … menu shows the new mode too.
+        if (LoopButton.Visibility != Visibility.Visible) RefreshOverflowMenu();
         SetStatus(loopMode switch
         {
             LoopMode.All => "Loop all: the queue or show starts again after the last video.",
@@ -1537,12 +1539,15 @@ public partial class MainWindow : Window
             _ => "Loop off.",
         });
     }
+    private string LoopLabel => loopMode switch { LoopMode.All => "Loop all", LoopMode.One => "Loop one", _ => "Loop off" };
     private void RefreshLoopButton()
     {
+        // A guest's own earlier choice must neither show nor carry over if hosting passes to them; the host chooses.
+        if (room is not null && room.Identity?.Host != true && loopMode != LoopMode.Off) { loopMode = LoopMode.Off; RefreshOverflowMenu(); }
         // The toggle's own click flips IsChecked; the mode decides it.
         LoopButton.IsChecked = loopMode != LoopMode.Off;
         LoopButton.Content = loopMode == LoopMode.One ? "" : "";
-        var label = loopMode switch { LoopMode.All => "Loop all", LoopMode.One => "Loop one", _ => "Loop off" };
+        var label = LoopLabel;
         LoopButton.ToolTip = !LoopButton.IsEnabled ? "The host controls looping" : label + " (L)";
         System.Windows.Automation.AutomationProperties.SetName(LoopButton, label);
     }
@@ -2075,7 +2080,7 @@ public partial class MainWindow : Window
         if (e.Key == Key.Escape && LibraryPage.Visibility == Visibility.Visible && SearchBox.IsKeyboardFocused)
         { SearchBox.Clear(); e.Handled = true; return; }
         if (Keyboard.FocusedElement is TextBox or PasswordBox or ComboBox or ListBox or ListBoxItem || !inPlayer) return;
-        if (e.Key == Key.Space && Keyboard.FocusedElement is Button) return;
+        if (e.Key == Key.Space && (Keyboard.FocusedElement is Button || Keyboard.FocusedElement == LoopButton)) return;
         if (e.Key is Key.F or Key.F11) { Fullscreen(sender, e); e.Handled = true; }
         else if (e.Key == Key.I) { SetPictureInPicture(!pictureInPicture); e.Handled = true; }
         else if (e.Key == Key.Space) { TogglePlayback(sender, e); e.Handled = true; }

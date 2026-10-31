@@ -149,8 +149,10 @@ public partial class MainWindow
         var firstQueued = loop == LoopMode.All && PlayingFromQueue(endedItem) ? QueuePlayback.FindNext(queue, -1, 1, QueueItemAvailable) : -1;
         var nextEpisode = loop == LoopMode.All && firstQueued < 0 && current is not null
             ? EpisodePlayback.Next(items, current, false, item => File.Exists(item.Path), PreferredVersion(current)) : null;
+        // The show starts again at its first regular episode; specials (season 0) come first only when there is nothing else.
         var firstEpisode = loop == LoopMode.All && firstQueued < 0 && nextEpisode is null && current?.Series is not null
-            ? EpisodePlayback.Episodes(items, current, PreferredVersion(current)).FirstOrDefault(item => item.Id == current.Id || File.Exists(item.Path))
+            ? EpisodePlayback.Episodes(items, current, PreferredVersion(current)).Where(item => item.Id == current.Id || File.Exists(item.Path))
+                .OrderBy(item => item.Season == 0).FirstOrDefault()
             : null;
         // Loop one, or Loop all with nothing else to play, replays the video from the start; in a room it restarts for everyone.
         if (loop == LoopMode.One || loop == LoopMode.All && !ContinuesQueue(endedItem) && firstQueued < 0 && nextEpisode is null &&

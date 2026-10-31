@@ -328,7 +328,7 @@ public partial class MainWindow
             OverflowItems.Children.Add(row);
         }
         var actions = new List<Button>();
-        foreach (var (button, label, action) in new (System.Windows.Controls.Primitives.ButtonBase, string, RoutedEventHandler)[] { (StopButton, "Stop", StopPlayback), (LoopButton, "Loop", ToggleLoop), (PictureInPictureButton, "Picture in picture", EnterPictureInPicture) })
+        foreach (var (button, label, action) in new (System.Windows.Controls.Primitives.ButtonBase, string, RoutedEventHandler)[] { (StopButton, "Stop", StopPlayback), (LoopButton, LoopLabel, ToggleLoop), (PictureInPictureButton, "Picture in picture", EnterPictureInPicture) })
         {
             if (button.Visibility == Visibility.Visible) continue;
             var row = OverflowRow(button.Content, label, null, button, false);
