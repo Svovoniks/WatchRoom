@@ -1543,7 +1543,7 @@ public partial class MainWindow : Window
     private void RefreshLoopButton()
     {
         // A guest's own earlier choice must neither show nor carry over if hosting passes to them; the host chooses.
-        if (room is not null && room.Identity?.Host != true && loopMode != LoopMode.Off) { loopMode = LoopMode.Off; RefreshOverflowMenu(); }
+        if (room?.Identity is { Host: false } && loopMode != LoopMode.Off) { loopMode = LoopMode.Off; RefreshOverflowMenu(); }
         // The toggle's own click flips IsChecked; the mode decides it.
         LoopButton.IsChecked = loopMode != LoopMode.Off;
         LoopButton.Content = loopMode == LoopMode.One ? "" : "";
