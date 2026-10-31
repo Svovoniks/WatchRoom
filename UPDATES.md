@@ -42,8 +42,9 @@ contains the latest `origin/master` and has no uncommitted tracked changes.
 
 **Open or update a pull request** (default mode). The script rejects branches whose
 diff from `origin/master` touches anything other than release source paths:
-`sites`, `artifacts/`, `.tools/`, databases, credentials, local HTML reports, and
-generated media are refused. It picks a version above both the latest public release
+`sites`, `artifacts/`, `.tools/`, databases, credentials, local HTML reports,
+generated media, top-level dotfiles such as `.gitignore`, and `.github/` outside
+`workflows/` are refused. Change those by hand, outside this flow. It picks a version above both the latest public release
 and `master`, and commits `Set version X` on the branch if needed. A branch that
 already has such a version keeps it across review rounds. The script then runs the
 release checks below plus the full smoke suite against a fresh test directory. It
@@ -80,6 +81,16 @@ GitHub and `SHA256SUMS.txt`. Finally, it pulls `master` into the checkout that o
 that branch. If `master` has no checkout, it fast-forwards the local branch without
 switching any checkout.
 
+The script re-reads the verdict right before merging, so a rejection posted while CI
+runs still stops the merge. If anything fails after the merge, the error names the
+merged commit and the recovery step, because rerunning `-Merge` cannot help then.
+
+**Without a release** (`-NoRelease`, only when the user asks not to release). Both
+modes keep the version from `master`. They refuse a branch that changes it, and need
+no release note. `-Merge -NoRelease` applies the same review, check, and CI gates.
+It squash-merges with the PR title and synchronizes local `master`, with no tag or
+release.
+
 Any new commit, including a merge of `master` into the branch, needs another
 `ship.ps1` run and a re-review, because approval covers one exact commit.
 
@@ -110,6 +121,10 @@ so it can complete a previously interrupted ship.
 # Preview the merge gates, then merge, tag, and verify the release.
 ./scripts/ship.ps1 -Merge -Plan
 ./scripts/ship.ps1 -Merge
+
+# A change the user does not want released: same flow, no version bump, tag, or release.
+./scripts/ship.ps1 -NoRelease -Title 'Tidy the shipping docs' -BodyFile $env:TEMP/pr-body.md
+./scripts/ship.ps1 -Merge -NoRelease
 
 # Recheck an already pushed tag after a timeout or network interruption.
 ./scripts/ship.ps1 -VerifyOnly -Version 0.3.18

@@ -58,6 +58,11 @@ manual git, version, tag, and verification commands:
    the release, waits for the tag build, verifies the public release and the
    unauthenticated updater feed, and synchronizes the user's local `master`.
 
+If the user wants a change landed without a new release, pass `-NoRelease` to both
+`ship.ps1` runs. The PR then keeps `master`'s version, and the merge creates no tag
+or release. The review and fix loop is the same. Use it only when the user says not
+to release.
+
 Shipping is authorized for the whole flow above, including posting review comments
 and merging the approved pull request. Do not add confirmation prompts for an
 already authorized release. A pushed branch, an open pull request, or a successful

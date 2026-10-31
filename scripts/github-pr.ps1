@@ -4,7 +4,8 @@ $apiRoot = "https://api.github.com/repos/$repository"
 $buildWorkflow = 'Build and release'
 # Review verdicts are PR comments carrying this marker. Every account here is the same
 # owner, so GitHub's own approve state is unavailable (authors cannot approve their PRs).
-$reviewMarkerPattern = '<!-- watchroom-review head=([a-f0-9]{40}) verdict=(approve|changes) -->'
+# Only a marker ending the comment counts, so findings that quote another marker cannot decide the verdict.
+$reviewMarkerPattern = '<!-- watchroom-review head=([a-f0-9]{40}) verdict=(approve|changes) -->\s*\z'
 
 function Invoke-Native {
     param([string]$Command, [string[]]$Arguments)
@@ -18,7 +19,7 @@ function Get-PublicJson {
 }
 function Get-GitHubToken {
     # The token git already uses for pushes; it is never printed.
-    $env:GIT_TERMINAL_PROMPT = '0'
+    $env:GIT_TERMINAL_PROMPT = '0'; $env:GCM_INTERACTIVE = 'never'
     $fill = "protocol=https`nhost=github.com`n`n" | & git credential fill 2>$null
     $password = @($fill | Where-Object { $_ -like 'password=*' } | Select-Object -First 1)
     if (!$password.Count) { throw 'No GitHub credential is stored for git. Pull requests need the same credential used for pushes.' }
@@ -57,7 +58,7 @@ function Get-ReviewVerdict {
     param($Comments)
     # The newest marked comment wins. Public commenters cannot approve or block.
     $latest = $null
-    foreach ($comment in @($Comments | Sort-Object { [datetime]$_.created_at })) {
+    foreach ($comment in @($Comments | Sort-Object { [datetime]$_.created_at }, { [long]$_.id })) {
         if ($comment.author_association -notin 'OWNER', 'MEMBER', 'COLLABORATOR') { continue }
         $match = [regex]::Match([string]$comment.body, $reviewMarkerPattern)
         if ($match.Success) { $latest = @{ Head = $match.Groups[1].Value; Verdict = $match.Groups[2].Value; Url = $comment.html_url } }

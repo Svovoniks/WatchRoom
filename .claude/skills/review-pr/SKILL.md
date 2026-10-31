@@ -66,7 +66,9 @@ Blocking findings. Each one prevents approval:
   data or cannot open older files; protocol changes that break older peers; update
   packaging that could install wrong bytes.
 - **Release hygiene**: personal data, credentials, local reports, generated media,
-  `artifacts/`, `.tools/`, or `sites` changes in the diff; a missing version bump; and
+  `artifacts/`, `.tools/`, or `sites` changes in the diff; a missing version bump
+  (unless the release note says "Not released.", meaning the user asked to land the
+  change without a release, in which case any version change is the problem); and
   docs (UPDATES.md, AGENTS.md, other `*.md`) left contradicting the new behavior.
 - **Missing coverage for risky changes**: a bug fix without a regression check, or a
   risky behavior change with no test in `tests/`, when a check is practical.

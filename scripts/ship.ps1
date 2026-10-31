@@ -2,6 +2,7 @@
 # Ships an app update through a reviewed pull request; see UPDATES.md.
 #   ship.ps1 -Message ... -BodyFile ...   check the branch, push it, and open or update its pull request
 #   ship.ps1 -Merge                       merge the approved pull request, tag it, and verify the release
+#   ship.ps1 -NoRelease [-Merge]          the same for a change the user does not want released: no version bump, tag, or release
 #   ship.ps1 -VerifyOnly -Version x.y.z   finish verifying an already pushed tag
 [CmdletBinding()]
 param(
@@ -13,6 +14,7 @@ param(
     [int]$Pr = 0,
     [switch]$Plan,
     [switch]$Merge,
+    [switch]$NoRelease,
     [switch]$VerifyOnly,
     [ValidateRange(1, 120)][int]$TimeoutMinutes = 60
 )
@@ -291,6 +293,8 @@ function Test-PublishedRelease {
 # Dot-sourcing exposes helpers for offline safety checks without starting a release.
 if ($MyInvocation.InvocationName -eq '.') { return }
 $root = Split-Path -Parent $PSScriptRoot
+# Records and sync backups go to the main checkout, which outlives agent worktrees.
+$mainRoot = Split-Path -Parent (Invoke-Native git @('-C', $root, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
 $originalPath = $env:PATH
 $checkout = $null
 Push-Location $root
@@ -322,14 +326,24 @@ try {
         & git merge-base --is-ancestor origin/master $head
         if ($LASTEXITCODE -ne 0) { throw 'master advanced since this pull request was checked. Merge origin/master into the branch, rerun ship.ps1, and request a re-review.' }
         $approval = Assert-ReviewApproval (Get-PullRequestComments $number) $head
-        $Version = Get-PropsVersion $root $head
-        $latest = (Get-PublicJson "$apiRoot/releases/latest").tag_name -replace '^v', ''
-        if ([version]$Version -le [version]$latest) { throw "The pull request ships $Version, but $latest is already published. Rerun ship.ps1 to raise the version, then request a re-review." }
-        & git show-ref --verify --quiet "refs/tags/v$Version"
-        if ($LASTEXITCODE -eq 0) { throw "Tag v$Version already exists. Rerun ship.ps1 with a higher -Version, then request a re-review." }
-        $note = Get-ReleaseNote $pull.body
-        if (!$note) { $note = $pull.title }
-        Write-Host "Merge #$number ($head) as Watchroom $Version, approved in $($approval.Url)"
+        $headVersion = Get-PropsVersion $root $head
+        if ($NoRelease) {
+            # An unreleased merge must not leave master claiming a version that was never published.
+            if ($headVersion -cne (Get-PropsVersion $root 'origin/master')) { throw "The pull request sets version $headVersion. Merge it without -NoRelease, or drop the version change." }
+            $mergeTitle = "$($pull.title) (#$number)"
+            Write-Host "Merge #$number ($head) without a release, approved in $($approval.Url)"
+        }
+        else {
+            $Version = $headVersion
+            $latest = (Get-PublicJson "$apiRoot/releases/latest").tag_name -replace '^v', ''
+            if ([version]$Version -le [version]$latest) { throw "The pull request ships $Version, but $latest is already published. Rerun ship.ps1 to raise the version, then request a re-review." }
+            & git show-ref --verify --quiet "refs/tags/v$Version"
+            if ($LASTEXITCODE -eq 0) { throw "Tag v$Version already exists. Rerun ship.ps1 with a higher -Version, then request a re-review." }
+            $note = Get-ReleaseNote $pull.body
+            if (!$note) { $note = $pull.title }
+            $mergeTitle = "Release Watchroom ${Version}: $note"
+            Write-Host "Merge #$number ($head) as Watchroom $Version, approved in $($approval.Url)"
+        }
         if ($Plan) { Write-Host 'Preview complete. Nothing was merged, tagged, or released.'; return }
         $checks = $null
         while (!$checks) {
@@ -344,21 +358,41 @@ try {
         Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', 'master')
         & git merge-base --is-ancestor origin/master $head
         if ($LASTEXITCODE -ne 0) { throw 'master advanced while waiting for checks. Merge origin/master into the branch, rerun ship.ps1, and request a re-review.' }
+        # The reviewer may have withdrawn approval while CI ran.
+        $approval = Assert-ReviewApproval (Get-PullRequestComments $number) $head
         $merged = Invoke-GitHub "/pulls/$number/merge" -Method Put -Body @{
             merge_method = 'squash'; sha = $head
-            commit_title = "Release Watchroom ${Version}: $note"
+            commit_title = $mergeTitle
             commit_message = "Reviewed and merged in #$number."
         }
         $commit = $merged.sha
-        Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', 'master')
-        Invoke-Native git @('merge-base', '--is-ancestor', $commit, 'origin/master') | Out-Null
-        if ((Invoke-Native git @('rev-parse', "$commit^{tree}")).Trim() -cne (Invoke-Native git @('rev-parse', "$head^{tree}")).Trim()) {
-            throw "Merged commit $commit differs from the reviewed head $head. It was not tagged; ship a higher version once master is correct."
+        try {
+            Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', 'master')
+            Invoke-Native git @('merge-base', '--is-ancestor', $commit, 'origin/master') | Out-Null
+            if ((Invoke-Native git @('rev-parse', "$commit^{tree}")).Trim() -cne (Invoke-Native git @('rev-parse', "$head^{tree}")).Trim()) {
+                throw "The merged tree differs from the reviewed head $head, so it was not tagged."
+            }
+            if (!$NoRelease) {
+                Invoke-Native git @('tag', '-a', "v$Version", $commit, '-m', "Watchroom ${Version}: $note")
+                Invoke-Native git @('push', 'origin', "v$Version")
+            }
         }
-        Invoke-Native git @('tag', '-a', "v$Version", $commit, '-m', "Watchroom ${Version}: $note")
-        Invoke-Native git @('push', 'origin', "v$Version")
+        catch {
+            # Rerunning -Merge cannot help once the pull request is merged.
+            $recover = if ($NoRelease) { 'Inspect master.' } else { "If v$Version is not on GitHub and $commit has the reviewed head's tree, tag $commit as v$Version, push the tag, and run -VerifyOnly -Version $Version. Otherwise ship a higher version once master is correct." }
+            throw "Pull request #$number is merged as $commit, but finishing failed: $_ $recover"
+        }
         try { Invoke-GitHub "/git/refs/heads/$($pull.head.ref)" -Method Delete | Out-Null }
         catch { Write-Warning "Could not delete merged branch $($pull.head.ref): $($_.Exception.Message)" }
+        if ($NoRelease) {
+            $record = Join-Path $mainRoot ('artifacts/merge-' + $number + '-' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $record -Force | Out-Null
+            try { $synced = Sync-ShippedMaster $root $commit $record }
+            catch { throw "Pull request #$number is merged as $commit, but local master was not synchronized. $_" }
+            Write-Host "Merged #$number without a release: $commit"
+            Write-Host "Local master synchronized: $($synced.Commit)"
+            return
+        }
     }
     else {
         # Open or update the pull request for this worktree's branch.
@@ -376,14 +410,21 @@ try {
         $untracked = @(Invoke-Native git @('ls-files', '--others', '--exclude-standard'))
         if ($untracked.Count) { Write-Warning "Untracked files are not shipped: $($untracked -join ', ')" }
         $existing = Find-BranchPullRequest $branch
-        if (!$existing -and !$Message) { throw 'Pass -Message with the release note users will read.' }
+        if (!$existing -and !$Message -and !$NoRelease) { throw 'Pass -Message with the release note users will read.' }
+        if (!$existing -and !$Message -and !$Title) { throw 'Pass -Title for the pull request.' }
         if (!$existing -and !$BodyFile) { throw 'Pass -BodyFile with the pull request description for the reviewer.' }
         $latest = (Get-PublicJson "$apiRoot/releases/latest").tag_name -replace '^v', ''
         $branchVersion = Get-PropsVersion $root 'HEAD'
-        $Version = Get-PullRequestVersion $Version $latest (Get-PropsVersion $root 'origin/master') $branchVersion
-        & git show-ref --verify --quiet "refs/tags/v$Version"
-        if ($LASTEXITCODE -eq 0) { throw "Tag v$Version already exists. Choose a higher version." }
-        Write-Host "$(if ($existing) { "Update #$($existing.number)" } else { 'Open a pull request' }) for $branch as Watchroom $Version with these files:"
+        if ($NoRelease) {
+            if ($branchVersion -cne (Get-PropsVersion $root 'origin/master')) { throw 'A change that is not released keeps the version from master.' }
+            $Version = $branchVersion
+        }
+        else {
+            $Version = Get-PullRequestVersion $Version $latest (Get-PropsVersion $root 'origin/master') $branchVersion
+            & git show-ref --verify --quiet "refs/tags/v$Version"
+            if ($LASTEXITCODE -eq 0) { throw "Tag v$Version already exists. Choose a higher version." }
+        }
+        Write-Host "$(if ($existing) { "Update #$($existing.number)" } else { 'Open a pull request' }) for $branch $(if ($NoRelease) { 'without a release' } else { "as Watchroom $Version" }) with these files:"
         $changed | ForEach-Object { Write-Host "  $_" }
         if ($Plan) { Write-Host 'Preview complete. No files, commits, branches, or pull requests changed.'; return }
         if (!$Sdk) {
@@ -416,19 +457,19 @@ try {
         @{ Commit = $head; Version = $Version; Checked = [datetime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content -LiteralPath $recordPath
         Invoke-Native git @('push', '--set-upstream', 'origin', "HEAD:refs/heads/$branch")
         $summary = if ($BodyFile) { Get-Content -LiteralPath $BodyFile -Raw } else { Get-PullRequestSummary $existing.body }
-        $note = if ($Message) { $Message } else { Get-ReleaseNote $existing.body }
-        $body = Format-PullRequestBody $summary $note $Version
+        $note = if ($NoRelease) { 'Not released.' } elseif ($Message) { $Message } else { Get-ReleaseNote $existing.body }
+        $body = Format-PullRequestBody $summary $note $(if ($NoRelease) { 'none' } else { $Version })
         $prTitle = if ($Title) { $Title } elseif ($existing) { $existing.title } elseif ($Message.Length -le 100) { $Message } else { $Message.Substring(0, 99) + '…' }
         $pull = if ($existing) { Invoke-GitHub "/pulls/$($existing.number)" -Method Patch -Body @{ title = $prTitle; body = $body } }
         else { Invoke-GitHub '/pulls' -Method Post -Body @{ title = $prTitle; head = $branch; base = 'master'; body = $body } }
         Invoke-Native git @('worktree', 'remove', '--force', $checkout); $checkout = $null
         Write-Host "Pull request: $($pull.html_url)"
-        Write-Host "Head: $head (Watchroom $Version, release checks passed)"
+        Write-Host "Head: $head ($(if ($NoRelease) { 'not released' } else { "Watchroom $Version" }), release checks passed)"
         Write-Host "Next: ask a separate reviewer agent to review #$($pull.number) at $head with the review-pr skill (.claude/skills/review-pr/SKILL.md)."
-        Write-Host 'Fix what it finds and rerun this script until it approves, then run ship.ps1 -Merge.'
+        Write-Host "Fix what it finds and rerun this script until it approves, then run ship.ps1 -Merge$(if ($NoRelease) { ' -NoRelease' })."
         return
     }
-    $record = Join-Path $root ('artifacts/ship-' + $Version + '-' + [guid]::NewGuid().ToString('N'))
+    $record = Join-Path $mainRoot ('artifacts/ship-' + $Version + '-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $record | Out-Null
     $run = Wait-ReleaseBuild $Version $commit $deadline
     $result = Test-PublishedRelease $Version $record $deadline
