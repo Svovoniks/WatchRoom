@@ -13,7 +13,7 @@ namespace Watchroom.Desktop;
 public static class OpenFileHandoff
 {
     private static Mutex? instance;
-    private static string Name => "Watchroom-" + LibraryIdentity.Hash(Path.GetFullPath(App.DataDirectory).ToUpperInvariant());
+    private static string Name => "Watchroom-" + LibraryIdentity.Hash(Path.GetFullPath(Program.DataDirectory).ToUpperInvariant());
 
     public static string? FileArgument(IEnumerable<string> args) =>
         args.Where(arg => !arg.StartsWith("--", StringComparison.Ordinal)).Select(arg =>
@@ -108,21 +108,21 @@ public partial class MainWindow
         ConnectionStatus.Text = "Local playback";
         ShowPage("Room");
     }
-    // Plays a video opened at launch while the player starts and the catalog loads. A file the library holds at that
-    // path is one lookup; any other file is matched against the catalog. The library's pages fill in behind the player.
-    private async Task OpenStartupFileAsync(string path, Task<List<MediaItem>> catalog)
+    // Records a video opened at launch could match, read without waiting for the whole catalog. Files outside the library's
+    // folders are left out, as the catalog load prunes them.
+    private List<MediaItem> StartupFileCandidates(string path, IReadOnlyList<LibraryFolder> roots, IReadOnlyList<string> excluded) =>
+        library.OpenedFileCandidates(path).Where(item => item.IsVirtual ||
+            roots.Any(root => LibraryStore.IsWithin(item.Path, root.Path)) && !excluded.Any(folder => LibraryStore.IsWithin(item.Path, folder))).ToList();
+    // Plays a video opened at launch while the player starts and the catalog loads. The file is matched against the
+    // records it could belong to rather than the full catalog; the library's pages fill in behind the player.
+    private async Task OpenStartupFileAsync(string path, Task<List<MediaItem>> candidates)
     {
-        var roots = folders.ToArray(); var excluded = exclusions.ToArray();
-        var opened = await Task.Run(async () =>
-        {
-            if (library.ByPath(path) is { IsExtra: false, IsVirtual: false } exact &&
-                roots.Any(root => LibraryStore.IsWithin(path, root.Path)) && !excluded.Any(folder => LibraryStore.IsWithin(path, folder)))
-                return new OpenedFile(exact with { Available = true }, exact, "path");
-            List<MediaItem> known;
-            // The library load reports its own failure; the video still plays on its own.
-            try { known = await catalog; } catch (Exception) { known = []; }
-            return OpenedFiles.Resolve(known, path);
-        });
+        List<MediaItem> known;
+        // A failed lookup only means the video plays on its own; the library load reports its own failures.
+        try { known = await candidates; }
+        catch (Exception ex) { PlaybackDiagnostics.Record("open-file-lookup-failed", new { error = ex.GetType().Name }); known = []; }
+        // Only a few records remain, so matching them is quick enough for this thread.
+        var opened = OpenedFiles.Resolve(known, path);
         if (closing || playingItem is not null) return;
         PlaybackDiagnostics.Record("open-file", new { match = opened.Match, known = opened.Library?.Id, startup = true });
         queuePosition = -1;
