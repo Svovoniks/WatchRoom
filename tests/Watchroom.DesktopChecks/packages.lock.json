@@ -61,6 +61,22 @@
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.3"
         }
       },
+      "Microsoft.ML.OnnxRuntime": {
+        "type": "Transitive",
+        "resolved": "1.31.1",
+        "contentHash": "XtsO/1JoKepkWbGk9/DcYtRUTduwJD68kw0eeaH5yy77YBivUZWhC1NBNlVecsBt9EitlQIjCd1hHDNXJ2jbQA==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.1"
+        }
+      },
+      "Microsoft.ML.OnnxRuntime.Managed": {
+        "type": "Transitive",
+        "resolved": "1.31.1",
+        "contentHash": "158JCbNXN9/90LtjF4vHFiJYCF0bqF7CxLjm031jq7dJLEn/CtlHpMJm3UItQSIhQenlx+9Zuqi3zulwnsRVtA==",
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        }
+      },
       "NAudio.Core": {
         "type": "Transitive",
         "resolved": "3.3.0",
@@ -200,11 +216,12 @@
         "type": "Project",
         "dependencies": {
           "LibVLCSharp.WPF": "[3.10.1, )",
+          "Microsoft.ML.OnnxRuntime": "[1.31.1, )",
           "NAudio.Wasapi": "[3.3.0, )",
           "Panlingo.LanguageIdentification.CLD3": "[0.8.1, )",
           "TesseractOCR": "[5.5.2, )",
           "VideoLAN.LibVLC.Windows": "[3.0.23.1, )",
-          "Watchroom.Core": "[0.3.69, )",
+          "Watchroom.Core": "[0.3.77, )",
           "Whisper.net": "[1.9.1, )",
           "Whisper.net.Runtime": "[1.9.1, )",
           "Whisper.net.Runtime.NoAvx": "[1.9.1, )"

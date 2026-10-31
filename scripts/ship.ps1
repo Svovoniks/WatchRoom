@@ -343,7 +343,7 @@ try {
                 Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', $check)
             }
             Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build')
-            foreach ($check in @('--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout', '--language-detection')) {
+            foreach ($check in @('--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout', '--language-detection', '--voice-processing')) {
                 Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build', '--', $check)
             }
             # Some nested metadata fixtures also create long SQLite backup filenames.

@@ -28,7 +28,7 @@ public partial class MainWindow
         public VoiceAudio.Settings Devices => new(Input, Output, Processing);
     }
     private VoiceSession? voice;
-    private VoiceOptions voicePreferences = new(null, null, VoiceAudio.Processing.Windows, false, false, true, false, 100);
+    private VoiceOptions voicePreferences = new(null, null, VoiceAudio.Processing.Standard, false, false, true, false, 100);
     private bool voiceJoining, voiceMuted, pushToTalkHeld;
     // Each person's level for you, by their connection; remembered by name for the next room.
     private readonly Dictionary<string, int> voiceLevels = [];
@@ -157,11 +157,12 @@ public partial class MainWindow
     private VoiceOptions LoadVoicePreferences()
     {
         static string? Device(string? id) => string.IsNullOrEmpty(id) ? null : id;
-        // Apps before the processing choice stored only whether Windows echo cancellation was on.
+        // Earlier choices were Windows' own processing ("windows", "standard") or none ("raw"); Windows' processing is no
+        // longer used, so those become Watchroom's processing, and raw stays unprocessed.
         var processing = library.Setting("voiceProcessing") switch
         {
-            "standard" => VoiceAudio.Processing.Standard, "raw" => VoiceAudio.Processing.Raw, "windows" => VoiceAudio.Processing.Windows,
-            _ => library.Setting("voiceEcho") == "false" ? VoiceAudio.Processing.Standard : VoiceAudio.Processing.Windows
+            "light" => VoiceAudio.Processing.Light, "off" or "raw" => VoiceAudio.Processing.Off,
+            _ => VoiceAudio.Processing.Standard
         };
         return new(Device(library.Setting("voiceInput")), Device(library.Setting("voiceOutput")), processing,
             library.Setting("voicePushToTalk") == "true", library.Setting("voiceAlwaysOn") == "true", library.Setting("voiceDucking") != "false", library.Setting("voiceAutoJoin") == "true",
@@ -535,9 +536,9 @@ public partial class MainWindow
     private sealed record VoiceProcessingChoice(VoiceAudio.Processing Id, string Name);
     private static readonly VoiceProcessingChoice[] VoiceProcessingChoices =
     [
-        new(VoiceAudio.Processing.Windows, "Windows voice processing: echo and noise reduction"),
-        new(VoiceAudio.Processing.Standard, "Standard: the microphone's own settings"),
-        new(VoiceAudio.Processing.Raw, "Raw: no processing at all"),
+        new(VoiceAudio.Processing.Standard, "Remove echo and noise"),
+        new(VoiceAudio.Processing.Light, "Lighter processing, for slower computers"),
+        new(VoiceAudio.Processing.Off, "Off: send the microphone as it is"),
     ];
     private VoiceOptions DraftVoicePreferences()
     {
@@ -549,9 +550,9 @@ public partial class MainWindow
     {
         var draft = DraftVoicePreferences();
         library.Setting("voiceInput", draft.Input ?? ""); library.Setting("voiceOutput", draft.Output ?? "");
-        library.Setting("voiceProcessing", draft.Processing switch { VoiceAudio.Processing.Standard => "standard", VoiceAudio.Processing.Raw => "raw", _ => "windows" });
-        // Older versions of the app read only the echo cancellation switch.
-        library.Setting("voiceEcho", draft.Processing == VoiceAudio.Processing.Windows ? "true" : "false");
+        library.Setting("voiceProcessing", draft.Processing switch { VoiceAudio.Processing.Light => "light", VoiceAudio.Processing.Off => "off", _ => "watchroom" });
+        // Older versions of the app read only the echo cancellation switch, and use Windows' processing when it is on.
+        library.Setting("voiceEcho", draft.Processing == VoiceAudio.Processing.Off ? "false" : "true");
         library.Setting("voicePushToTalk", draft.PushToTalk ? "true" : "false"); library.Setting("voiceAlwaysOn", draft.AlwaysOn ? "true" : "false");
         library.Setting("voiceDucking", draft.Ducking ? "true" : "false"); library.Setting("voiceAutoJoin", draft.AutoJoin ? "true" : "false");
         library.Setting("voiceVolume", draft.Volume.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -587,6 +588,7 @@ public partial class MainWindow
     private async Task StopVoiceTest()
     {
         voiceTestTimer.Stop();
+        voiceRecording = null; voicePlayback?.Cancel(); VoiceRecordButton.Content = "Record a test";
         var test = voiceTest; voiceTest = null; voiceTestCapture = null;
         VoiceTestFill.Width = 0;
         if (test is not null) await test.DisposeAsync();
@@ -596,10 +598,57 @@ public partial class MainWindow
         if (voiceTest is not { } test || voiceTestCapture is not { } capture) return;
         var level = test.MicrophoneReady ? Math.Clamp((capture.LevelDb + 60) / 50, 0, 1) : 0;
         VoiceTestFill.Width = VoiceTestTrack.ActualWidth * level;
+        // Green is speech, which would be sent; grey is any other sound, which is not.
+        var speech = capture.HearsSpeech;
+        VoiceTestFill.Background = speech ? VoiceTalking : VoiceIdle;
+        if (voiceRecording is { Full: true }) _ = Guard(FinishVoiceRecording);
         VoiceTestStatus.Text = test.Problem ?? (test.InputName is { } name
-            ? (capture.LevelDb > -45 ? "Watchroom hears you on " + name + "." : "Speak to test " + name + ". The bar moves when Watchroom hears you.")
+            ? voiceRecording is { } recording ? $"Recording, {recording.ElapsedMs / 1000} of {VoiceRecording.MaxSeconds} s. Talk, drop something or type, then press Stop and play back."
+                + (DraftVoicePreferences().PushToTalk ? " Push to talk is on, so this records as if you held V." : "")
+            : voicePlayback is not null ? voiceRecordNote
+            : voiceRecordNote is { } note && Environment.TickCount64 < voiceRecordNoteUntil ? note
+            : speech ? "Watchroom hears you speaking on " + name + "."
+            : capture.LevelDb > -45 ? "Watchroom hears a sound on " + name + " that isn't speech, so it won't be sent."
+            : "Speak to test " + name + ". The bar turns green when Watchroom hears speech."
             : "Checking your microphone…");
     }
+
+    // Record a test: the settings microphone transmits with the settings on the page into a recording, which then
+    // plays back on the chosen output exactly as the room would hear it. The button stops recording, then playback.
+    private VoiceRecording? voiceRecording;
+    private CancellationTokenSource? voicePlayback;
+    private string? voiceRecordNote;
+    private long voiceRecordNoteUntil;
+    private async void RecordVoiceTest(object sender, RoutedEventArgs e) => await Guard(async () =>
+    {
+        if (voicePlayback is { } playing) { playing.Cancel(); return; }
+        if (voiceRecording is not null) { await FinishVoiceRecording(); return; }
+        if (voiceTest is not { MicrophoneReady: true } || voiceTestCapture is not { } capture) { NoteVoiceRecording("The microphone isn't ready yet."); return; }
+        var draft = DraftVoicePreferences();
+        var recording = voiceRecording = new VoiceRecording();
+        capture.Frame += recording.Add;
+        // Push to talk records as if the key were held; sending continuously records the silent stretches too.
+        capture.PushToTalk = draft.PushToTalk; capture.AlwaysOn = draft.AlwaysOn; capture.Transmitting = true;
+        VoiceRecordButton.Content = "Stop and play back";
+        UpdateVoiceTest();
+    });
+    private async Task FinishVoiceRecording()
+    {
+        if (voiceRecording is not { } recording) return;
+        voiceRecording = null;
+        if (voiceTestCapture is { } capture) { capture.Transmitting = false; capture.Frame -= recording.Add; }
+        VoiceRecordButton.Content = "Record a test";
+        if (recording.Frames == 0) { NoteVoiceRecording("Nothing would have been sent: Watchroom didn't hear any speech."); UpdateVoiceTest(); return; }
+        var samples = recording.Render();
+        using var cancel = voicePlayback = new CancellationTokenSource();
+        voiceRecordNote = $"Playing back what others would hear: {recording.Frames * VoicePacket.FrameMs / 1000.0:F1} of {samples.Length / (double)VoicePacket.SampleRate:F1} s was sent.";
+        VoiceRecordButton.Content = "Stop playback";
+        UpdateVoiceTest();
+        try { await VoiceAudio.PlayAsync(DraftVoicePreferences().Output, samples, cancel.Token); NoteVoiceRecording(null); }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException) { NoteVoiceRecording("The recording could not play on this device."); }
+        finally { voicePlayback = null; VoiceRecordButton.Content = "Record a test"; UpdateVoiceTest(); }
+    }
+    private void NoteVoiceRecording(string? note) { voiceRecordNote = note; voiceRecordNoteUntil = Environment.TickCount64 + 5000; }
     private async void PlayVoiceTestSound(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         VoiceTestSoundButton.IsEnabled = false;

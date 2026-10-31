@@ -28,6 +28,11 @@ jobs:
           if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") { throw 'Tag must match Version in Directory.Build.props' }
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Release tags must be vMAJOR.MINOR.PATCH' }
           "APP_VERSION=$version" >> $env:GITHUB_ENV
+      # Voice processing libraries are built from pinned sources (see Watchroom.Desktop.csproj); reuse them while those are unchanged.
+      - uses: actions/cache@v4
+        with:
+          path: .tools/native/*.dll
+          key: voice-native-${{ hashFiles('src/native/**', 'src/Watchroom.Desktop/Watchroom.Desktop.csproj') }}
       - name: Restore and build
         shell: pwsh
         run: |
@@ -57,6 +62,8 @@ jobs:
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --player-layout
       - name: Track language detection checks
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --language-detection
+      - name: Voice processing checks
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --voice-processing
       - name: Episode thumbnail checks
         run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --video-frames
       - name: Full playback and room checks

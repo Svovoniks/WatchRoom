@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows10.0.17763.0</TargetFramework><UseWPF>true</UseWPF><PlatformTarget>x64</PlatformTarget><AssemblyName>Watchroom</AssemblyName><ApplicationIcon>Assets/Watchroom.ico</ApplicationIcon><ApplicationManifest>app.manifest</ApplicationManifest></PropertyGroup><ItemGroup><PackageReference Include="NAudio.Wasapi" Version="3.3.0" /><ProjectReference Include="../Watchroom.Core/Watchroom.Core.csproj" /><PackageReference Include="LibVLCSharp.WPF" Version="3.10.1" /><PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" /><PackageReference Include="Whisper.net" Version="1.9.1" /><PackageReference Include="Whisper.net.Runtime" Version="1.9.1" /><PackageReference Include="Whisper.net.Runtime.NoAvx" Version="1.9.1" /><PackageReference Include="Panlingo.LanguageIdentification.CLD3" Version="0.8.1" /><PackageReference Include="TesseractOCR" Version="5.5.2" /></ItemGroup><ItemGroup><Resource Include="Assets/Watchroom.ico" /><Resource Include="Assets/Watchroom.png" /><Resource Include="Assets/Tmdb.png" /></ItemGroup><ItemGroup><AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" /><InternalsVisibleTo Include="Watchroom.DesktopChecks" /></ItemGroup>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows10.0.17763.0</TargetFramework><UseWPF>true</UseWPF><PlatformTarget>x64</PlatformTarget><AssemblyName>Watchroom</AssemblyName><ApplicationIcon>Assets/Watchroom.ico</ApplicationIcon><ApplicationManifest>app.manifest</ApplicationManifest></PropertyGroup><ItemGroup><PackageReference Include="NAudio.Wasapi" Version="3.3.0" /><ProjectReference Include="../Watchroom.Core/Watchroom.Core.csproj" /><PackageReference Include="LibVLCSharp.WPF" Version="3.10.1" /><PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" /><PackageReference Include="Whisper.net" Version="1.9.1" /><PackageReference Include="Whisper.net.Runtime" Version="1.9.1" /><PackageReference Include="Whisper.net.Runtime.NoAvx" Version="1.9.1" /><PackageReference Include="Panlingo.LanguageIdentification.CLD3" Version="0.8.1" /><PackageReference Include="TesseractOCR" Version="5.5.2" /><PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.1" /></ItemGroup><ItemGroup><Resource Include="Assets/Watchroom.ico" /><Resource Include="Assets/Watchroom.png" /><Resource Include="Assets/Tmdb.png" /></ItemGroup><ItemGroup><AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" /><InternalsVisibleTo Include="Watchroom.DesktopChecks" /></ItemGroup>
   <!-- Whisper tiny (MIT, OpenAI; ggml conversion by whisper.cpp) identifies spoken languages of untagged audio tracks.
        Downloaded once per checkout from a pinned revision and verified before it is bundled under Models/. -->
   <PropertyGroup><LanguageModelName>ggml-tiny-q5_1.bin</LanguageModelName><LanguageModelSha256>818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7</LanguageModelSha256><LanguageModelUrl>https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/$(LanguageModelName)</LanguageModelUrl><LanguageModelDirectory>$(MSBuildThisFileDirectory)../../.tools/models/</LanguageModelDirectory><LanguageModelPath>$(LanguageModelDirectory)$(LanguageModelName)</LanguageModelPath></PropertyGroup>
@@ -69,6 +69,50 @@
       }
     ]]></Code></Task>
   </UsingTask>
+  <!-- Room voice processing (VoiceProcessing.cs): Watchroom's own echo cancellation, noise removal and speech detection
+       instead of Windows' voice pipeline. Each piece is fetched or built once per checkout under .tools/ from a pinned,
+       verified source: Silero VAD's model; webrtc-apm.dll (WebRTC audio processing with a C interface) from SoundFlow's
+       package; rnnoise.dll built from the RNNoise 0.2 release with the Visual Studio C compiler; and deepfilter.dll
+       built from src/native/deepfilter with Cargo. -->
+  <PropertyGroup>
+    <VoiceNativeDirectory>$(MSBuildThisFileDirectory)../../.tools/native/</VoiceNativeDirectory>
+    <SpeechModelName>silero_vad.onnx</SpeechModelName><SpeechModelSha256>1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3</SpeechModelSha256>
+    <SpeechModelUrl>https://raw.githubusercontent.com/snakers4/silero-vad/5cd7945676eb32225748052e2e6a0580e4686a08/src/silero_vad/data/$(SpeechModelName)</SpeechModelUrl>
+    <EchoPackageUrl>https://www.nuget.org/api/v2/package/SoundFlow.Extensions.WebRtc.Apm/1.4.0</EchoPackageUrl><EchoPackageSha256>b7b5d54ec40187b85919801f05530f5b178eeafa18227643b6757394d6854eaf</EchoPackageSha256>
+    <EchoLibrarySha256>89ab213150e0a3f7d0ca6424ef8f72e2402adabcfae8a369976b8b27df207411</EchoLibrarySha256>
+    <RnnoiseUrl>https://github.com/xiph/rnnoise/releases/download/v0.2/rnnoise-0.2.tar.gz</RnnoiseUrl><RnnoiseSha256>90fce4b00b9ff24c08dbfe31b82ffd43bae383d85c5535676d28b0a2b11c0d37</RnnoiseSha256>
+    <DeepFilterProject>$(MSBuildThisFileDirectory)../native/deepfilter/</DeepFilterProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(LanguageModelDirectory)$(SpeechModelName)" Link="Models/$(SpeechModelName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(VoiceNativeDirectory)webrtc-apm.dll;$(VoiceNativeDirectory)rnnoise.dll;$(VoiceNativeDirectory)deepfilter.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+    <None Include="Models/LICENSE-silero.txt;Models/LICENSE-webrtc.txt;Models/LICENSE-rnnoise.txt;Models/LICENSE-deepfilternet.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="FetchSpeechModel" BeforeTargets="AssignTargetPaths;PrepareForBuild" Condition="!Exists('$(LanguageModelDirectory)$(SpeechModelName)')">
+    <DownloadFile SourceUrl="$(SpeechModelUrl)" DestinationFolder="$(LanguageModelDirectory)" DestinationFileName="$(SpeechModelName).download" Retries="3" RetryDelayMilliseconds="2000" />
+    <VerifyFileHash File="$(LanguageModelDirectory)$(SpeechModelName).download" Hash="$(SpeechModelSha256)" Algorithm="SHA256" />
+    <Move SourceFiles="$(LanguageModelDirectory)$(SpeechModelName).download" DestinationFiles="$(LanguageModelDirectory)$(SpeechModelName)" />
+  </Target>
+  <Target Name="FetchEchoCanceller" BeforeTargets="AssignTargetPaths;PrepareForBuild" Condition="!Exists('$(VoiceNativeDirectory)webrtc-apm.dll')">
+    <DownloadFile SourceUrl="$(EchoPackageUrl)" DestinationFolder="$(VoiceNativeDirectory)apm/" DestinationFileName="apm.zip" Retries="3" RetryDelayMilliseconds="2000" />
+    <VerifyFileHash File="$(VoiceNativeDirectory)apm/apm.zip" Hash="$(EchoPackageSha256)" Algorithm="SHA256" />
+    <Unzip SourceFiles="$(VoiceNativeDirectory)apm/apm.zip" DestinationFolder="$(VoiceNativeDirectory)apm/package/" />
+    <VerifyFileHash File="$(VoiceNativeDirectory)apm/package/runtimes/win-x64/native/webrtc-apm.dll" Hash="$(EchoLibrarySha256)" Algorithm="SHA256" />
+    <Copy SourceFiles="$(VoiceNativeDirectory)apm/package/runtimes/win-x64/native/webrtc-apm.dll" DestinationFolder="$(VoiceNativeDirectory)" />
+    <RemoveDir Directories="$(VoiceNativeDirectory)apm/" />
+  </Target>
+  <Target Name="BuildRnnoise" BeforeTargets="AssignTargetPaths;PrepareForBuild" Condition="!Exists('$(VoiceNativeDirectory)rnnoise.dll')">
+    <DownloadFile SourceUrl="$(RnnoiseUrl)" DestinationFolder="$(VoiceNativeDirectory)rnnoise/" DestinationFileName="rnnoise.tar.gz" Retries="3" RetryDelayMilliseconds="2000" />
+    <VerifyFileHash File="$(VoiceNativeDirectory)rnnoise/rnnoise.tar.gz" Hash="$(RnnoiseSha256)" Algorithm="SHA256" />
+    <Exec Command="tar -xzf rnnoise.tar.gz" WorkingDirectory="$(VoiceNativeDirectory)rnnoise/" />
+    <Exec Command="&quot;$(MSBuildThisFileDirectory)../native/rnnoise/build.cmd&quot; &quot;$(VoiceNativeDirectory)rnnoise/rnnoise-0.2&quot; &quot;$(VoiceNativeDirectory)rnnoise/build&quot;" />
+    <Copy SourceFiles="$(VoiceNativeDirectory)rnnoise/build/rnnoise.dll" DestinationFolder="$(VoiceNativeDirectory)" />
+    <RemoveDir Directories="$(VoiceNativeDirectory)rnnoise/" />
+  </Target>
+  <Target Name="BuildDeepFilter" BeforeTargets="AssignTargetPaths;PrepareForBuild" Condition="!Exists('$(VoiceNativeDirectory)deepfilter.dll')">
+    <Exec Command="cargo build --release --locked --manifest-path &quot;$(DeepFilterProject)Cargo.toml&quot;" EnvironmentVariables="CARGO_TARGET_DIR=$(VoiceNativeDirectory)deepfilter-target" />
+    <Copy SourceFiles="$(VoiceNativeDirectory)deepfilter-target/release/deepfilter.dll" DestinationFolder="$(VoiceNativeDirectory)" />
+  </Target>
   <!-- The app is x64 only. -->
   <Target Name="DropX86Tesseract" BeforeTargets="AssignTargetPaths">
     <ItemGroup><None Remove="@(None)" Condition="$([System.String]::Copy('%(None.Link)').StartsWith('x86'))" /></ItemGroup>

@@ -65,6 +65,9 @@ PowerShell checks (use `dotnet` instead of the workspace SDK path on other machi
 .tools/dotnet/dotnet.exe run --project tests/Watchroom.DesktopChecks -c Release
 ```
 
+When voice chat changes, also run `tests/Watchroom.DesktopChecks -- --voice-processing`; a fresh checkout builds
+the voice processing libraries once, which needs Visual Studio's C++ tools and Rust (`cargo`).
+
 When packaging or the updater changes, also run `./scripts/update-package-checks.ps1`.
 The release workflow runs it on every packaged build.
 
