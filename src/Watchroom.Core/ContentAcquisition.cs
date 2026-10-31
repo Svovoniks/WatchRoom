@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Watchroom.Core;
 
@@ -8,12 +10,21 @@ namespace Watchroom.Core;
 // Watchroom runs its command with a request on standard input saying what to get and where it belongs, and the files
 // join the library on the next scan. See PLUGINS.md.
 public record AcquisitionPlugin(string Id, string Name, string Description, string[] ContentTypes, string Command, string[] Arguments,
-    string Directory, int TimeoutSeconds)
+    string Directory, int TimeoutSeconds, bool Interactive = false, string? SettingsSchema = null)
 {
     public bool Supports(string contentType) => ContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase);
 }
 public record AcquisitionManifest(string? Id = null, string? Name = null, string? Description = null, string[]? ContentTypes = null,
-    string? Command = null, string[]? Arguments = null, int? TimeoutSeconds = null);
+    string? Command = null, string[]? Arguments = null, int? TimeoutSeconds = null, bool Interactive = false, string? SettingsSchema = null);
+public record AcquisitionSetting(string Key, string Label, string Type = "text", string[]? Choices = null, string? Default = null, string? Help = null);
+public record AcquisitionOptions(string? Query = null, string? SourceUrl = null, int? Resolution = null, string? Filter = null, int? EpisodeOffset = null, int? ProviderSeason = null);
+// Assignable: a release of the right title with no episode number, such as a season pack or an OVA. It is never
+// ticked automatically, but the user may tick it on its own to download it for the request.
+public record AcquisitionChoice(string Id, string Title, string Detail = "", bool Matches = false, string? Episode = null, int? Resolution = null, string? SuggestedFilter = null, bool Assignable = false)
+{
+    // The episode the release provides: the requested one it matches, or else the one its name gives, such as S01E01.
+    [System.Text.Json.Serialization.JsonIgnore] public string? EpisodeCode => Episode ?? ContentAcquisition.EpisodeInName(Title);
+}
 // A library folder and what it holds: anime, show, movie or mixed.
 public record AcquisitionLibrary(string Path, string Kind);
 public record AcquisitionEpisode(int Season, int Episode, string? Title, string? AirDate, bool Upcoming, int? AbsoluteEpisode = null);
@@ -22,10 +33,10 @@ public record AcquisitionEpisode(int Season, int Episode, string? Title, string?
 // library folder for a film. It may not exist yet when nothing of the show or season is on disk.
 public record AcquisitionRequest(int Version, string Scope, string ContentType, string Name, string Title, string? OriginalTitle, int? Year,
     string TargetDirectory, bool TargetExists, string? ShowDirectory, string? SeasonDirectory, int? Season, AcquisitionEpisode[] Episodes,
-    Dictionary<string, string> ProviderIds, AcquisitionLibrary[] Libraries);
-public record AcquisitionResult(bool Success, string Message);
+    Dictionary<string, string> ProviderIds, AcquisitionLibrary[] Libraries, string? Action = null, AcquisitionOptions? Options = null, string[]? SelectedReleases = null);
+public record AcquisitionResult(bool Success, string Message, string? Stage = null, AcquisitionChoice[]? Choices = null);
 // What a plugin may print as its last line of output.
-public record AcquisitionResponse(bool? Success = null, string? Status = null, string? Message = null);
+public record AcquisitionResponse(bool? Success = null, string? Status = null, string? Message = null, string? Stage = null, AcquisitionChoice[]? Choices = null);
 
 public static class ContentAcquisition
 {
@@ -33,6 +44,129 @@ public static class ContentAcquisition
     public const int RequestVersion = 1;
     public static readonly string[] ContentTypes = ["anime", "show", "movie"];
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    // The best downloadable release of each episode comes first (what Select matching picks), then the other
+    // downloadable releases, then other releases of the requested episodes, then season packs and specials, then the
+    // rest. The episode groups run in episode order; within an episode, and among the rest, the user's search terms (for example a release group)
+    // decide first. Score each distinct term once. Then the picks are chosen together as a batch: one release per
+    // episode, named as much as possible like each other and like the show's files on disk (existing), so a season
+    // comes from one group and encode. The other releases follow by how close their names are to the picks. Tied
+    // results prefer a named release group and then retain the provider's order; ranking never changes whether a
+    // release matches.
+    public static AcquisitionChoice[] RankChoices(IEnumerable<AcquisitionChoice> choices, string? query, IReadOnlyCollection<string>? existing = null)
+    {
+        // "S02E10" sorts after "S02E9"; a choice without numbers sorts by its text.
+        static string EpisodeKey(string? episode) => Regex.Replace(episode ?? "", @"\d+", match => match.Value.PadLeft(6, '0'));
+        var terms = NameWords(query);
+        var library = (existing ?? []).Select(x => new ReleaseName(x)).ToArray();
+        var scored = choices.Select((choice, index) =>
+        {
+            var words = NameWords(choice.Title).ToHashSet(StringComparer.Ordinal);
+            var name = new ReleaseName(choice.Title);
+            return new
+            {
+                Choice = choice, Index = index, Name = name, Named = name.Group.Count > 0,
+                Exact = terms.Count(words.Contains),
+                Prefix = terms.Count(term => !words.Contains(term) && words.Any(word => word.StartsWith(term, StringComparison.Ordinal))),
+                Library = library.Length == 0 ? 0 : library.Min(file => Distance(name, file))
+            };
+        }).ToArray();
+
+        // Candidates: the downloadable releases of each episode that best fit the search terms.
+        var episodes = scored.Where(x => x.Choice.Matches).GroupBy(x => x.Choice.Episode)
+            .Select(x => { var best = x.Max(y => (y.Exact, y.Prefix)); return x.Where(y => (y.Exact, y.Prefix) == best).ToArray(); }).ToArray();
+        // Matching the files on disk counts as much as matching the rest of the batch.
+        var libraryWeight = Math.Max(1, episodes.Length - 1);
+        var picks = new int[episodes.Length];
+        int Best(int episode, Func<int, int> cost) => Enumerable.Range(0, episodes[episode].Length)
+            .OrderBy(cost).ThenByDescending(i => episodes[episode][i].Named).ThenBy(i => episodes[episode][i].Index).First();
+        // Start from the releases nearest the files on disk, or else nearest the other episodes' releases; then re-pick
+        // each episode against the others until the batch settles.
+        for (var e = 0; e < episodes.Length; e++)
+        {
+            var episode = e;
+            picks[e] = Best(e, i => libraryWeight * episodes[episode][i].Library + Enumerable.Range(0, episodes.Length).Where(other => other != episode)
+                .Sum(other => episodes[other].Min(y => Distance(episodes[episode][i].Name, y.Name))));
+        }
+        for (var round = 0; round < 8; round++)
+        {
+            var changed = false;
+            for (var e = 0; e < episodes.Length; e++)
+            {
+                var episode = e;
+                var pick = Best(e, i => libraryWeight * episodes[episode][i].Library + Enumerable.Range(0, episodes.Length).Where(other => other != episode)
+                    .Sum(other => Distance(episodes[episode][i].Name, episodes[other][picks[other]].Name)));
+                if (pick != picks[e]) { picks[e] = pick; changed = true; }
+            }
+            if (!changed) break;
+        }
+        var chosen = episodes.Select((x, e) => x[picks[e]]).ToArray();
+        var chosenSet = chosen.Select(x => x.Choice).ToHashSet(ReferenceEqualityComparer.Instance);
+        var ranked = scored.OrderByDescending(x => x.Choice.Matches).ThenByDescending(x => x.Choice.Episode is { Length: > 0 }).ThenByDescending(x => x.Choice.Assignable)
+            .ThenBy(x => EpisodeKey(x.Choice.Episode), StringComparer.Ordinal).ThenByDescending(x => x.Exact).ThenByDescending(x => x.Prefix)
+            .ThenByDescending(x => chosenSet.Contains(x.Choice))
+            .ThenBy(x => libraryWeight * x.Library + chosen.Where(y => y.Choice.Episode != x.Choice.Episode).Sum(y => Distance(x.Name, y.Name)))
+            .ThenByDescending(x => x.Named).ThenBy(x => x.Index).Select(x => x.Choice).ToArray();
+        return [.. ranked.Where(chosenSet.Contains), .. ranked.Where(x => !chosenSet.Contains(x))];
+    }
+
+    private static string[] NameWords(string? text)
+    {
+        var normalized = new string((text ?? "").Normalize(NormalizationForm.FormD)
+            .Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray()).ToLowerInvariant();
+        return Regex.Matches(normalized, @"[\p{L}\p{N}]+").Select(x => x.Value).Distinct(StringComparer.Ordinal).ToArray();
+    }
+    // A release or file name as the words that tell releases apart. Words that only say which episode it is cost
+    // nothing: episode codes, bare numbers, versions and CRC checksums such as [ABCDEF12].
+    private sealed class ReleaseName
+    {
+        private static readonly Regex EpisodeWord = new(@"^(?:\d+(?:v\d+)?|s\d+e\d+(?:v\d+)?|e\d+|\d+x\d+|v\d+|(?=[a-f]*\d)[0-9a-f]{8})$", RegexOptions.CultureInvariant);
+        public readonly HashSet<string> Words, Group;
+        public ReleaseName(string? name)
+        {
+            Words = NameWords(name).Where(x => !EpisodeWord.IsMatch(x)).ToHashSet(StringComparer.Ordinal);
+            Group = NameWords(ReleaseGroup(name)).ToHashSet(StringComparer.Ordinal);
+        }
+    }
+    // How different two names are: each word in only one of them costs 1, or 3 when it names a release group, so
+    // "S01E01" to "S01E02" costs nothing and "MeGusta" to "ELiTE" costs 6.
+    private static int Distance(ReleaseName a, ReleaseName b)
+    {
+        var cost = 0;
+        foreach (var word in a.Words) if (!b.Words.Contains(word)) cost += a.Group.Contains(word) || b.Group.Contains(word) ? 3 : 1;
+        foreach (var word in b.Words) if (!a.Words.Contains(word)) cost += a.Group.Contains(word) || b.Group.Contains(word) ? 3 : 1;
+        return cost;
+    }
+    public static int NameDistance(string? a, string? b) => Distance(new ReleaseName(a), new ReleaseName(b));
+
+    // The group that made a release: "[Erai-raws] Show - 01 [1080p].mkv" or "Show.S01E01.1080p.WEB.x265-MeGusta".
+    private static readonly Regex LeadingGroup = new(@"^\s*\[([^\]]+)\]", RegexOptions.CultureInvariant);
+    // Scene names attach the group with a dash ("x264-KILLERS"); "Show - OVA" is a title, not a group.
+    private static readonly Regex TrailingGroup = new(@"(?<=\S)-([A-Za-z0-9][A-Za-z0-9_.]*)$", RegexOptions.CultureInvariant);
+    private static readonly Regex TrailingNoise = new(@"(?:\.(?:mkv|mp4|avi|m4v|ts|wmv)$|\s*[\[\(][^\]\)]*[\]\)]\s*$|[\s.]+(?:eztv|rarbg|ettv|eztvx\.to)$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    public static string? ReleaseGroup(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return null;
+        var name = Path.GetFileName(title.Trim());
+        if (LeadingGroup.Match(name) is { Success: true } leading) return leading.Groups[1].Value.Trim();
+        for (string previous = ""; previous != name;) { previous = name; name = TrailingNoise.Replace(name, "").TrimEnd(); }
+        // "WEB-DL" or "Blu-ray" end a name without a group; a group has at least two characters.
+        return TrailingGroup.Match(name) is { Success: true } trailing && trailing.Groups[1].Value.Length >= 2
+            && !Regex.IsMatch(trailing.Groups[1].Value, @"^(?:DL|Rip|ray|\d+)$", RegexOptions.IgnoreCase) ? trailing.Groups[1].Value : null;
+    }
+    // The names of the show's files on disk that releases are compared with: its files of the requested season, or
+    // of the whole show when that season has none.
+    public static string[] ExistingNames(AcquisitionRequest request, IEnumerable<MediaItem> library)
+    {
+        if (request.Scope == "movie") return [];
+        var files = library.Where(x => !x.IsVirtual && x.Series is not null && string.Equals(x.Series, request.Title, StringComparison.OrdinalIgnoreCase)).ToArray();
+        var season = files.Where(x => x.Season == request.Season).ToArray();
+        return (season.Length > 0 ? season : files).Select(x => Path.GetFileNameWithoutExtension(x.Path)).Distinct(StringComparer.OrdinalIgnoreCase).Take(200).ToArray();
+    }
+
+    private static readonly Regex EpisodeName =new(@"(?<![a-z0-9])(?:s(\d{1,2})e(\d{1,3})|(\d{1,2})x(\d{1,3}))(?!\d)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    public static string? EpisodeInName(string? title) => title is null ? null : EpisodeName.Match(title) is { Success: true } match
+        ? $"S{int.Parse(match.Groups[1].Success ? match.Groups[1].Value : match.Groups[3].Value):00}E{int.Parse(match.Groups[2].Success ? match.Groups[2].Value : match.Groups[4].Value):00}" : null;
 
     public static string ContentType(string kind) => kind switch { "Anime" => "anime", "Movie" => "movie", _ => "show" };
     public static string LibraryKind(string kind) => kind is "Anime" or "Movie" or "Show" ? kind.ToLowerInvariant() : "mixed";
@@ -65,7 +199,7 @@ public static class ContentAcquisition
                 var id = string.IsNullOrWhiteSpace(manifest.Id) ? name : manifest.Id.Trim();
                 if (plugins.Any(x => x.Id.Equals(id, StringComparison.OrdinalIgnoreCase))) { problems.Add($"{name}: another plugin already has the id {id}."); continue; }
                 plugins.Add(new(id, string.IsNullOrWhiteSpace(manifest.Name) ? name : manifest.Name.Trim(), manifest.Description?.Trim() ?? "",
-                    types.OfType<string>().Distinct().ToArray(), manifest.Command.Trim(), manifest.Arguments ?? [], folder, Math.Clamp(manifest.TimeoutSeconds ?? 120, 5, 3600)));
+                    types.OfType<string>().Distinct().ToArray(), manifest.Command.Trim(), manifest.Arguments ?? [], folder, Math.Clamp(manifest.TimeoutSeconds ?? 120, 5, 3600), manifest.Interactive, manifest.SettingsSchema));
             }
             catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
             { problems.Add($"{name}: plugin.json can't be read: {ex.Message}"); }
@@ -201,7 +335,7 @@ public static class ContentAcquisition
                 var response = Wire.Read<AcquisitionResponse>(last);
                 var success = response.Success ?? (response.Status is { } status ? status.Equals("ok", StringComparison.OrdinalIgnoreCase) || status.Equals("success", StringComparison.OrdinalIgnoreCase)
                     || status.Equals("queued", StringComparison.OrdinalIgnoreCase) || status.Equals("started", StringComparison.OrdinalIgnoreCase) : exitCode == 0);
-                return new(success, string.IsNullOrWhiteSpace(response.Message) ? Default(plugin, success, exitCode) : response.Message.Trim());
+                return new(success, string.IsNullOrWhiteSpace(response.Message) ? Default(plugin, success, exitCode) : response.Message.Trim(), response.Stage, response.Choices);
             }
             catch (Exception ex) when (ex is JsonException or InvalidDataException) { }
         }
