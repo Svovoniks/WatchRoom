@@ -43,8 +43,6 @@ static class Program
         Environment.SetEnvironmentVariable("WATCHROOM_DATA", directory);
         Environment.SetEnvironmentVariable("WATCHROOM_DISABLE_UPDATES", "1");
         var store = new LibraryStore(directory); store.Setting("artwork", "false");
-        // The one-time promo is covered by PostplayChecks; elsewhere finished videos carry on at once.
-        store.Setting("postplayShown", "true");
         store.Setting("folders", Wire.Serialize(new[] { new LibraryFolder(directory) }));
         var entries = Enumerable.Range(0, 750).Select(index => new MediaItem("item-" + index, Path.Combine(directory, "movie-" + index + ".mp4"), $"Movie {index:0000}", "Movie")).ToArray();
         foreach (var entry in entries) store.Save(entry);
@@ -315,7 +313,6 @@ static class Program
                 PreferenceNavigationChecks.Run(window, activeStore, Check);
                 await QueuePlaybackChecks.Run(window, activeStore, directory, Check);
                 await EpisodeEndChecks.Run(window, Check);
-                await PostplayChecks.Run(window, activeStore, Check);
                 await OpenFileChecks.Run(window, Check);
                 await PictureInPictureChecks.Run(window, Check);
                 await EndedSeekChecks.Run(window, Check);

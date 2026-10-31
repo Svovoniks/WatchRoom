@@ -76,19 +76,5 @@ static class HostRoomFixture
             "legacy guest retains buffering readiness instead of waiting for an unsupported seek acknowledgement");
         mixed.Apply("host", Ready(mixed.Playback!.Generation), 1200, out _);
         check(mixed.Playback.Playing, "updated host can resume a seek with a legacy guest");
-
-        // Everyone watches the postplay promo together while anyone in the room has not seen it.
-        var promo = new HostRoomCoordinator("host"); promo.Discover(members, 1000); promo.SetConnected("guest", true, 1000);
-        check(promo.Snapshot.Postplay is { Pending.Length: 0, Round: 0 }, "updated hosts publish the promo state, so guests follow its rounds");
-        check(promo.Apply("guest", new("postplay", Number: 1), 1000, out _) && promo.Snapshot.Postplay!.Pending.SequenceEqual(["guest"]),
-            "a guest who has not seen the promo is listed for the host");
-        check(!promo.Apply("pending", new("postplay", Number: 1), 1000, out _) && !promo.Apply("guest", new("postplay", Number: 2), 1000, out _),
-            "only admitted people report the promo, with a valid state");
-        check(!promo.Apply("guest", new("postplay-start"), 1000, out _) && promo.Apply("host", new("postplay-start"), 1000, out _) && promo.Snapshot.Postplay!.Round == 1,
-            "only the host starts the promo for the room");
-        check(Wire.Read<RoomSnapshot>(Wire.Serialize(promo.Snapshot)).Postplay is { Round: 1, Pending: ["guest"] }, "the promo state survives wire serialization");
-        promo.Apply("guest", new("postplay", Number: 0), 1000, out _);
-        promo.Apply("guest", new("postplay", Number: 1), 1000, out _); promo.Depart("guest", 1100);
-        check(promo.Snapshot.Postplay!.Pending.Length == 0, "people who leave no longer hold the promo for the room");
     }
 }

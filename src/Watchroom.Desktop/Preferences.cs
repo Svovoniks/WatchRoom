@@ -51,7 +51,7 @@ public partial class MainWindow
         foreach (var box in new[] { DisplayNameBox, ServerBox, MetadataRefreshDays, StreamingBufferSeconds }) box.TextChanged += PreferencesChanged;
         PreferredAudioLanguages.TextChanged += PreferencesChanged;
         PreferredSubtitleLanguages.TextChanged += PreferencesChanged;
-        foreach (var box in new[] { AutoArtwork, ImportMissing, ImportUpcoming, SaveNfo, DisplaySpecials, GroupShows, NeverRefresh, ForceDisablePostplay })
+        foreach (var box in new[] { AutoArtwork, ImportMissing, ImportUpcoming, SaveNfo, DisplaySpecials, GroupShows, NeverRefresh })
         { box.Checked += PreferencesChanged; box.Unchecked += PreferencesChanged; }
         MetadataLanguage.SelectionChanged += PreferencesChanged;
         MetadataCountry.SelectionChanged += PreferencesChanged;
@@ -70,7 +70,6 @@ public partial class MainWindow
         {
             DisplayNameBox.Text = SavedDisplayName; ServerBox.Text = SavedServerAddress;
             AutoArtwork.IsChecked = SavedAutoArtwork;
-            ForceDisablePostplay.IsChecked = SavedPostplayDisabled;
             StreamingBufferSeconds.Text = SavedStreamingBufferSeconds.ToString(CultureInfo.InvariantCulture);
             MetadataToken.Password = savedMetadataToken;
             LoadTrackPreferences();
@@ -111,7 +110,7 @@ public partial class MainWindow
         providers = providerChoices.Select(p => new { p.Id, p.Enabled }).ToArray(), language = MetadataLanguage.SelectedValue,
         country = MetadataCountry.SelectedValue, days = MetadataRefreshDays.Text, never = NeverRefresh.IsChecked,
         missing = ImportMissing.IsChecked, upcoming = ImportUpcoming.IsChecked, nfo = SaveNfo.IsChecked,
-        specials = DisplaySpecials.IsChecked, grouping = GroupShows.IsChecked, postplay = ForceDisablePostplay.IsChecked, voice = DraftVoicePreferences()
+        specials = DisplaySpecials.IsChecked, grouping = GroupShows.IsChecked, voice = DraftVoicePreferences()
     });
     private void PreferencesChanged(object sender, RoutedEventArgs e)
     {
@@ -215,9 +214,6 @@ public partial class MainWindow
         displaySpecialsWithinSeasons = DisplaySpecials.IsChecked == true;
         library.Setting("name", DisplayNameBox.Text.Trim()); library.Setting("server", ServerBox.Text.Trim().TrimEnd('/'));
         library.Setting("artwork", AutoArtwork.IsChecked == true ? "true" : "false");
-        library.Setting(PostplayDisabledSetting, ForceDisablePostplay.IsChecked == true ? "true" : "false");
-        if (SavedPostplayDisabled) EndPostplay("disabled");
-        UpdatePostplayPending();
         // Missing and upcoming episodes follow their settings now rather than at the next scan.
         if (SavedAutoArtwork && (before.ImportMissing != (ImportMissing.IsChecked == true) || before.ImportUpcoming != (ImportUpcoming.IsChecked == true)))
             _ = Guard(async () => { await FetchArtwork(); await RefreshLibrary(); });
