@@ -29,6 +29,7 @@ public class InAppDialog : ContentControl
     private DispatcherFrame? frame;
     private IInputElement? restoreFocus;
     private Window? attached;
+    private ScrimAdorner? margins;
     private bool? result;
     private const double Gutter = 48, HeaderHeight = 54;
 
@@ -100,6 +101,7 @@ public class InAppDialog : ContentControl
         {
             var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
             layer.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
+            margins?.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
             scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.96, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
             scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.96, 1, TimeSpan.FromMilliseconds(180)) { EasingFunction = ease });
         }
@@ -152,6 +154,7 @@ public class InAppDialog : ContentControl
     }
     private void Detach()
     {
+        if (margins is not null) { AdornerLayer.GetAdornerLayer(margins.AdornedElement)?.Remove(margins); margins = null; }
         if (attached is not { } owner) return;
         owner.SizeChanged -= OwnerChanged; owner.LocationChanged -= OwnerChanged; owner.StateChanged -= OwnerChanged;
         owner.Activated -= OwnerActivated; owner.Closing -= OwnerClosing;
@@ -166,11 +169,68 @@ public class InAppDialog : ContentControl
         var target = popup.PlacementTarget as FrameworkElement;
         var width = target is { ActualWidth: > 0 } ? target.ActualWidth : attached?.Width is double w && double.IsFinite(w) ? w : 1000;
         var height = target is { ActualHeight: > 0 } ? target.ActualHeight : attached?.Height is double h && double.IsFinite(h) ? h : 700;
-        popup.Width = width; popup.Height = height;
-        MaxWidth = Math.Max(160, width - Gutter * 2 - card.Padding.Left - card.Padding.Right - 2);
-        MaxHeight = Math.Max(120, height - Gutter * 2 - card.Padding.Top - card.Padding.Bottom - HeaderHeight);
+        // Windows-level popups may cover at most 75% of the monitor's area, so a popup over a large window is cut off.
+        // Above that the popup narrows, centred over the window, and the window dims the margins it leaves.
+        var (popupWidth, popupHeight) = PopupLimit(target, width, height);
+        popup.Width = popupWidth; popup.Height = popupHeight;
+        MaxWidth = Math.Max(160, popupWidth - Gutter * 2 - card.Padding.Left - card.Padding.Right - 2);
+        MaxHeight = Math.Max(120, popupHeight - Gutter * 2 - card.Padding.Top - card.Padding.Bottom - HeaderHeight);
+        var left = (width - popupWidth) / 2; var top = (height - popupHeight) / 2;
         // Changing an offset makes the popup re-read its position after the window moves.
-        popup.HorizontalOffset = popup.HorizontalOffset == 0 ? 0.01 : 0;
+        popup.HorizontalOffset = popup.HorizontalOffset == left ? left + 0.01 : left;
+        popup.VerticalOffset = top;
+        var hole = new Rect(left, top, popupWidth, popupHeight);
+        if (target is not null && (popupWidth < width || popupHeight < height))
+        {
+            if (margins?.AdornedElement != target)
+            {
+                if (margins is not null) AdornerLayer.GetAdornerLayer(margins.AdornedElement)?.Remove(margins);
+                margins = null;
+                if (AdornerLayer.GetAdornerLayer(target) is { } adorners) adorners.Add(margins = new ScrimAdorner(target, this));
+            }
+            margins?.Update(hole, target.TryFindResource("Scrim") as Brush);
+        }
+        else if (margins is not null) { AdornerLayer.GetAdornerLayer(margins.AdornedElement)?.Remove(margins); margins = null; }
+    }
+    // The largest popup WPF will show over the window: Popup.RestrictSize keeps width × height within 75% of the
+    // monitor's area, in device pixels. A pixel is left over for rounding.
+    private static (double Width, double Height) PopupLimit(FrameworkElement? target, double width, double height)
+    {
+        if (target is null || PresentationSource.FromVisual(target) is not HwndSource source) return (width, height);
+        var monitor = MonitorFromWindow(source.Handle, 2); // MONITOR_DEFAULTTONEAREST
+        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info)) return (width, height);
+        var dpi = VisualTreeHelper.GetDpi(target);
+        double screenWidth = info.Monitor.Right - info.Monitor.Left, screenHeight = info.Monitor.Bottom - info.Monitor.Top;
+        if (screenWidth <= 0 || screenHeight <= 0) return (width, height);
+        // Dialogs need height more than width, so the popup keeps the window's height and gives up width.
+        var pixelHeight = Math.Min(height * dpi.DpiScaleY, screenHeight);
+        var pixelWidth = Math.Min(width * dpi.DpiScaleX, Math.Min(screenWidth, 0.75 * screenWidth * screenHeight / pixelHeight - 1));
+        return (Math.Min(width, Math.Floor(pixelWidth) / dpi.DpiScaleX), Math.Min(height, Math.Floor(pixelHeight) / dpi.DpiScaleY));
+    }
+
+    // Dims the part of the owner window the popup can't cover. Clicks on it count as clicks outside the dialog and
+    // never reach the window beneath.
+    private sealed class ScrimAdorner : Adorner
+    {
+        private Rect hole;
+        private Brush? brush;
+        public ScrimAdorner(UIElement target, InAppDialog dialog) : base(target)
+        {
+            MouseLeftButtonDown += (_, e) => { if (dialog.CloseOnOutsideClick) dialog.Close(); e.Handled = true; };
+            MouseRightButtonDown += (_, e) => e.Handled = true;
+            MouseWheel += (_, e) => e.Handled = true;
+        }
+        public void Update(Rect hole, Brush? brush) { this.hole = hole; this.brush = brush; InvalidateVisual(); }
+        protected override void OnRender(DrawingContext context)
+        {
+            var size = AdornedElement.RenderSize;
+            var fill = brush ?? new SolidColorBrush(Color.FromArgb(0x80, 0, 0, 0));
+            foreach (var strip in new[] {
+                new Rect(0, 0, size.Width, Math.Max(0, hole.Top)), new Rect(0, Math.Min(size.Height, hole.Bottom), size.Width, Math.Max(0, size.Height - hole.Bottom)),
+                new Rect(0, hole.Top, Math.Max(0, hole.Left), hole.Height), new Rect(Math.Min(size.Width, hole.Right), hole.Top, Math.Max(0, size.Width - hole.Right), hole.Height) })
+                if (strip.Width > 0 && strip.Height > 0) context.DrawRectangle(fill, null, strip);
+        }
     }
     private void KeepWithOwner()
     {
@@ -252,6 +312,12 @@ public class InAppDialog : ContentControl
 
     [StructLayout(LayoutKind.Sequential)]
     private struct FlashInfo { public uint Size; public IntPtr Window; public uint Flags; public uint Count; public uint Timeout; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo { public int Size; public NativeRect Monitor; public NativeRect Work; public uint Flags; }
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+    [DllImport("user32.dll")] private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
     [DllImport("user32.dll")] private static extern bool FlashWindowEx(ref FlashInfo info);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr window, int index, IntPtr value);
