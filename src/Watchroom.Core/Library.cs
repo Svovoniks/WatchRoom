@@ -375,6 +375,26 @@ public sealed partial class LibraryStore
         command.Parameters.AddWithValue("$path", path);
         return ReadMedia(command).FirstOrDefault();
     }
+    // Every record OpenedFiles.Resolve could match to a video opened from outside the app: the same file name, or a title
+    // equal to the file's own. Reading these instead of the whole catalog lets a video opened at launch start sooner.
+    public List<MediaItem> OpenedFileCandidates(string path)
+    {
+        ExpireTmdbContent();
+        var name = System.IO.Path.GetFileName(path);
+        var title = LibraryIdentity.Normalize(FileNames.Parse(path).DisplayTitle);
+        var names = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        bool Titled(string? value) => !string.IsNullOrWhiteSpace(value) && LibraryIdentity.Normalize(value) == title;
+        using var db = Open();
+        // A show's title replaces its episodes' series unless the series is locked, so both are compared.
+        db.CreateFunction("opened_file_candidate", (string itemPath, string? series, string? itemTitle, string? original, string? seriesPath, string? showTitle) =>
+            string.Equals(System.IO.Path.GetFileName(itemPath), name, names) || title.Length > 0 &&
+            (Titled(series) || Titled(itemTitle) || Titled(original) || Titled(seriesPath is null ? null : System.IO.Path.GetFileName(seriesPath)) || Titled(showTitle)),
+            isDeterministic: true);
+        using var command = db.CreateCommand();
+        command.CommandText = MediaWithHierarchy + "WHERE opened_file_candidate(m.path, json_extract(m.json, '$.series'), json_extract(m.json, '$.title'), " +
+            "json_extract(m.json, '$.originalTitle'), json_extract(m.json, '$.seriesPath'), json_extract(s.json, '$.title'))";
+        return SortItems(ReadMedia(command));
+    }
     private static List<MediaItem> ReadMedia(SqliteCommand command)
     {
         using var rows = command.ExecuteReader(); var result = new List<MediaItem>();

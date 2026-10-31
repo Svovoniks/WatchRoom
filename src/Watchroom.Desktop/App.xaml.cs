@@ -6,15 +6,14 @@ using Watchroom.Core;
 namespace Watchroom.Desktop;
 public partial class App : Application
 {
-    public static string DataDirectory { get; } = Environment.GetEnvironmentVariable("WATCHROOM_DATA") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Watchroom");
+    public static string DataDirectory => Program.DataDirectory;
     private readonly CancellationTokenSource handoff = new();
     protected override void OnStartup(StartupEventArgs e)
     {
-        // A video opened while Watchroom already runs plays there. Update relaunches always start their own window.
-        var openedFile = OpenFileHandoff.FileArgument(e.Args);
-        var updated = e.Args.Contains("--updated");
-        var primary = OpenFileHandoff.Claim();
-        if (!primary && !updated && openedFile is not null && OpenFileHandoff.Forward(openedFile)) { Shutdown(); return; }
+        // Program.Main has already handed a video to a running app; this process shows its own window.
+        var openedFile = Program.OpenedFile; var primary = Program.Primary;
+        // A video opened at launch starts the native player while the window is built.
+        if (openedFile is not null) Desktop.MainWindow.StartPlayerEarly();
         // The library, scrolling and animations draw on the GPU. Surfaces layered over the native video
         // (LibVLC's see-through control window and the player menus) keep the software surface for reliable
         // interop on hybrid GPUs. Remote desktops, GPUs without hardware rendering and WATCHROOM_RENDER=software

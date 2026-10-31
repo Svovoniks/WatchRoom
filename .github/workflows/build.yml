@@ -79,7 +79,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:WATCHROOM_TMDB_API_KEY)) { throw "WATCHROOM_TMDB_API_KEY repository secret is required for packaged builds." }
           [IO.File]::WriteAllText($keyFile, $env:WATCHROOM_TMDB_API_KEY.Trim())
           $env:WATCHROOM_TMDB_KEY_FILE = $keyFile
-          dotnet publish src/Watchroom.Desktop -c Release -r win-x64 --self-contained true -o artifacts/Watchroom -p:Version=$env:APP_VERSION -p:VlcWindowsX86Enabled=false -p:VlcWindowsArm64Enabled=false
+          dotnet publish src/Watchroom.Desktop -c Release -r win-x64 --self-contained true -o artifacts/Watchroom -p:Version=$env:APP_VERSION -p:VlcWindowsX86Enabled=false -p:VlcWindowsArm64Enabled=false -p:PublishReadyToRun=true
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           ./scripts/package.ps1 -SkipPublish -Version $env:APP_VERSION
           ./scripts/update-package-checks.ps1
