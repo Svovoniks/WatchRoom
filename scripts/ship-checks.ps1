@@ -23,34 +23,47 @@ try {
     foreach ($version in @('0.3.17','0.3.16','0.3.18-beta','0.3')) {
         Expect-Rejected { Get-ShipVersion $version '0.3.17' '0.3.17' } "unsafe version $version is rejected"
     }
-    Check ((Assert-ShipPath $testRoot 'src/app.cs') -eq 'src/app.cs') 'explicit source file is accepted'
-    $logoPath = 'src/Watchroom.Desktop/Assets/Tmdb.png'
-    New-Item -ItemType Directory -Path (Split-Path -Parent (Join-Path $testRoot $logoPath)) -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) $logoPath) -Destination (Join-Path $testRoot $logoPath)
-    Check ((Assert-ShipPath $testRoot $logoPath) -eq $logoPath) 'approved TMDB attribution logo is accepted'
-    $promoPath = 'src/Watchroom.Desktop/Assets/Promo/teaser-clam-intro.mp4'
-    New-Item -ItemType Directory -Path (Split-Path -Parent (Join-Path $testRoot $promoPath)) -Force | Out-Null
-    [IO.File]::WriteAllText((Join-Path $testRoot $promoPath), 'promo fixture')
-    Check ((Assert-ShipPath $testRoot $promoPath) -eq $promoPath) 'approved postplay promo is accepted'
-    foreach ($path in @('../outside.cs','artifacts/report.html','sites/src/app.ts','.tools/helper.ps1','src/credentials/token.json','src/.env','src/library.db','src/personal.png','src/Watchroom.Desktop/Assets/snapshot.png','src/Watchroom.Desktop/Assets/Promo/other.mp4','src/clip.mp4')) {
-        Expect-Rejected { Assert-ShipPath $testRoot $path } "excluded path $path cannot enter a release"
+    Check ((Get-PullRequestVersion '' '0.3.17' '0.3.17' '0.3.17') -eq '0.3.18') 'a new pull request gets the next patch version'
+    Check ((Get-PullRequestVersion '' '0.3.17' '0.3.17' '0.3.18') -eq '0.3.18') 'a bumped branch keeps its version across review rounds'
+    Check ((Get-PullRequestVersion '' '0.3.18' '0.3.18' '0.3.18') -eq '0.3.19') 'a branch overtaken by a release is bumped again'
+    Check ((Get-PullRequestVersion '' '0.3.17' '0.3.18' '0.3.18') -eq '0.3.19') 'a branch matching a newer master version is bumped'
+    Check ((Get-PullRequestVersion '0.4.0' '0.3.17' '0.3.17' '0.3.18') -eq '0.4.0') 'an explicit version replaces the branch version'
+    Expect-Rejected { Get-PullRequestVersion '0.3.17' '0.3.17' '0.3.17' '0.3.18' } 'an explicit version must still be higher than every release'
+    foreach ($path in @('src/app.cs', 'Directory.Build.props', 'scripts/ship.ps1', '.claude/skills/review-pr/SKILL.md', 'src/Watchroom.Desktop/Assets/Tmdb.png', 'src/Watchroom.Desktop/Assets/Promo/teaser-clam-intro.mp4')) {
+        Check ((Assert-ShipPathName $path) -eq $path) "release source path $path is accepted"
     }
-    Expect-Rejected { Assert-ShipPath $testRoot 'src' } 'directory selection cannot stage unrelated files'
-    # Reproduce the release checkout after git apply --index stages a deletion.
-    Invoke-Native git @('-C', $testRoot, 'init', '--quiet')
-    $removedSource = Join-Path $testRoot 'src/removed.cs'
-    [IO.File]::WriteAllText($removedSource, 'remove me')
-    Invoke-Native git @('-C', $testRoot, 'add', '--', 'src/app.cs', 'src/removed.cs')
-    Invoke-Native git @('-C', $testRoot, '-c', 'user.name=Shipping checks', '-c', 'user.email=checks@example.invalid', 'commit', '--quiet', '-m', 'Source fixture')
-    [IO.File]::Delete($removedSource)
-    Check ((Assert-ShipPath $testRoot 'src/removed.cs') -eq 'src/removed.cs') 'explicit tracked deletion is accepted'
-    Invoke-Native git @('-C', $testRoot, 'update-index', '--force-remove', 'src/removed.cs')
-    [IO.File]::WriteAllText((Join-Path $testRoot 'src/app.cs'), 'updated fixture')
-    [IO.File]::WriteAllText((Join-Path $testRoot 'src/new.cs'), 'new fixture')
-    Stage-ShipSources $testRoot @('src/app.cs', 'src/removed.cs', 'src/new.cs')
-    $staged = @(Invoke-Native git @('-C', $testRoot, 'diff', '--cached', '--name-status'))
-    Check ($staged -contains "D`tsrc/removed.cs") 'already staged deletion survives release source staging'
-    Check ($staged -contains "M`tsrc/app.cs" -and $staged -contains "A`tsrc/new.cs") 'release source staging includes modified and newly added files'
+    foreach ($path in @('../outside.cs','sites','artifacts/report.html','sites/src/app.ts','.tools/helper.ps1','src/credentials/token.json','src/.env','src/library.db','src/personal.png','src/Watchroom.Desktop/Assets/snapshot.png','src/Watchroom.Desktop/Assets/Promo/other.mp4','src/clip.mp4','TEST-REPORT.html','.claude/settings.json')) {
+        Expect-Rejected { Assert-ShipPathName $path } "excluded path $path cannot enter a pull request"
+    }
+    $summary = "Fixes seeking.`n`nIntentional: removes the old toggle."
+    $body = Format-PullRequestBody $summary 'Seeking is faster' '0.3.18'
+    Check ((Get-ReleaseNote $body) -ceq 'Seeking is faster' -and (Get-PullRequestSummary $body) -ceq $summary) 'release note and description survive a pull request body round trip'
+    Check ($null -eq (Get-ReleaseNote 'Edited by hand')) 'a body without a release note yields none'
+    $headA = 'a' * 40; $headB = 'b' * 40
+    function New-ReviewComment { param([string]$Head, [string]$Verdict, [string]$Association = 'OWNER', [int]$Minute = 0)
+        [pscustomobject]@{ body = "Findings`n$(Format-ReviewMarker $Head $Verdict)"; author_association = $Association; created_at = [datetime]::new(2026, 1, 1, 0, $Minute, 0); html_url = "https://github.com/fixture/$Minute" } }
+    Check ((Assert-ReviewApproval @((New-ReviewComment $headA 'changes' -Minute 1), (New-ReviewComment $headA 'approve' -Minute 2)) $headA).Verdict -eq 'approve') 'an approval of the exact head after earlier findings allows the merge'
+    Expect-Rejected { Assert-ReviewApproval @() $headA } 'a pull request without a review cannot merge'
+    Expect-Rejected { Assert-ReviewApproval @(New-ReviewComment $headA 'approve') $headB } 'an approval of an older head does not cover new commits'
+    Expect-Rejected { Assert-ReviewApproval @((New-ReviewComment $headA 'approve' -Minute 1), (New-ReviewComment $headA 'changes' -Minute 2)) $headA } 'requested changes after an approval block the merge'
+    Expect-Rejected { Assert-ReviewApproval @((New-ReviewComment $headA 'changes' -Minute 2), (New-ReviewComment $headA 'approve' -Minute 1)) $headA } 'the newest verdict wins regardless of response order'
+    Expect-Rejected { Assert-ReviewApproval @(New-ReviewComment $headA 'approve' 'NONE') $headA } 'a public commenter cannot approve'
+    $quoting = New-ReviewComment $headA 'changes' -Minute 3
+    $quoting.body = "The parser accepts ``$(Format-ReviewMarker $headA 'approve')`` anywhere.`n$(Format-ReviewMarker $headA 'changes')"
+    Expect-Rejected { Assert-ReviewApproval @((New-ReviewComment $headA 'approve' -Minute 1), $quoting) $headA } 'findings quoting an approval marker cannot turn requested changes into an approval'
+    $sameSecond = @((New-ReviewComment $headA 'changes'), (New-ReviewComment $headA 'approve'))
+    $sameSecond[0] | Add-Member id 20; $sameSecond[1] | Add-Member id 10
+    Expect-Rejected { Assert-ReviewApproval $sameSecond $headA } 'comments posted in the same second are ordered by id'
+    Expect-Rejected { Assert-ReviewApproval @([pscustomobject]@{ body = "LGTM <!-- watchroom-review head=$headA verdict=approved -->"; author_association = 'OWNER'; created_at = [datetime]::UtcNow }) $headA } 'a malformed verdict marker does not approve'
+    function New-BuildRun { param([string]$Event, [string]$Status, [string]$Conclusion, [int]$Id = 1, [int]$Attempt = 1, [string]$Head = $headA)
+        [pscustomobject]@{ id = $Id; run_attempt = $Attempt; event = $Event; status = $Status; conclusion = $Conclusion; head_sha = $Head; name = 'Build and release'; html_url = "https://github.com/fixture/run/$Id" } }
+    Check ((Get-HeadCheckState @() $headA).State -eq 'pending') 'merging waits for the build workflow to start'
+    Check ((Get-HeadCheckState @((New-BuildRun 'push' 'completed' 'success'), (New-BuildRun 'pull_request' 'in_progress' $null -Id 2)) $headA).State -eq 'pending') 'merging waits for every build of the head'
+    Check ((Get-HeadCheckState @((New-BuildRun 'push' 'completed' 'success'), (New-BuildRun 'pull_request' 'completed' 'success' -Id 2)) $headA).State -eq 'success') 'passing builds of the head allow the merge'
+    Check ((Get-HeadCheckState @((New-BuildRun 'push' 'completed' 'success'), (New-BuildRun 'pull_request' 'completed' 'failure' -Id 2)) $headA).State -eq 'failure') 'a failed build of the head blocks the merge'
+    Check ((Get-HeadCheckState @((New-BuildRun 'pull_request' 'completed' 'failure'), (New-BuildRun 'pull_request' 'completed' 'success' -Attempt 2)) $headA).State -eq 'success') 'a successful rerun replaces its failed attempt'
+    Check ((Get-HeadCheckState @(New-BuildRun 'push' 'completed' 'cancelled') $headA).State -eq 'failure') 'a cancelled build of the head blocks the merge'
+    Check ((Get-HeadCheckState @(New-BuildRun 'push' 'completed' 'success' -Head $headB) $headA).State -eq 'pending') 'builds of other commits do not count'
     $fileName = 'Watchroom-Setup-0.3.18-win-x64.exe'
     $filePath = Join-Path $testRoot $fileName
     [IO.File]::WriteAllBytes($filePath, [byte[]](1,2,3,4))
