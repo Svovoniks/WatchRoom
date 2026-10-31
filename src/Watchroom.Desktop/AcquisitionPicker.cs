@@ -273,7 +273,8 @@ internal sealed class AcquisitionPicker : InAppDialog
         if (quality.SelectedIndex < 0) quality.SelectedIndex = 0;
         numbering.SelectedIndex = options.EpisodeOffset is not null ? 2 : options.ProviderSeason is not null ? 1 : 0;
         offset.Text = (options.EpisodeOffset ?? 0).ToString(); offset.IsEnabled = numbering.SelectedIndex == 2; offsetRow.Visibility = numbering.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
-        updating = false; releasesShown = false; Invalidate(reload: false);
+        // Another provider's titles and picked title mean nothing to this one, so its list always starts empty.
+        updating = false; releasesShown = false; shows = false; pickedTitle = null; Invalidate(reload: false);
         search.IsEnabled = plugin.Interactive;
         configure.IsEnabled = plugin.SettingsSchema is not null;
         status.Text = ""; UpdateActions();
@@ -406,7 +407,7 @@ internal static class AcquisitionPluginSettings
         actions.Children.Add(new Button { Content = "Cancel", IsCancel = true });
         var save = new Button { Content = "Save settings" }; save.SetResourceReference(FrameworkElement.StyleProperty, "Primary"); actions.Children.Add(save); footer.Children.Add(actions);
         var fields = new StackPanel(); root.Children.Add(new ScrollViewer { Content = fields, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-        var readers = new List<(AcquisitionSetting Field, Func<string> Read)>();
+        var readers = new List<(AcquisitionSetting Field, JsonNode? Original, Func<string> Read)>();
         foreach (var field in schema)
         {
             fields.Children.Add(new TextBlock { Text = field.Label });
@@ -414,9 +415,14 @@ internal static class AcquisitionPluginSettings
             var value = node?.ToString() ?? field.Default ?? "";
             Control control; Func<string> read;
             if (field.Type == "password") { var input = new PasswordBox { Password = value }; control = input; read = () => input.Password; }
-            else if (field.Type == "choice") { var input = new ComboBox { ItemsSource = field.Choices, SelectedItem = value }; control = input; read = () => input.SelectedItem as string ?? ""; }
+            else if (field.Type == "choice")
+            {
+                // A stored value the schema doesn't list stays selectable, so saving doesn't drop it.
+                var choices = field.Choices ?? []; if (value.Length > 0 && !choices.Contains(value)) choices = [.. choices, value];
+                var input = new ComboBox { ItemsSource = choices, SelectedItem = value }; control = input; read = () => input.SelectedItem as string ?? "";
+            }
             else { var input = new TextBox { Text = value }; control = input; read = () => input.Text.Trim(); }
-            fields.Children.Add(control); AutomationProperties.SetName(control, field.Label); dialog.RegisterName("Setting_" + field.Key.Replace('.', '_'), control); readers.Add((field, read));
+            fields.Children.Add(control); AutomationProperties.SetName(control, field.Label); dialog.RegisterName("Setting_" + field.Key.Replace('.', '_'), control); readers.Add((field, node, read));
             if (field.Help is { } help) { var hint = new TextBlock { Text = help, TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 0, 0, 14) }; hint.SetResourceReference(TextBlock.ForegroundProperty, "Muted"); fields.Children.Add(hint); }
         }
         save.Click += (_, _) =>
@@ -424,11 +430,13 @@ internal static class AcquisitionPluginSettings
             try
             {
                 var updated = (JsonObject)settings.DeepClone();
-                foreach (var (field, read) in readers)
+                foreach (var (field, original, read) in readers)
                 {
                     var value = read(); var parts = field.Key.Split('.'); var parent = updated;
                     foreach (var part in parts.SkipLast(1)) { if (parent[part] is not JsonObject) parent[part] = new JsonObject(); parent = (JsonObject)parent[part]!; }
                     if (value.Length == 0) parent.Remove(parts[^1]);
+                    // An unchanged value keeps its stored JSON type, such as a number under a text field.
+                    else if (original is JsonValue && value == original.ToString()) parent[parts[^1]] = original.DeepClone();
                     else parent[parts[^1]] = field.Type == "number" ? JsonValue.Create(int.Parse(value)) : JsonValue.Create(value);
                 }
                 var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";

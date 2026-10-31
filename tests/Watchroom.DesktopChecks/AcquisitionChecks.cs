@@ -255,6 +255,26 @@ static class AcquisitionChecks
         var frame = new System.Windows.Threading.DispatcherFrame(); window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () => frame.Continue = false); System.Windows.Threading.Dispatcher.PushFrame(frame);
         check(((ListBox)waiting.FindName("AcquireResults")).Items.Count == 0, "a late search result cannot update a closed picker");
 
+        // Switching provider while another provider's titles are listed must not hand that provider's title to the new one.
+        var first = plugin with { Id = "first", Name = "First" }; var second = plugin with { Id = "second", Name = "Second" };
+        var switchCalls = new List<(string Plugin, AcquisitionRequest Sent)>();
+        var switching = new AcquisitionPicker(window, [first, second], request with { Title = "Dark Matter", OriginalTitle = null, Year = null }, first,
+            x => x.Id == "second" ? new(Query: "Dark Matter", SourceUrl: "https://second.invalid/saved/") : null, (used, sent, _) =>
+            {
+                switchCalls.Add((used.Id, sent));
+                return Task.FromResult(sent.Action == "search"
+                    ? new AcquisitionResult(true, "Choose a title", "shows", [new("https://first.invalid/2015/", "Dark Matter (2015)"), new("https://first.invalid/2024/", "Dark Matter (2024)")])
+                    : new AcquisitionResult(true, "Choose releases", "releases", [new("second-release", "Dark Matter S01E01 720p", "Requested", true, "S01E01", 720)]));
+            });
+        switching.Show(); Pump(() => switchCalls.Count >= 1);
+        var switchResults = (ListBox)switching.FindName("AcquireResults");
+        check(switchResults.Items.Count == 2, "the first provider's titles are listed for the user to choose");
+        ((ComboBox)switching.FindName("AcquireProvider")).SelectedItem = second; Pump(() => switchCalls.Count >= 2);
+        check(switchCalls.Count == 2 && switchCalls[1] is ("second", { Action: "releases" }) && switchCalls[1].Sent.Options is { Query: "Dark Matter", SourceUrl: "https://second.invalid/saved/" }
+            && ((TextBox)switching.FindName("AcquireSource")).Text == "https://second.invalid/saved/" && switchResults.Items.Cast<AcquisitionChoice>().All(x => x.Id == "second-release"),
+            "switching provider drops the previous provider's titles and opens the new provider's own saved page");
+        switching.Close();
+
         var settingsPath = Path.Combine(pluginDirectory, "settings.json");
         File.WriteAllText(settingsPath, """{"resolution":720,"custom":true,"titles":{"Other":{"filter":"keep"}},"qbittorrent":{"password":"old"}}""");
         var settings = AcquisitionPluginSettings.Create(window, plugin); settings.Show();
@@ -268,5 +288,14 @@ static class AcquisitionChecks
         using var config = JsonDocument.Parse(File.ReadAllText(settingsPath));
         check(!settings.IsOpen && config.RootElement.GetProperty("downloader").GetString() == "qbittorrent" && config.RootElement.GetProperty("qbittorrent").GetProperty("password").GetString() == "updated" && config.RootElement.GetProperty("custom").GetBoolean() && config.RootElement.GetProperty("titles").GetProperty("Other").GetProperty("filter").GetString() == "keep",
             "in-app plugin settings save downloader credentials and preserve existing title bindings and unknown fields");
+
+        // Values the schema doesn't describe exactly survive an unchanged save: an unlisted choice and a number under a text field.
+        File.WriteAllText(settingsPath, """{"downloader":"aria2","baseUrl":5}""");
+        var unchanged = AcquisitionPluginSettings.Create(window, plugin); unchanged.Show();
+        check((string?)((ComboBox)unchanged.FindName("Setting_downloader")).SelectedItem == "aria2", "a stored choice the schema doesn't list is still shown");
+        ((Button)unchanged.FindName("SavePluginSettings")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        using var kept = JsonDocument.Parse(File.ReadAllText(settingsPath));
+        check(!unchanged.IsOpen && kept.RootElement.GetProperty("downloader").GetString() == "aria2" && kept.RootElement.GetProperty("baseUrl").ValueKind == JsonValueKind.Number,
+            "saving unchanged settings keeps an unlisted choice and a value's stored JSON type");
     }
 }
