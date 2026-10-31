@@ -333,6 +333,8 @@ public partial class MainWindow : Window
         }
         currentPage = name;
         if (name != "Room") videoClickUndo = null;
+        // The promo is shown only with the player; leaving the player ends it.
+        if (name != "Room" && !pictureInPicture) EndPostplay("left player");
         if (fullscreen && name != "Room") SetFullscreen(false);
         if (pictureInPicture && name == "Room") SetPictureInPicture(false, openPlayer: false);
         // VideoView hosts its content in a separate native overlay window. Collapsing
@@ -1151,7 +1153,7 @@ public partial class MainWindow : Window
                 appliedRevision = readyGeneration = -1;
                 // A long outage can exhaust VLC's HTTP input. Reopen only that
                 // failed input; ordinary reconnects retain the same player/bridge.
-                if (player?.State == VLCState.Error && room.Snapshot?.Media is { } recoveredMedia)
+                if (player?.State == VLCState.Error && !PostplayActive && room.Snapshot?.Media is { } recoveredMedia)
                     await LoadRoomMedia(recoveredMedia);
                 ApplyRoomPlayback(); ReportReady();
                 UpdateSessionControls();
@@ -1199,7 +1201,8 @@ public partial class MainWindow : Window
                 SharedControls.IsEnabled = room.Identity?.Host == true; SharedControls.IsChecked = snapshot.SharedControls; RefreshSharedControlsChip();
                 if (room.Identity?.Host != true && !snapshot.SharedControls) { playbackPause.Clear(); playbackIntent.Clear(); }
                 if (snapshot.Playback is not null) AcceptState(snapshot.Playback);
-                if (snapshot.Media is not null && snapshot.Media.Id != loadedMedia) await LoadRoomMedia(snapshot.Media);
+                // A new video waits until the promo ends.
+                if (snapshot.Media is not null && snapshot.Media.Id != loadedMedia && !PostplayActive) await LoadRoomMedia(snapshot.Media);
                 if (ready) RefreshTracks();
                 UpdateSessionControls();
                 RefreshSharedLibrary();
@@ -1392,7 +1395,8 @@ public partial class MainWindow : Window
             PlayerOverlay.Cursor = Cursors.None;
         }
         UpdateRoomPlaybackStatus();
-        if (player is null || nativeStopCount > 0) return;
+        // The promo pauses synchronization; see Postplay.cs.
+        if (player is null || nativeStopCount > 0 || PostplayActive) return;
         FitPictureInPictureToVideo();
         PollBufferedRecovery();
         StartReadAhead();
@@ -1430,7 +1434,7 @@ public partial class MainWindow : Window
     }
     private void ApplyRoomPlayback()
     {
-        if (player is null || room is null || !room.IsConnected || room.IsPeerRecovering || target is null || loadedMedia != target.MediaId || !ready) return;
+        if (player is null || room is null || !room.IsConnected || room.IsPeerRecovering || PostplayActive || target is null || loadedMedia != target.MediaId || !ready) return;
         // Pause before clock checks, settling, or a potentially slow remote seek.
         if (playbackPause.Pending || !target.Playing) player.SetPause(true);
         if (playbackPause.Pending || seeking || pendingSeek is not null && target.Revision <= seekRevision) return;
@@ -1487,7 +1491,7 @@ public partial class MainWindow : Window
     }
     private void ReportReady()
     {
-        if (!ready || player is null || target is null || room?.IsPeerRecovering == true || loadedMedia != target.MediaId ||
+        if (!ready || player is null || target is null || room?.IsPeerRecovering == true || PostplayActive || loadedMedia != target.MediaId ||
             appliedGeneration != target.Generation || readyGeneration == target.Generation || buffering.IsActive ||
             player.State == VLCState.Buffering || settling.Waiting(target.Revision, Math.Max(0, player.Time), Environment.TickCount64)) return;
         readyGeneration = target.Generation;
@@ -2024,6 +2028,9 @@ public partial class MainWindow : Window
     private void KeyPressed(object sender, KeyEventArgs e)
     {
         if (e.Handled) return;
+        // While the promo plays, keys only talk in voice chat or leave fullscreen or picture in picture.
+        if (PostplayActive && !(e.Key == Key.Escape && (fullscreen || pictureInPicture)))
+        { if (!VoiceKey(e, true) && (RoomPage.Visibility == Visibility.Visible || pictureInPicture && sender == PlayerOverlay)) e.Handled = true; return; }
         if (MediaKeyPressed(e)) return;
         if (VoiceKey(e, true)) return;
         if (e.Key is Key.BrowserBack or Key.BrowserForward || Keyboard.Modifiers == ModifierKeys.Alt && e.SystemKey is Key.Left or Key.Right)
@@ -2173,6 +2180,7 @@ public partial class MainWindow : Window
     private async void WindowClosing(object? sender, CancelEventArgs e)
     {
         if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop();
+        EndPostplay("closing");
         DisableSystemMediaControls();
         disconnectToast?.Invoke();
         guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); metadataRetentionTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;

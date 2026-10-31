@@ -68,6 +68,9 @@ public partial class MainWindow
             if (EpisodeEndButton.Visibility != Visibility.Visible || !EpisodeEndButton.IsEnabled || playingItem is not { } item) return;
             var next = EpisodePlayback.Next(items, item, false, candidate => File.Exists(candidate.Path), PreferredVersion(item));
             library.Setting("position:" + item.Id, "0"); SetWatched(item, true);
+            var generation = loadGeneration;
+            await PlayPostplayOnce(pauseVideo: true);
+            if (closing || generation != loadGeneration || playingItem?.Id != item.Id) return;
             if (next is null) { SetStatus(item.Series is null ? "Movie marked as watched." : "Episode marked as watched."); return; }
             await PlayFollowingEpisode(next);
         });
@@ -143,6 +146,8 @@ public partial class MainWindow
             SetWatched(endedItem, true);
         }
         if (room?.Identity?.Host == true) SendPlayback(false, Math.Max(0, player!.Length), stopReason: "ended");
+        await PlayPostplayOnce();
+        if (closing || generation != loadGeneration || room != endedRoom || playingItem?.Id != endedItem?.Id) return;
         if (ContinuesQueue(endedItem))
         {
             if (room is null || room.Identity?.Host == true) await PlayQueueStep(1);

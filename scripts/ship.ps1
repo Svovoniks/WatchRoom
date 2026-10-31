@@ -34,9 +34,9 @@ function Assert-ShipPath {
     param([string]$Root, [string]$Path)
     $absolute = [IO.Path]::GetFullPath($Path, $Root)
     $relative = [IO.Path]::GetRelativePath($Root, $absolute).Replace('\', '/')
-    # This approved attribution asset belongs to the app, unlike local reports
-    # and generated media. Keep the exception to this one exact source path.
-    $attributionLogo = $relative -ceq 'src/Watchroom.Desktop/Assets/Tmdb.png'
+    # The approved attribution logo and postplay promo belong to the app, unlike local
+    # reports and generated media. Keep the exception to these exact source paths.
+    $attributionLogo = $relative -ceq 'src/Watchroom.Desktop/Assets/Tmdb.png' -or $relative -ceq 'src/Watchroom.Desktop/Assets/Promo/teaser-clam-intro.mp4'
     if ($relative -match '^\.\.(?:/|$)' -or [IO.Path]::IsPathRooted($relative) -or
         $relative -match '(^|/)(sites|artifacts|\.tools|\.nuget|bin|obj|node_modules|data|logs|credentials)(/|$)' -or
         ($relative -match '(?i)(^|/)(\.env[^/]*|.*\.(html?|png|jpe?g|mp4|mkv|sqlite|db|pfx|pem|key))$' -and !$attributionLogo) -or

@@ -28,7 +28,11 @@ try {
     New-Item -ItemType Directory -Path (Split-Path -Parent (Join-Path $testRoot $logoPath)) -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) $logoPath) -Destination (Join-Path $testRoot $logoPath)
     Check ((Assert-ShipPath $testRoot $logoPath) -eq $logoPath) 'approved TMDB attribution logo is accepted'
-    foreach ($path in @('../outside.cs','artifacts/report.html','sites/src/app.ts','.tools/helper.ps1','src/credentials/token.json','src/.env','src/library.db','src/personal.png','src/Watchroom.Desktop/Assets/snapshot.png')) {
+    $promoPath = 'src/Watchroom.Desktop/Assets/Promo/teaser-clam-intro.mp4'
+    New-Item -ItemType Directory -Path (Split-Path -Parent (Join-Path $testRoot $promoPath)) -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $testRoot $promoPath), 'promo fixture')
+    Check ((Assert-ShipPath $testRoot $promoPath) -eq $promoPath) 'approved postplay promo is accepted'
+    foreach ($path in @('../outside.cs','artifacts/report.html','sites/src/app.ts','.tools/helper.ps1','src/credentials/token.json','src/.env','src/library.db','src/personal.png','src/Watchroom.Desktop/Assets/snapshot.png','src/Watchroom.Desktop/Assets/Promo/other.mp4','src/clip.mp4')) {
         Expect-Rejected { Assert-ShipPath $testRoot $path } "excluded path $path cannot enter a release"
     }
     Expect-Rejected { Assert-ShipPath $testRoot 'src' } 'directory selection cannot stage unrelated files'

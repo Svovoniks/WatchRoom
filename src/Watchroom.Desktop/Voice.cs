@@ -444,6 +444,8 @@ public partial class MainWindow
     private void ApplyPlayerVolume()
     {
         if (player is not null) player.Volume = (int)Math.Round(Volume.Value * videoDuck);
+        // The promo is lowered for voice chat like the video.
+        if (PostplayActive) PostplayVideo.Volume = player?.Mute == true ? 0 : Volume.Value * videoDuck / 100;
     }
     // Snapshot changes: refresh the panel, sound a cue when someone joins or leaves voice, and join automatically if chosen.
     private void VoiceSnapshot(RoomSnapshot snapshot)

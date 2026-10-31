@@ -41,7 +41,7 @@ public partial class MainWindow
         var play = args.Button == SystemMediaTransportControlsButton.Play;
         // Windows delivers these events on a worker thread. Recheck the current
         // media and room permissions on the UI thread before applying them.
-        Dispatcher.BeginInvoke(() => HandleMediaPlayback(play, system: true));
+        Dispatcher.BeginInvoke(() => { if (!PostplayActive) HandleMediaPlayback(play, system: true); });
     }
 
     private long lastSystemMediaButtonAt = long.MinValue / 2;
