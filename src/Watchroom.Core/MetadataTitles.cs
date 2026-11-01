@@ -64,6 +64,8 @@ public static class MetadataTitles
             var clean = Regex.Replace(item.Title, @"^\d{1,2}\s+(.+?)\s+-\s+(?:Comedy|Action|Drama|Horror|Thriller)\b.*$", "$1", RegexOptions.IgnoreCase);
             Add(clean);
             if (clean != item.Title && clean.EndsWith(" 1")) Add(clean[..^2]);
+            // "Hyakuemu - Movie" labels the film; providers list it as "Hyakuemu".
+            Add(Regex.Replace(clean, @"\s+[-–:]\s+(?:The\s+)?Movie$", "", RegexOptions.IgnoreCase));
         }
         if (item.SeriesPath is { } folder) Add(Path.GetFileName(folder));
         if (item.SeriesPath is { } nested && Path.GetDirectoryName(nested) is { } parentFolder)
