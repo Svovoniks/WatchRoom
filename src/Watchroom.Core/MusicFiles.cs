@@ -19,8 +19,9 @@ public static partial class MusicFiles
     // A disc folder ("CD 2", "Disc 1") belongs to the album folder above it.
     [GeneratedRegex(@"(?i)^(?:cd|dis[ck])[ ._-]*(\d{1,2})\b")]
     private static partial Regex DiscFolder();
-    // "01 - Title", "01. Title", "1-03 Title" (disc 1, track 3), "A1 Title" is left alone.
-    [GeneratedRegex(@"^(?:(?<disc>\d)[-.](?<track>\d{2})|(?<track>\d{1,3}))(?:\s*[-._)]\s*|\s+)(?<title>.+)$")]
+    // "01 - Title", "01. Title", "01 Title", "1-03 Title" (disc 1, track 3). "A1 Title" is left alone, and so is a number that is
+    // part of the title, such as "99 Luftballons": a number followed only by a space counts only when zero-padded.
+    [GeneratedRegex(@"^(?:(?<disc>\d)[-.](?<track>\d{2})(?:\s*[-._)]\s*|\s+)|(?<track>\d{1,3})\s*[-._)]\s*|(?<track>0\d{1,2})\s+)(?<title>.+)$")]
     private static partial Regex NumberedName();
 
     public static MediaItem Parse(string path, string? libraryRoot = null, string? artworkDirectory = null)
@@ -102,6 +103,9 @@ public static partial class MusicFiles
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    // A cover saved beside a track after it was scanned, which a rescan should pick up.
+    public static bool CoverAdded(MediaItem stored) => stored.Poster is null &&
+        (stored.SeriesPath is { } album && FolderCover(album) is not null || Path.GetDirectoryName(stored.Path) is { } folder && folder != stored.SeriesPath && FolderCover(folder) is not null);
     private static string? FolderCover(string folder)
     {
         try

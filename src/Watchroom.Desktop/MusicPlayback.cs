@@ -15,7 +15,7 @@ public partial class MainWindow
     private bool audioPlayback, audioChecked;
     private int audioCheckGeneration = -1, audioArtworkVersion;
     private long audioCheckSince, audioDetailsAt;
-    private string? audioArtworkPath;
+    private string? audioArtworkKey;
 
     private bool PlayingKnownMusic => playingItem?.IsMusic == true && (room is null || room.Identity?.Host == true);
 
@@ -43,8 +43,10 @@ public partial class MainWindow
             SetAudioPlayback(player.VideoTrackCount <= 0 && player.AudioTrackCount > 0);
             return;
         }
-        // A streamed song's tags arrive as it plays; library music changes only when its record does.
-        if (audioPlayback && Environment.TickCount64 - audioDetailsAt > 2000) RefreshAudioDetails();
+        // A streamed song's tags arrive as it plays, and a picture that turns up late shows instead; library music changes only when it
+        // changes track, so it isn't polled.
+        if (!audioPlayback || PlayingKnownMusic || Environment.TickCount64 - audioDetailsAt <= 2000) return;
+        if (player.VideoTrackCount > 0) SetAudioPlayback(false); else RefreshAudioDetails();
     }
 
     private void SetAudioPlayback(bool on)
@@ -55,7 +57,7 @@ public partial class MainWindow
         if (on) { RefreshAudioDetails(); ShowPlayerControls(); }
         else
         {
-            audioArtworkPath = null; audioArtworkVersion++;
+            audioArtworkKey = null; audioArtworkVersion++;
             AudioArtwork.Source = AudioBackdrop.Source = null; AudioArtworkGlyph.Visibility = Visibility.Visible;
         }
         UpdateSystemMediaControls();
@@ -65,8 +67,7 @@ public partial class MainWindow
     {
         audioDetailsAt = Environment.TickCount64;
         var item = PlayingKnownMusic ? playingItem : null;
-        string? title = item?.Title, artist = item?.Artist, album = item?.Series;
-        var artwork = item is null ? null : LibraryCatalog.EpisodeArtwork(item);
+        string? title = item?.Title, artist = item?.Artist, album = item?.Series, artwork = null;
         if (item is null && player is not null)
         {
             using var media = player.Media;
@@ -85,21 +86,25 @@ public partial class MainWindow
         AudioArtist.Visibility = artist is null ? Visibility.Collapsed : Visibility.Visible;
         AudioAlbum.Text = album ?? "";
         AudioAlbum.Visibility = album is null ? Visibility.Collapsed : Visibility.Visible;
-        if (artwork != audioArtworkPath)
+        // Library music's cover is found on its drive, which may be slow to wake, so the lookup runs off the UI thread.
+        var key = item is not null ? "track:" + item.Id : artwork;
+        if (key != audioArtworkKey)
         {
-            audioArtworkPath = artwork; var version = ++audioArtworkVersion;
+            audioArtworkKey = key; var version = ++audioArtworkVersion;
             AudioArtwork.Source = AudioBackdrop.Source = null; AudioArtworkGlyph.Visibility = Visibility.Visible;
-            if (artwork is not null) _ = LoadAudioArtwork(artwork, version);
+            if (item is not null) _ = LoadAudioArtwork(() => LibraryCatalog.EpisodeArtwork(item), version);
+            else if (artwork is not null) _ = LoadAudioArtwork(() => artwork, version);
         }
         UpdateSystemMediaControls();
     }
 
-    private async Task LoadAudioArtwork(string path, int version)
+    private async Task LoadAudioArtwork(Func<string?> find, int version)
     {
         var image = await Task.Run(() =>
         {
             try
             {
+                if (find() is not { } path) return null;
                 using var stream = File.OpenRead(path);
                 var bitmap = new BitmapImage(); bitmap.BeginInit();
                 bitmap.CacheOption = BitmapCacheOption.OnLoad; bitmap.DecodePixelWidth = 640; bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze();

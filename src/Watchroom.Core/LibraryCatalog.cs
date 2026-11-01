@@ -65,7 +65,8 @@ public static class LibraryCatalog
         foreach (var item in all.OrderBy(x => x.IsVirtual).ThenByDescending(x => x.Available).ThenByDescending(x => preferred.Contains(x.Id))
             .ThenByDescending(x => (x.EpisodeEnd ?? x.Episode) - x.Episode).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase))
         {
-            var keys = item.Season is null || item.NumberingConflict is not null ? [] :
+            // An album has no versions: tracks that share a disc and number are different songs.
+            var keys = item.IsMusic || item.Season is null || item.NumberingConflict is not null ? [] :
                 LibraryIdentity.EpisodeNumbers(item).Select(n => $"{LibraryIdentity.ShowKey(item)}:{item.Season}:{n}").ToArray();
             if (keys.Length > 0 && keys.All(covered.Contains)) continue;
             foreach (var key in keys) covered.Add(key);
@@ -98,10 +99,13 @@ public static class LibraryCatalog
         var episodes = items.Where(x => LibraryIdentity.InShow(x, series, kind));
         // An album lists its tracks straight away, disc by disc.
         if (kind == MusicFiles.Kind || episodes.Any() && episodes.All(x => x.IsMusic))
+        {
+            var discs = episodes.Select(e => e.Season).Distinct().Count();
             return episodes.OrderBy(x => x.Season ?? int.MaxValue).ThenBy(x => x.Episode ?? int.MaxValue).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
                 .Select(x => new LibraryCard(x.EpisodeDisplayTitle, string.Join(" · ", new[] { x.Artist, x.DurationSeconds is > 0 ? MusicFiles.Duration(x.DurationSeconds.Value) : null,
-                    episodes.Select(e => e.Season).Distinct().Count() > 1 ? $"Disc {x.Season}" : null, x.Available ? null : "Unavailable" }.Where(t => t is not null)),
+                    discs > 1 ? $"Disc {x.Season}" : null, x.Available ? null : "Unavailable" }.Where(t => t is not null)),
                     EpisodeArtwork(x, cancellation), x, "episode", x.Season)).ToList();
+        }
         if (season is null)
             // Specials and extras follow the numbered seasons they accompany; a season counts its missing episodes as its show does.
             return episodes.GroupBy(x => x.Season ?? -1).OrderBy(g => g.Key < 0 ? int.MaxValue : g.Key == 0 ? int.MaxValue - 1 : g.Key).Select(g =>

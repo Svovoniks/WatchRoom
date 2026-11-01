@@ -860,7 +860,7 @@ public partial class MainWindow : Window
     private void MixedFolderMusicClick(object sender, RoutedEventArgs e)
     {
         var on = MixedFolderMusic.IsChecked == true;
-        library.MixedFoldersListMusic = on; scanDelay.Stop(); scanDelay.Start();
+        library.MixedFoldersListMusic = on; WatchFolders(); scanDelay.Stop(); scanDelay.Start();
         // Turning it off drops the music now; turning it on finds it with the scan.
         _ = Guard(async () => { await RefreshLibrary(); SetStatus(on ? "Mixed folders now list music. Scanning your library…" : "Mixed folders no longer list music."); });
     }
@@ -882,9 +882,10 @@ public partial class MainWindow : Window
             {
                 var watcher = new FileSystemWatcher(folder.Path) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName, EnableRaisingEvents = true };
                 void Changed() => Dispatcher.BeginInvoke(() => { scanDelay.Stop(); scanDelay.Start(); });
-                watcher.Created += (_, e) => { if (FileNames.AffectsLibrary(e.FullPath, false)) Changed(); };
-                watcher.Deleted += (_, e) => { if (FileNames.AffectsLibrary(e.FullPath, true)) Changed(); };
-                watcher.Renamed += (_, e) => { if (FileNames.AffectsLibrary(e.OldFullPath, true) || FileNames.AffectsLibrary(e.FullPath, false)) Changed(); };
+                var music = folder.Kind == MusicFiles.Kind || folder.Kind == "Mixed" && library.MixedFoldersListMusic;
+                watcher.Created += (_, e) => { if (FileNames.AffectsLibrary(e.FullPath, false, music)) Changed(); };
+                watcher.Deleted += (_, e) => { if (FileNames.AffectsLibrary(e.FullPath, true, music)) Changed(); };
+                watcher.Renamed += (_, e) => { if (FileNames.AffectsLibrary(e.OldFullPath, true, music) || FileNames.AffectsLibrary(e.FullPath, false, music)) Changed(); };
                 watchers.Add(watcher);
             }
             catch (IOException) { }
@@ -902,7 +903,7 @@ public partial class MainWindow : Window
         ScanButton.IsEnabled = false;
         AddFolderButton.IsEnabled = RemoveFolderButton.IsEnabled = ChangeFolderButton.IsEnabled = FolderKind.IsEnabled = MixedFolderMusic.IsEnabled = ExcludeFolderButton.IsEnabled = RestoreFolderButton.IsEnabled = false;
         RescanButton.Content = "Cancel scan";
-        RescanButton.ToolTip = "Stop scanning; keep videos already indexed";
+        RescanButton.ToolTip = "Stop scanning; keep files already indexed";
         ScanProgress.Visibility = Visibility.Visible;
         scanCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         CancelScanButton.Visibility = Visibility.Visible;
@@ -914,11 +915,11 @@ public partial class MainWindow : Window
             var candidates = wanted.Values.Where(x => x.Candidate is not null).Select(x => x.Id).ToHashSet();
             RefreshLibraryFromItems(scannedItems);
             AnnounceArrivals(candidates);
-            ScanStatus.Text = $"Scan complete · {items.Count} videos indexed.";
+            ScanStatus.Text = $"Scan complete · {items.Count} files indexed.";
             // A watcher scan that changed nothing has nothing new to identify.
             if (SavedAutoArtwork && !scanCancellation.IsCancellationRequested && (!fromWatcher || library.LastScanChanges > 0)) await FetchArtwork(scanCancellation.Token);
         }
-        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested) { var partial = await Task.Run(library.All); RefreshLibraryFromItems(partial); ScanStatus.Text = "Scan cancelled. Videos already indexed remain in your library."; SetStatus(ScanStatus.Text); }
+        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested) { var partial = await Task.Run(library.All); RefreshLibraryFromItems(partial); ScanStatus.Text = "Scan cancelled. Files already indexed remain in your library."; SetStatus(ScanStatus.Text); }
         finally
         {
             scanning = false;

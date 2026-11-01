@@ -652,9 +652,10 @@ public sealed partial class LibraryStore
                     MediaItem parsed;
                     if (music)
                     {
-                        // Tags are read again only when a track's file changed.
+                        // Tags are read again only when a track's file changed, or a cover appeared beside a track without one.
                         var writeTime = file.LastWriteTimeUtc.Ticks;
-                        if (ByPath(path) is { IsMusic: true, Available: true } unchanged && unchanged.FileSize == file.Length && unchanged.FileWriteTime == writeTime)
+                        if (ByPath(path) is { IsMusic: true, Available: true } unchanged && unchanged.FileSize == file.Length && unchanged.FileWriteTime == writeTime &&
+                            !MusicFiles.CoverAdded(unchanged))
                         {
                             seen.Add(unchanged.Id);
                             progress?.Report($"Found {seen.Count} files · {unchanged.Title}");
@@ -799,10 +800,12 @@ public static partial class FileNames
     private static readonly HashSet<string> IgnoredChanges = new(StringComparer.OrdinalIgnoreCase)
     { ".nfo", ".tmp", ".part", ".crdownload", ".download", ".partial", ".!qb", ".!ut", ".aria2", ".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt", ".sup",
       ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tbn", ".txt", ".url", ".ini", ".db", ".json", ".xml", ".log", ".torrent", ".parts" };
-    public static bool AffectsLibrary(string path, bool deleted)
+    // Audio files count only in folders that list music, so a soundtrack saved beside a film doesn't start a scan.
+    public static bool AffectsLibrary(string path, bool deleted, bool music = false)
     {
         var extension = System.IO.Path.GetExtension(path);
-        if (Extensions.Contains(extension) || MusicFiles.Extensions.Contains(extension)) return true;
+        if (MusicFiles.Extensions.Contains(extension)) return music;
+        if (Extensions.Contains(extension)) return true;
         // A deleted folder can no longer be checked, so only skip names that look like a known non-video file.
         if (deleted) return !IgnoredChanges.Contains(extension);
         return Directory.Exists(path);

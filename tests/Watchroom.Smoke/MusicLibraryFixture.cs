@@ -60,6 +60,24 @@ static class MusicLibraryFixture
         var reloaded = library.PruneAndLoad([new(music, "Mixed"), new(films, "Movie")]);
         check(!reloaded.Any(x => x.IsMusic), "a folder that stops being a Music folder drops its tracks");
 
+        // Review: tracks that share a number are different songs, not versions of one.
+        var repeats = Path.Combine(music, "Artist C", "Two Discs");
+        var repeatPaths = new[] { "01 - Alpha.wav", "02 - Beta.wav", "01 - Gamma.wav", "02 - Delta.wav" }.Select(name => Path.Combine(repeats, name)).ToArray();
+        Directory.CreateDirectory(repeats); foreach (var path in repeatPaths) File.WriteAllBytes(path, Wave());
+        var withRepeats = await library.ScanAsync(folders);
+        var alpha = withRepeats.Single(x => x.Path == repeatPaths[0]);
+        var album = LibraryCatalog.Search(withRepeats, "Two Discs", null, null, null).Single(card => card.Media.IsMusic && card.DisplayTitle == "Two Discs");
+        check(LibraryCatalog.CardItems(withRepeats, album).Count() == 4 && EpisodePlayback.Episodes(withRepeats, alpha).Length == 4,
+            "tracks that share a number all play with their album");
+        var order = new List<string>(); for (var track = (MediaItem?)alpha; track is not null && order.Count < 5; track = EpisodePlayback.Next(withRepeats, track, false, _ => true)) order.Add(track.Title);
+        check(order.SequenceEqual(["Alpha", "Gamma", "Beta", "Delta"]), "an album with repeated numbers plays every track once, in number and name order");
+        check(MusicFiles.Parse(Path.Combine(repeats, "99 Luftballons.mp3"), music).Title == "99 Luftballons" &&
+            MusicFiles.Parse(Path.Combine(repeats, "07 Seven.mp3"), music) is { Title: "Seven", Episode: 7 }, "a number in a song's name stays in its title; a zero-padded number is its track");
+        File.WriteAllBytes(Path.Combine(repeats, "folder.jpg"), [0xFF, 0xD8, 0xFF, 0xD9]);
+        check((await library.ScanAsync(folders)).Single(x => x.Path == repeatPaths[0]).Poster == Path.Combine(repeats, "folder.jpg"), "a rescan picks up a cover added later");
+        check(!FileNames.AffectsLibrary(Path.Combine(films, "theme.flac"), false) && FileNames.AffectsLibrary(Path.Combine(music, "theme.flac"), false, music: true),
+            "audio files start a scan only in folders that list music");
+
         var mixed = Path.Combine(root, "Mixed");
         Directory.CreateDirectory(Path.Combine(mixed, "Example Film (2001)", "Soundtrack"));
         File.WriteAllBytes(Path.Combine(mixed, "Example Film (2001)", "Example Film (2001).mkv"), [0]);
