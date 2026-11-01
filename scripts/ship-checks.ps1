@@ -29,10 +29,10 @@ try {
     Check ((Get-PullRequestVersion '' '0.3.17' '0.3.18' '0.3.18') -eq '0.3.19') 'a branch matching a newer master version is bumped'
     Check ((Get-PullRequestVersion '0.4.0' '0.3.17' '0.3.17' '0.3.18') -eq '0.4.0') 'an explicit version replaces the branch version'
     Expect-Rejected { Get-PullRequestVersion '0.3.17' '0.3.17' '0.3.17' '0.3.18' } 'an explicit version must still be higher than every release'
-    foreach ($path in @('src/app.cs', 'Directory.Build.props', 'scripts/ship.ps1', '.claude/skills/review-pr/SKILL.md', 'src/Watchroom.Desktop/Assets/Tmdb.png', 'src/Watchroom.Desktop/Assets/Promo/teaser-clam-intro.mp4')) {
+    foreach ($path in @('src/app.cs', 'Directory.Build.props', 'scripts/ship.ps1', '.claude/skills/review-pr/SKILL.md', 'src/Watchroom.Desktop/Assets/Tmdb.png', 'src/Watchroom.Desktop/Assets/Promo/teaser-clam-intro.mp4', 'deploy/haproxy.cfg', 'deploy/watchroom.env.example', '.gitattributes')) {
         Check ((Assert-ShipPathName $path) -eq $path) "release source path $path is accepted"
     }
-    foreach ($path in @('../outside.cs','sites','artifacts/report.html','sites/src/app.ts','.tools/helper.ps1','src/credentials/token.json','src/.env','src/library.db','src/personal.png','src/Watchroom.Desktop/Assets/snapshot.png','src/Watchroom.Desktop/Assets/Promo/other.mp4','src/clip.mp4','TEST-REPORT.html','.claude/settings.json')) {
+    foreach ($path in @('../outside.cs','sites','artifacts/report.html','sites/src/app.ts','.tools/helper.ps1','src/credentials/token.json','src/.env','src/library.db','src/personal.png','src/Watchroom.Desktop/Assets/snapshot.png','src/Watchroom.Desktop/Assets/Promo/other.mp4','src/clip.mp4','TEST-REPORT.html','.claude/settings.json','deploy/watchroom.env','deploy/.env')) {
         Expect-Rejected { Assert-ShipPathName $path } "excluded path $path cannot enter a pull request"
     }
     $summary = "Fixes seeking.`n`nIntentional: removes the old toggle."

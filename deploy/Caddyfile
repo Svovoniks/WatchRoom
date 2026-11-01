@@ -1,7 +1,30 @@
+# HAProxy owns public TCP 443 and forwards TLS here with the PROXY protocol, so Caddy listens on loopback only.
+# Certificates use the TLS-ALPN challenge through that same port; port 80 is not needed.
+{
+	default_bind 127.0.0.1
+	http_port 8080
+	https_port 8443
+	auto_https disable_redirects
+	servers {
+		listener_wrappers {
+			proxy_protocol {
+				timeout 5s
+				allow 127.0.0.1/32
+			}
+			tls
+		}
+	}
+}
+
 {$WATCHROOM_DOMAIN} {
-    reverse_proxy watchroom:8080
-    header {
-        X-Content-Type-Options nosniff
-        Referrer-Policy no-referrer
-    }
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
+	reverse_proxy 127.0.0.1:5080
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
 }

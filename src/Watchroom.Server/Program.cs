@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Watchroom.Core;
 
@@ -16,6 +17,8 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var app = builder.Build();
+// Behind the bundled reverse proxy, rate limits apply to the client address it reports; only loopback proxies are trusted.
+app.UseForwardedHeaders(new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto });
 app.UseRateLimiter();
 // Half-open sockets close after a missed pong so a returning host is not rejected for minutes.
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20), KeepAliveTimeout = TimeSpan.FromSeconds(30) });
@@ -59,28 +62,30 @@ foreach (var saved in persistentRooms.All())
     foreach (var guest in saved.Guests ?? []) restored.GuestNames[guest.Id] = guest.Name;
 }
 void SaveRoom(Room room) { if (room.Persistent) persistentRooms.Update(room.Code, room.Guests(), room.SharedControls, room.Name); }
+var cloudflare = CloudflareTurn.Create(builder.Configuration["CLOUDFLARE_TURN_KEY_ID"], builder.Configuration["CLOUDFLARE_TURN_API_TOKEN"],
+    builder.Configuration["CLOUDFLARE_TURN_API"] ?? "https://rtc.live.cloudflare.com/v1",
+    TimeSpan.FromSeconds(Setting("CLOUDFLARE_TURN_TTL_SECONDS", 86400)), TimeSpan.FromSeconds(Setting("CLOUDFLARE_TURN_RETRY_SECONDS", 60)), app.Logger);
+if (cloudflare is not null) _ = cloudflare.RunAsync(app.Lifetime.ApplicationStopping);
 string[] IceServers(string peer)
 {
     var urls = new List<string>();
     var stun = builder.Configuration["WATCHROOM_STUN"];
     if (!string.IsNullOrWhiteSpace(stun)) urls.Add(stun);
+    if (cloudflare is not null) urls.AddRange(cloudflare.Current());
     var turn = builder.Configuration["WATCHROOM_TURN"];
     var secret = builder.Configuration["WATCHROOM_TURN_SECRET"];
     if (!string.IsNullOrWhiteSpace(turn) && !string.IsNullOrWhiteSpace(secret))
     {
         var username = $"{DateTimeOffset.UtcNow.AddHours(8).ToUnixTimeSeconds()}:{peer}";
         var credential = Convert.ToBase64String(HMACSHA1.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(username)));
-        foreach (var address in turn.Split(';', StringSplitOptions.RemoveEmptyEntries))
-        {
-            // libdatachannel uses TURN URLs with escaped userinfo.
-            var separator = address.IndexOf(':');
-            urls.Add(address[..(separator + 1)] + "//" + Uri.EscapeDataString(username) + ":" + Uri.EscapeDataString(credential) + "@" + address[(separator + 1)..].TrimStart('/'));
-        }
+        foreach (var address in turn.Split(';', StringSplitOptions.RemoveEmptyEntries)) urls.Add(CloudflareTurn.WithCredentials(address, username, credential));
     }
     return urls.ToArray();
 }
 bool forceRelay = builder.Configuration["WATCHROOM_FORCE_RELAY"] == "true";
-app.MapGet("/health", () => Results.Ok(new { status = "ok", protocol = 1, persistentRooms = true, relayConfigured = !string.IsNullOrEmpty(builder.Configuration["WATCHROOM_TURN"]) }));
+app.MapGet("/health", () => Results.Ok(new { status = "ok", protocol = 1, persistentRooms = true,
+    relayConfigured = cloudflare?.HasRelay == true || !string.IsNullOrEmpty(builder.Configuration["WATCHROOM_TURN"]),
+    stunConfigured = cloudflare is not null || !string.IsNullOrEmpty(builder.Configuration["WATCHROOM_STUN"]) }));
 app.Map("/room", async context =>
 {
     if (!context.WebSockets.IsWebSocketRequest) { context.Response.StatusCode = 400; return; }
@@ -235,6 +240,86 @@ app.Map("/room", async context =>
     }
 });
 await app.RunAsync();
+
+// Cloudflare issues shared short-lived TURN credentials through an authenticated API. A background loop keeps them
+// fresh even while no rooms are open, so startup and admission never wait on Cloudflare and every credential handed out
+// stays valid for at least half its lifetime (12 hours by default).
+sealed class CloudflareTurn(string keyId, string token, string api, TimeSpan lifetime, TimeSpan retryInterval, ILogger logger)
+{
+    static readonly string[] StunOnly = ["stun:stun.cloudflare.com:3478"];
+    sealed record Credentials(string[] Urls, DateTimeOffset Expires);
+    readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    Credentials? credentials;
+    Credentials? Valid(DateTimeOffset now) => Volatile.Read(ref credentials) is { } current && now < current.Expires ? current : null;
+    public bool HasRelay => Valid(DateTimeOffset.UtcNow)?.Urls.Any(x => x.StartsWith("turn", StringComparison.Ordinal)) == true;
+    public static CloudflareTurn? Create(string? keyId, string? token, string api, TimeSpan lifetime, TimeSpan retryInterval, ILogger logger) =>
+        string.IsNullOrWhiteSpace(keyId) || string.IsNullOrWhiteSpace(token) ? null : new(keyId.Trim(), token.Trim(), api.TrimEnd('/'), lifetime, retryInterval, logger);
+    // Without valid relay credentials, allocations would only fail, so participants get STUN alone.
+    public string[] Current() => Valid(DateTimeOffset.UtcNow)?.Urls ?? StunOnly;
+    public async Task RunAsync(CancellationToken stopping)
+    {
+        try
+        {
+            while (!stopping.IsCancellationRequested)
+            {
+                var refreshed = await RefreshAsync(stopping);
+                var wait = refreshed ? Volatile.Read(ref credentials)!.Expires - lifetime / 2 - DateTimeOffset.UtcNow : retryInterval;
+                await Task.Delay(wait > TimeSpan.Zero ? wait : TimeSpan.Zero, stopping);
+            }
+        }
+        catch (Exception) when (stopping.IsCancellationRequested) { }
+    }
+    async Task<bool> RefreshAsync(CancellationToken stopping)
+    {
+        try
+        {
+            // Expiry counts from the request, so a slow reply cannot make handed-out credentials outlive Cloudflare's.
+            var requested = DateTimeOffset.UtcNow;
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{api}/turn/keys/{Uri.EscapeDataString(keyId)}/credentials/generate-ice-servers")
+            { Content = JsonContent.Create(new { ttl = (int)lifetime.TotalSeconds }) };
+            request.Headers.Authorization = new("Bearer", token);
+            using var response = await http.SendAsync(request, stopping);
+            response.EnsureSuccessStatusCode();
+            using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync(stopping));
+            var parsed = Parse(Items(json.RootElement.GetProperty("iceServers")));
+            if (parsed.Length == 0) throw new InvalidDataException("Cloudflare returned no ICE servers");
+            Volatile.Write(ref credentials, new Credentials(parsed, requested + lifetime));
+            logger.LogInformation("Cloudflare TURN credentials refreshed ({Count} servers)", parsed.Length);
+            return true;
+        }
+        catch (Exception ex) when (!stopping.IsCancellationRequested)
+        {
+            logger.LogWarning("Cloudflare TURN credentials unavailable: {Error}", ex.Message);
+            return false;
+        }
+    }
+    static IEnumerable<System.Text.Json.JsonElement> Items(System.Text.Json.JsonElement value) =>
+        value.ValueKind == System.Text.Json.JsonValueKind.Array ? value.EnumerateArray() : [value];
+    static string[] Parse(IEnumerable<System.Text.Json.JsonElement> servers)
+    {
+        var result = new List<string>();
+        foreach (var server in servers)
+        {
+            var username = server.TryGetProperty("username", out var u) ? u.GetString() : null;
+            var credential = server.TryGetProperty("credential", out var c) ? c.GetString() : null;
+            if (!server.TryGetProperty("urls", out var list)) continue;
+            foreach (var entry in Items(list))
+            {
+                // Port 53 duplicates the standard ports and is commonly intercepted by local DNS resolvers.
+                if (entry.GetString() is not { Length: > 0 } url || System.Text.RegularExpressions.Regex.IsMatch(url, @":53(\?|$)")) continue;
+                if (url.StartsWith("stun:", StringComparison.Ordinal)) result.Add(url);
+                else if (url.StartsWith("turn", StringComparison.Ordinal) && username is not null && credential is not null) result.Add(WithCredentials(url, username, credential));
+            }
+        }
+        return result.ToArray();
+    }
+    // libdatachannel uses TURN URLs with escaped userinfo.
+    public static string WithCredentials(string address, string username, string credential)
+    {
+        var separator = address.IndexOf(':');
+        return address[..(separator + 1)] + "//" + Uri.EscapeDataString(username) + ":" + Uri.EscapeDataString(credential) + "@" + address[(separator + 1)..].TrimStart('/');
+    }
+}
 
 sealed class Member(string id, string name, bool host, WebSocket socket, CancellationTokenSource lifetime, string? guestKey = null)
 {

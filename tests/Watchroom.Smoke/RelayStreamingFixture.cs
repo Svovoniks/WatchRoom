@@ -10,15 +10,31 @@ static class RelayStreamingFixture
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         using var http = new HttpClient { BaseAddress = new Uri(server), Timeout = TimeSpan.FromSeconds(20) };
-        var created = await http.PostAsJsonAsync("/sessions", new { type = "create", text = "Transport regression" }, timeout.Token);
-        created.EnsureSuccessStatusCode();
-        var session = await created.Content.ReadFromJsonAsync<JsonElement>(timeout.Token);
-        http.DefaultRequestHeaders.Authorization = new("Bearer", session.GetProperty("token").GetString());
+        // Sites uses HTTP sessions; the ASP.NET service hands out the same identity over its room WebSocket.
+        var polling = (await http.GetStringAsync("/health", timeout.Token)).Contains("http-poll", StringComparison.Ordinal);
+        using var socket = new System.Net.WebSockets.ClientWebSocket();
+        Welcome identity;
+        if (polling)
+        {
+            var created = await http.PostAsJsonAsync("/sessions", new { type = "create", text = "Transport regression" }, timeout.Token);
+            created.EnsureSuccessStatusCode();
+            var session = await created.Content.ReadFromJsonAsync<JsonElement>(timeout.Token);
+            http.DefaultRequestHeaders.Authorization = new("Bearer", session.GetProperty("token").GetString());
+        }
+        else
+        {
+            await socket.ConnectAsync(new Uri(new Uri(server.Replace("https://", "wss://").Replace("http://", "ws://")), "/room"), timeout.Token);
+            await SocketMessages.SendAsync(socket, new("create", Text: "Transport regression"), timeout.Token);
+        }
         try
         {
-            var events = await http.GetFromJsonAsync<JsonElement>("/session?since=0", timeout.Token);
-            var welcome = events.GetProperty("events").EnumerateArray().Select(e => e.GetProperty("message")).First(e => e.GetProperty("type").GetString() == "welcome");
-            var identity = Wire.Read<Welcome>(welcome.GetProperty("data").GetString()!);
+            if (polling)
+            {
+                var events = await http.GetFromJsonAsync<JsonElement>("/session?since=0", timeout.Token);
+                var welcome = events.GetProperty("events").EnumerateArray().Select(e => e.GetProperty("message")).First(e => e.GetProperty("type").GetString() == "welcome");
+                identity = Wire.Read<Welcome>(welcome.GetProperty("data").GetString()!);
+            }
+            else identity = Wire.Read<Welcome>((await SocketMessages.ReadAsync(socket, timeout.Token))!.Data!);
             check(identity.IceServers.Any(s => s.StartsWith("turn:")), "live service provides relay credentials");
             using var host = new PeerTransport(identity.IceServers, true);
             using var guest = new PeerTransport(identity.IceServers, true);
@@ -56,7 +72,11 @@ static class RelayStreamingFixture
             await StreamingAudioFixture.Run(Path.Combine("artifacts/relay-audio", Guid.NewGuid().ToString("N")), check, iceServers: identity.IceServers, relayOnly: true);
             timeout.Cancel(); try { await pump; } catch (OperationCanceledException) { }
         }
-        finally { await http.DeleteAsync("/session"); }
+        finally
+        {
+            if (polling) await http.DeleteAsync("/session");
+            else socket.Abort();
+        }
     }
     private sealed class GeneratedSource : IMediaSource
     {

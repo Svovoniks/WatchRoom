@@ -55,8 +55,8 @@ function Assert-ShipPathName {
     $attributionLogo = $relative -ceq 'src/Watchroom.Desktop/Assets/Tmdb.png' -or $relative -ceq 'src/Watchroom.Desktop/Assets/Promo/teaser-clam-intro.mp4'
     if ($relative -match '^\.\.(?:/|$)' -or [IO.Path]::IsPathRooted($relative) -or
         $relative -match '(^|/)(sites|artifacts|\.tools|\.nuget|bin|obj|node_modules|data|logs|credentials)(/|$)' -or
-        ($relative -match '(?i)(^|/)(\.env[^/]*|.*\.(html?|png|jpe?g|mp4|mkv|sqlite|db|pfx|pem|key))$' -and !$attributionLogo) -or
-        $relative -notmatch '^(src/|tests/|scripts/|packaging/|\.github/workflows/|\.claude/skills/|[^/]+\.(md|props|targets|slnx|ps1)|NuGet\.Config$|global\.json$)') {
+        ($relative -match '(?i)(^|/)(\.env[^/]*|.*\.(html?|png|jpe?g|mp4|mkv|sqlite|db|pfx|pem|key|env))$' -and !$attributionLogo) -or
+        $relative -notmatch '^(src/|tests/|scripts/|packaging/|deploy/|\.gitattributes$|\.github/workflows/|\.claude/skills/|[^/]+\.(md|props|targets|slnx|ps1)|NuGet\.Config$|global\.json$)') {
         throw "Not a release source path: $Path"
     }
     return $relative
@@ -458,7 +458,10 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'The branch does not contain the latest origin/master. Merge it (git merge origin/master), resolve conflicts, and rerun.' }
         $changed = @(Invoke-Native git @('diff', '--name-only', '--no-renames', 'origin/master', 'HEAD'))
         if (!$changed.Count) { throw 'The branch has no changes from origin/master.' }
-        $changed | ForEach-Object { $null = Assert-ShipPathName $_ }
+        # Deleting a file adds no content, so only the submodule rule applies to removals.
+        @(Invoke-Native git @('diff', '--name-only', '--no-renames', '--diff-filter=d', 'origin/master', 'HEAD')) | ForEach-Object { $null = Assert-ShipPathName $_ }
+        @(Invoke-Native git @('diff', '--name-only', '--no-renames', '--diff-filter=D', 'origin/master', 'HEAD')) |
+            Where-Object { $_.Replace('\', '/') -match '^sites(/|$)' } | ForEach-Object { throw "Not a release source path: $_" }
         $untracked = @(Invoke-Native git @('ls-files', '--others', '--exclude-standard'))
         if ($untracked.Count) { Write-Warning "Untracked files are not shipped: $($untracked -join ', ')" }
         $existing = Find-BranchPullRequest $branch
