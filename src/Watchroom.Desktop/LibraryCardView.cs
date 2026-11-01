@@ -42,6 +42,9 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     public string Caption => Card.Caption;
     public bool IsEpisode => Card.Level == "episode";
     public bool IsMovie => Card.Level == "movie";
+    // Album covers are square, and a track card shows its album's cover whole.
+    public bool IsMusic => Card.Media.IsMusic;
+    public bool IsAlbum => IsMusic && Card.Level == "series";
     public bool HasPlaybackProgress => !IsRemote && PlaybackLabel.Length > 0;
     public bool IsRemote { get; private set; }
     public string? HomeSection { get; set; }
@@ -56,7 +59,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         if (HomeDetail != detail) { HomeDetail = detail; Changed(nameof(HomeDetail)); }
         if (HomeTag != tag) { HomeTag = tag; Changed(nameof(HomeTag)); Changed(nameof(HomeTagVisibility)); }
     }
-    public string EpisodeMeta => (Card.Media.IsBonus ? "Extra" : (Card.Media.Season is { } season ? $"S{season:00} · " : "") +
+    public string EpisodeMeta => IsMusic ? Card.Caption : (Card.Media.IsBonus ? "Extra" : (Card.Media.Season is { } season ? $"S{season:00} · " : "") +
         (Card.Media.Episode is { } episode ? $"E{episode:00}" + (Card.Media.EpisodeEnd > episode ? $"–{Card.Media.EpisodeEnd:00}" : "") : "Episode unknown")) +
         (Card.Media.RuntimeMinutes is > 0 ? $" · {Card.Media.RuntimeMinutes} min" : "") +
         (Card.Version is { Length: > 0 } version ? $" · {version} · {Card.Versions} versions" : "");

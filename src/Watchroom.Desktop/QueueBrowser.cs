@@ -198,9 +198,9 @@ public partial class MainWindow
         bool Matches(MediaItem item)
         {
             cancellation.ThrowIfCancellationRequested();
-            if (filter switch { 1 => item.Kind != "Movie", 2 => item.Kind != "Show", 3 => item.Kind != "Anime", _ => false }) return false;
+            if (filter switch { 1 => item.Kind != "Movie", 2 => item.Kind != "Show", 3 => item.Kind != "Anime", 4 => !item.IsMusic, _ => false }) return false;
             if (terms.Length == 0) return true;
-            var text = $"{item.Series} {item.Title} {item.EpisodeTitle} {item.Year} {Path.GetFileNameWithoutExtension(item.Path)}" +
+            var text = $"{item.Series} {item.Title} {item.EpisodeTitle} {item.Artist} {item.Year} {Path.GetFileNameWithoutExtension(item.Path)}" +
                 (item.Episode is { } episode ? $" S{item.Season}E{episode} S{item.Season:00}E{episode:00}" : "");
             return terms.All(term => text.Contains(term, StringComparison.OrdinalIgnoreCase));
         }

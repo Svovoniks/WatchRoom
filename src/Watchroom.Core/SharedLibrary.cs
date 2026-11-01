@@ -56,7 +56,7 @@ public static class SharedLibrary
     public static LibraryBrowsePage Browse(IEnumerable<MediaItem> source, LibraryBrowseRequest request, Func<string?, string?>? thumbnail = null,
         IReadOnlyDictionary<string, string>? playback = null)
     {
-        if (request.Query is null || request.Query.Length > 100 || request.Category is < 0 or > 3 || request.Page is < 0 or > 100000 || request.ParentId?.Length > 128)
+        if (request.Query is null || request.Query.Length > 100 || request.Category is < 0 or > 3 and not LibraryCatalog.Music || request.Page is < 0 or > 100000 || request.ParentId?.Length > 128)
             throw new InvalidDataException("Invalid library search");
         // Keep artwork paths internal; only bounded thumbnail bytes leave the host.
         var all = source.ToArray();
@@ -68,8 +68,11 @@ public static class SharedLibrary
             Overview: x.Overview, EpisodeTitle: x.EpisodeTitle, EpisodeOverview: x.EpisodeOverview,
             ShowId: LibraryIdentity.ShowKey(x), EpisodeEnd: x.EpisodeEnd, Poster: x.Poster,
             SeriesPoster: x.SeriesPoster, SeasonPoster: x.SeasonPoster, EpisodePoster: x.EpisodePoster,
-            GeneratedEpisodePoster: x.GeneratedEpisodePoster, PosterSource: x.PosterSource, RuntimeMinutes: x.RuntimeMinutes)).ToArray();
-        var visible = publicItems.Where(x => request.Category switch { 1 => x.Kind == "Movie", 2 => x.Kind == "Show", 3 => x.Kind == "Anime", _ => true });
+            GeneratedEpisodePoster: x.GeneratedEpisodePoster, PosterSource: x.PosterSource, RuntimeMinutes: x.RuntimeMinutes,
+            Artist: x.Artist, DurationSeconds: x.DurationSeconds)).ToArray();
+        // All lists videos; music has its own category. An album opened from it keeps browsing within it.
+        var visible = publicItems.Where(x => request.Category switch { 1 => x.Kind == "Movie", 2 => x.Kind == "Show", 3 => x.Kind == "Anime",
+            LibraryCatalog.Music => x.IsMusic, _ => parent is not null || !x.IsMusic });
         var home = request.Home ? LibraryHome.Browse(all, playback, request.Seed) : null;
         var cards = home?.Select(entry => entry.Card).ToList() ?? LibraryCatalog.Search(visible, request.Query, parent is null ? null : LibraryIdentity.ShowKey(publicItems.First(x => x.Id == parent.Id)), parent?.Kind, request.Season);
         var page = Math.Min(request.Page, Math.Max(0, (cards.Count - 1) / PageSize));

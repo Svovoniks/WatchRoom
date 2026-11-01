@@ -8,6 +8,8 @@ public record LibraryCard(string DisplayTitle, string Caption, string? Poster, M
 
 public static class LibraryCatalog
 {
+    // The Music library category; 4 and 5 are the Unavailable and Missing views.
+    public const int Music = 6;
     public static Task<List<LibraryCard>> SearchAsync(IEnumerable<MediaItem> source, string query, int filter = 0,
         string? series = null, string? kind = null, int? season = null, CancellationToken cancellation = default, bool displaySpecials = false, string? preferVersion = null) => Task.Run(() =>
     {
@@ -16,7 +18,7 @@ public static class LibraryCatalog
             cancellation.ThrowIfCancellationRequested();
             return filter switch
             {
-                1 => item.Kind == "Movie", 2 => item.Kind == "Show", 3 => item.Kind == "Anime",
+                1 => item.Kind == "Movie", 2 => item.Kind == "Show", 3 => item.Kind == "Anime", Music => item.IsMusic,
                 4 => !File.Exists(item.Poster) && !File.Exists(item.SeriesPoster) && !File.Exists(item.SeasonPoster),
                 5 => !item.Available, _ => true
             };
@@ -63,7 +65,8 @@ public static class LibraryCatalog
         foreach (var item in all.OrderBy(x => x.IsVirtual).ThenByDescending(x => x.Available).ThenByDescending(x => preferred.Contains(x.Id))
             .ThenByDescending(x => (x.EpisodeEnd ?? x.Episode) - x.Episode).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase))
         {
-            var keys = item.Season is null || item.NumberingConflict is not null ? [] :
+            // An album has no versions: tracks that share a disc and number are different songs.
+            var keys = item.IsMusic || item.Season is null || item.NumberingConflict is not null ? [] :
                 LibraryIdentity.EpisodeNumbers(item).Select(n => $"{LibraryIdentity.ShowKey(item)}:{item.Season}:{n}").ToArray();
             if (keys.Length > 0 && keys.All(covered.Contains)) continue;
             foreach (var key in keys) covered.Add(key);
@@ -85,6 +88,7 @@ public static class LibraryCatalog
                 var seasons = g.Select(x => x.Season).Distinct().Count();
                 var clips = item.Series is null ? filmExtras[item.Id].Count() : 0;
                 var status = TitleStatus(g.ToArray());
+                if (item.IsMusic) return AlbumCard(g.ToArray(), item, cancellation);
                 return new LibraryCard(item.DisplayTitle, item.Series is null ? item.Caption + (clips > 0 ? $" · {clips} {(clips == 1 ? "extra" : "extras")}" : "") +
                     (item.IsVirtual ? " · " + status + (status == "Upcoming" && DateOnly.TryParse(item.AirDate, out var release) ? " · " + release.ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture) : "") : item.Available ? "" : " · Unavailable") :
                     (item.Year is null ? "" : item.Year + " · ") + $"{seasons} {(seasons == 1 ? "season" : "seasons")} · {LibraryIdentity.EpisodeCount(g)} episodes" +
@@ -93,6 +97,15 @@ public static class LibraryCatalog
             }).OrderBy(x => x.DisplayTitle).ToList();
         }
         var episodes = items.Where(x => LibraryIdentity.InShow(x, series, kind));
+        // An album lists its tracks straight away, disc by disc.
+        if (kind == MusicFiles.Kind || episodes.Any() && episodes.All(x => x.IsMusic))
+        {
+            var discs = episodes.Select(e => e.Season).Distinct().Count();
+            return episodes.OrderBy(x => x.Season ?? int.MaxValue).ThenBy(x => x.Episode ?? int.MaxValue).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+                .Select(x => new LibraryCard(x.EpisodeDisplayTitle, string.Join(" · ", new[] { x.Artist, x.DurationSeconds is > 0 ? MusicFiles.Duration(x.DurationSeconds.Value) : null,
+                    discs > 1 ? $"Disc {x.Season}" : null, x.Available ? null : "Unavailable" }.Where(t => t is not null)),
+                    EpisodeArtwork(x, cancellation), x, "episode", x.Season)).ToList();
+        }
         if (season is null)
             // Specials and extras follow the numbered seasons they accompany; a season counts its missing episodes as its show does.
             return episodes.GroupBy(x => x.Season ?? -1).OrderBy(g => g.Key < 0 ? int.MaxValue : g.Key == 0 ? int.MaxValue - 1 : g.Key).Select(g =>
@@ -113,6 +126,14 @@ public static class LibraryCatalog
                     (version is null ? "" : $" · {version} · {versions.Length} versions"),
                     EpisodeArtwork(x, cancellation), x, "episode", season, version, versions.Length);
             }).ToList();
+    }
+    private static LibraryCard AlbumCard(MediaItem[] tracks, MediaItem first, CancellationToken cancellation)
+    {
+        var artists = tracks.Select(x => x.Artist).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Take(2).ToArray();
+        var count = tracks.Count(x => !x.IsVirtual);
+        var caption = string.Join(" · ", new[] { artists.Length == 1 ? artists[0] : artists.Length > 1 ? "Various artists" : null,
+            first.Year?.ToString(), $"{count} {(count == 1 ? "track" : "tracks")}", tracks.Any(x => x.Available) ? null : "Unavailable" }.Where(x => x is not null));
+        return new LibraryCard(first.Series!, caption, Existing(tracks.Select(x => x.SeriesPoster).Concat(tracks.Select(x => x.Poster)), cancellation), first, "series");
     }
     // The clips that came with a film, in name order.
     public static MediaItem[] Extras(IEnumerable<MediaItem> source, MediaItem film) => film.Series is not null ? [] :

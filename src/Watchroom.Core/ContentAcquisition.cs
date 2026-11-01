@@ -207,7 +207,8 @@ public static class ContentAcquisition
         return (plugins, problems);
     }
 
-    public static AcquisitionLibrary[] Libraries(IEnumerable<LibraryFolder> folders) => folders.Select(x => new AcquisitionLibrary(x.Path, LibraryKind(x.Kind))).ToArray();
+    // Music folders never receive videos.
+    public static AcquisitionLibrary[] Libraries(IEnumerable<LibraryFolder> folders) => folders.Where(x => x.Kind != MusicFiles.Kind).Select(x => new AcquisitionLibrary(x.Path, LibraryKind(x.Kind))).ToArray();
     private static bool Upcoming(string? date) => DateOnly.TryParse(date, out var day) && day > DateOnly.FromDateTime(DateTime.UtcNow);
     private static AcquisitionEpisode Episode(MediaItem item) => new(item.Season ?? 0, item.Episode ?? 0, item.EpisodeTitle, item.AirDate, Upcoming(item.AirDate), item.AbsoluteEpisode);
     // The folder most of the paths share.
@@ -223,7 +224,7 @@ public static class ContentAcquisition
     private static string? Root(IReadOnlyList<LibraryFolder> folders, string kind, bool movie)
     {
         var order = kind == "Anime" ? movie ? new[] { "Anime", "Movie", "Mixed" } : ["Anime", "Show", "Mixed"] : movie ? ["Movie", "Mixed"] : ["Show", "Mixed", "Anime"];
-        return order.Select(k => folders.FirstOrDefault(f => f.Kind == k)?.Path).FirstOrDefault(x => x is not null) ?? folders.FirstOrDefault()?.Path;
+        return order.Select(k => folders.FirstOrDefault(f => f.Kind == k)?.Path).FirstOrDefault(x => x is not null) ?? folders.FirstOrDefault(f => f.Kind != MusicFiles.Kind)?.Path;
     }
     private static Dictionary<string, string> Ids(MediaItem item)
     {

@@ -259,6 +259,14 @@ if (args.FirstOrDefault() == "--library-ingestion")
     Console.WriteLine($"{checks} library ingestion checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--music-library")
+{
+    var checks = 0;
+    await MusicLibraryFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/music-library-" + Guid.NewGuid().ToString("N")), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} music library checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--library-search")
 {
     var checks = 0;
@@ -392,6 +400,7 @@ await MetadataRecoveryFixture.Run(Path.Combine(root, "metadata-recovery"), Check
 await MetadataEvidenceFixture.Run(Path.Combine(root, "metadata-evidence"), Check);
 await MetadataCacheFixture.Run(Path.Combine(root, "metadata-cache"), Check);
 await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
+await MusicLibraryFixture.Run(Path.Combine(root, "music-library"), Check);
 await LibraryVersionsFixture.Run(Path.Combine(root, "library-versions"), Check);
 await WantedTitlesFixture.Run(Path.Combine(root, "wanted-titles"), Check);
 MissingEpisodesFixture.Run(Path.Combine(root, "missing-episodes"), Check);

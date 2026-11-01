@@ -340,6 +340,7 @@ static class Program
                 PreferenceNavigationChecks.Run(window, activeStore, Check);
                 await QueuePlaybackChecks.Run(window, activeStore, directory, Check);
                 await EpisodeEndChecks.Run(window, Check);
+                await MusicPlaybackChecks.Run(window, Check);
                 await LoopChecks.Run(window, Check);
                 await OpenFileChecks.Run(window, Check);
                 await PictureInPictureChecks.Run(window, Check);

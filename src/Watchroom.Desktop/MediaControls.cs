@@ -93,13 +93,21 @@ public partial class MainWindow
             if (controls.IsPauseEnabled != allowed) controls.IsPauseEnabled = allowed;
             if (controls.PlaybackStatus != status) controls.PlaybackStatus = status;
             var title = active ? room?.Snapshot?.Media?.Title ?? playingItem?.Title ?? "Watchroom" : null;
-            if (systemMediaTitle != title)
+            // Music shows as a song, with its artist and album, in the Windows media flyout.
+            var music = active && audioPlayback;
+            var key = music ? $"music\n{AudioTitle.Text}\n{AudioArtist.Text}\n{AudioAlbum.Text}" : title;
+            if (systemMediaTitle != key)
             {
                 var display = controls.DisplayUpdater;
                 display.ClearAll();
-                if (title is not null) { display.Type = MediaPlaybackType.Video; display.VideoProperties.Title = title; }
+                if (music)
+                {
+                    display.Type = MediaPlaybackType.Music; display.MusicProperties.Title = AudioTitle.Text;
+                    display.MusicProperties.Artist = AudioArtist.Text; display.MusicProperties.AlbumTitle = AudioAlbum.Text;
+                }
+                else if (title is not null) { display.Type = MediaPlaybackType.Video; display.VideoProperties.Title = title; }
                 display.Update();
-                systemMediaTitle = title;
+                systemMediaTitle = key;
             }
             if (controls.IsEnabled != active) controls.IsEnabled = active;
         }

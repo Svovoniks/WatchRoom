@@ -104,6 +104,11 @@
           "SQLitePCLRaw.core": "3.0.5"
         }
       },
+      "TagLibSharp": {
+        "type": "Transitive",
+        "resolved": "2.3.0",
+        "contentHash": "Qo4z6ZjnIfbR3Us1Za5M2vQ97OWZPmODvVmepxZ8XW0UIVLGdO2T63/N3b23kCcyiwuIe0TQvMEQG8wUCCD1mA=="
+      },
       "watchroom.core": {
         "type": "Project",
         "dependencies": {
@@ -112,7 +117,8 @@
           "Microsoft.Data.Sqlite": "[10.0.12, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )",
           "SkiaSharp": "[2.88.9, )",
-          "SkiaSharp.NativeAssets.Linux.NoDependencies": "[2.88.9, )"
+          "SkiaSharp.NativeAssets.Linux.NoDependencies": "[2.88.9, )",
+          "TagLibSharp": "[2.3.0, )"
         }
       }
     }

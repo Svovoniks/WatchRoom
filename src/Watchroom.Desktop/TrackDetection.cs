@@ -76,6 +76,8 @@ public partial class MainWindow
         languageDetectionCancellation?.Cancel(); languageDetectionCancellation = null;
         languageDetectionGeneration = loadGeneration;
         detectedLanguages.Clear(); namedLanguages.Clear(); pendingLanguages.Clear(); untaggedLanguages.Clear();
+        // Songs aren't speech to identify, and neither is the next track.
+        if (PlayingKnownMusic) return;
         foreach (var stale in subtitleFiles.Where(pair => pair.Value.Generation != loadGeneration).Select(pair => pair.Key).ToArray()) subtitleFiles.Remove(stale);
         PrefetchNextLanguages();
         if (room?.Identity?.Host == false || LocalMediaPath() is not { } path) return;

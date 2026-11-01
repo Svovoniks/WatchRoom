@@ -22,7 +22,8 @@ public static class AutomaticArtwork
         using var ownedTmdb = metadata is null && TmdbCredentials.Resolve(token) is not null ? new MetadataClient(token, options: options) : null;
         var tmdb = metadata ?? ownedTmdb;
         PlaybackDiagnostics.Record("metadata-fetch-start", new { Mode = mode.ToString(), Providers = options.ProviderOrder, TmdbAvailable = tmdb is not null });
-        var catalog = library.All(); var localChanged = false;
+        // Music keeps the names and artwork of its own files; film and show providers know nothing of albums.
+        var catalog = library.All().Where(x => !x.IsMusic).ToList(); var localChanged = false;
         foreach (var entry in catalog.Where(x => mode != MetadataRefresh.RetryArtwork && x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus))
         {
             using var context = MetadataDiagnostics.BeginItem("nfo-artwork", entry);
@@ -38,7 +39,7 @@ public static class AutomaticArtwork
             if (Wire.Serialize(local) != Wire.Serialize(entry)) { library.Save(local); localChanged = true; }
         }
         // Re-read the catalog only when local metadata changed it.
-        var snapshot = localChanged ? library.All() : catalog;
+        var snapshot = localChanged ? library.All().Where(x => !x.IsMusic).ToList() : catalog;
         var folderIds = snapshot.ToLookup(x => Path.GetDirectoryName(x.Path) ?? "", x => x.Id,
             OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         IEnumerable<MediaItem> CurrentSiblings(MediaItem item)

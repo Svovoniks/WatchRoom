@@ -184,7 +184,7 @@ public static class WantedTitles
     {
         var wanted = library.Wanted(); var arrivals = new List<string>();
         if (wanted.Count == 0) { library.LastWantedArrivals = []; return 0; }
-        var all = library.All(); var changes = 0;
+        var all = library.All().Where(x => !x.IsMusic).ToList(); var changes = 0;
         foreach (var title in wanted)
         {
             var candidates = Groups(title, all).Where(g => !(title.Rejected ?? []).Contains(g.Key))

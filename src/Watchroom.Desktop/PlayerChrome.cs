@@ -133,7 +133,7 @@ public partial class MainWindow
         QueueModeOn.IsChecked = queueMode; QueueModeOff.IsChecked = !queueMode;
         QueueModeOn.IsEnabled = QueueModeOff.IsEnabled = canManage;
         var series = playingItem is { Series: not null, Season: not null, Episode: not null, IsExtra: false };
-        QueueModeOffText.Text = series ? "Episodes" : "Off";
+        QueueModeOffText.Text = series ? playingItem!.IsMusic ? "Tracks" : "Episodes" : "Off";
         QueueModeOffIcon.Text = series ? "" : "";
         QueuePickerRow.Visibility = queueMode && canManage ? Visibility.Visible : Visibility.Collapsed;
         PlayPlayerQueueButton.Visibility = QueueList.HasItems && !ShowingEpisodeList ? Visibility.Visible : Visibility.Collapsed;
@@ -182,7 +182,7 @@ public partial class MainWindow
         if (ShowingEpisodeList)
         {
             var index = Array.FindIndex(listedEpisodes, item => item.Id == playingItem?.Id);
-            SetQueuePill("Episodes", index >= 0 ? $"{index + 1} / {listedEpisodes.Length}" : $"{listedEpisodes.Length}", "");
+            SetQueuePill(playingItem?.IsMusic == true ? "Tracks" : "Episodes", index >= 0 ? $"{index + 1} / {listedEpisodes.Length}" : $"{listedEpisodes.Length}", "");
         }
         else if (queue.Count > 0)
             SetQueuePill(savedQueues.FirstOrDefault(saved => saved.Id == activeQueueId)?.Name ?? "Queue",
