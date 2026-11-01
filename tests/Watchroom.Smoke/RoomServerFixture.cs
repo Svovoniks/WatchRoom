@@ -117,6 +117,7 @@ static class RoomServerFixture
         var api = $"http://localhost:{FreePort()}/";
         using var cloudflare = new HttpListener(); cloudflare.Prefixes.Add(api); cloudflare.Start();
         var requests = new ConcurrentQueue<(string Path, string? Authorization, string Body)>();
+        var failing = 1;
         _ = Task.Run(async () =>
         {
             while (cloudflare.IsListening)
@@ -124,6 +125,7 @@ static class RoomServerFixture
                 HttpListenerContext context;
                 try { context = await cloudflare.GetContextAsync(); } catch (Exception) { return; }
                 using (var reader = new StreamReader(context.Request.InputStream)) requests.Enqueue((context.Request.Url!.AbsolutePath, context.Request.Headers["Authorization"], await reader.ReadToEndAsync()));
+                if (Volatile.Read(ref failing) == 1) { context.Response.StatusCode = 503; context.Response.Close(); continue; }
                 var body = """{"iceServers":[{"urls":["stun:stun.cloudflare.com:3478","stun:stun.cloudflare.com:53"]},{"urls":["turn:turn.cloudflare.com:3478?transport=udp","turn:turn.cloudflare.com:53?transport=udp","turns:turn.cloudflare.com:5349?transport=tcp"],"username":"user/1","credential":"pa:ss"}]}"""u8.ToArray();
                 context.Response.ContentType = "application/json"; await context.Response.OutputStream.WriteAsync(body); context.Response.Close();
             }
@@ -132,7 +134,7 @@ static class RoomServerFixture
         var start = new ProcessStartInfo(sdk) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         start.Environment["WATCHROOM_DATA"] = Path.Combine(directory, "cloudflare-server");
         start.Environment["CLOUDFLARE_TURN_KEY_ID"] = "key-id"; start.Environment["CLOUDFLARE_TURN_API_TOKEN"] = "api-token";
-        start.Environment["CLOUDFLARE_TURN_API"] = api.TrimEnd('/');
+        start.Environment["CLOUDFLARE_TURN_API"] = api.TrimEnd('/'); start.Environment["CLOUDFLARE_TURN_RETRY_SECONDS"] = "1";
         start.ArgumentList.Add(serverDll); start.ArgumentList.Add("--urls"); start.ArgumentList.Add(url);
         using var server = Process.Start(start)!;
         var stdout = server.StandardOutput.ReadToEndAsync(); var stderr = server.StandardError.ReadToEndAsync();
@@ -141,16 +143,30 @@ static class RoomServerFixture
             using var http = new HttpClient();
             string health = "";
             for (var i = 0; i < 100 && health == ""; i++) { try { var reply = await http.GetAsync(url + "/health"); if (reply.IsSuccessStatusCode) health = await reply.Content.ReadAsStringAsync(); } catch (HttpRequestException) { } if (health == "") await Task.Delay(200); }
-            check(health.Contains("\"relayConfigured\":true") && health.Contains("\"stunConfigured\":true"), "Cloudflare TURN credentials make the server report STUN and relay");
-            check(requests.TryPeek(out var request) && request.Path == "/turn/keys/key-id/credentials/generate-ice-servers" && request.Authorization == "Bearer api-token" && request.Body.Contains("\"ttl\":86400"),
+            async Task<string[]> CreateRoom()
+            {
+                using var socket = new ClientWebSocket(); await socket.ConnectAsync(new Uri(url.Replace("http", "ws") + "/room"), default);
+                await SocketMessages.SendAsync(socket, new("create", Text: "Host"), default);
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var reply = await SocketMessages.ReadAsync(socket, timeout.Token);
+                socket.Abort();
+                return reply is { Type: "welcome" } ? Wire.Read<Welcome>(reply.Data!).IceServers : ["no welcome: " + reply?.Type];
+            }
+            await Task.Delay(500);
+            health = await http.GetStringAsync(url + "/health");
+            check(health.Contains("\"relayConfigured\":false") && health.Contains("\"stunConfigured\":true"), "a failed Cloudflare request at startup reports STUN without relay");
+            var fallback = await CreateRoom();
+            check(fallback.SequenceEqual(["stun:stun.cloudflare.com:3478"]), $"rooms still open with STUN alone while Cloudflare fails ({string.Join(' ', fallback)})");
+
+            Volatile.Write(ref failing, 0); await Task.Delay(1500);
+            await CreateRoom();
+            for (var i = 0; i < 10 && !health.Contains("\"relayConfigured\":true"); i++) { await Task.Delay(300); health = await http.GetStringAsync(url + "/health"); }
+            check(health.Contains("\"relayConfigured\":true"), "the server retries Cloudflare and reports relay once it recovers");
+            check(requests.Any(r => r.Path == "/turn/keys/key-id/credentials/generate-ice-servers" && r.Authorization == "Bearer api-token" && r.Body.Contains("\"ttl\":86400")),
                 "the server requests day-long Cloudflare credentials with its API token");
-            using var socket = new ClientWebSocket(); await socket.ConnectAsync(new Uri(url.Replace("http", "ws") + "/room"), default);
-            await SocketMessages.SendAsync(socket, new("create", Text: "Host"), default);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            var ice = Wire.Read<Welcome>((await SocketMessages.ReadAsync(socket, timeout.Token))!.Data!).IceServers;
+            var ice = await CreateRoom();
             check(ice.SequenceEqual(["stun:stun.cloudflare.com:3478", "turn://user%2F1:pa%3Ass@turn.cloudflare.com:3478?transport=udp", "turns://user%2F1:pa%3Ass@turn.cloudflare.com:5349?transport=tcp"]),
                 $"welcomes carry Cloudflare's STUN and TURN servers with escaped credentials and without port 53 ({string.Join(' ', ice)})");
-            socket.Abort();
 
             async Task<int> Probe(string client)
             {
