@@ -64,6 +64,8 @@ internal static class FilenameExtras
             series = placeholder.Groups["series"].Value; rest = placeholder.Groups["rest"].Value;
         }
         else return null;
+        // "One Piece - 492A" and "Show - 12.5" carry episode numbers the parser can't place; they stay episodes.
+        if (char.IsDigit(rest[0])) return null;
         var dash = rest.IndexOf(" - ", StringComparison.Ordinal);
         var slot = dash < 0 ? rest : rest[..dash];
         if (IsSlot(slot))

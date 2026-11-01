@@ -139,6 +139,8 @@ static class LibraryVersionsFixture
         check(sequel is { IsBonus: false, Series: null, Kind: "Movie" }, "a file that names a year after the show's name is a film, not a clip");
         var episodeTwo = await Mixed("Azumanga Daioh - 02 - Chiyo.mkv");
         check(episodeTwo is { IsBonus: false, Season: 1, Episode: 2 } && episodeTwo.ShowId == azumangaEpisode.ShowId, "an episode beside clips keeps its number");
+        check(new[] { "Azumanga Daioh - 03A.mkv", "Azumanga Daioh - 12.5.mkv" }.Select(name => Mixed(name).Result).All(x => !x.IsBonus),
+            "a part or recap episode whose number the parser can't place is not a clip");
         var films = Path.Combine(directory, "Films");
         var oceans = new[] { "Ocean's Eleven (2001).mkv", "Ocean's Twelve (2004).mkv", "Alien (1979).mkv" }.Select(name => FileNames.Parse(FileAt(films, name).Result, "Mixed", films)).ToArray();
         check(oceans.All(x => x is { IsBonus: false, Series: null, Kind: "Movie" }), "films in a folder without episodes stay films");
