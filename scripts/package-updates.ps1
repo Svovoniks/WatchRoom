@@ -58,8 +58,9 @@ function Assert-SameTable {
 }
 # Inno Setup reads braces as constants; a literal one is doubled.
 function ConvertTo-InnoPath { param([string]$Path) return $Path.Replace('{', '{{') }
+# With -NoWait the compiler keeps running and the result carries its Process; Wait-UpdateInstaller finishes it.
 function New-UpdateInstaller {
-    param([string]$Compiler, [string]$Script, [string]$From, [string]$To, $Old, [string]$NewFiles, [string]$Stage, [string]$Output, [string[]]$Defines = @())
+    param([string]$Compiler, [string]$Script, [string]$From, [string]$To, $Old, [string]$NewFiles, [string]$Stage, [string]$Output, [string[]]$Defines = @(), [switch]$NoWait)
     $new = Get-FileTable $NewFiles
     if (Test-Path -LiteralPath $Stage) { Remove-Item -LiteralPath $Stage -Recurse -Force }
     New-Item -ItemType Directory -Force $Stage | Out-Null
@@ -74,9 +75,24 @@ function New-UpdateInstaller {
     $lines = @('[InstallDelete]') + @($removed | ForEach-Object { 'Type: files; Name: "{app}\' + (ConvertTo-InnoPath $_) + '"' })
     [IO.File]::WriteAllLines($deletions, [string[]]$lines)
     $arguments = @('/Qp', "/DAppVersion=$To", "/DUpdateFrom=$From", "/DAppFiles=$Stage", "/DUpdateRemoved=$deletions", "/DOutputFolder=$Output") + $Defines + @($Script)
+    $update = [pscustomobject]@{ From = $From; Path = Join-Path $Output "Watchroom-Update-$From-to-$To-win-x64.exe"; Changed = $changed; Removed = $removed; Process = $null }
+    if ($NoWait) {
+        $start = [Diagnostics.ProcessStartInfo]::new($Compiler)
+        $arguments | ForEach-Object { $start.ArgumentList.Add($_) }
+        $start.UseShellExecute = $false
+        $update.Process = [Diagnostics.Process]::Start($start)
+        return $update
+    }
     & $Compiler @arguments
     if ($LASTEXITCODE -ne 0) { throw "Update installer compilation from $From failed" }
-    return [pscustomobject]@{ Path = Join-Path $Output "Watchroom-Update-$From-to-$To-win-x64.exe"; Changed = $changed; Removed = $removed }
+    return $update
+}
+function Wait-UpdateInstaller {
+    param($Update)
+    $Update.Process.WaitForExit()
+    if ($Update.Process.ExitCode -ne 0) { throw "Update installer compilation from $($Update.From) failed" }
+    $Update.Process.Dispose(); $Update.Process = $null
+    Write-Host "Update from $($Update.From): $($Update.Changed.Count) changed files, $($Update.Removed.Count) removed, $([Math]::Round((Get-Item $Update.Path).Length / 1MB, 1)) MB"
 }
 function Invoke-Installer {
     param([string]$Path, [string[]]$Arguments)
@@ -147,7 +163,25 @@ $earlier = @($releases | Where-Object { !$_.draft -and !$_.prerelease -and $_.ta
     Sort-Object { [Version]$_.tag_name.Substring(1) } -Descending | Select-Object -First $Previous)
 $scratch = Join-Path $output ('update-build-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $scratch | Out-Null
+# Updates built from a published file list compile in the background, a few at a time, while earlier releases are
+# installed and checked; each compiler uses about two cores.
+$waiting = [Collections.Generic.Queue[object]]::new()
+$building = [Collections.Generic.List[object]]::new()
+$limit = [Math]::Max(2, [int]([Environment]::ProcessorCount / 2))
+function Step-UpdateBuilds {
+    param([switch]$Finish)
+    while ($true) {
+        foreach ($update in @($building | Where-Object { $_.Process.HasExited })) { Wait-UpdateInstaller $update; $null = $building.Remove($update) }
+        while ($building.Count -lt $limit -and $waiting.Count) {
+            $next = $waiting.Dequeue()
+            $building.Add((New-UpdateInstaller $compiler $script $next.From $Version $next.Old $app (Join-Path $output "Watchroom-Update-$($next.From)") $output -NoWait))
+        }
+        if (!$Finish -or !$building.Count) { return }
+        $building[0].Process.WaitForExit()
+    }
+}
 $installs = 0
+$toInstall = [Collections.Generic.List[object]]::new()
 try {
     foreach ($release in $earlier) {
         $from = $release.tag_name.Substring(1)
@@ -156,31 +190,40 @@ try {
         $old = if ($list) { Read-FileList $list }
         $installable = $installs -lt $InstallLimit -and @($release.assets | Where-Object name -CEQ "Watchroom-Setup-$from-win-x64.exe").Count -eq 1
         if ($old -and (!$newest -or !$installable)) {
-            $update = New-UpdateInstaller $compiler $script $from $Version $old $app (Join-Path $output 'Watchroom-Update') $output
-            Write-Host "Update from $from`: $($update.Changed.Count) changed files, $($update.Removed.Count) removed, $([Math]::Round((Get-Item $update.Path).Length / 1MB, 1)) MB"
+            $waiting.Enqueue([pscustomobject]@{ From = $from; Old = $old })
+            Step-UpdateBuilds
             continue
         }
         if (!$installable) { Write-Host "Skipping $from`: no published file list"; continue }
         $installer = Get-VerifiedAsset $release "Watchroom-Setup-$from-win-x64.exe" (Join-Path $scratch "Watchroom-Setup-$from-win-x64.exe")
         if (!$installer) { Write-Host "Skipping $from`: no verifiable installer"; continue }
         $installs++
+        $toInstall.Add([pscustomobject]@{ From = $from; Old = $old; Installer = $installer })
+        Step-UpdateBuilds
+    }
+    foreach ($entry in $toInstall) {
+        $from = $entry.From
         $installed = Join-Path $scratch "installed-$from"
-        Install-Silently $installer $installed (Join-Path $scratch "install-$from.log")
+        Install-Silently $entry.Installer $installed (Join-Path $scratch "install-$from.log")
         try {
+            Step-UpdateBuilds
             $table = Get-FileTable $installed
-            if ($old) { Assert-SameTable $table $old "The installed $from and its published file list" }
+            if ($entry.Old) { Assert-SameTable $table $entry.Old "The installed $from and its published file list" }
             $update = New-UpdateInstaller $compiler $script $from $Version $table $app (Join-Path $output 'Watchroom-Update') $output
             Write-Host "Update from $from`: $($update.Changed.Count) changed files, $($update.Removed.Count) removed, $([Math]::Round((Get-Item $update.Path).Length / 1MB, 1)) MB, applied"
+            Step-UpdateBuilds
             $code = Invoke-Installer $update.Path @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$(Join-Path $scratch "update-$from.log")`"", "/DIR=`"$installed`"")
             if ($code -ne 0) { throw "Update installer from $from exited with $code" }
             Assert-SameFiles $installed $app "The update from $from"
         }
         finally { Uninstall-Silently $installed }
+        Step-UpdateBuilds
     }
+    Step-UpdateBuilds -Finish
 }
 finally {
+    foreach ($update in $building) { if (!$update.Process.HasExited) { $update.Process.Kill() }; $update.Process.WaitForExit() }
     Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
-    foreach ($path in @((Join-Path $output 'Watchroom-Update'), (Join-Path $output 'Watchroom-Update-removed.iss'))) {
-        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
-    }
+    Get-ChildItem -LiteralPath $output -Directory -Filter 'Watchroom-Update*' | Remove-Item -Recurse -Force
+    Get-ChildItem -LiteralPath $output -File -Filter 'Watchroom-Update*-removed.iss' | Remove-Item -Force
 }

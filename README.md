@@ -54,7 +54,7 @@ Run the local coordination service with `./scripts/run-server.ps1`. Open two app
 
 The smoke executable validates SQLite scans, byte ranges and authorization, real native WebRTC transfers, remote LibVLC AVI playback and seeking, room admission, host-only playback, automatic buffering recovery, and revocation. It starts a temporary loopback server and shuts it down afterward.
 
-Desktop checks exercise media keyboard/app commands and room permissions with generated video. On an interactive Windows desktop, run `dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --system-media-controls` to also verify play, pause, and toggle through the Windows media service while the test app is minimized.
+Desktop checks exercise media keyboard/app commands and room permissions with generated video. They run on a separate hidden Windows desktop so their windows never appear on yours; set `WATCHROOM_TEST_VISIBLE=1` to watch them. On an interactive Windows desktop, run `dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --system-media-controls` to also verify play, pause, and toggle through the Windows media service while the test app is minimized.
 
 ## Playback diagnostics and VM retesting
 
