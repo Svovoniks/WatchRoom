@@ -5,29 +5,8 @@
 
   <!-- Sidebar -->
   <Border x:Name="Rail" Grid.RowSpan="2" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
-   <DockPanel Margin="12,20,12,12" LastChildFill="False">
-    <StackPanel DockPanel.Dock="Top">
-     <StackPanel Orientation="Horizontal" Margin="10,0,0,22"><Image Source="Assets/BlackPearl.png" Width="26" Height="26"/><TextBlock Text="BlackPearl" FontSize="18" FontWeight="SemiBold" Margin="10,0,0,1" VerticalAlignment="Center"/></StackPanel>
-     <Button x:Name="HomeNav" Tag="Home" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Home"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE80F;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Home"/></StackPanel></Button>
-     <Button x:Name="LibraryNav" Tag="Library" Click="LibraryMenuClick" Style="{StaticResource Navigation}" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Library" AutomationProperties.HelpText="Expand or collapse library categories">
-      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8F1;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Library"/></StackPanel><TextBlock x:Name="LibraryChevron" Grid.Column="1" Text="&#xE70D;" Style="{StaticResource Icon}" FontSize="10" Foreground="{DynamicResource Muted}"/></Grid>
-     </Button>
-     <StackPanel x:Name="LibraryCategories" Margin="0,0,0,6">
-      <Button x:Name="AllLibraryNav" Content="All" Tag="0" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}"/>
-      <Button x:Name="AnimeLibraryNav" Content="Anime" Tag="3" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}"/>
-      <Button x:Name="ShowsLibraryNav" Content="Shows" Tag="2" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}"/>
-      <Button x:Name="MoviesLibraryNav" Content="Movies" Tag="1" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}"/>
-      <Button x:Name="UnavailableLibraryNav" Content="Unavailable" Tag="4" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}" Visibility="Collapsed"/>
-      <!-- Shows and films with episodes or files still to come; listed only while there are some. -->
-      <Button x:Name="MissingLibraryNav" Tag="5" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}" HorizontalContentAlignment="Stretch" Visibility="Collapsed" AutomationProperties.Name="Missing"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Missing" VerticalAlignment="Center"/><Border Grid.Column="1" Background="{DynamicResource AccentSoft}" CornerRadius="8" Padding="7,1" VerticalAlignment="Center"><TextBlock x:Name="MissingLibraryCount" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/></Border></Grid></Button>
-     </StackPanel>
-     <!-- Music sits beside the video library rather than in it; listed once a folder is a Music folder or the library holds music. -->
-     <Button x:Name="MusicLibraryNav" Tag="6" Click="LibraryCategoryClick" Style="{StaticResource Navigation}" Visibility="Collapsed" AutomationProperties.Name="Music"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8D6;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Music"/></StackPanel></Button>
-     <Button x:Name="QueuesNav" Tag="Queues" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Queues"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8FD;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Queues"/></StackPanel></Button>
-     <Button x:Name="RoomNav" Tag="Rooms" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Watch rooms"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE716;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Watch rooms"/></StackPanel></Button>
-     <Button x:Name="FoldersNav" Tag="Folders" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Folders"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Folders"/></StackPanel></Button>
-    </StackPanel>
-    <StackPanel DockPanel.Dock="Bottom">
+   <DockPanel Margin="12,20,12,12">
+    <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
      <Button x:Name="NowPlayingButton" Tag="Room" Click="Navigate" Visibility="Collapsed" Background="{DynamicResource AccentSoft}" HorizontalContentAlignment="Stretch" Padding="12,10" Margin="0,0,0,8" ToolTip="Return to the current video" AutomationProperties.Name="Return to player">
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
        <Border Width="30" Height="30" CornerRadius="15" Background="{DynamicResource Accent}" VerticalAlignment="Center"><TextBlock Text="&#xF5B0;" Style="{StaticResource Icon}" FontSize="11" Foreground="{DynamicResource AccentInk}" HorizontalAlignment="Center" Margin="2,0,0,0"/></Border>
@@ -36,6 +15,30 @@
      </Button>
      <Button x:Name="SettingsNav" Tag="Settings" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Settings"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Settings"/></StackPanel></Button>
     </StackPanel>
+    <!-- The navigation scrolls when the window is too short for it, so Settings and the player stay in view; the scroll bar sits in the rail's right padding. -->
+    <ScrollViewer Margin="0,0,-12,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+     <StackPanel Margin="0,0,12,0">
+       <StackPanel Orientation="Horizontal" Margin="10,0,0,22"><Image Source="Assets/BlackPearl.png" Width="26" Height="26"/><TextBlock Text="BlackPearl" FontSize="18" FontWeight="SemiBold" Margin="10,0,0,1" VerticalAlignment="Center"/></StackPanel>
+       <Button x:Name="HomeNav" Tag="Home" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Home"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE80F;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Home"/></StackPanel></Button>
+       <Button x:Name="LibraryNav" Tag="Library" Click="LibraryMenuClick" Style="{StaticResource Navigation}" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Library" AutomationProperties.HelpText="Expand or collapse library categories">
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8F1;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Library"/></StackPanel><TextBlock x:Name="LibraryChevron" Grid.Column="1" Text="&#xE70D;" Style="{StaticResource Icon}" FontSize="10" Foreground="{DynamicResource Muted}"/></Grid>
+       </Button>
+       <StackPanel x:Name="LibraryCategories" Margin="0,0,0,6">
+        <Button x:Name="AllLibraryNav" Content="All" Tag="0" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}"/>
+        <Button x:Name="AnimeLibraryNav" Content="Anime" Tag="3" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}"/>
+        <Button x:Name="ShowsLibraryNav" Content="Shows" Tag="2" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}"/>
+        <Button x:Name="MoviesLibraryNav" Content="Movies" Tag="1" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}"/>
+        <Button x:Name="UnavailableLibraryNav" Content="Unavailable" Tag="4" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}" Visibility="Collapsed"/>
+        <!-- Shows and films with episodes or files still to come; listed only while there are some. -->
+        <Button x:Name="MissingLibraryNav" Tag="5" Click="LibraryCategoryClick" Style="{StaticResource LibrarySubNavigation}" HorizontalContentAlignment="Stretch" Visibility="Collapsed" AutomationProperties.Name="Missing"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Missing" VerticalAlignment="Center"/><Border Grid.Column="1" Background="{DynamicResource AccentSoft}" CornerRadius="8" Padding="7,1" VerticalAlignment="Center"><TextBlock x:Name="MissingLibraryCount" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/></Border></Grid></Button>
+       </StackPanel>
+       <!-- Music sits beside the video library rather than in it; listed once a folder is a Music folder or the library holds music. -->
+       <Button x:Name="MusicLibraryNav" Tag="6" Click="LibraryCategoryClick" Style="{StaticResource Navigation}" Visibility="Collapsed" AutomationProperties.Name="Music"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8D6;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Music"/></StackPanel></Button>
+       <Button x:Name="QueuesNav" Tag="Queues" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Queues"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8FD;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Queues"/></StackPanel></Button>
+       <Button x:Name="RoomNav" Tag="Rooms" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Watch rooms"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE716;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Watch rooms"/></StackPanel></Button>
+       <Button x:Name="FoldersNav" Tag="Folders" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Folders"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Folders"/></StackPanel></Button>
+     </StackPanel>
+    </ScrollViewer>
    </DockPanel>
   </Border>
 
