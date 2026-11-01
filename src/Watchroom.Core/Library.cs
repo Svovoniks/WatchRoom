@@ -788,7 +788,7 @@ public sealed partial class LibraryStore
         { item = item with { ExtraOf = parsed.ExtraOf, Title = parsed.Title, Kind = parsed.Kind, Series = null, ShowId = null, SeasonId = null, SeriesPath = null, Season = null, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, Year = null }; bonus = true; }
         // A clip's home season comes from its folder, so a rescan places clips indexed before seasons were recorded.
         if (bonus && parsed.IsBonus && parsed.AirsAfterSeason is not null) item = item with { AirsAfterSeason = parsed.AirsAfterSeason };
-        return LocalMetadata.Apply(item with { IsBonus = bonus, NumberingSource = parsed.NumberingSource,
+        return LocalMetadata.Apply(item with { IsBonus = bonus, BonusKind = bonus ? parsed.IsBonus ? parsed.BonusKind : previous?.BonusKind : null, NumberingSource = parsed.NumberingSource,
             SourceLibraryKind = parsed.SourceLibraryKind, IsExtra = false });
     }
 }
@@ -864,10 +864,17 @@ public static partial class FileNames
         var numbering = FilenameEpisodes.Read(path, seriesContext || seasonFolder.Success, folderSeason, name);
         var season = numbering?.Season; var number = numbering?.Episode;
         string? series = numbering?.Series;
-        // "Azumanga Daioh - XX - Original Opening Sequence" is a clip of the show: XX stands in for an episode number.
-        var placeholder = numbering is null && filmExtra is null
-            ? Regex.Match(name, @"^(?<series>.*\S)\s+[-–]\s+(?:XX|xx|##|\?\?)(?:\s+[-–]\s+(?<clip>\S.*))?$") : Match.Empty;
-        if (placeholder.Success) { bonus = true; series = placeholder.Groups["series"].Value; }
+        // A file that starts the way the folder's episodes do but carries no episode number of that show is one of its clips.
+        // A number after a clip word ("Show - OVA 2", "Show - OP 2") numbers the clip, not an episode.
+        var folderShow = filmExtra is not null ? null : FilenameExtras.FolderSeries(dir, seriesContext || seasonFolder.Success);
+        var clip = filmExtra is not null ? null : FilenameExtras.Read(name, folderShow) is { } read &&
+            (numbering is null || read.Marked && !string.Equals(numbering.Series, read.Series, StringComparison.OrdinalIgnoreCase)) ? read : null;
+        if (clip is not null)
+        {
+            bonus = true; series = clip.Series; numbering = null; season = null; number = null;
+            // The clip is the same kind of title as the episodes it sits with.
+            if (kind == "Mixed" && folderShow is { Anime: true } && clip.Series == folderShow.Series) kind = "Anime";
+        }
         if (numbering is not null && !numbering.ExplicitSeason && number is not null && kind == "Mixed" && Regex.IsMatch(System.IO.Path.GetFileName(path), @"^\[[^\]]+\]")) kind = "Anime";
         var filenameSeason = numbering?.ExplicitSeason == true ? season : null;
         if (seasonFolder.Success)
@@ -933,10 +940,10 @@ public static partial class FileNames
                 EpisodeEnd = sourcePart > 1 ? null : result.EpisodeEnd, NumberingOrder = "absolute",
                 AbsoluteEpisode = sourcePart > 1 ? null : result.AbsoluteEpisode };
         // Bonus clips sit in season 0 without numbering; a clip from an extras folder drops any numbers its file name carried.
-        if (bonus && (structured || extraClip || placeholder.Success) && (numbering is null || extraClip))
-            result = result with { IsBonus = true, Kind = sourceKind == "Anime" || path.Split(System.IO.Path.DirectorySeparatorChar).Any(p => p.Equals("Anime", StringComparison.OrdinalIgnoreCase)) ? "Anime" : "Show",
+        if (bonus && (structured || extraClip || clip is not null) && (numbering is null || extraClip))
+            result = result with { IsBonus = true, Kind = kind == "Anime" || path.Split(System.IO.Path.DirectorySeparatorChar).Any(p => p.Equals("Anime", StringComparison.OrdinalIgnoreCase)) ? "Anime" : "Show",
                 Season = 0, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, SourcePart = null, SourcePartEpisode = null, SourcePartEpisodeEnd = null,
-                EpisodeTitle = placeholder.Groups["clip"] is { Success: true } clip ? clip.Value : BonusTitle(name, result.Series), NumberingOrder = "aired", NumberingConflict = null,
+                EpisodeTitle = clip?.Title ?? BonusTitle(name, result.Series), NumberingOrder = "aired", NumberingConflict = null,
                 // An extras folder inside "Season 2" holds that season's clips, so they also list at the end of season 2.
                 AirsAfterSeason = extraClip ? Parts(dir).Reverse().Select(SeasonNumber).FirstOrDefault(n => n is > 0) : result.AirsAfterSeason };
         // A film's extras are clips of that film: no show, no numbering, listed on the film's page.
@@ -945,6 +952,8 @@ public static partial class FileNames
                 Kind = sourceKind == "Anime" || path.Split(System.IO.Path.DirectorySeparatorChar).Any(p => p.Equals("Anime", StringComparison.OrdinalIgnoreCase)) ? "Anime" : "Movie",
                 Series = null, SeriesPath = null, Season = null, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null,
                 SourcePart = null, SourcePartEpisode = null, SourcePartEpisodeEnd = null, NumberingOrder = "aired", NumberingConflict = null, AirsAfterSeason = null };
+        // A clip's kind comes from its slot word, or else from its title: "NCOP1" is an opening, "Original Closing Sequence" an ending.
+        if (result.IsBonus) result = result with { BonusKind = clip is not null ? clip.Kind : FilenameExtras.Kind(result.EpisodeTitle, result.EpisodeTitle) };
         return LocalMetadata.Apply(LibraryIdentity.Ensure(result with { SourceLibraryKind = sourceKind, IsExtra = IsExtra(path) && !showExtras && filmExtra is null,
             NumberingSource = result.IsBonus ? null : sourcePart is not null ? "part" : numbering?.AirDate is not null ? "date" : filenameSeason is not null ? "filename" :
                 seasonFolder.Success && number is not null && !absoluteFolder ? "season-folder" : result.AbsoluteEpisode is not null ? "absolute" : null }));

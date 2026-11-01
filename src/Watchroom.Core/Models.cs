@@ -24,10 +24,15 @@ public record MediaItem(string Id, string Path, string Title, string Kind, int? 
     string? ExtraOf = null,
     // A music track's performer and length, read from its tags; its album is Series and its disc and track are Season and Episode.
     // FileWriteTime lets a rescan skip reading the tags of a track whose file has not changed.
-    string? Artist = null, int? DurationSeconds = null, long? FileWriteTime = null)
+    string? Artist = null, int? DurationSeconds = null, long? FileWriteTime = null,
+    // What a bonus clip is: "special", "opening", "ending" or "trailer"; null for any other clip.
+    string? BonusKind = null)
 {
     public bool IsMusic => Kind == MusicFiles.Kind;
-    public string Caption => IsMusic ? string.Join(" · ", new[] { Artist, Series, DurationSeconds is > 0 ? MusicFiles.Duration(DurationSeconds.Value) : null }.Where(x => !string.IsNullOrWhiteSpace(x))) : IsBonus ? Series is null ? "Bonus content" : $"{Series} · Bonus content" : Series is not null ? $"{Series} · {(Season is null ? "Season unknown" : $"S{Season:00}")} {(Episode is null ? "Episode unknown" : $"E{Episode:00}" + (EpisodeEnd > Episode ? $"–E{EpisodeEnd:00}" : ""))}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";
+    public string Caption => IsMusic ? string.Join(" · ", new[] { Artist, Series, DurationSeconds is > 0 ? MusicFiles.Duration(DurationSeconds.Value) : null }.Where(x => !string.IsNullOrWhiteSpace(x))) : IsBonus ? Series is null ? BonusLabel : $"{Series} · {BonusLabel}" : Series is not null ? $"{Series} · {(Season is null ? "Season unknown" : $"S{Season:00}")} {(Episode is null ? "Episode unknown" : $"E{Episode:00}" + (EpisodeEnd > Episode ? $"–E{EpisodeEnd:00}" : ""))}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";
+    public string BonusLabel => BonusKind switch { "special" => "Special", "opening" => "Opening", "ending" => "Ending", "trailer" => "Trailer", _ => "Bonus content" };
+    // Extras list specials first, then openings, endings, trailers and the rest.
+    public int BonusOrder => BonusKind switch { "special" => 0, "opening" => 1, "ending" => 2, "trailer" => 3, _ => 4 };
     public string DisplayTitle => Series ?? Title;
     public string QueueTitle => IsMusic ? Artist is null ? Title : $"{Title} · {Artist}" : Episode is null ? Title : Caption;
     public string EpisodeDisplayTitle => IsMusic ? Episode is { } track ? $"{track}. {Title}" : Title : Episode is { } ep ? $"Episode {ep}" + (EpisodeEnd > ep ? $"–{EpisodeEnd}" : "") + (string.IsNullOrWhiteSpace(EpisodeTitle) ? "" : " · " + EpisodeTitle)
