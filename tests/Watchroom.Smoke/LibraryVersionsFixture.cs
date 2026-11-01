@@ -141,6 +141,29 @@ static class LibraryVersionsFixture
         check(episodeTwo is { IsBonus: false, Season: 1, Episode: 2 } && episodeTwo.ShowId == azumangaEpisode.ShowId, "an episode beside clips keeps its number");
         check(new[] { "Azumanga Daioh - 03A.mkv", "Azumanga Daioh - 12.5.mkv" }.Select(name => Mixed(name).Result).All(x => !x.IsBonus),
             "a part or recap episode whose number the parser can't place is not a clip");
+        var batmanRoot = Path.Combine(directory, "Batman");
+        var batmanEpisode = FileNames.Parse(await FileAt(batmanRoot, "Batman", "Batman - 01 - On Leather Wings.mkv"), "Mixed", batmanRoot);
+        await FileAt(batmanRoot, "Batman", "Batman - 02 - Christmas with the Joker.mkv");
+        var phantasm = FileNames.Parse(await FileAt(batmanRoot, "Batman", "Batman - Mask of the Phantasm.mkv"), "Mixed", batmanRoot);
+        check(phantasm is { IsBonus: false, Series: null, Kind: "Movie" }, "a bare title after the show's name that names no clip stays a film");
+        // Earlier scans stored "Show - Special - 01" as a show of its own and "[Group] Show - OVA 2" as episode 2; a rescan moves both to their show's extras.
+        var batmanSpecialPath = await FileAt(batmanRoot, "Batman", "Batman - Special - 01.mkv");
+        var batmanSpecial = FileNames.Parse(batmanSpecialPath, "Mixed", batmanRoot);
+        check(batmanSpecial is { IsBonus: true, BonusKind: "special", Season: 0, Episode: null, EpisodeTitle: "Special 01" } && batmanSpecial.ShowId == batmanEpisode.ShowId,
+            "a numbered clip word after the show's name is a numbered clip of that show");
+        var animeRoot = Path.Combine(directory, "OvaAnime");
+        var ovaEpisode = FileNames.Parse(await FileAt(animeRoot, "Azumanga Daioh", "[Group] Azumanga Daioh - 01.mkv"), "Anime", animeRoot);
+        var ovaPath = await FileAt(animeRoot, "Azumanga Daioh", "[Group] Azumanga Daioh - OVA 2.mkv");
+        var ovaClip = FileNames.Parse(ovaPath, "Anime", animeRoot);
+        var rescans = new LibraryStore(Path.Combine(directory, "rescan-db"));
+        rescans.Save(LibraryIdentity.Ensure(batmanSpecial with { Title = "Batman - Special", Kind = "Show", Series = "Batman - Special", ShowId = null, SeriesPath = null, Season = 1, Episode = 1,
+            EpisodeTitle = null, IsBonus = false, BonusKind = null, NumberingSource = "filename" }));
+        rescans.Save(ovaClip with { Season = 1, Episode = 2, AbsoluteEpisode = 2, NumberingOrder = "absolute", EpisodeTitle = null, IsBonus = false, BonusKind = null, NumberingSource = "absolute" });
+        await rescans.ScanAsync([new(batmanRoot), new(animeRoot, "Anime")]);
+        check(rescans.All().Single(x => x.Path == batmanSpecialPath) is { IsBonus: true, Series: "Batman", Season: 0, Episode: null, EpisodeTitle: "Special 01" } rescannedSpecial &&
+            rescannedSpecial.ShowId == batmanEpisode.ShowId, "a rescan moves a clip stored as a show of its own into its show's extras");
+        check(rescans.All().Single(x => x.Path == ovaPath) is { IsBonus: true, BonusKind: "special", Season: 0, Episode: null, AbsoluteEpisode: null } rescannedOva &&
+            rescannedOva.ShowId == ovaEpisode.ShowId, "a rescan takes the episode number away from a clip stored as an episode");
         var films = Path.Combine(directory, "Films");
         var oceans = new[] { "Ocean's Eleven (2001).mkv", "Ocean's Twelve (2004).mkv", "Alien (1979).mkv" }.Select(name => FileNames.Parse(FileAt(films, name).Result, "Mixed", films)).ToArray();
         check(oceans.All(x => x is { IsBonus: false, Series: null, Kind: "Movie" }), "films in a folder without episodes stay films");

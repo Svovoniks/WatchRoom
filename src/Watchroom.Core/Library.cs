@@ -783,6 +783,12 @@ public sealed partial class LibraryStore
                 item = item with { EpisodeEnd = null };
         }
         var bonus = previous?.Matched == true || previous is not null && LibraryIdentity.Locked(previous, "Episode") ? previous.IsBonus : parsed.IsBonus;
+        // A file stored as an episode, or as a show of its own, that a rescan finds to be a clip ("Show - OVA 2" was episode 2 of "Show - OVA")
+        // moves to its show's extras: it drops the number and show it was given and takes the clip's.
+        if (parsed.IsBonus && parsed.ExtraOf is null && previous is { IsBonus: false, ExtraOf: null } && CanRepairGrouping(previous))
+            item = item with { Title = parsed.Title, Kind = parsed.Kind, Series = parsed.Series, ShowId = parsed.ShowId, SeasonId = parsed.SeasonId, SeriesPath = parsed.SeriesPath,
+                Season = parsed.Season, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, SourcePart = null, SourcePartEpisode = null,
+                SourcePartEpisodeEnd = null, EpisodeTitle = parsed.EpisodeTitle, NumberingOrder = "aired", NumberingConflict = null };
         // A film's clip stays with its film, including one an earlier scan had filed under a show of its own.
         if (parsed.ExtraOf is not null && (previous is null || CanRepairGrouping(previous)))
         { item = item with { ExtraOf = parsed.ExtraOf, Title = parsed.Title, Kind = parsed.Kind, Series = null, ShowId = null, SeasonId = null, SeriesPath = null, Season = null, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, Year = null }; bonus = true; }
@@ -866,14 +872,16 @@ public static partial class FileNames
         string? series = numbering?.Series;
         // A file that starts the way the folder's episodes do but carries no episode number of that show is one of its clips.
         // A number after a clip word ("Show - OVA 2", "Show - OP 2") numbers the clip, not an episode.
-        var folderShow = filmExtra is not null ? null : FilenameExtras.FolderSeries(dir, seriesContext || seasonFolder.Success);
-        var clip = filmExtra is not null ? null : FilenameExtras.Read(name, folderShow) is { } read &&
+        // Only a file without a number of its own, or one whose number follows a clip word, can be a clip, so other files skip the folder.
+        FilenameExtras.Folder? folderShow = null;
+        var clip = filmExtra is not null || numbering is not null && !numbering.Series.Contains(" - ", StringComparison.Ordinal) ? null :
+            FilenameExtras.Read(name, cleaned => folderShow = FilenameExtras.FolderShow(path, seriesContext || seasonFolder.Success, cleaned)) is { } read &&
             (numbering is null || read.Marked && !string.Equals(numbering.Series, read.Series, StringComparison.OrdinalIgnoreCase)) ? read : null;
         if (clip is not null)
         {
             bonus = true; series = clip.Series; numbering = null; season = null; number = null;
             // The clip is the same kind of title as the episodes it sits with.
-            if (kind == "Mixed" && folderShow is { Anime: true } && clip.Series == folderShow.Series) kind = "Anime";
+            if (kind == "Mixed" && folderShow is { Anime: true } && string.Equals(clip.Series, folderShow.Series, StringComparison.OrdinalIgnoreCase)) kind = "Anime";
         }
         if (numbering is not null && !numbering.ExplicitSeason && number is not null && kind == "Mixed" && Regex.IsMatch(System.IO.Path.GetFileName(path), @"^\[[^\]]+\]")) kind = "Anime";
         var filenameSeason = numbering?.ExplicitSeason == true ? season : null;
