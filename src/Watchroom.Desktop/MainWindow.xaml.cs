@@ -577,7 +577,8 @@ public partial class MainWindow : Window
     private async void FilterLibrary(bool debounce = false, bool backgroundUpdate = false)
     {
         if (PosterGrid is null || LibraryStatusFilter is null || NoResults is null || library is null || closing) return;
-        if (GuestLibrary) { await FilterHostLibraryAsync(debounce); return; }
+        // Local library updates don't change the host's library, and re-filtering it scrolls back to the top.
+        if (GuestLibrary) { if (!backgroundUpdate) await FilterHostLibraryAsync(debounce); return; }
         if (FollowingGuest) { if (!applyingGuestMirror) ApplyGuestMirror(); return; }
         if (!libraryLoaded) return;
         librarySearchCancellation?.Cancel();

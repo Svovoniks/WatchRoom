@@ -105,6 +105,10 @@ static class HostLibraryBrowseChecks
             Call("LoadMoreHostTitles");
             var scroll = Control<ScrollViewer>("LibraryScroll"); scroll.ScrollToBottom(); content.UpdateLayout(); Call("LoadMoreHostTitles");
             Check(Field<bool>("guestBrowsePending") && Field<LibraryBrowseRequest>("guestBrowse").Page == 2, "scrolling near the bottom automatically requests the next chunk");
+            var offset = scroll.VerticalOffset;
+            Call("FilterLibrary", false, true); content.UpdateLayout();
+            Check(scroll.VerticalOffset == offset && Field<bool>("guestBrowsePending") && Field<LibraryBrowseRequest>("guestBrowse").Page == 2,
+                "local library updates keep the guest's place in the host's library");
             typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryBrowsing = false, LibraryActivity = null });
             Call("RefreshSharedLibrary"); Receive(SharedLibrary.Browse(movies, new(Page: 2), _ => thumbnail));
             Check(cards.Count == 0 && !Field<bool>("guestBrowsePending"), "revoked access clears cached titles and ignores in-flight chunks");
