@@ -22,6 +22,6 @@ for mode in ('local','public'):
   profile=test/f'{mode}-{role}';profile.mkdir(exist_ok=True)
   with sqlite3.connect(profile/'library.db') as db:
    db.executescript('CREATE TABLE IF NOT EXISTS media(id TEXT PRIMARY KEY,path TEXT UNIQUE NOT NULL,json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);')
-   settings={'name':f'Sync followup {role}','artwork':'false','server':'http://localhost:5081' if mode=='local' else 'https://watchroom-rooms.svovoniks.chatgpt.site'}
+   settings={'name':f'Sync followup {role}','artwork':'false','server':'http://localhost:5081' if mode=='local' else 'https://31-76-63-229.sslip.io'}
    db.executemany('INSERT OR REPLACE INTO settings VALUES(?,?)',settings.items())
 print(test)

@@ -1,5 +1,7 @@
 # Watchroom on Sites
 
+The app no longer uses Sites by default. Rooms run on the VPS service described in `deploy/README.md`, with Cloudflare TURN relaying media when direct connections fail. Saved settings that point to the Sites address move to the VPS automatically. This document records the earlier Sites migration.
+
 The native Windows player supports the Sites room service as well as the original ASP.NET WebSocket server. Sites coordinates invitations, host approval and WebRTC signaling using D1-backed HTTP sessions. Updated native clients send playback, readiness, buffering, queues and chat through a separate reliable WebRTC data channel. The host owns the room state and clock, validates guest requests and distributes authoritative updates to admitted guests. Files and LibVLC playback remain on each computer.
 
 The pre-migration preview is saved in root commit `d1ea5d4`. Migration work is on `sites-migration`. The Site has its own deployment repository; this branch references its source commit as the `sites` Git submodule. The local Site checkout is retained for recovery.
