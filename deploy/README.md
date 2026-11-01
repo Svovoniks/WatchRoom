@@ -2,11 +2,11 @@
 
 The VPS only coordinates rooms: invitations, admission and WebRTC signaling. Video, voice and controls go directly between participants. When a direct path fails, Cloudflare's TURN service relays it, so no media passes through the VPS and its bandwidth use stays small.
 
-The production instance runs at `https://31-76-63-229.sslip.io`. [sslip.io](https://sslip.io) resolves that name to the server's IP address, so a public certificate works without registering a domain.
+Without a registered domain, use [sslip.io](https://sslip.io): a name such as `203-0-113-10.sslip.io` resolves to the IP address it spells (`203.0.113.10`), so the server can still get a public certificate. The examples below use that placeholder; substitute your server's name.
 
 ## Layout
 
-- **HAProxy** owns public TCP 443 (`haproxy.cfg`). It forwards TLS connections to Caddy with the PROXY protocol and everything else to sshd, because some networks allow SSH only on 443. Clients that wait for the server's SSH banner connect after a 5 second delay.
+- **HAProxy** owns public TCP 443 (`haproxy.cfg`). It forwards TLS connections to Caddy with the PROXY protocol and everything else to sshd, because some networks allow SSH only on 443. Clients that wait for the server's SSH banner connect after a 5 second delay. Because sshd sees these connections from loopback, HAProxy limits SSH attempts to 10 per minute per client address; use key-only SSH authentication on such a server.
 - **Caddy** (2.7 or later, for `proxy_protocol`) terminates HTTPS on `127.0.0.1:8443` (`Caddyfile`). It obtains certificates with the TLS-ALPN challenge through 443, so port 80 stays free for other services.
 - **Watchroom.Server** listens on `127.0.0.1:5080` (`watchroom.service`). It trusts `X-Forwarded-For` only from loopback, so rate limits apply per real client.
 
@@ -20,9 +20,9 @@ The production instance runs at `https://31-76-63-229.sslip.io`. [sslip.io](http
 
 1. Publish on a development machine: `dotnet publish src/Watchroom.Server -c Release -o artifacts/server-publish`. Copy the output to `/opt/watchroom` on the VPS.
 2. Install `watchroom.service` to `/etc/systemd/system/`. Create `/etc/watchroom/watchroom.env` from `watchroom.env.example` with mode 600, then `systemctl enable --now watchroom`.
-3. Install `Caddyfile` to `/etc/caddy/Caddyfile`. Set `Environment=WATCHROOM_DOMAIN=31-76-63-229.sslip.io` in a `systemctl edit caddy` drop-in, then restart Caddy.
+3. Install `Caddyfile` to `/etc/caddy/Caddyfile`. Set `Environment=WATCHROOM_DOMAIN=203-0-113-10.sslip.io` (your server's name) in a `systemctl edit caddy` drop-in, then restart Caddy.
 4. Install `haproxy.cfg` to `/etc/haproxy/haproxy.cfg`. Set `Environment=MULTIPLEX_BIND=:443` in a `systemctl edit haproxy` drop-in. Anything else listening on 443 must be stopped first. Keep a second SSH route open, or schedule an automatic rollback, before switching 443.
-5. Verify that `https://31-76-63-229.sslip.io/health` returns `status: ok`, `relayConfigured: true` and `stunConfigured: true`, and that `ssh -p 443` still connects.
+5. Verify that `https://203-0-113-10.sslip.io/health` returns `status: ok`, `relayConfigured: true` and `stunConfigured: true`, and that `ssh -p 443` still connects.
 
 For an update, repeat step 1 and run `systemctl restart watchroom`. Rooms live in memory, except persistent rooms stored under `/var/lib/watchroom`, so a restart closes temporary rooms in progress.
 
