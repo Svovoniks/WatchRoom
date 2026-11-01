@@ -5,9 +5,12 @@ namespace Watchroom.Core;
 // Read container headers only, on demand. No decoder, executable or full-file scan.
 public static class MediaDuration
 {
-    public static double? Minutes(string path, CancellationToken ct = default)
+    public static double? Minutes(string path, CancellationToken ct = default) => Read(path, out var minutes, ct) ? minutes : null;
+    // False when the file can't be opened or read right now (drive offline, file locked), so a caller can try again later;
+    // true with null minutes when the file was read and its header holds no usable length.
+    public static bool Read(string path, out double? minutes, CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();
+        ct.ThrowIfCancellationRequested(); minutes = null;
         try
         {
             using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -18,9 +21,12 @@ public static class MediaDuration
                 ".avi" => Avi(file, ct),
                 _ => null
             };
-            return seconds is > 0 and < 604800 && double.IsFinite(seconds.Value) ? seconds / 60 : null;
+            minutes = seconds is > 0 and < 604800 && double.IsFinite(seconds.Value) ? seconds / 60 : null;
+            return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or OverflowException) { return null; }
+        // A truncated or malformed header is a file without a length.
+        catch (Exception ex) when (ex is EndOfStreamException or InvalidDataException or ArgumentException or OverflowException) { return true; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
     private static double? Mp4(Stream file, long end, CancellationToken ct, int depth = 0)
     {
@@ -52,9 +58,9 @@ public static class MediaDuration
     }
     private static ulong Vint(Stream file, bool id)
     {
-        var first = file.ReadByte(); if (first <= 0) throw new IOException("Invalid EBML header.");
+        var first = file.ReadByte(); if (first <= 0) throw new InvalidDataException("Invalid EBML header.");
         var mask = 0x80; var length = 1; while ((first & mask) == 0) { mask >>= 1; length++; }
-        if (length > (id ? 4 : 8)) throw new IOException("Invalid EBML length.");
+        if (length > (id ? 4 : 8)) throw new InvalidDataException("Invalid EBML length.");
         ulong value = (ulong)(id ? first : first & (mask - 1));
         for (var i = 1; i < length; i++) { var next = file.ReadByte(); if (next < 0) throw new EndOfStreamException(); value = value << 8 | (byte)next; }
         return !id && value == (1UL << (7 * length)) - 1 ? ulong.MaxValue : value;

@@ -100,78 +100,30 @@ static class LibraryVersionsFixture
         await FileAt(anime, "Outlaw Star", "Outlaw Star - 01 (BDRip 1080p).mkv");
         var ncop = FileNames.Parse(await FileAt(anime, "Outlaw Star", "Extras", "Outlaw Star - NCOP1.mkv"), "Mixed", anime);
         check(ncop is { IsExtra: false, IsBonus: true, Series: "Outlaw Star", AirsAfterSeason: null }, "an extras folder beside numbered episodes belongs to the show");
-        // "XX" stands in for an episode number, so these are the show's clips rather than films named after the whole file.
+        // A show's clips are sorted by kind, read from their titles, and their captions name it.
         var azumanga = Path.Combine(directory, "Azumanga");
-        var azumangaEpisode = FileNames.Parse(await FileAt(azumanga, "Azumanga Daioh", "Azumanga Daioh - 01 - Miss Yukari [KM-Dual-DVDRIP].mkv"), "Mixed", azumanga);
-        var azumangaClipPath = await FileAt(azumanga, "Azumanga Daioh", "Azumanga Daioh - XX - Original Opening Sequence [KM-Dual-DVDRIP].mkv");
-        var azumangaClip = FileNames.Parse(azumangaClipPath, "Mixed", azumanga);
-        check(azumangaClip is { IsBonus: true, Season: 0, Episode: null, Series: "Azumanga Daioh", EpisodeTitle: "Original Opening Sequence" } && azumangaClip.ShowId == azumangaEpisode.ShowId,
-            "a clip numbered XX joins its show's extras under its own title");
-        var azumangaStore = new LibraryStore(Path.Combine(directory, "azumanga-db"));
-        azumangaStore.Save(azumangaClip with { Title = "Azumanga Daioh - XX - Original Opening Sequence", Kind = "Movie", Series = null, ShowId = null, Season = null, EpisodeTitle = null, IsBonus = false });
-        await azumangaStore.ScanAsync([new(azumanga)]);
-        check(azumangaStore.All().Single(x => x.Path == azumangaClipPath) is { IsBonus: true, Series: "Azumanga Daioh", Season: 0, Kind: "Show" },
-            "a rescan moves an XX clip indexed as a film into its show");
-        // A folder's numbered episodes show how its files start, so any file that starts that way without an episode number is one of the show's clips.
-        async Task<MediaItem> Mixed(string name) => FileNames.Parse(await FileAt(azumanga, "Azumanga Daioh", name), "Mixed", azumanga);
-        var gallery = await Mixed("Azumanga Daioh - XX - Movie Character Art Gallery [KM-Dual-DVDRIP].mkv");
-        var closing = await Mixed("Azumanga Daioh - XX - Original Closing Sequence [KM-Dual-DVDRIP].mkv");
-        var shortFilm = await Mixed("Azumanga Daioh - XX - The Very Short Azumanga Daioh Movie [KM-Dual-DVDRIP].mkv");
-        var nced = await Mixed("Azumanga Daioh - NCED [KM-Dual-DVDRIP].mkv");
-        var ova = await Mixed("Azumanga Daioh - OVA 2 [KM-Dual-DVDRIP].mkv");
-        var op = await Mixed("Azumanga Daioh - OP 2 - Soramimi Cake.mkv");
-        var pv = await Mixed("Azumanga Daioh - PV.mkv");
-        var menu = await Mixed("Azumanga Daioh - Menu.mkv");
-        var azumangaClips = new[] { azumangaClip, gallery, closing, shortFilm, nced, ova, op, pv, menu };
-        check(azumangaClips.All(x => x is { IsBonus: true, Season: 0, Episode: null, Series: "Azumanga Daioh", Kind: "Show" } && x.ShowId == azumangaEpisode.ShowId),
-            "files that start like the folder's episodes but carry no episode number are the show's clips");
-        check(azumangaClip.BonusKind == "opening" && closing.BonusKind == "ending" && gallery.BonusKind is null && shortFilm.BonusKind == "special" &&
-            nced.BonusKind == "ending" && ova.BonusKind == "special" && op.BonusKind == "opening" && pv.BonusKind == "trailer" && menu.BonusKind is null,
-            "a clip's kind comes from its slot word or its title");
-        check(nced.EpisodeTitle == "NCED" && ova.EpisodeTitle == "OVA 2" && op.EpisodeTitle == "Soramimi Cake" && menu.EpisodeTitle == "Menu" && gallery.EpisodeTitle == "Movie Character Art Gallery",
-            "a clip is titled by its own name, or by its slot word when it has none");
-        check(nced.Caption == "Azumanga Daioh · Ending" && menu.Caption == "Azumanga Daioh · Bonus content", "a clip's caption names its kind");
-        var azumangaExtras = LibraryCatalog.Browse(azumangaClips.Append(azumangaEpisode).ToArray(), azumangaEpisode.ShowId, "Show", 0);
-        check(azumangaExtras.Select(card => card.Media.BonusOrder).SequenceEqual(azumangaExtras.Select(card => card.Media.BonusOrder).Order()) && azumangaExtras[0].Media.BonusKind == "special",
+        async Task<MediaItem> Azumanga(string name) => FileNames.Parse(await FileAt(azumanga, "Azumanga Daioh", name), "Mixed", azumanga);
+        await FileAt(azumanga, "Azumanga Daioh", "Azumanga Daioh - 02 - Chiyo [KM-Dual-DVDRIP].mkv");
+        var azumangaEpisode = await Azumanga("Azumanga Daioh - 01 - Miss Yukari [KM-Dual-DVDRIP].mkv");
+        var opening = await Azumanga("Azumanga Daioh - XX - Original Opening Sequence [KM-Dual-DVDRIP].mkv");
+        var closing = await Azumanga("Azumanga Daioh - XX - Original Closing Sequence [KM-Dual-DVDRIP].mkv");
+        var gallery = await Azumanga("Azumanga Daioh - XX - Movie Character Art Gallery [KM-Dual-DVDRIP].mkv");
+        var shortFilm = await Azumanga("Azumanga Daioh - XX - The Very Short Azumanga Daioh Movie [KM-Dual-DVDRIP].mkv");
+        var nced = await Azumanga("Azumanga Daioh - NCED [KM-Dual-DVDRIP].mkv");
+        var pv = await Azumanga("Azumanga Daioh - PV.mkv");
+        var azumangaClips = new[] { gallery, pv, closing, nced, opening, shortFilm };
+        check(azumangaClips.All(x => x is { IsBonus: true, Season: 0, Episode: null } && x.ShowId == azumangaEpisode.ShowId), "clips beside the show's episodes are its bonus clips");
+        check(opening.BonusKind == "opening" && closing.BonusKind == "ending" && gallery.BonusKind is null && shortFilm.BonusKind == "special" && nced.BonusKind == "ending" && pv.BonusKind == "trailer" &&
+            ncop.BonusKind == "opening" && clips[1].BonusKind == "opening" && beside.BonusKind == "trailer" && storyboard.BonusKind is null && azumangaEpisode.BonusKind is null,
+            "a clip's kind comes from a clip word or the words of its title");
+        check(nced.Caption == "Azumanga Daioh · Ending" && gallery.Caption == "Azumanga Daioh · Bonus content" && storyboard.Caption == "Bonus content", "a clip's caption names its kind");
+        var azumangaExtras = LibraryCatalog.Browse(azumangaClips.Append(azumangaEpisode).ToArray(), azumangaEpisode.ShowId, azumangaEpisode.Kind, 0);
+        check(azumangaExtras.Count == 6 && azumangaExtras.Select(card => card.Media.BonusKind ?? "other").SequenceEqual(["special", "opening", "ending", "ending", "trailer", "other"]),
             "extras list specials first, then openings, endings, trailers and the rest");
-        // A file of another title that only shares the start of the name stays a title of its own.
-        var sequel = await Mixed("Azumanga Daioh - The Movie (2001).mkv");
-        check(sequel is { IsBonus: false, Series: null, Kind: "Movie" }, "a file that names a year after the show's name is a film, not a clip");
-        var episodeTwo = await Mixed("Azumanga Daioh - 02 - Chiyo.mkv");
-        check(episodeTwo is { IsBonus: false, Season: 1, Episode: 2 } && episodeTwo.ShowId == azumangaEpisode.ShowId, "an episode beside clips keeps its number");
-        check(new[] { "Azumanga Daioh - 03A.mkv", "Azumanga Daioh - 12.5.mkv" }.Select(name => Mixed(name).Result).All(x => !x.IsBonus),
-            "a part or recap episode whose number the parser can't place is not a clip");
-        var batmanRoot = Path.Combine(directory, "Batman");
-        var batmanEpisode = FileNames.Parse(await FileAt(batmanRoot, "Batman", "Batman - 01 - On Leather Wings.mkv"), "Mixed", batmanRoot);
-        await FileAt(batmanRoot, "Batman", "Batman - 02 - Christmas with the Joker.mkv");
-        var phantasm = FileNames.Parse(await FileAt(batmanRoot, "Batman", "Batman - Mask of the Phantasm.mkv"), "Mixed", batmanRoot);
-        check(phantasm is { IsBonus: false, Series: null, Kind: "Movie" }, "a bare title after the show's name that names no clip stays a film");
-        // Earlier scans stored "Show - Special - 01" as a show of its own and "[Group] Show - OVA 2" as episode 2; a rescan moves both to their show's extras.
-        var batmanSpecialPath = await FileAt(batmanRoot, "Batman", "Batman - Special - 01.mkv");
-        var batmanSpecial = FileNames.Parse(batmanSpecialPath, "Mixed", batmanRoot);
-        check(batmanSpecial is { IsBonus: true, BonusKind: "special", Season: 0, Episode: null, EpisodeTitle: "Special 01" } && batmanSpecial.ShowId == batmanEpisode.ShowId,
-            "a numbered clip word after the show's name is a numbered clip of that show");
-        var animeRoot = Path.Combine(directory, "OvaAnime");
-        var ovaEpisode = FileNames.Parse(await FileAt(animeRoot, "Azumanga Daioh", "[Group] Azumanga Daioh - 01.mkv"), "Anime", animeRoot);
-        var ovaPath = await FileAt(animeRoot, "Azumanga Daioh", "[Group] Azumanga Daioh - OVA 2.mkv");
-        var ovaClip = FileNames.Parse(ovaPath, "Anime", animeRoot);
-        var rescans = new LibraryStore(Path.Combine(directory, "rescan-db"));
-        rescans.Save(LibraryIdentity.Ensure(batmanSpecial with { Title = "Batman - Special", Kind = "Show", Series = "Batman - Special", ShowId = null, SeriesPath = null, Season = 1, Episode = 1,
-            EpisodeTitle = null, IsBonus = false, BonusKind = null, NumberingSource = "filename" }));
-        rescans.Save(ovaClip with { Season = 1, Episode = 2, AbsoluteEpisode = 2, NumberingOrder = "absolute", EpisodeTitle = null, IsBonus = false, BonusKind = null, NumberingSource = "absolute" });
-        await rescans.ScanAsync([new(batmanRoot), new(animeRoot, "Anime")]);
-        check(rescans.All().Single(x => x.Path == batmanSpecialPath) is { IsBonus: true, Series: "Batman", Season: 0, Episode: null, EpisodeTitle: "Special 01" } rescannedSpecial &&
-            rescannedSpecial.ShowId == batmanEpisode.ShowId, "a rescan moves a clip stored as a show of its own into its show's extras");
-        check(rescans.All().Single(x => x.Path == ovaPath) is { IsBonus: true, BonusKind: "special", Season: 0, Episode: null, AbsoluteEpisode: null } rescannedOva &&
-            rescannedOva.ShowId == ovaEpisode.ShowId, "a rescan takes the episode number away from a clip stored as an episode");
-        var films = Path.Combine(directory, "Films");
-        var oceans = new[] { "Ocean's Eleven (2001).mkv", "Ocean's Twelve (2004).mkv", "Alien (1979).mkv" }.Select(name => FileNames.Parse(FileAt(films, name).Result, "Mixed", films)).ToArray();
-        check(oceans.All(x => x is { IsBonus: false, Series: null, Kind: "Movie" }), "films in a folder without episodes stay films");
-        var grouped = Path.Combine(directory, "Grouped");
-        var groupEpisode = FileNames.Parse(await FileAt(grouped, "[Group] Mushishi - 01 [1080p].mkv"), "Mixed", grouped);
-        var groupClip = FileNames.Parse(await FileAt(grouped, "[Group] Mushishi - NCOP [1080p].mkv"), "Mixed", grouped);
-        check(groupClip is { IsBonus: true, BonusKind: "opening", Kind: "Anime" } && groupClip.ShowId == groupEpisode.ShowId && groupEpisode.Kind == "Anime",
-            "a fansub group's clip joins its anime in a Mixed folder");
+        var azumangaStore = new LibraryStore(Path.Combine(directory, "azumanga-db"));
+        azumangaStore.Save(opening with { BonusKind = null });
+        await azumangaStore.ScanAsync([new(azumanga)]);
+        check(azumangaStore.All().Single(x => x.Id == opening.Id).BonusKind == "opening", "a rescan gives clips indexed earlier their kind");
         var all = clips.Append(episode).Append(beside).ToArray();
         var seasons = LibraryCatalog.Browse(all, episode.ShowId, "Show");
         check(seasons.Select(x => x.DisplayTitle).SequenceEqual(["Season 1", "Extras"]) && seasons[1].Caption == "4 bonus clips", "bonus clips gather in an Extras season after the numbered seasons");

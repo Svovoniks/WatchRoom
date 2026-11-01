@@ -25,6 +25,8 @@ public record MediaItem(string Id, string Path, string Title, string Kind, int? 
     // A music track's performer and length, read from its tags; its album is Series and its disc and track are Season and Episode.
     // FileWriteTime lets a rescan skip reading the tags of a track whose file has not changed.
     string? Artist = null, int? DurationSeconds = null, long? FileWriteTime = null,
+    // A video's length in minutes as its file header records it; 0 once read and found absent. It wins over provider runtimes.
+    int? FileRuntimeMinutes = null,
     // What a bonus clip is: "special", "opening", "ending" or "trailer"; null for any other clip.
     string? BonusKind = null)
 {
