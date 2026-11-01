@@ -13,7 +13,7 @@ static class SharedLibraryFixture
         room.Apply("host", new("catalog-permission", Number: 1), 1000, out _);
         check(!room.Apply("pending", new("catalog-browse"), 1000, out _), "unapproved guest cannot acquire library");
         check(room.Apply("a", new("catalog-browse"), 1000, out _) && !room.Apply("b", new("catalog-browse"), 1000, out _), "exactly one guest acquires browsing lock");
-        foreach (var command in new[] { "catalog-follow", "catalog-artwork", "catalog-watch" })
+        foreach (var command in new[] { "catalog-follow", "catalog-pointer", "catalog-artwork", "catalog-watch" })
             check(room.Apply("a", new(command), 1000, out _) && !room.Apply("b", new(command), 1000, out _), "only the browsing lock owner can " + command);
         var view = new LibraryBrowseView(new(), 8, .5, "hover", "selected");
         room.DescribeLibraryView(view, 1000); room.Apply("a", new("catalog-browse"), 1000, out _);

@@ -4,6 +4,15 @@ public sealed partial class RoomClient
     private bool HandleLibraryInteraction(string sender, WireMessage message)
     {
         if (message.Type == "session-artwork") { SendSessionArtwork(sender, message); return true; }
+        if (message.Type == "catalog-pointer")
+        {
+            // Only the host draws the pointer, so it stays out of the room state the other guests receive. No data hides it.
+            LibraryPointer? pointer = null;
+            try { pointer = message.Data is null ? null : Wire.Read<LibraryPointer>(message.Data); }
+            catch (System.Text.Json.JsonException) { return true; }
+            if (pointer is null || pointer.Valid()) Message?.Invoke(new("catalog-pointer", Sender: sender, Data: pointer is null ? null : Wire.Serialize(pointer)));
+            return true;
+        }
         if (message.Type is not ("catalog-follow" or "catalog-artwork" or "catalog-watch")) return false;
         void Fail(Exception ex, string fallback)
         {

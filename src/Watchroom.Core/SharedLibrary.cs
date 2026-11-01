@@ -6,6 +6,11 @@ public record SharedLibraryEntry(string Id, string Title, string Caption, string
     string? HomeSection = null, long PositionMs = 0);
 public record LibraryBrowsePage(SharedLibraryEntry[] Entries, int Total, int Page, string Location);
 public record LibraryBrowseView(LibraryBrowseRequest Browse, int LoadedCount, double ScrollFraction = 0, string? HoveredId = null, string? SelectedId = null);
+// Where the browsing guest's mouse is: X and Y within the library grid, and CardX and CardY within the card it is over, all from 0 to 1.
+public record LibraryPointer(double X, double Y, string? CardId = null, double CardX = 0, double CardY = 0)
+{
+    public bool Valid() => CardId?.Length is null or (> 0 and <= 128) && new[] { X, Y, CardX, CardY }.All(value => double.IsFinite(value) && value is >= 0 and <= 1);
+}
 // FullHd asks for the large copy; older hosts ignore it and send the 600 px copy.
 public record LibraryArtworkRequest(string Id, string Level, int? Season = null, bool FullHd = false);
 // Paced chunks belong to a full HD transfer: the guest acknowledges each one before the host sends more.

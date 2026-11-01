@@ -189,6 +189,7 @@ public partial class MainWindow
     private void LibraryScrollChanged(object sender, ScrollChangedEventArgs e)
     {
         if (GuestLibrary) { LoadMoreHostTitles(); ScheduleGuestView(); }
+        else if (mirroredPointer is not null) PlaceGuestPointer();
     }
     private void LoadMoreHostTitles()
     {
@@ -203,7 +204,7 @@ public partial class MainWindow
     private void ReleaseHostLibrary()
     {
         guestSearchCancellation?.Cancel();
-        ClearHostArtworkRequests(); guestHoveredId = null;
+        ClearHostArtworkRequests(); guestHoveredId = null; guestPointer = sentGuestPointer = null; guestPointerDelay.Stop();
         guestHadLibraryLease = false;
         if (GuestLibrary && (OwnsLibrary || guestBrowsePending)) TryLibraryCommand(new("catalog-release"));
         guestLibraryNotice = null; guestBrowsePending = false; ++guestBrowseRequest;

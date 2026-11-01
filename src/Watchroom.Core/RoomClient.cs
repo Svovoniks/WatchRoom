@@ -202,7 +202,7 @@ public sealed partial class RoomClient : IAsyncDisposable
     {
         if (!IsConnected) throw new IOException("Room connection is closed. Rejoin the room to reconnect.");
         if (message.Type == "remove" && !DiscoveryOnline) throw new IOException("Reconnect to the room service before revoking saved guest access.");
-        if (message.Type is "tracks" or "catalog-follow" or "catalog-artwork" or "catalog-watch" or "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "last-session" or "session-artwork" or "artwork-ack" or "queue" or "playback" or "ready" or "buffering" or "remove")
+        if (message.Type is "tracks" or "catalog-follow" or "catalog-pointer" or "catalog-artwork" or "catalog-watch" or "catalog-view" or "catalog-browse" or "catalog-release" or "catalog-renew" or "catalog-permission" or "media" or "controls" or "room-name" or "last-session" or "session-artwork" or "artwork-ack" or "queue" or "playback" or "ready" or "buffering" or "remove")
         {
             if (Identity?.Host != true && !directConnected.Task.IsCompletedSuccessfully)
                 throw new IOException("Waiting for the host's direct control connection. All participants need the updated app.");

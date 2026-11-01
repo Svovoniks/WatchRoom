@@ -60,7 +60,9 @@ public record AdmittedGuest(string Id, string Name);
 public record RoomSnapshot(Participant[] People, SharedMedia? Media, PlaybackState? Playback, bool SharedControls, string[]? Queue = null, AdmittedGuest[]? AdmittedGuests = null, string? Name = null,
     bool LibraryBrowsing = false, LibraryBrowseActivity? LibraryActivity = null, RoomTracks? Tracks = null, RoomSession? LastSession = null,
     // Null from hosts without voice chat; otherwise everyone whose app supports voice, in or out of it.
-    VoiceMember[]? Voice = null);
+    VoiceMember[]? Voice = null,
+    // True from hosts that show the browsing guest's mouse; guests send catalog-pointer only to them.
+    bool GuestPointers = false);
 
 public static class Wire
 {

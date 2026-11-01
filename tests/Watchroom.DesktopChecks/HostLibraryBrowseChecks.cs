@@ -116,6 +116,15 @@ static class HostLibraryBrowseChecks
             Call("RefreshSharedLibrary");
             var mirror = Field<LibraryCardCollection>("mirroredCards");
             Check(ReferenceEquals(grid.ItemsSource, mirror) && mirror.Count == 8 && mirror[2].IsGuestHovered, "host follows the exact loaded guest entries and highlights guest hover");
+            content.UpdateLayout();
+            var pointer = Control<FrameworkElement>("GuestPointer");
+            Call("ReceiveGuestPointer", new WireMessage("catalog-pointer", Sender: "other", Data: Wire.Serialize(new LibraryPointer(0.5, 0.5))));
+            Check(pointer.Visibility != Visibility.Visible, "only the browsing guest's pointer is drawn");
+            Call("ReceiveGuestPointer", new WireMessage("catalog-pointer", Sender: "guest", Data: Wire.Serialize(new LibraryPointer(0.5, 0.5, movies[2].Id, 0.25, 0.75))));
+            Check(pointer.Visibility == Visibility.Visible, "host shows the browsing guest's mouse as a circle");
+            Call("ReceiveGuestPointer", new WireMessage("catalog-pointer", Sender: "guest"));
+            Check(pointer.Visibility != Visibility.Visible, "the circle hides when the guest's mouse leaves the library");
+            Check(new LibraryPointer(0.5, 0.5).Valid() && !new LibraryPointer(1.5, 0).Valid() && !new LibraryPointer(0, 0, "").Valid(), "pointer positions are bounded");
             Call("DetachGuestMirror");
             Check(Control<Button>("BrowseWithGuestButton").Visibility == Visibility.Visible && Control<Button>("BrowseWithGuestButton").Content.ToString() == "Browse with Guest",
                 "independent host interaction exposes the named follow button");

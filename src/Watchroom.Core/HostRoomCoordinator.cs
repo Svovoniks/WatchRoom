@@ -16,7 +16,7 @@ internal sealed class HostRoomCoordinator(string host)
     private bool resumeWhenReady;
     public AdmittedGuest[] AdmittedGuests { get; set; } = [];
     public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name, LibraryBrowsing, LibraryActivity, Tracks, LastSession,
-        voice.Values.Where(v => people.ContainsKey(v.Peer)).OrderBy(v => v.Slot).ToArray());
+        voice.Values.Where(v => people.ContainsKey(v.Peer)).OrderBy(v => v.Slot).ToArray(), GuestPointers: true);
     // Everyone whose app supports voice reports its state once connected; each keeps a small slot that
     // labels its relayed audio frames, so listeners can tell speakers apart without per-frame names.
     private readonly Dictionary<string, VoiceMember> voice = [];
@@ -101,6 +101,7 @@ internal sealed class HostRoomCoordinator(string host)
             case "catalog-artwork" when LibraryActivity?.Peer == sender && LibraryBrowsing:
             case "catalog-watch" when LibraryActivity?.Peer == sender && LibraryBrowsing:
             case "catalog-view" when LibraryActivity?.Peer == sender && LibraryBrowsing:
+            case "catalog-pointer" when LibraryActivity?.Peer == sender && LibraryBrowsing:
                 return true;
             case "catalog-browse" when sender != host && LibraryBrowsing:
                 if (LibraryActivity is not null && LibraryActivity.Peer != sender) return false;

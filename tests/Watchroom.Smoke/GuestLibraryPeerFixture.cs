@@ -69,6 +69,12 @@ static class GuestLibraryPeerFixture
         var directView = new LibraryBrowseView(new(), 1, .25, "direct-video", "direct-video");
         guest.Send(new("catalog-follow", Data: Wire.Serialize(directView)));
         await AwaitDirect(() => host.Snapshot?.LibraryActivity?.View == directView, "guest scroll, hover, and selected video reach the host mirror");
+        LibraryPointer? hostPointer = null;
+        host.Message += message => { if (message.Type == "catalog-pointer" && message.Sender == guest.Identity.Peer) hostPointer = Wire.Read<LibraryPointer>(message.Data!); };
+        await AwaitDirect(() => guest.Snapshot?.GuestPointers == true, "the host tells guests it draws their pointer");
+        var directPointer = new LibraryPointer(.4, .6, "direct-video", .5, .25);
+        guest.Send(new("catalog-pointer", Data: Wire.Serialize(directPointer)));
+        await AwaitDirect(() => hostPointer == directPointer && host.Snapshot?.LibraryActivity?.View == directView, "the browsing guest's mouse reaches only the host, outside the room state");
         guest.Send(new("catalog-artwork", Number: 1003, Data: Wire.Serialize(new LibraryArtworkRequest("direct-video", "movie"))));
         await AwaitDirect(() => artworkParts.Values.Sum(part => part.Length) == artworkBytes.Length, "high-resolution artwork crosses the peer channel in bounded chunks");
         check(string.Concat(artworkParts.OrderBy(pair => pair.Key).Select(pair => pair.Value)) == artworkBytes, "artwork chunks reconstruct the original bytes without loss");
