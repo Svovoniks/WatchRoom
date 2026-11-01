@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     private readonly EpisodeArtwork episodeArtwork;
     private readonly HashSet<string> episodeArtworkRequests = [];
     private bool libraryViewDirty;
+    private double? libraryOffsetAfterFilter;
     private bool libraryLoaded;
     private string? detailPosterPath;
     private int detailPosterGeneration;
@@ -581,6 +582,7 @@ public partial class MainWindow : Window
         if (GuestLibrary) { if (!backgroundUpdate) await FilterHostLibraryAsync(debounce); return; }
         if (FollowingGuest) { if (!applyingGuestMirror) ApplyGuestMirror(); return; }
         if (!libraryLoaded) return;
+        var restoreOffset = libraryOffsetAfterFilter; libraryOffsetAfterFilter = null;
         librarySearchCancellation?.Cancel();
         using var request = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         librarySearchCancellation = request;
@@ -692,6 +694,7 @@ public partial class MainWindow : Window
             ResultCount.Text = $"{cards.Count} {(cards.Count == 1 ? "item" : "items")}";
             NoResults.Visibility = items.Count > 0 && cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             ShowFindTitle(query, cards.Count == 0 && series is null);
+            if (restoreOffset is { } offset) _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => LibraryScroll.ScrollToVerticalOffset(offset));
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex)

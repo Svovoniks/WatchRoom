@@ -119,12 +119,22 @@ static class HostLibraryBrowseChecks
             typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryActivity = snapshot.LibraryActivity! with { View = guestView } });
             Call("RefreshSharedLibrary");
             var mirror = Field<LibraryCardCollection>("mirroredCards");
-            Check(ReferenceEquals(grid.ItemsSource, mirror) && mirror.Count == 8 && mirror[2].IsGuestHovered, "host follows the exact loaded guest entries and highlights guest hover");
-            Call("DetachGuestMirror");
-            Check(Control<Button>("BrowseWithGuestButton").Visibility == Visibility.Visible && Control<Button>("BrowseWithGuestButton").Content.ToString() == "Browse with Guest",
-                "independent host interaction exposes the named follow button");
+            var follow = Control<Button>("BrowseWithGuestButton");
+            Check(!ReferenceEquals(grid.ItemsSource, mirror) && follow.Visibility == Visibility.Visible && follow.Content.ToString() == "Follow Guest",
+                "the host browses their own library while a guest browses, with a named follow button");
+            typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryActivity = snapshot.LibraryActivity! with { View = guestView with { ScrollFraction = 0.5 } } });
+            Call("RefreshSharedLibrary");
+            Check(!ReferenceEquals(grid.ItemsSource, mirror) && follow.Content.ToString() == "Follow Guest", "guest scrolling does not move a host who is not following");
             Call("BrowseWithGuest", window, new RoutedEventArgs());
-            Check(Control<Button>("BrowseWithGuestButton").Visibility == Visibility.Collapsed && ReferenceEquals(grid.ItemsSource, mirror), "follow button returns host to the current guest location");
+            Check(ReferenceEquals(grid.ItemsSource, mirror) && mirror.Count == 8 && mirror[2].IsGuestHovered && follow.Content.ToString() == "Stop following",
+                "following shows the exact loaded guest entries and highlights guest hover");
+            Call("HostLibraryScrollInput", grid, null);
+            Check(!ReferenceEquals(grid.ItemsSource, mirror) && follow.Content.ToString() == "Follow Guest", "scrolling stops following and returns to the host's own library");
+            Call("BrowseWithGuest", window, new RoutedEventArgs());
+            Call("BrowseWithGuest", window, new RoutedEventArgs());
+            Check(!ReferenceEquals(grid.ItemsSource, mirror) && follow.Content.ToString() == "Follow Guest", "Stop following returns to the host's own library");
+            Call("BrowseWithGuest", window, new RoutedEventArgs());
+            Check(ReferenceEquals(grid.ItemsSource, mirror), "follow button returns host to the current guest location");
             typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryActivity = snapshot.LibraryActivity! with { View = guestView with { SelectedId = movies[0].Id } } });
             Call("RefreshSharedLibrary");
             Check(Control<FrameworkElement>("Details").Visibility == Visibility.Visible && Field<MediaItem>("selected").Id == movies[0].Id, "following host opens the same video details as the guest");
