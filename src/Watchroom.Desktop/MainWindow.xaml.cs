@@ -1285,6 +1285,25 @@ public partial class MainWindow : Window
     {
         if (((Image)sender).DataContext is LibraryCardView view) { await view.LoadPosterAsync(); await ImproveEpisodeArtwork(view); }
     }
+    // The card's title tooltip only appears when the caption is cut short and the card has artwork;
+    // otherwise the full title is already on screen and the tooltip would just cover it.
+    private void CardToolTipOpening(object sender, ToolTipEventArgs e)
+    {
+        if (sender is not FrameworkElement card) return;
+        var artwork = card.FindName("CardArtwork") as Image;
+        if (card.FindName("CardTitle") is TextBlock title && (artwork?.Source is null || !IsTrimmed(title))) e.Handled = true;
+    }
+    private static bool IsTrimmed(TextBlock text)
+    {
+        if (string.IsNullOrEmpty(text.Text) || text.ActualWidth <= 0) return false;
+        var formatted = new FormattedText(text.Text, System.Globalization.CultureInfo.CurrentUICulture, text.FlowDirection,
+            new Typeface(text.FontFamily, text.FontStyle, text.FontWeight, text.FontStretch), text.FontSize, Brushes.Black,
+            VisualTreeHelper.GetDpi(text).PixelsPerDip);
+        if (text.TextWrapping == TextWrapping.NoWrap) return formatted.Width > text.ActualWidth + 0.5;
+        formatted.MaxTextWidth = text.ActualWidth;
+        if (!double.IsNaN(text.LineHeight)) formatted.LineHeight = text.LineHeight;
+        return formatted.Height > text.ActualHeight + 0.5;
+    }
     private async void CardArtworkUpdated(object sender, System.Windows.Data.DataTransferEventArgs e)
     {
         if (((Image)sender).DataContext is LibraryCardView view) await view.LoadPosterAsync();

@@ -117,7 +117,7 @@ public static class LibraryCatalog
             }).ToList();
         var seasonItems = episodes.Where(x => (x.Season ?? -1) == season || SeasonExtra(x, season) || displaySpecials && season > 0 && x.Season == 0 && (x.AirsBeforeSeason == season || x.AirsAfterSeason == season)).ToArray();
         return PreferredFiles(seasonItems, preferVersion).OrderBy(x => x.Season == 0 && season > 0 ? x.AirsBeforeSeason == season ? (x.AirsBeforeEpisode ?? 1) - 0.5 : double.MaxValue : x.Episode ?? int.MaxValue)
-            .ThenBy(x => x.Path).Select(x =>
+            .ThenBy(x => x.IsBonus ? x.BonusOrder : -1).ThenBy(x => x.Path).Select(x =>
             {
                 var versions = Versions(seasonItems, x);
                 var version = versions.Length > 1 ? VersionLabel(x, versions) : null;

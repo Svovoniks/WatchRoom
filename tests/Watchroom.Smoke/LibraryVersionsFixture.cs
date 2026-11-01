@@ -72,7 +72,7 @@ static class LibraryVersionsFixture
         var clips = clipPaths.Select(path => FileNames.Parse(path, "Mixed", desktop)).ToArray();
         check(clips.All(x => x.IsBonus && !x.IsExtra && x.Season == 0 && x.Episode is null && x.EpisodeEnd is null && x.NumberingSource is null && x.ShowId == episode.ShowId && x.Series == episode.Series),
             "extras under a season folder become the show's bonus clips, numbered or not");
-        check(clips[0].EpisodeDisplayTitle == "NCED" && clips[2].EpisodeDisplayTitle == "S01E12 NCED" && clips[2].Caption.Contains("Bonus content"), "a bonus clip is titled by its file name without the show's name");
+        check(clips[0].EpisodeDisplayTitle == "NCED" && clips[2].EpisodeDisplayTitle == "S01E12 NCED" && clips[2].Caption.EndsWith("Ending"), "a bonus clip is titled by its file name without the show's name");
         check(episode.Series == "Komi Can't Communicate" && episode.Title == "Komi Can't Communicate", "bracketed release tags and batch notes drop out of a show folder's title");
         check(FileNames.StripReleaseTags("Doctor Who (2005)") == "Doctor Who (2005)" && FileNames.StripReleaseTags("[Group] Show Name (BD 1080p)") == "Show Name" && FileNames.StripReleaseTags("[Only Tags]") == "[Only Tags]",
             "release tag stripping keeps years, plain names, and names made only of tags");
@@ -100,6 +100,30 @@ static class LibraryVersionsFixture
         await FileAt(anime, "Outlaw Star", "Outlaw Star - 01 (BDRip 1080p).mkv");
         var ncop = FileNames.Parse(await FileAt(anime, "Outlaw Star", "Extras", "Outlaw Star - NCOP1.mkv"), "Mixed", anime);
         check(ncop is { IsExtra: false, IsBonus: true, Series: "Outlaw Star", AirsAfterSeason: null }, "an extras folder beside numbered episodes belongs to the show");
+        // A show's clips are sorted by kind, read from their titles, and their captions name it.
+        var azumanga = Path.Combine(directory, "Azumanga");
+        async Task<MediaItem> Azumanga(string name) => FileNames.Parse(await FileAt(azumanga, "Azumanga Daioh", name), "Mixed", azumanga);
+        await FileAt(azumanga, "Azumanga Daioh", "Azumanga Daioh - 02 - Chiyo [KM-Dual-DVDRIP].mkv");
+        var azumangaEpisode = await Azumanga("Azumanga Daioh - 01 - Miss Yukari [KM-Dual-DVDRIP].mkv");
+        var opening = await Azumanga("Azumanga Daioh - XX - Original Opening Sequence [KM-Dual-DVDRIP].mkv");
+        var closing = await Azumanga("Azumanga Daioh - XX - Original Closing Sequence [KM-Dual-DVDRIP].mkv");
+        var gallery = await Azumanga("Azumanga Daioh - XX - Movie Character Art Gallery [KM-Dual-DVDRIP].mkv");
+        var shortFilm = await Azumanga("Azumanga Daioh - XX - The Very Short Azumanga Daioh Movie [KM-Dual-DVDRIP].mkv");
+        var nced = await Azumanga("Azumanga Daioh - NCED [KM-Dual-DVDRIP].mkv");
+        var pv = await Azumanga("Azumanga Daioh - PV.mkv");
+        var azumangaClips = new[] { gallery, pv, closing, nced, opening, shortFilm };
+        check(azumangaClips.All(x => x is { IsBonus: true, Season: 0, Episode: null } && x.ShowId == azumangaEpisode.ShowId), "clips beside the show's episodes are its bonus clips");
+        check(opening.BonusKind == "opening" && closing.BonusKind == "ending" && gallery.BonusKind is null && shortFilm.BonusKind == "special" && nced.BonusKind == "ending" && pv.BonusKind == "trailer" &&
+            ncop.BonusKind == "opening" && clips[1].BonusKind == "opening" && beside.BonusKind == "trailer" && storyboard.BonusKind is null && azumangaEpisode.BonusKind is null,
+            "a clip's kind comes from a clip word or the words of its title");
+        check(nced.Caption == "Azumanga Daioh · Ending" && gallery.Caption == "Azumanga Daioh · Bonus content" && storyboard.Caption == "Bonus content", "a clip's caption names its kind");
+        var azumangaExtras = LibraryCatalog.Browse(azumangaClips.Append(azumangaEpisode).ToArray(), azumangaEpisode.ShowId, azumangaEpisode.Kind, 0);
+        check(azumangaExtras.Count == 6 && azumangaExtras.Select(card => card.Media.BonusKind ?? "other").SequenceEqual(["special", "opening", "ending", "ending", "trailer", "other"]),
+            "extras list specials first, then openings, endings, trailers and the rest");
+        var azumangaStore = new LibraryStore(Path.Combine(directory, "azumanga-db"));
+        azumangaStore.Save(opening with { BonusKind = null });
+        await azumangaStore.ScanAsync([new(azumanga)]);
+        check(azumangaStore.All().Single(x => x.Id == opening.Id).BonusKind == "opening", "a rescan gives clips indexed earlier their kind");
         var all = clips.Append(episode).Append(beside).ToArray();
         var seasons = LibraryCatalog.Browse(all, episode.ShowId, "Show");
         check(seasons.Select(x => x.DisplayTitle).SequenceEqual(["Season 1", "Extras"]) && seasons[1].Caption == "4 bonus clips", "bonus clips gather in an Extras season after the numbered seasons");
