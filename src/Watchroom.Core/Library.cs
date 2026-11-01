@@ -438,13 +438,13 @@ public sealed partial class LibraryStore
     private readonly object writeGate = new();
     public void Save(MediaItem item)
     {
-        item = LibraryIdentity.Ensure(TmdbRetention.TrackLegacy(item));
+        item = LibraryRuntimes.Apply(LibraryIdentity.Ensure(TmdbRetention.TrackLegacy(item)));
         lock (writeGate) Write(item);
         MediaSaved?.Invoke(item);
     }
-    // Adds a file-derived length to a movie that has none. The entry is re-read under the write
+    // Records the length read from a video's file header. The entry is re-read under the write
     // lock, so a metadata save that lands first is kept rather than replaced with an older copy.
-    public MediaItem? FillMovieRuntime(string id, int minutes)
+    public MediaItem? FillFileRuntime(string id, int minutes)
     {
         MediaItem updated;
         lock (writeGate)
@@ -455,8 +455,8 @@ public sealed partial class LibraryStore
                 read.CommandText = "SELECT json FROM media WHERE id=$id"; read.Parameters.AddWithValue("$id", id);
                 if (read.ExecuteScalar() is not string json) return null;
                 var current = Wire.Read<MediaItem>(json);
-                if (!LibraryRuntimes.NeedsRuntime(current) || minutes <= 0) return null;
-                updated = current with { RuntimeMinutes = minutes };
+                if (!LibraryRuntimes.NeedsRuntime(current)) return null;
+                updated = LibraryRuntimes.Apply(current with { FileRuntimeMinutes = Math.Max(0, minutes) });
             }
             Write(updated);
         }
@@ -672,7 +672,9 @@ public sealed partial class LibraryStore
                     {
                         var previous = ByIds([parsed.Id]).FirstOrDefault() ?? ByPath(parsed.Path);
                         item = music ? previous is null ? parsed : MusicFiles.Merge(parsed, previous)
-                            : previous is null ? MergeScanned(parsed, null) : MergeScanned(parsed with { Id = previous.Id }, previous) with { FileSize = parsed.FileSize };
+                            : previous is null ? MergeScanned(parsed, null) : MergeScanned(parsed with { Id = previous.Id }, previous) with { FileSize = parsed.FileSize,
+                                // A replaced file has its length read again.
+                                FileRuntimeMinutes = previous.FileSize == parsed.FileSize ? previous.FileRuntimeMinutes : null };
                         // Records compare collections by reference, so compare the stored form to skip unchanged files.
                         if (previous is null || Wire.Serialize(LibraryIdentity.Ensure(TmdbRetention.TrackLegacy(item))) != Wire.Serialize(previous)) { Save(item); changes++; }
                         if (previous is null) found.Add(item);

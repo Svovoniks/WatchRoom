@@ -1,19 +1,21 @@
 namespace Watchroom.Core;
 
-// Movies often have no runtime until (or unless) online metadata supplies one, which leaves
-// Home's length filters with nothing to match. The file header already records the length.
+// A video's length comes from its own file header. Provider runtimes can belong to the wrong title or edition,
+// and a matched show can list its episodes at a tenth of their real length; the file is what plays.
 public static class LibraryRuntimes
 {
-    public static bool NeedsRuntime(MediaItem item) => item.Series is null && item.ShowId is null && !item.IsExtra && !item.IsVirtual &&
-        item.Available && item.RuntimeMinutes is not > 0 && !LibraryIdentity.Locked(item, "RuntimeMinutes");
+    public static bool NeedsRuntime(MediaItem item) => !item.IsMusic && !item.IsVirtual && item.Available && item.FileRuntimeMinutes is null;
+    // Only a length the user set themselves outranks the file's; a sidecar .nfo repeats provider data.
+    public static MediaItem Apply(MediaItem item) => item.FileRuntimeMinutes is > 0 and var minutes && item.RuntimeMinutes != minutes &&
+        !item.MetadataLocked && !(item.LockedFields ?? []).Contains("RuntimeMinutes", StringComparer.OrdinalIgnoreCase) ? item with { RuntimeMinutes = minutes } : item;
     public static int Backfill(LibraryStore store, IEnumerable<MediaItem> items, CancellationToken ct = default)
     {
         var filled = 0;
         foreach (var item in items.Where(NeedsRuntime))
         {
             ct.ThrowIfCancellationRequested();
-            if (MediaDuration.Minutes(item.Path, ct) is not { } minutes || minutes < 1) continue;
-            if (store.FillMovieRuntime(item.Id, (int)Math.Round(minutes)) is not null) filled++;
+            var minutes = MediaDuration.Minutes(item.Path, ct) is { } length ? (int)Math.Round(length) : 0;
+            if (store.FillFileRuntime(item.Id, minutes) is not null && minutes > 0) filled++;
         }
         return filled;
     }

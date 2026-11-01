@@ -24,7 +24,9 @@ public record MediaItem(string Id, string Path, string Title, string Kind, int? 
     string? ExtraOf = null,
     // A music track's performer and length, read from its tags; its album is Series and its disc and track are Season and Episode.
     // FileWriteTime lets a rescan skip reading the tags of a track whose file has not changed.
-    string? Artist = null, int? DurationSeconds = null, long? FileWriteTime = null)
+    string? Artist = null, int? DurationSeconds = null, long? FileWriteTime = null,
+    // A video's length in minutes as its file header records it; 0 once read and found absent. It wins over provider runtimes.
+    int? FileRuntimeMinutes = null)
 {
     public bool IsMusic => Kind == MusicFiles.Kind;
     public string Caption => IsMusic ? string.Join(" · ", new[] { Artist, Series, DurationSeconds is > 0 ? MusicFiles.Duration(DurationSeconds.Value) : null }.Where(x => !string.IsNullOrWhiteSpace(x))) : IsBonus ? Series is null ? "Bonus content" : $"{Series} · Bonus content" : Series is not null ? $"{Series} · {(Season is null ? "Season unknown" : $"S{Season:00}")} {(Episode is null ? "Episode unknown" : $"E{Episode:00}" + (EpisodeEnd > Episode ? $"–E{EpisodeEnd:00}" : ""))}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";

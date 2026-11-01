@@ -38,23 +38,38 @@ static class MetadataEvidenceFixture
         var known = await FileItem("Known Film.mp4", "Known Film", 90) with { RuntimeMinutes = 95 };
         var locked = await FileItem("Locked Film.mp4", "Locked Film", 70) with { LockedFields = ["RuntimeMinutes"] };
         var episodeFile = await FileItem("Some Show S01E01.mkv", "Some Show", 24) with { Kind = "Show", Series = "Some Show", Season = 1, Episode = 1 };
-        foreach (var entry in new[] { longFilm, known, locked, episodeFile }) runtimeStore.Save(entry);
+        var unreadable = new MediaItem("unreadable", Path.Combine(directory, "Unreadable Show S01E02.ts"), "Unreadable Show", "Show", Series: "Unreadable Show", Season: 1, Episode: 2, RuntimeMinutes: 45);
+        await File.WriteAllBytesAsync(unreadable.Path, new byte[64]);
+        foreach (var entry in new[] { longFilm, known, locked, episodeFile, unreadable }) runtimeStore.Save(entry);
         var filledRuntimes = LibraryRuntimes.Backfill(runtimeStore, runtimeStore.All());
         var runtimes = runtimeStore.All().ToDictionary(entry => entry.Id);
-        check(filledRuntimes == 1 && runtimes[longFilm.Id].RuntimeMinutes == 151 && runtimes[known.Id].RuntimeMinutes == 95 &&
-            runtimes[locked.Id].RuntimeMinutes is null && runtimes[episodeFile.Id].RuntimeMinutes is null,
-            "missing movie lengths are read from the file, without replacing known, locked, or episode runtimes");
+        check(filledRuntimes == 4 && runtimes[longFilm.Id].RuntimeMinutes == 151 && runtimes[known.Id].RuntimeMinutes == 90 &&
+            runtimes[locked.Id] is { RuntimeMinutes: null, FileRuntimeMinutes: 70 } && runtimes[episodeFile.Id].RuntimeMinutes == 24 &&
+            runtimes[unreadable.Id] is { RuntimeMinutes: 45, FileRuntimeMinutes: 0 } && !runtimeStore.All().Any(LibraryRuntimes.NeedsRuntime),
+            "video lengths are read from the file and replace provider runtimes, except a locked length or a file without one");
+        runtimeStore.Save(runtimes[episodeFile.Id] with { RuntimeMinutes = 5 });
+        check(runtimeStore.All().Single(entry => entry.Id == episodeFile.Id).RuntimeMinutes == 24,
+            "a provider runtime saved later, such as a mismatched show's five-minute episodes, does not replace the file's length");
         check(LibraryHome.Draw(LibraryHome.Overview(runtimeStore.All()).Unseen, "Movie", MysteryLength.LongNight, 1)?.Card.Media.Id == longFilm.Id,
             "a movie with a file-derived length over two hours matches the Long night filter");
-        runtimeStore.Save(runtimes[longFilm.Id] with { RuntimeMinutes = null, Overview = "Newer metadata" });
-        var refilled = runtimeStore.FillMovieRuntime(longFilm.Id, 151);
+        runtimeStore.Save(runtimes[longFilm.Id] with { RuntimeMinutes = null, FileRuntimeMinutes = null, Overview = "Newer metadata" });
+        var refilled = runtimeStore.FillFileRuntime(longFilm.Id, 151);
         check(refilled is not null && runtimeStore.All().Single(entry => entry.Id == longFilm.Id) is { Overview: "Newer metadata", RuntimeMinutes: 151 } &&
-            runtimeStore.FillMovieRuntime(longFilm.Id, 10) is null, "filling a length keeps newer metadata and never replaces an existing length");
+            runtimeStore.FillFileRuntime(longFilm.Id, 10) is null, "recording a file length keeps newer metadata, and a file is read only once");
+        var scanRoot = Path.Combine(directory, "runtime-scan", "Shows"); Directory.CreateDirectory(Path.Combine(scanRoot, "Scan Show"));
+        var scanned = Path.Combine(scanRoot, "Scan Show", "Scan Show S01E01.mkv"); await File.WriteAllBytesAsync(scanned, Mkv(55));
+        var scanStore = new LibraryStore(Path.Combine(directory, "runtime-scan-db")); var scanFolders = new[] { new LibraryFolder(scanRoot, "Show") };
+        await scanStore.ScanAsync(scanFolders); LibraryRuntimes.Backfill(scanStore, scanStore.All());
+        await scanStore.ScanAsync(scanFolders); var unchangedScan = scanStore.All().Single();
+        await File.WriteAllBytesAsync(scanned, Mkv(57).Concat(new byte[32]).ToArray()); await scanStore.ScanAsync(scanFolders);
+        var replacedScan = scanStore.All().Single(); LibraryRuntimes.Backfill(scanStore, scanStore.All());
+        check(unchangedScan is { FileRuntimeMinutes: 55, RuntimeMinutes: 55 } && replacedScan.FileRuntimeMinutes is null && scanStore.All().Single().RuntimeMinutes == 57,
+            "a rescan keeps a file's length until the file is replaced, and then reads it again");
         var mergedFilm = AutomaticArtwork.MergeDetails(new MediaItem("merged-film", "", "Merged Film", "Movie", RuntimeMinutes: 151), new MetadataMatch(7, "movie", "Merged Film", "2020", null, "", RuntimeMinutes: 148));
         var mergedEpisode = AutomaticArtwork.MergeDetails(new MediaItem("merged-episode", "", "Some Show", "Show", Series: "Some Show", RuntimeMinutes: 24), new MetadataMatch(8, "tv", "Some Show", "2020", null, "", RuntimeMinutes: 60));
         check(mergedFilm.RuntimeMinutes == 148 && mergedFilm.TmdbFields?.GetValueOrDefault("runtimeMinutes") is { Original: "151" } && mergedEpisode.RuntimeMinutes == 24,
             "provider movie runtimes are saved and tracked for expiry, restoring the file length; episodes keep their own runtime");
-        check(MetadataClassification.Apply(runtimes[known.Id], "Movie", "movie").RuntimeMinutes == 95 &&
+        check(MetadataClassification.Apply(runtimes[known.Id], "Movie", "movie").RuntimeMinutes == 90 &&
             MetadataClassification.Apply(runtimes[episodeFile.Id] with { RuntimeMinutes = 24 }, "Movie", "movie").RuntimeMinutes is null,
             "classifying a movie keeps its length, while an episode reclassified as a movie drops its episode runtime");
         check(MetadataTitles.Queries(island).Contains("остров сокровищ") && !MetadataTitles.Queries(new("church","The Church.mkv","The Church","Movie")).Any(x=>x.Contains('щ')),

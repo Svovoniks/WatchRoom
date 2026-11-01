@@ -486,7 +486,7 @@ public partial class MainWindow : Window
         BackfillRuntimes();
     }
     private bool runtimeBackfillRunning, runtimeBackfillAgain;
-    // Reads missing movie lengths from file headers in the background; Home's length filters need them.
+    // Reads video lengths from file headers in the background; they replace provider runtimes, and Home's length filters need them.
     private async void BackfillRuntimes()
     {
         if (runtimeBackfillRunning) { runtimeBackfillAgain = true; return; }
@@ -540,7 +540,7 @@ public partial class MainWindow : Window
     {
         if (closing) return;
         // Scans and metadata passes save many records; rebuild the views less often while they run.
-        var interval = TimeSpan.FromMilliseconds(scanning || artworkBusy ? 1000 : 250);
+        var interval = TimeSpan.FromMilliseconds(scanning || artworkBusy || runtimeBackfillRunning ? 1000 : 250);
         if (libraryUpdateTimer.Interval != interval) libraryUpdateTimer.Interval = interval;
         if (Interlocked.Exchange(ref pendingScanStatus, null) is { } progress && scanning)
         { ScanStatus.Text = progress; SetStatus(progress); }
