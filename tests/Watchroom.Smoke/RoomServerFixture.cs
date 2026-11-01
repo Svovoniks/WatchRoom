@@ -117,7 +117,7 @@ static class RoomServerFixture
         var api = $"http://localhost:{FreePort()}/";
         using var cloudflare = new HttpListener(); cloudflare.Prefixes.Add(api); cloudflare.Start();
         var requests = new ConcurrentQueue<(string Path, string? Authorization, string Body)>();
-        var failing = 1;
+        var failing = 1; var served = 0;
         _ = Task.Run(async () =>
         {
             while (cloudflare.IsListening)
@@ -128,6 +128,7 @@ static class RoomServerFixture
                 if (Volatile.Read(ref failing) == 1) { context.Response.StatusCode = 503; context.Response.Close(); continue; }
                 var body = """{"iceServers":[{"urls":["stun:stun.cloudflare.com:3478","stun:stun.cloudflare.com:53"]},{"urls":["turn:turn.cloudflare.com:3478?transport=udp","turn:turn.cloudflare.com:53?transport=udp","turns:turn.cloudflare.com:5349?transport=tcp"],"username":"user/1","credential":"pa:ss"}]}"""u8.ToArray();
                 context.Response.ContentType = "application/json"; await context.Response.OutputStream.WriteAsync(body); context.Response.Close();
+                Interlocked.Increment(ref served);
             }
         });
         var url = "http://localhost:" + FreePort();
@@ -135,6 +136,8 @@ static class RoomServerFixture
         start.Environment["WATCHROOM_DATA"] = Path.Combine(directory, "cloudflare-server");
         start.Environment["CLOUDFLARE_TURN_KEY_ID"] = "key-id"; start.Environment["CLOUDFLARE_TURN_API_TOKEN"] = "api-token";
         start.Environment["CLOUDFLARE_TURN_API"] = api.TrimEnd('/'); start.Environment["CLOUDFLARE_TURN_RETRY_SECONDS"] = "1";
+        // A four-second credential lifetime makes the server refresh every two seconds, which exercises idle expiry quickly.
+        start.Environment["CLOUDFLARE_TURN_TTL_SECONDS"] = "4";
         start.ArgumentList.Add(serverDll); start.ArgumentList.Add("--urls"); start.ArgumentList.Add(url);
         using var server = Process.Start(start)!;
         var stdout = server.StandardOutput.ReadToEndAsync(); var stderr = server.StandardError.ReadToEndAsync();
@@ -158,15 +161,18 @@ static class RoomServerFixture
             var fallback = await CreateRoom();
             check(fallback.SequenceEqual(["stun:stun.cloudflare.com:3478"]), $"rooms still open with STUN alone while Cloudflare fails ({string.Join(' ', fallback)})");
 
-            Volatile.Write(ref failing, 0); await Task.Delay(1500);
-            await CreateRoom();
+            string[] Expected = ["stun:stun.cloudflare.com:3478", "turn://user%2F1:pa%3Ass@turn.cloudflare.com:3478?transport=udp", "turns://user%2F1:pa%3Ass@turn.cloudflare.com:5349?transport=tcp"];
+            Volatile.Write(ref failing, 0);
             for (var i = 0; i < 10 && !health.Contains("\"relayConfigured\":true"); i++) { await Task.Delay(300); health = await http.GetStringAsync(url + "/health"); }
-            check(health.Contains("\"relayConfigured\":true"), "the server retries Cloudflare and reports relay once it recovers");
-            check(requests.Any(r => r.Path == "/turn/keys/key-id/credentials/generate-ice-servers" && r.Authorization == "Bearer api-token" && r.Body.Contains("\"ttl\":86400")),
-                "the server requests day-long Cloudflare credentials with its API token");
+            check(health.Contains("\"relayConfigured\":true"), "the server retries Cloudflare in the background and reports relay once it recovers");
+            check(requests.Any(r => r.Path == "/turn/keys/key-id/credentials/generate-ice-servers" && r.Authorization == "Bearer api-token" && r.Body.Contains("\"ttl\":4")),
+                "the server requests Cloudflare credentials for its configured lifetime with its API token");
             var ice = await CreateRoom();
-            check(ice.SequenceEqual(["stun:stun.cloudflare.com:3478", "turn://user%2F1:pa%3Ass@turn.cloudflare.com:3478?transport=udp", "turns://user%2F1:pa%3Ass@turn.cloudflare.com:5349?transport=tcp"]),
-                $"welcomes carry Cloudflare's STUN and TURN servers with escaped credentials and without port 53 ({string.Join(' ', ice)})");
+            check(ice.SequenceEqual(Expected), $"welcomes carry Cloudflare's STUN and TURN servers with escaped credentials and without port 53 ({string.Join(' ', ice)})");
+            var before = Volatile.Read(ref served);
+            await Task.Delay(6000);
+            var idle = await CreateRoom();
+            check(Volatile.Read(ref served) > before && idle.SequenceEqual(Expected), $"credentials stay fresh while no rooms are open, so a room created after their lifetime still gets TURN ({string.Join(' ', idle)})");
 
             async Task<int> Probe(string client)
             {

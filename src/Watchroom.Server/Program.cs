@@ -63,8 +63,9 @@ foreach (var saved in persistentRooms.All())
 }
 void SaveRoom(Room room) { if (room.Persistent) persistentRooms.Update(room.Code, room.Guests(), room.SharedControls, room.Name); }
 var cloudflare = CloudflareTurn.Create(builder.Configuration["CLOUDFLARE_TURN_KEY_ID"], builder.Configuration["CLOUDFLARE_TURN_API_TOKEN"],
-    builder.Configuration["CLOUDFLARE_TURN_API"] ?? "https://rtc.live.cloudflare.com/v1", TimeSpan.FromSeconds(Setting("CLOUDFLARE_TURN_RETRY_SECONDS", 60)), app.Logger);
-cloudflare?.Current();
+    builder.Configuration["CLOUDFLARE_TURN_API"] ?? "https://rtc.live.cloudflare.com/v1",
+    TimeSpan.FromSeconds(Setting("CLOUDFLARE_TURN_TTL_SECONDS", 86400)), TimeSpan.FromSeconds(Setting("CLOUDFLARE_TURN_RETRY_SECONDS", 60)), app.Logger);
+if (cloudflare is not null) _ = cloudflare.RunAsync(app.Lifetime.ApplicationStopping);
 string[] IceServers(string peer)
 {
     var urls = new List<string>();
@@ -240,52 +241,57 @@ app.Map("/room", async context =>
 });
 await app.RunAsync();
 
-// Cloudflare issues shared short-lived TURN credentials through an authenticated API; the server fetches them in the
-// background so startup and admission never wait on Cloudflare, and every credential handed out stays valid for at least 12 hours.
-sealed class CloudflareTurn(string keyId, string token, string api, TimeSpan retryInterval, ILogger logger)
+// Cloudflare issues shared short-lived TURN credentials through an authenticated API. A background loop keeps them
+// fresh even while no rooms are open, so startup and admission never wait on Cloudflare and every credential handed out
+// stays valid for at least half its lifetime (12 hours by default).
+sealed class CloudflareTurn(string keyId, string token, string api, TimeSpan lifetime, TimeSpan retryInterval, ILogger logger)
 {
-    static readonly TimeSpan Lifetime = TimeSpan.FromHours(24), RefreshBefore = TimeSpan.FromHours(12);
     static readonly string[] StunOnly = ["stun:stun.cloudflare.com:3478"];
     sealed record Credentials(string[] Urls, DateTimeOffset Expires);
     readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
     Credentials? credentials;
-    DateTimeOffset retryAfter = DateTimeOffset.MinValue;
-    int refreshing;
     Credentials? Valid(DateTimeOffset now) => Volatile.Read(ref credentials) is { } current && now < current.Expires ? current : null;
     public bool HasRelay => Valid(DateTimeOffset.UtcNow)?.Urls.Any(x => x.StartsWith("turn", StringComparison.Ordinal)) == true;
-    public static CloudflareTurn? Create(string? keyId, string? token, string api, TimeSpan retryInterval, ILogger logger) =>
-        string.IsNullOrWhiteSpace(keyId) || string.IsNullOrWhiteSpace(token) ? null : new(keyId.Trim(), token.Trim(), api.TrimEnd('/'), retryInterval, logger);
-    public string[] Current()
+    public static CloudflareTurn? Create(string? keyId, string? token, string api, TimeSpan lifetime, TimeSpan retryInterval, ILogger logger) =>
+        string.IsNullOrWhiteSpace(keyId) || string.IsNullOrWhiteSpace(token) ? null : new(keyId.Trim(), token.Trim(), api.TrimEnd('/'), lifetime, retryInterval, logger);
+    // Without valid relay credentials, allocations would only fail, so participants get STUN alone.
+    public string[] Current() => Valid(DateTimeOffset.UtcNow)?.Urls ?? StunOnly;
+    public async Task RunAsync(CancellationToken stopping)
     {
-        var now = DateTimeOffset.UtcNow;
-        var current = Valid(now);
-        if ((current is null || now + RefreshBefore > current.Expires) && now > retryAfter) _ = RefreshAsync(CancellationToken.None);
-        // Without valid relay credentials, allocations would only fail, so participants get STUN alone.
-        return current?.Urls ?? StunOnly;
-    }
-    public async Task RefreshAsync(CancellationToken cancellation)
-    {
-        if (Interlocked.Exchange(ref refreshing, 1) == 1) return;
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{api}/turn/keys/{Uri.EscapeDataString(keyId)}/credentials/generate-ice-servers")
-            { Content = JsonContent.Create(new { ttl = (int)Lifetime.TotalSeconds }) };
-            request.Headers.Authorization = new("Bearer", token);
-            using var response = await http.SendAsync(request, cancellation);
-            response.EnsureSuccessStatusCode();
-            using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellation));
-            var servers = json.RootElement.GetProperty("iceServers");
-            var parsed = Parse(Items(servers));
-            if (parsed.Length == 0) throw new InvalidDataException("Cloudflare returned no ICE servers");
-            Volatile.Write(ref credentials, new Credentials(parsed, DateTimeOffset.UtcNow + Lifetime));
-            logger.LogInformation("Cloudflare TURN credentials refreshed ({Count} servers)", parsed.Length);
+            while (!stopping.IsCancellationRequested)
+            {
+                var refreshed = await RefreshAsync(stopping);
+                var wait = refreshed ? Volatile.Read(ref credentials)!.Expires - lifetime / 2 - DateTimeOffset.UtcNow : retryInterval;
+                await Task.Delay(wait > TimeSpan.Zero ? wait : TimeSpan.Zero, stopping);
+            }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellation.IsCancellationRequested)
+        catch (Exception) when (stopping.IsCancellationRequested) { }
+    }
+    async Task<bool> RefreshAsync(CancellationToken stopping)
+    {
+        try
         {
-            retryAfter = DateTimeOffset.UtcNow + retryInterval;
-            logger.LogWarning("Cloudflare TURN credentials unavailable: {Error}", ex.Message);
+            // Expiry counts from the request, so a slow reply cannot make handed-out credentials outlive Cloudflare's.
+            var requested = DateTimeOffset.UtcNow;
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{api}/turn/keys/{Uri.EscapeDataString(keyId)}/credentials/generate-ice-servers")
+            { Content = JsonContent.Create(new { ttl = (int)lifetime.TotalSeconds }) };
+            request.Headers.Authorization = new("Bearer", token);
+            using var response = await http.SendAsync(request, stopping);
+            response.EnsureSuccessStatusCode();
+            using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync(stopping));
+            var parsed = Parse(Items(json.RootElement.GetProperty("iceServers")));
+            if (parsed.Length == 0) throw new InvalidDataException("Cloudflare returned no ICE servers");
+            Volatile.Write(ref credentials, new Credentials(parsed, requested + lifetime));
+            logger.LogInformation("Cloudflare TURN credentials refreshed ({Count} servers)", parsed.Length);
+            return true;
         }
-        finally { Volatile.Write(ref refreshing, 0); }
+        catch (Exception ex) when (!stopping.IsCancellationRequested)
+        {
+            logger.LogWarning("Cloudflare TURN credentials unavailable: {Error}", ex.Message);
+            return false;
+        }
     }
     static IEnumerable<System.Text.Json.JsonElement> Items(System.Text.Json.JsonElement value) =>
         value.ValueKind == System.Text.Json.JsonValueKind.Array ? value.EnumerateArray() : [value];
