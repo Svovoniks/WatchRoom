@@ -106,6 +106,67 @@ static class RoomServerFixture
             await server.WaitForExitAsync();
             await File.WriteAllTextAsync(Path.Combine(directory, "server.log"), await stdout + await stderr);
         }
+        await CloudflareRelay(sdk, serverDll, directory, check);
+    }
+
+    // A stand-in for Cloudflare's credential API checks that the server turns its ICE servers into libdatachannel URLs,
+    // and that rate limits follow the client address reported by the loopback reverse proxy.
+    private static async Task CloudflareRelay(string sdk, string serverDll, string directory, Action<bool, string> check)
+    {
+        static int FreePort() { using var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start(); return ((IPEndPoint)probe.LocalEndpoint).Port; }
+        var api = $"http://localhost:{FreePort()}/";
+        using var cloudflare = new HttpListener(); cloudflare.Prefixes.Add(api); cloudflare.Start();
+        var requests = new ConcurrentQueue<(string Path, string? Authorization, string Body)>();
+        _ = Task.Run(async () =>
+        {
+            while (cloudflare.IsListening)
+            {
+                HttpListenerContext context;
+                try { context = await cloudflare.GetContextAsync(); } catch (Exception) { return; }
+                using (var reader = new StreamReader(context.Request.InputStream)) requests.Enqueue((context.Request.Url!.AbsolutePath, context.Request.Headers["Authorization"], await reader.ReadToEndAsync()));
+                var body = """{"iceServers":[{"urls":["stun:stun.cloudflare.com:3478","stun:stun.cloudflare.com:53"]},{"urls":["turn:turn.cloudflare.com:3478?transport=udp","turn:turn.cloudflare.com:53?transport=udp","turns:turn.cloudflare.com:5349?transport=tcp"],"username":"user/1","credential":"pa:ss"}]}"""u8.ToArray();
+                context.Response.ContentType = "application/json"; await context.Response.OutputStream.WriteAsync(body); context.Response.Close();
+            }
+        });
+        var url = "http://localhost:" + FreePort();
+        var start = new ProcessStartInfo(sdk) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        start.Environment["WATCHROOM_DATA"] = Path.Combine(directory, "cloudflare-server");
+        start.Environment["CLOUDFLARE_TURN_KEY_ID"] = "key-id"; start.Environment["CLOUDFLARE_TURN_API_TOKEN"] = "api-token";
+        start.Environment["CLOUDFLARE_TURN_API"] = api.TrimEnd('/');
+        start.ArgumentList.Add(serverDll); start.ArgumentList.Add("--urls"); start.ArgumentList.Add(url);
+        using var server = Process.Start(start)!;
+        var stdout = server.StandardOutput.ReadToEndAsync(); var stderr = server.StandardError.ReadToEndAsync();
+        try
+        {
+            using var http = new HttpClient();
+            string health = "";
+            for (var i = 0; i < 100 && health == ""; i++) { try { var reply = await http.GetAsync(url + "/health"); if (reply.IsSuccessStatusCode) health = await reply.Content.ReadAsStringAsync(); } catch (HttpRequestException) { } if (health == "") await Task.Delay(200); }
+            check(health.Contains("\"relayConfigured\":true") && health.Contains("\"stunConfigured\":true"), "Cloudflare TURN credentials make the server report STUN and relay");
+            check(requests.TryPeek(out var request) && request.Path == "/turn/keys/key-id/credentials/generate-ice-servers" && request.Authorization == "Bearer api-token" && request.Body.Contains("\"ttl\":86400"),
+                "the server requests day-long Cloudflare credentials with its API token");
+            using var socket = new ClientWebSocket(); await socket.ConnectAsync(new Uri(url.Replace("http", "ws") + "/room"), default);
+            await SocketMessages.SendAsync(socket, new("create", Text: "Host"), default);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var ice = Wire.Read<Welcome>((await SocketMessages.ReadAsync(socket, timeout.Token))!.Data!).IceServers;
+            check(ice.SequenceEqual(["stun:stun.cloudflare.com:3478", "turn://user%2F1:pa%3Ass@turn.cloudflare.com:3478?transport=udp", "turns://user%2F1:pa%3Ass@turn.cloudflare.com:5349?transport=tcp"]),
+                $"welcomes carry Cloudflare's STUN and TURN servers with escaped credentials and without port 53 ({string.Join(' ', ice)})");
+            socket.Abort();
+
+            async Task<int> Probe(string client)
+            {
+                using var message = new HttpRequestMessage(HttpMethod.Get, url + "/health"); message.Headers.Add("X-Forwarded-For", client);
+                return (int)(await http.SendAsync(message)).StatusCode;
+            }
+            var statuses = new List<int>();
+            for (var i = 0; i < 31; i++) statuses.Add(await Probe("203.0.113.7"));
+            check(statuses[^1] == 429 && await Probe("203.0.113.8") == 200, "rate limits apply per client address forwarded by a loopback proxy");
+        }
+        finally
+        {
+            if (!server.HasExited) server.Kill(true);
+            await server.WaitForExitAsync(); cloudflare.Stop();
+            await File.WriteAllTextAsync(Path.Combine(directory, "cloudflare-server.log"), await stdout + await stderr);
+        }
     }
 
     private static async Task HostSurvivesGuests(string url, string directory, Action<bool, string> check)

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Watchroom.Core;
 
@@ -16,6 +17,8 @@ builder.Services.AddRateLimiter(options =>
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var app = builder.Build();
+// Behind the bundled reverse proxy, rate limits apply to the client address it reports; only loopback proxies are trusted.
+app.UseForwardedHeaders(new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto });
 app.UseRateLimiter();
 // Half-open sockets close after a missed pong so a returning host is not rejected for minutes.
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20), KeepAliveTimeout = TimeSpan.FromSeconds(30) });
@@ -59,28 +62,29 @@ foreach (var saved in persistentRooms.All())
     foreach (var guest in saved.Guests ?? []) restored.GuestNames[guest.Id] = guest.Name;
 }
 void SaveRoom(Room room) { if (room.Persistent) persistentRooms.Update(room.Code, room.Guests(), room.SharedControls, room.Name); }
+var cloudflare = CloudflareTurn.Create(builder.Configuration["CLOUDFLARE_TURN_KEY_ID"], builder.Configuration["CLOUDFLARE_TURN_API_TOKEN"],
+    builder.Configuration["CLOUDFLARE_TURN_API"] ?? "https://rtc.live.cloudflare.com/v1", app.Logger);
+if (cloudflare is not null) await cloudflare.RefreshAsync(app.Lifetime.ApplicationStopping);
 string[] IceServers(string peer)
 {
     var urls = new List<string>();
     var stun = builder.Configuration["WATCHROOM_STUN"];
     if (!string.IsNullOrWhiteSpace(stun)) urls.Add(stun);
+    if (cloudflare is not null) urls.AddRange(cloudflare.Current());
     var turn = builder.Configuration["WATCHROOM_TURN"];
     var secret = builder.Configuration["WATCHROOM_TURN_SECRET"];
     if (!string.IsNullOrWhiteSpace(turn) && !string.IsNullOrWhiteSpace(secret))
     {
         var username = $"{DateTimeOffset.UtcNow.AddHours(8).ToUnixTimeSeconds()}:{peer}";
         var credential = Convert.ToBase64String(HMACSHA1.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(username)));
-        foreach (var address in turn.Split(';', StringSplitOptions.RemoveEmptyEntries))
-        {
-            // libdatachannel uses TURN URLs with escaped userinfo.
-            var separator = address.IndexOf(':');
-            urls.Add(address[..(separator + 1)] + "//" + Uri.EscapeDataString(username) + ":" + Uri.EscapeDataString(credential) + "@" + address[(separator + 1)..].TrimStart('/'));
-        }
+        foreach (var address in turn.Split(';', StringSplitOptions.RemoveEmptyEntries)) urls.Add(CloudflareTurn.WithCredentials(address, username, credential));
     }
     return urls.ToArray();
 }
 bool forceRelay = builder.Configuration["WATCHROOM_FORCE_RELAY"] == "true";
-app.MapGet("/health", () => Results.Ok(new { status = "ok", protocol = 1, persistentRooms = true, relayConfigured = !string.IsNullOrEmpty(builder.Configuration["WATCHROOM_TURN"]) }));
+app.MapGet("/health", () => Results.Ok(new { status = "ok", protocol = 1, persistentRooms = true,
+    relayConfigured = cloudflare?.HasRelay == true || !string.IsNullOrEmpty(builder.Configuration["WATCHROOM_TURN"]),
+    stunConfigured = cloudflare is not null || !string.IsNullOrEmpty(builder.Configuration["WATCHROOM_STUN"]) }));
 app.Map("/room", async context =>
 {
     if (!context.WebSockets.IsWebSocketRequest) { context.Response.StatusCode = 400; return; }
@@ -235,6 +239,77 @@ app.Map("/room", async context =>
     }
 });
 await app.RunAsync();
+
+// Cloudflare issues shared short-lived TURN credentials through an authenticated API; the server fetches them in the
+// background so admission never waits on Cloudflare, and every credential handed out stays valid for at least 12 hours.
+sealed class CloudflareTurn(string keyId, string token, string api, ILogger logger)
+{
+    static readonly TimeSpan Lifetime = TimeSpan.FromHours(24), RefreshBefore = TimeSpan.FromHours(12);
+    readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    string[] urls = ["stun:stun.cloudflare.com:3478"];
+    DateTimeOffset expires = DateTimeOffset.MinValue, retryAfter = DateTimeOffset.MinValue;
+    int refreshing;
+    public bool HasRelay => urls.Any(x => x.StartsWith("turn", StringComparison.Ordinal));
+    public static CloudflareTurn? Create(string? keyId, string? token, string api, ILogger logger) =>
+        string.IsNullOrWhiteSpace(keyId) || string.IsNullOrWhiteSpace(token) ? null : new(keyId.Trim(), token.Trim(), api.TrimEnd('/'), logger);
+    public string[] Current()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (now > expires - RefreshBefore && now > retryAfter) _ = RefreshAsync(CancellationToken.None);
+        // Expired relay credentials only produce failed allocations, so fall back to STUN alone.
+        return now < expires ? urls : ["stun:stun.cloudflare.com:3478"];
+    }
+    public async Task RefreshAsync(CancellationToken cancellation)
+    {
+        if (Interlocked.Exchange(ref refreshing, 1) == 1) return;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{api}/turn/keys/{Uri.EscapeDataString(keyId)}/credentials/generate-ice-servers")
+            { Content = JsonContent.Create(new { ttl = (int)Lifetime.TotalSeconds }) };
+            request.Headers.Authorization = new("Bearer", token);
+            using var response = await http.SendAsync(request, cancellation);
+            response.EnsureSuccessStatusCode();
+            using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellation));
+            var servers = json.RootElement.GetProperty("iceServers");
+            var parsed = Parse(Items(servers));
+            if (parsed.Length == 0) throw new InvalidDataException("Cloudflare returned no ICE servers");
+            urls = parsed; expires = DateTimeOffset.UtcNow + Lifetime;
+            logger.LogInformation("Cloudflare TURN credentials refreshed ({Count} servers)", parsed.Length);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellation.IsCancellationRequested)
+        {
+            retryAfter = DateTimeOffset.UtcNow.AddMinutes(1);
+            logger.LogWarning("Cloudflare TURN credentials unavailable: {Error}", ex.Message);
+        }
+        finally { Volatile.Write(ref refreshing, 0); }
+    }
+    static IEnumerable<System.Text.Json.JsonElement> Items(System.Text.Json.JsonElement value) =>
+        value.ValueKind == System.Text.Json.JsonValueKind.Array ? value.EnumerateArray() : [value];
+    static string[] Parse(IEnumerable<System.Text.Json.JsonElement> servers)
+    {
+        var result = new List<string>();
+        foreach (var server in servers)
+        {
+            var username = server.TryGetProperty("username", out var u) ? u.GetString() : null;
+            var credential = server.TryGetProperty("credential", out var c) ? c.GetString() : null;
+            if (!server.TryGetProperty("urls", out var list)) continue;
+            foreach (var entry in Items(list))
+            {
+                // Port 53 duplicates the standard ports and is commonly intercepted by local DNS resolvers.
+                if (entry.GetString() is not { Length: > 0 } url || System.Text.RegularExpressions.Regex.IsMatch(url, @":53(\?|$)")) continue;
+                if (url.StartsWith("stun:", StringComparison.Ordinal)) result.Add(url);
+                else if (url.StartsWith("turn", StringComparison.Ordinal) && username is not null && credential is not null) result.Add(WithCredentials(url, username, credential));
+            }
+        }
+        return result.ToArray();
+    }
+    // libdatachannel uses TURN URLs with escaped userinfo.
+    public static string WithCredentials(string address, string username, string credential)
+    {
+        var separator = address.IndexOf(':');
+        return address[..(separator + 1)] + "//" + Uri.EscapeDataString(username) + ":" + Uri.EscapeDataString(credential) + "@" + address[(separator + 1)..].TrimStart('/');
+    }
+}
 
 sealed class Member(string id, string name, bool host, WebSocket socket, CancellationTokenSource lifetime, string? guestKey = null)
 {

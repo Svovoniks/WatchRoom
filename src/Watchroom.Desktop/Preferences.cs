@@ -31,7 +31,9 @@ public partial class MainWindow
     private string preferenceSection = "";
     private bool HasUnsavedPreferences => preferencesReady &&
         (PreferenceSnapshot() != preferencesBaseline || MetadataToken.Password != savedMetadataToken);
-    private string SavedServerAddress => library.Setting("server") ?? "https://watchroom-rooms.svovoniks.chatgpt.site";
+    // Saving Settings stores the address shown, so the retired Sites service also moves to the current default.
+    private const string DefaultServerAddress = "https://31-76-63-229.sslip.io", RetiredServerAddress = "https://watchroom-rooms.svovoniks.chatgpt.site";
+    private string SavedServerAddress => library.Setting("server") is { Length: > 0 } saved && saved != RetiredServerAddress ? saved : DefaultServerAddress;
     private string SavedDisplayName => library.Setting("name") ?? Environment.UserName;
     private bool SavedAutoArtwork => library.Setting("artwork") != "false";
     private int SavedStreamingBufferSeconds => StreamingBufferOptions.Load(library);
