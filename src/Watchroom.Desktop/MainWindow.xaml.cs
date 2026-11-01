@@ -47,6 +47,9 @@ public partial class MainWindow : Window
     private readonly EpisodeArtwork episodeArtwork;
     private readonly HashSet<string> episodeArtworkRequests = [];
     private bool libraryViewDirty;
+    // Set when the host stops following a guest by scrolling: the guest's list stays on screen until the host's
+    // own library is ready, which then takes over at the place the host has scrolled to.
+    private bool libraryKeepPlace;
     private bool libraryLoaded;
     private string? detailPosterPath;
     private int detailPosterGeneration;
@@ -577,9 +580,11 @@ public partial class MainWindow : Window
     private async void FilterLibrary(bool debounce = false, bool backgroundUpdate = false)
     {
         if (PosterGrid is null || LibraryStatusFilter is null || NoResults is null || library is null || closing) return;
-        if (GuestLibrary) { await FilterHostLibraryAsync(debounce); return; }
+        // Local library updates don't change the host's library, and re-filtering it scrolls back to the top.
+        if (GuestLibrary) { if (!backgroundUpdate) await FilterHostLibraryAsync(debounce); return; }
         if (FollowingGuest) { if (!applyingGuestMirror) ApplyGuestMirror(); return; }
         if (!libraryLoaded) return;
+        if (!backgroundUpdate) libraryKeepPlace = false;
         librarySearchCancellation?.Cancel();
         using var request = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         librarySearchCancellation = request;
@@ -651,7 +656,9 @@ public partial class MainWindow : Window
             }, cancellation);
             if (cancellation.IsCancellationRequested || librarySearchCancellation != request) return;
             cards = playback.Select(state => state.Card).ToList();
-            if (PosterGrid.ItemsSource != libraryCards) PosterGrid.ItemsSource = libraryCards;
+            // A guest's mirrored list stays visible until the host's own cards are in place.
+            var replacingMirror = PosterGrid.ItemsSource == mirroredCards;
+            if (!replacingMirror && PosterGrid.ItemsSource != libraryCards) PosterGrid.ItemsSource = libraryCards;
             var desiredKeys = cards.Select(LibraryCardView.Identity).ToHashSet();
             var slice = Stopwatch.StartNew();
             async Task YieldForInput()
@@ -691,6 +698,13 @@ public partial class MainWindow : Window
             ResultCount.Text = $"{cards.Count} {(cards.Count == 1 ? "item" : "items")}";
             NoResults.Visibility = items.Count > 0 && cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             ShowFindTitle(query, cards.Count == 0 && series is null);
+            if (replacingMirror && !FollowingGuest)
+            {
+                var offset = libraryKeepPlace ? LibraryScroll.VerticalOffset : 0;
+                libraryKeepPlace = false;
+                PosterGrid.ItemsSource = libraryCards;
+                if (offset > 0) _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => LibraryScroll.ScrollToVerticalOffset(offset));
+            }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex)
@@ -2275,6 +2289,7 @@ public partial class MainWindow : Window
     private async void WindowClosing(object? sender, CancelEventArgs e)
     {
         if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop();
+        OpenFileHandoff.StopListening();
         DisableSystemMediaControls();
         disconnectToast?.Invoke();
         guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); metadataRetentionTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
@@ -2285,6 +2300,8 @@ public partial class MainWindow : Window
         try { await Disconnect(); }
         finally
         {
+            // Playback position and the room session are saved; a video opened now can start its own window.
+            OpenFileHandoff.Release();
             pictureInPictureWindow?.Close();
             Video.MediaPlayer = null;
             var native = player; var engine = vlc; player = null; vlc = null;

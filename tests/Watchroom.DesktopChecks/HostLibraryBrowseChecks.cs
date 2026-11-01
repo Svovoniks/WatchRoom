@@ -105,25 +105,61 @@ static class HostLibraryBrowseChecks
             Call("LoadMoreHostTitles");
             var scroll = Control<ScrollViewer>("LibraryScroll"); scroll.ScrollToBottom(); content.UpdateLayout(); Call("LoadMoreHostTitles");
             Check(Field<bool>("guestBrowsePending") && Field<LibraryBrowseRequest>("guestBrowse").Page == 2, "scrolling near the bottom automatically requests the next chunk");
+            var offset = scroll.VerticalOffset;
+            Call("FilterLibrary", false, true); content.UpdateLayout();
+            Check(scroll.VerticalOffset == offset && Field<bool>("guestBrowsePending") && Field<LibraryBrowseRequest>("guestBrowse").Page == 2,
+                "local library updates keep the guest's place in the host's library");
             typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryBrowsing = false, LibraryActivity = null });
             Call("RefreshSharedLibrary"); Receive(SharedLibrary.Browse(movies, new(Page: 2), _ => thumbnail));
             Check(cards.Count == 0 && !Field<bool>("guestBrowsePending"), "revoked access clears cached titles and ignores in-flight chunks");
             // Reuse the detached fixture as host to verify following and independent browsing.
             typeof(RoomClient).GetProperty("Identity")!.SetValue(client, new Welcome("fixture", "host", true, [], false));
-            typeof(MainWindow).GetField("items", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, movies.ToList());
-            var guestView = new LibraryBrowseView(new(), 8, 0, movies[2].Id);
+            var hostMovies = Enumerable.Range(0, 80).Select(i => new MediaItem("host-" + i, "C:/private/host.mkv", $"Host movie {i:00}", "Movie")).ToArray();
+            typeof(MainWindow).GetField("items", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, hostMovies.ToList());
+            typeof(MainWindow).GetField("libraryLoaded", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, true);
+            void PumpUntil(Func<bool> condition, string name)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(15);
+                while (!condition())
+                {
+                    if (DateTime.UtcNow > deadline) throw new Exception("FAIL: timed out: " + name);
+                    var frame = new DispatcherFrame();
+                    Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() => frame.Continue = false));
+                    Dispatcher.PushFrame(frame); content.UpdateLayout();
+                }
+            }
+            var ownCards = Field<LibraryCardCollection>("libraryCards");
+            var guestView = new LibraryBrowseView(new(), 40, 0, hostMovies[2].Id);
             typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryActivity = snapshot.LibraryActivity! with { View = guestView } });
             Call("RefreshSharedLibrary");
             var mirror = Field<LibraryCardCollection>("mirroredCards");
-            Check(ReferenceEquals(grid.ItemsSource, mirror) && mirror.Count == 8 && mirror[2].IsGuestHovered, "host follows the exact loaded guest entries and highlights guest hover");
-            Call("DetachGuestMirror");
-            Check(Control<Button>("BrowseWithGuestButton").Visibility == Visibility.Visible && Control<Button>("BrowseWithGuestButton").Content.ToString() == "Browse with Guest",
-                "independent host interaction exposes the named follow button");
-            Call("BrowseWithGuest", window, new RoutedEventArgs());
-            Check(Control<Button>("BrowseWithGuestButton").Visibility == Visibility.Collapsed && ReferenceEquals(grid.ItemsSource, mirror), "follow button returns host to the current guest location");
-            typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryActivity = snapshot.LibraryActivity! with { View = guestView with { SelectedId = movies[0].Id } } });
+            var follow = Control<Button>("BrowseWithGuestButton");
+            Check(!ReferenceEquals(grid.ItemsSource, mirror) && follow.Visibility == Visibility.Visible && follow.Content.ToString() == "Follow Guest",
+                "the host browses their own library while a guest browses, with a named follow button");
+            typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryActivity = snapshot.LibraryActivity! with { View = guestView with { ScrollFraction = 0.5 } } });
             Call("RefreshSharedLibrary");
-            Check(Control<FrameworkElement>("Details").Visibility == Visibility.Visible && Field<MediaItem>("selected").Id == movies[0].Id, "following host opens the same video details as the guest");
+            Check(!ReferenceEquals(grid.ItemsSource, mirror) && follow.Content.ToString() == "Follow Guest", "guest scrolling does not move a host who is not following");
+            Call("BrowseWithGuest", window, new RoutedEventArgs());
+            Check(ReferenceEquals(grid.ItemsSource, mirror) && mirror.Count == 40 && mirror[2].IsGuestHovered && follow.Content.ToString() == "Stop following",
+                "following shows the exact loaded guest entries and highlights guest hover");
+            content.UpdateLayout(); scroll.ScrollToVerticalOffset(300); content.UpdateLayout();
+            Call("HostLibraryScrollInput", grid, null);
+            Check(ReferenceEquals(grid.ItemsSource, mirror) && follow.Content.ToString() == "Follow Guest",
+                "scrolling stops following and keeps the guest's list on screen while the host's library loads");
+            scroll.ScrollToVerticalOffset(600); content.UpdateLayout();
+            PumpUntil(() => ReferenceEquals(grid.ItemsSource, ownCards) && ownCards.Count == 80 && Math.Abs(scroll.VerticalOffset - 600) < 1, "host library replaces the mirror");
+            Check(Math.Abs(scroll.VerticalOffset - 600) < 1, "the host's own library takes over where the host had scrolled to");
+            Call("BrowseWithGuest", window, new RoutedEventArgs());
+            Check(ReferenceEquals(grid.ItemsSource, mirror), "follow button returns host to the current guest location");
+            Call("BrowseWithGuest", window, new RoutedEventArgs());
+            Check(follow.Content.ToString() == "Follow Guest", "Stop following ends following");
+            PumpUntil(() => ReferenceEquals(grid.ItemsSource, ownCards), "Stop following shows the host's own library");
+            Check(ReferenceEquals(grid.ItemsSource, ownCards), "Stop following returns to the host's own library");
+            Call("BrowseWithGuest", window, new RoutedEventArgs());
+            Check(ReferenceEquals(grid.ItemsSource, mirror), "following again shows the guest's location");
+            typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryActivity = snapshot.LibraryActivity! with { View = guestView with { SelectedId = hostMovies[0].Id } } });
+            Call("RefreshSharedLibrary");
+            Check(Control<FrameworkElement>("Details").Visibility == Visibility.Visible && Field<MediaItem>("selected").Id == hostMovies[0].Id, "following host opens the same video details as the guest");
         }
         finally
         {
