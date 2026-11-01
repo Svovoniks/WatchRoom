@@ -86,14 +86,21 @@ public partial class MainWindow
             layer.ActualWidth <= 0 || layer.ActualHeight <= 0) { GuestPointer.Visibility = Visibility.Collapsed; return; }
         var at = new Point(pointer.X * layer.ActualWidth, pointer.Y * layer.ActualHeight);
         if (pointer.CardId is { } id && mirroredCards.FirstOrDefault(view => view.Card.Media.Id == id) is { } view &&
-            PosterGrid.ItemContainerGenerator.ContainerFromItem(view) is FrameworkElement { IsVisible: true } card)
+            PosterGrid.ItemContainerGenerator.ContainerFromItem(view) is FrameworkElement { Visibility: Visibility.Visible, ActualWidth: > 0 } card)
             at = card.TranslatePoint(new Point(pointer.CardX * card.ActualWidth, pointer.CardY * card.ActualHeight), layer);
         var shown = GuestPointer.Visibility == Visibility.Visible;
         GuestPointer.Visibility = Visibility.Visible;
-        // Glide between updates so the circle follows smoothly; jump when it first appears.
-        var duration = animate && shown ? new Duration(guestPointerDelay.Interval) : new Duration(TimeSpan.Zero);
-        GuestPointerPosition.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(at.X, duration));
-        GuestPointerPosition.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, new System.Windows.Media.Animation.DoubleAnimation(at.Y, duration));
+        // Glide between updates so the circle follows smoothly; jump when it first appears or the layout moved.
+        if (animate && shown)
+        {
+            var duration = new Duration(guestPointerDelay.Interval);
+            GuestPointerPosition.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(at.X, duration));
+            GuestPointerPosition.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, new System.Windows.Media.Animation.DoubleAnimation(at.Y, duration));
+            return;
+        }
+        GuestPointerPosition.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
+        GuestPointerPosition.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, null);
+        GuestPointerPosition.X = at.X; GuestPointerPosition.Y = at.Y;
     }
     private bool guestHomeResume;
     private async void OpenGuestVideo(LibraryCard card, bool resume = false)
@@ -227,37 +234,46 @@ public partial class MainWindow
         catch (Exception ex) when (ex is FormatException or System.IO.IOException or NotSupportedException or ArgumentException) { return null; }
     }
 
-    private bool followGuest = true, applyingGuestMirror;
+    // The host browses their own library; following a guest is opt-in.
+    private bool followGuest, applyingGuestMirror;
     private string? followedPeer;
     private LibraryBrowseView? mirroredView;
     private readonly LibraryCardCollection mirroredCards = [];
     private bool FollowingGuest => room?.Identity?.Host == true && room.Snapshot?.LibraryActivity?.View is not null && followGuest;
-    private void ResetGuestMirror() { followGuest = true; followedPeer = null; mirroredView = null; mirroredPointer = null; mirroredCards.Clear(); ClearHostArtworkRequests(); PlaceGuestPointer(); }
+    private void ResetGuestMirror() { followGuest = false; followedPeer = null; mirroredView = null; mirroredPointer = null; mirroredCards.Clear(); ClearHostArtworkRequests(); PlaceGuestPointer(); }
     private void RefreshGuestMirror(LibraryBrowseActivity? activity)
     {
         if (room?.Identity?.Host != true) return;
-        if (activity?.Peer != followedPeer) { followedPeer = activity?.Peer; followGuest = true; mirroredView = null; mirroredPointer = null; }
+        if (activity?.Peer != followedPeer) { followedPeer = activity?.Peer; followGuest = false; mirroredView = null; mirroredPointer = null; }
         HostLibraryActivityText.Text = activity is null ? room.Snapshot?.LibraryBrowsing == true ? "Guest browsing available" : "Guest browsing is off"
             : activity.Name + " · " + activity.Location + (activity.Query.Length == 0 ? "" : " · " + activity.Query);
-        BrowseWithGuestButton.Content = "Browse with " + activity?.Name;
-        BrowseWithGuestButton.Visibility = activity is not null && !followGuest ? Visibility.Visible : Visibility.Collapsed;
+        BrowseWithGuestButton.Content = followGuest ? "Stop following" : "Follow " + activity?.Name;
+        BrowseWithGuestButton.Visibility = activity?.View is not null ? Visibility.Visible : Visibility.Collapsed;
         if (FollowingGuest) ApplyGuestMirror();
-        else if (activity is null && PosterGrid.ItemsSource == mirroredCards) { PosterGrid.ItemsSource = libraryCards; FilterLibrary(); }
+        // The host's own library replaces the mirror once it is filtered; an update already running will do it.
+        else if (PosterGrid.ItemsSource == mirroredCards && !applyingGuestMirror && librarySearchCancellation is null) FilterLibrary(backgroundUpdate: true);
         PlaceGuestPointer();
     }
-    private void DetachGuestMirror()
+    // Stopping keeps the guest's location, and scrolling away keeps the host's place in it, in the host's own full library.
+    private void DetachGuestMirror(bool keepPlace = false)
     {
         if (applyingGuestMirror || !FollowingGuest) return;
-        followGuest = false; RefreshGuestMirror(room?.Snapshot?.LibraryActivity);
+        followGuest = false;
+        libraryKeepPlace = keepPlace;
+        RefreshGuestMirror(room?.Snapshot?.LibraryActivity);
     }
-    private void HostLibraryScrollInput(object sender, MouseWheelEventArgs e) => DetachGuestMirror();
+    private void HostLibraryScrollInput(object sender, MouseWheelEventArgs e) => DetachGuestMirror(keepPlace: true);
     private void HostLibraryPointerInput(object sender, MouseButtonEventArgs e)
     {
         for (var node = e.OriginalSource as DependencyObject; node is System.Windows.Media.Visual; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
-            if (node is System.Windows.Controls.Primitives.Thumb or System.Windows.Controls.Primitives.RepeatButton) { DetachGuestMirror(); break; }
+            if (node is System.Windows.Controls.Primitives.Thumb or System.Windows.Controls.Primitives.RepeatButton) { DetachGuestMirror(keepPlace: true); break; }
     }
-    private void HostLibraryTouchInput(object sender, TouchEventArgs e) => DetachGuestMirror();
-    private void BrowseWithGuest(object sender, RoutedEventArgs e) { followGuest = true; ShowPage("Library"); mirroredView = null; ApplyGuestMirror(); }
+    private void HostLibraryTouchInput(object sender, TouchEventArgs e) => DetachGuestMirror(keepPlace: true);
+    private void BrowseWithGuest(object sender, RoutedEventArgs e)
+    {
+        if (FollowingGuest) { DetachGuestMirror(keepPlace: true); return; }
+        followGuest = true; ShowPage("Library"); mirroredView = null; ApplyGuestMirror();
+    }
     private void ApplyGuestMirror()
     {
         if (applyingGuestMirror || !FollowingGuest || currentPage is not ("Library" or "Details")) return;
