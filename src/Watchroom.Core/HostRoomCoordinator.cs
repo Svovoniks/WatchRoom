@@ -12,6 +12,17 @@ internal sealed class HostRoomCoordinator(string host)
     // Guests gate shared playback only once their direct control channel exists.
     private readonly HashSet<string> connected = [];
     private readonly Dictionary<string, (long At, int Count)> limits = [];
+    // Pointer moves have their own budget, so they never use up the one artwork and other commands share.
+    private readonly Dictionary<string, (long At, int Count)> pointerLimits = [];
+    public bool AcceptsPointer(string sender, long now)
+    {
+        ExpireLibrary(now);
+        if (!Approved(sender) || !LibraryBrowsing || LibraryActivity?.Peer != sender) return false;
+        var limit = pointerLimits.GetValueOrDefault(sender);
+        limit = now - limit.At >= 1000 ? (now, 1) : (limit.At, limit.Count + 1);
+        pointerLimits[sender] = limit;
+        return limit.Count <= 30;
+    }
     private long revision, generation;
     private bool resumeWhenReady;
     public AdmittedGuest[] AdmittedGuests { get; set; } = [];
@@ -60,7 +71,7 @@ internal sealed class HostRoomCoordinator(string host)
     }
     public void Depart(string id, long now)
     {
-        departed.Add(id); people.Remove(id); limits.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); voice.Remove(id);
+        departed.Add(id); people.Remove(id); limits.Remove(id); pointerLimits.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); voice.Remove(id);
         if (LibraryActivity?.Peer == id) LibraryActivity = null;
         TryResume(now);
     }
@@ -101,7 +112,6 @@ internal sealed class HostRoomCoordinator(string host)
             case "catalog-artwork" when LibraryActivity?.Peer == sender && LibraryBrowsing:
             case "catalog-watch" when LibraryActivity?.Peer == sender && LibraryBrowsing:
             case "catalog-view" when LibraryActivity?.Peer == sender && LibraryBrowsing:
-            case "catalog-pointer" when LibraryActivity?.Peer == sender && LibraryBrowsing:
                 return true;
             case "catalog-browse" when sender != host && LibraryBrowsing:
                 if (LibraryActivity is not null && LibraryActivity.Peer != sender) return false;

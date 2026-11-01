@@ -524,6 +524,7 @@ public sealed partial class RoomClient : IAsyncDisposable
             if (message.Type == "artwork-ack") { if (coordinator!.Approved(sender)) ContinueArtwork(sender, message.Number); return; }
             if (message.Type == "clock-ping") { SendPeer(sender, new("clock-pong", Number: message.Number, Data: clock.Now.ToString())); return; }
             if (message.Type == "bye") { DepartPeer(sender); return; }
+            if (message.Type == "catalog-pointer") { ReceivePointer(sender, message); return; }
             ApplyHostCommand(sender, message);
         }
         else
