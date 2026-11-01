@@ -864,6 +864,10 @@ public static partial class FileNames
         var numbering = FilenameEpisodes.Read(path, seriesContext || seasonFolder.Success, folderSeason, name);
         var season = numbering?.Season; var number = numbering?.Episode;
         string? series = numbering?.Series;
+        // "Azumanga Daioh - XX - Original Opening Sequence" is a clip of the show: XX stands in for an episode number.
+        var placeholder = numbering is null && filmExtra is null
+            ? Regex.Match(name, @"^(?<series>.*\S)\s+[-–]\s+(?:XX|xx|##|\?\?)(?:\s+[-–]\s+(?<clip>\S.*))?$") : Match.Empty;
+        if (placeholder.Success) { bonus = true; series = placeholder.Groups["series"].Value; }
         if (numbering is not null && !numbering.ExplicitSeason && number is not null && kind == "Mixed" && Regex.IsMatch(System.IO.Path.GetFileName(path), @"^\[[^\]]+\]")) kind = "Anime";
         var filenameSeason = numbering?.ExplicitSeason == true ? season : null;
         if (seasonFolder.Success)
@@ -929,10 +933,10 @@ public static partial class FileNames
                 EpisodeEnd = sourcePart > 1 ? null : result.EpisodeEnd, NumberingOrder = "absolute",
                 AbsoluteEpisode = sourcePart > 1 ? null : result.AbsoluteEpisode };
         // Bonus clips sit in season 0 without numbering; a clip from an extras folder drops any numbers its file name carried.
-        if (bonus && (structured || extraClip) && (numbering is null || extraClip))
+        if (bonus && (structured || extraClip || placeholder.Success) && (numbering is null || extraClip))
             result = result with { IsBonus = true, Kind = sourceKind == "Anime" || path.Split(System.IO.Path.DirectorySeparatorChar).Any(p => p.Equals("Anime", StringComparison.OrdinalIgnoreCase)) ? "Anime" : "Show",
                 Season = 0, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, SourcePart = null, SourcePartEpisode = null, SourcePartEpisodeEnd = null,
-                EpisodeTitle = BonusTitle(name, result.Series), NumberingOrder = "aired", NumberingConflict = null,
+                EpisodeTitle = placeholder.Groups["clip"] is { Success: true } clip ? clip.Value : BonusTitle(name, result.Series), NumberingOrder = "aired", NumberingConflict = null,
                 // An extras folder inside "Season 2" holds that season's clips, so they also list at the end of season 2.
                 AirsAfterSeason = extraClip ? Parts(dir).Reverse().Select(SeasonNumber).FirstOrDefault(n => n is > 0) : result.AirsAfterSeason };
         // A film's extras are clips of that film: no show, no numbering, listed on the film's page.

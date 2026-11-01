@@ -100,6 +100,18 @@ static class LibraryVersionsFixture
         await FileAt(anime, "Outlaw Star", "Outlaw Star - 01 (BDRip 1080p).mkv");
         var ncop = FileNames.Parse(await FileAt(anime, "Outlaw Star", "Extras", "Outlaw Star - NCOP1.mkv"), "Mixed", anime);
         check(ncop is { IsExtra: false, IsBonus: true, Series: "Outlaw Star", AirsAfterSeason: null }, "an extras folder beside numbered episodes belongs to the show");
+        // "XX" stands in for an episode number, so these are the show's clips rather than films named after the whole file.
+        var azumanga = Path.Combine(directory, "Azumanga");
+        var azumangaEpisode = FileNames.Parse(await FileAt(azumanga, "Azumanga Daioh", "Azumanga Daioh - 01 - Miss Yukari [KM-Dual-DVDRIP].mkv"), "Mixed", azumanga);
+        var azumangaClipPath = await FileAt(azumanga, "Azumanga Daioh", "Azumanga Daioh - XX - Original Opening Sequence [KM-Dual-DVDRIP].mkv");
+        var azumangaClip = FileNames.Parse(azumangaClipPath, "Mixed", azumanga);
+        check(azumangaClip is { IsBonus: true, Season: 0, Episode: null, Series: "Azumanga Daioh", EpisodeTitle: "Original Opening Sequence" } && azumangaClip.ShowId == azumangaEpisode.ShowId,
+            "a clip numbered XX joins its show's extras under its own title");
+        var azumangaStore = new LibraryStore(Path.Combine(directory, "azumanga-db"));
+        azumangaStore.Save(azumangaClip with { Title = "Azumanga Daioh - XX - Original Opening Sequence", Kind = "Movie", Series = null, ShowId = null, Season = null, EpisodeTitle = null, IsBonus = false });
+        await azumangaStore.ScanAsync([new(azumanga)]);
+        check(azumangaStore.All().Single(x => x.Path == azumangaClipPath) is { IsBonus: true, Series: "Azumanga Daioh", Season: 0, Kind: "Show" },
+            "a rescan moves an XX clip indexed as a film into its show");
         var all = clips.Append(episode).Append(beside).ToArray();
         var seasons = LibraryCatalog.Browse(all, episode.ShowId, "Show");
         check(seasons.Select(x => x.DisplayTitle).SequenceEqual(["Season 1", "Extras"]) && seasons[1].Caption == "4 bonus clips", "bonus clips gather in an Extras season after the numbered seasons");
