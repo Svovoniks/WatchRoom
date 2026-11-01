@@ -861,7 +861,7 @@ public static partial class FileNames
         var folderSeason = seasonFolder.Success ? seasonFolder.Groups[1].Success ? int.Parse(seasonFolder.Groups[1].Value) : seasonFolder.Groups[2].Success ? int.Parse(seasonFolder.Groups[2].Value) : 0 : (int?)null;
         var name = FilenameEpisodes.Clean(path, seriesContext || seasonFolder.Success);
         var episodeName = name;
-        var numbering = FilenameEpisodes.Read(path, seriesContext || seasonFolder.Success, folderSeason, name);
+        var numbering = FilenameEpisodes.Read(path, seriesContext || seasonFolder.Success, folderSeason, name, specials: sourceKind != "Movie");
         var season = numbering?.Season; var number = numbering?.Episode;
         string? series = numbering?.Series;
         // "Azumanga Daioh - XX - Original Opening Sequence" beside the show's numbered episodes is one of its clips, not a film.
@@ -972,9 +972,20 @@ public static partial class FileNames
         return rest.Length > 0 ? rest : name;
     }
     // The show whose numbered episodes share this folder, when this file's name or the folder's names it. Two episodes
-    // are needed, so a stray numbered file beside a film can't claim it. The answer is cached until the folder changes.
+    // are needed, so a stray numbered file beside a film can't claim it. The answer is cached until the folder changes;
+    // the cache starts over past a few thousand folders.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Written, (string Series, int Count)[] Shows)> EpisodeFolders =
         new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    // "Arrow - Pilot" is named after Arrow, but "Arrowhead" isn't, and "Fargo (1996)" beside Fargo's episodes is the film.
+    private static bool NamedAfter(string text, string series, bool clip)
+    {
+        var words = Regex.Split(Regex.Replace(series, @"(?i)^the\s+", ""), @"[^\p{L}\p{N}]+").Where(word => word.Length > 0).Select(Regex.Escape).ToArray();
+        if (words.Length == 0) return false;
+        var match = Regex.Match(text, @"(?i)^(?:the[^\p{L}\p{N}]+)?" + string.Join(@"[^\p{L}\p{N}]*", words) + @"(?![\p{L}\p{N}])");
+        if (!match.Success) return false;
+        var rest = text[match.Length..].Trim(' ', '-', '–', ':', '.', '_');
+        return !clip || rest.Length > 0 && !Regex.IsMatch(rest, @"^\(?(?:19|20)\d{2}(?!\d)");
+    }
     private static string? EpisodeFolderSeries(string dir, string name, string? libraryRoot, bool seriesContext)
     {
         (string Series, int Count)[] shows;
@@ -989,6 +1000,7 @@ public static partial class FileNames
                     .Select(file => FilenameEpisodes.Read(file, seriesContext)).Where(found => found is { Episode: not null } && found.Season != 0 && found.Conflict is null)
                     .Select(found => string.IsNullOrWhiteSpace(found!.Series) ? System.IO.Path.GetFileName(dir) : found.Series)
                     .GroupBy(series => MetadataTitles.Normalize(series)).Where(group => group.Count() >= 2).Select(group => (group.First(), group.Count())).ToArray();
+                if (EpisodeFolders.Count > 4096) EpisodeFolders.Clear();
                 EpisodeFolders[key] = (written, shows);
             }
         }
@@ -996,9 +1008,11 @@ public static partial class FileNames
         catch (UnauthorizedAccessException) { return null; }
         var root = libraryRoot is not null && string.Equals(System.IO.Path.GetFullPath(libraryRoot).TrimEnd(System.IO.Path.DirectorySeparatorChar), dir,
             OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-        var file = MetadataTitles.Normalize(name); var folder = MetadataTitles.Normalize(StripReleaseTags(System.IO.Path.GetFileName(dir)));
+        var folder = StripReleaseTags(System.IO.Path.GetFileName(dir));
+        // A dated name is a film unless it names the show itself ("Sherlock The Abominable Bride 2016"), so the folder can't claim it.
+        var film = Regex.IsMatch(name, @"\(?(?:19|20)\d{2}\)?\s*$");
         return shows.OrderByDescending(show => show.Count).Select(show => show.Series).FirstOrDefault(series =>
-            MetadataTitles.Normalize(series) is { Length: >= 2 } show && (file.StartsWith(show, StringComparison.Ordinal) || !root && folder.StartsWith(show, StringComparison.Ordinal)));
+            MetadataTitles.Normalize(series).Length >= 2 && (NamedAfter(name, series, clip: true) || !root && !film && NamedAfter(folder, series, clip: false)));
     }
     private static bool IsReleaseDirectory(string directory) => Regex.IsMatch(
         Regex.Replace(System.IO.Path.GetFileName(directory), @"[._]+", " "),

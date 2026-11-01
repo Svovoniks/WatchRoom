@@ -50,7 +50,7 @@ internal static class FilenameEpisodes
         return Replace(name, @"\s+", " ").Trim();
     }
 
-    internal static Result? Read(string path, bool seriesContext, int? folderSeason = null, string? cleanedName = null)
+    internal static Result? Read(string path, bool seriesContext, int? folderSeason = null, string? cleanedName = null, bool specials = false)
     {
         var name = cleanedName ?? Clean(path, seriesContext);
         var season = Match(name, @"\bS(?<s>\d{1,2})[ -]*(?:x[ -]*)?E(?:P(?:ISODE)?)?[ -]*" + Number + @"(?=\b|E\d)");
@@ -59,8 +59,8 @@ internal static class FilenameEpisodes
         if (!season.Success) season = Match(name, @"\b(?<s>\d{1,2})\s*(?:сезон|sezon)\s*" + Number + @"\s*сери(?:я|и|й)\b");
         if (!season.Success) season = Match(name, @"\b[сc](?<s>\d{1,2})[ -]*[еэ]" + Number + @"\b");
         if (season.Success) return Finish(name, season, int.Parse(season.Groups["s"].Value), true);
-        // "One Piece - Egghead SP4" and "OVA2" are numbered specials; a show's "Special 3" is too.
-        var special = Match(name, @"(?:^|\s|-)(?:SP|OVA|OAD)[ #-]?" + Number + @"(?=\s*(?:$|-|\())");
+        // "One Piece - Egghead SP4" and "OVA2" are numbered specials outside a Movies library; a show's "Special 3" is too.
+        var special = seriesContext || specials ? Match(name, @"(?:^|\s|-)(?:SP|OVA|OAD)[ #-]?" + Number + @"(?=\s*(?:$|-|\())") : System.Text.RegularExpressions.Match.Empty;
         if (!special.Success && seriesContext) special = Match(name, @"(?:^|\s|-)Special[ #-]*" + Number + @"(?=\s*(?:$|-|\())");
         if (special.Success) return Finish(name, special, 0, true);
 

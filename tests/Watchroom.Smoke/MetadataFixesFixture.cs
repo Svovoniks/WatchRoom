@@ -160,6 +160,20 @@ static class MetadataFixesFixture
             FileNames.Parse(await At("Mixed", "Taxi", "Taxi (1998).mkv"), "Mixed", mixed) is { Kind: "Movie", Series: null, IsBonus: false } &&
             FileNames.Parse(await At("Movies", "Azumanga Daioh", "Azumanga Daioh - XX - Original Closing Sequence.mkv"), "Movie", Path.Combine(root, "Movies")) is { Kind: "Movie", IsBonus: false },
             "films beside unrelated or lone numbered files, and anything in a Movies folder, stay films");
+        var downloads = Path.Combine(root, "Downloads");
+        foreach (var show in new[] { "Arrow", "Show", "Fargo", "Westworld" }) { await At("Downloads", show + " S01E01.mkv"); await At("Downloads", show + " S01E02.mkv"); }
+        await At("Downloads", "Fargo", "Fargo S01E01.mkv"); await At("Downloads", "Fargo", "Fargo S01E02.mkv");
+        var films = new List<MediaItem>();
+        foreach (var name in new[] { "Arrowhead (2016).mkv", "Showgirls (1995).mkv", "Fargo (1996).mkv", "Westworld 1973 1080p.mkv" }) films.Add(FileNames.Parse(await At("Downloads", name), "Mixed", downloads));
+        films.Add(FileNames.Parse(await At("Downloads", "Fargo", "Fargo (1996).mkv"), "Mixed", downloads));
+        check(films.All(film => film is { Kind: "Movie", Series: null, IsBonus: false }) &&
+            FileNames.Parse(await At("Downloads", "Arrow - Pilot Presentation.mkv"), "Mixed", downloads) is { IsBonus: true, Series: "Arrow", EpisodeTitle: "Pilot Presentation" },
+            "a film whose name only starts like a show's, or is the show's name and a year, stays a film beside that show's episodes");
+        var movies = Path.Combine(root, "MovieRoot");
+        await At("MovieRoot", "Akira (1988).mkv");
+        foreach (var name in new[] { "Hellsing Ultimate OVA 1.mkv", "Hellsing Ultimate OVA 2.mkv" })
+            check(FileNames.Parse(await At("MovieRoot", name), "Movie", movies) is { Kind: "Movie", Series: null, Season: null, Episode: null },
+                "an OVA-numbered file in a Movies folder stays a film: " + name);
 
         // Folders listed before this change fix themselves on the next scan.
         var store = new LibraryStore(Path.Combine(root, "db"));
