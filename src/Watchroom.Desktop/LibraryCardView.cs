@@ -59,7 +59,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         if (HomeDetail != detail) { HomeDetail = detail; Changed(nameof(HomeDetail)); }
         if (HomeTag != tag) { HomeTag = tag; Changed(nameof(HomeTag)); Changed(nameof(HomeTagVisibility)); }
     }
-    public string EpisodeMeta => IsMusic ? Card.Caption : (Card.Media.IsBonus ? "Extra" : (Card.Media.Season is { } season ? $"S{season:00} · " : "") +
+    public string EpisodeMeta => IsMusic ? Card.Caption : (Card.Media.IsBonus ? Card.Media.BonusKind is null ? "Extra" : Card.Media.BonusLabel : (Card.Media.Season is { } season ? $"S{season:00} · " : "") +
         (Card.Media.Episode is { } episode ? $"E{episode:00}" + (Card.Media.EpisodeEnd > episode ? $"–{Card.Media.EpisodeEnd:00}" : "") : "Episode unknown")) +
         (Card.Media.RuntimeMinutes is > 0 ? $" · {Card.Media.RuntimeMinutes} min" : "") +
         (Card.Version is { Length: > 0 } version ? $" · {version} · {Card.Versions} versions" : "");
