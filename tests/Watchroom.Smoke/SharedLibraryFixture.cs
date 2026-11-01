@@ -15,6 +15,10 @@ static class SharedLibraryFixture
         check(room.Apply("a", new("catalog-browse"), 1000, out _) && !room.Apply("b", new("catalog-browse"), 1000, out _), "exactly one guest acquires browsing lock");
         foreach (var command in new[] { "catalog-follow", "catalog-artwork", "catalog-watch" })
             check(room.Apply("a", new(command), 1000, out _) && !room.Apply("b", new(command), 1000, out _), "only the browsing lock owner can " + command);
+        check(room.AcceptsPointer("a", 1000) && !room.AcceptsPointer("b", 1000) && !room.AcceptsPointer("host", 1000), "only the browsing lock owner can send its pointer");
+        check(Enumerable.Range(0, 200).Count(_ => room.AcceptsPointer("a", 1500)) == 29 && room.Apply("a", new("catalog-follow"), 1500, out _),
+            "excess pointer moves are dropped without using the command budget");
+        check(room.AcceptsPointer("a", 2600), "the pointer budget renews each second");
         var view = new LibraryBrowseView(new(), 8, .5, "hover", "selected");
         room.DescribeLibraryView(view, 1000); room.Apply("a", new("catalog-browse"), 1000, out _);
         check(room.LibraryActivity?.View == view, "loading another chunk preserves the authenticated guest view");

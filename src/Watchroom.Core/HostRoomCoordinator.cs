@@ -12,11 +12,22 @@ internal sealed class HostRoomCoordinator(string host)
     // Guests gate shared playback only once their direct control channel exists.
     private readonly HashSet<string> connected = [];
     private readonly Dictionary<string, (long At, int Count)> limits = [];
+    // Pointer moves have their own budget, so they never use up the one artwork and other commands share.
+    private readonly Dictionary<string, (long At, int Count)> pointerLimits = [];
+    public bool AcceptsPointer(string sender, long now)
+    {
+        ExpireLibrary(now);
+        if (!Approved(sender) || !LibraryBrowsing || LibraryActivity?.Peer != sender) return false;
+        var limit = pointerLimits.GetValueOrDefault(sender);
+        limit = now - limit.At >= 1000 ? (now, 1) : (limit.At, limit.Count + 1);
+        pointerLimits[sender] = limit;
+        return limit.Count <= 30;
+    }
     private long revision, generation;
     private bool resumeWhenReady;
     public AdmittedGuest[] AdmittedGuests { get; set; } = [];
     public RoomSnapshot Snapshot => new(people.Values.ToArray(), Media, Playback, SharedControls, Queue, AdmittedGuests, Name, LibraryBrowsing, LibraryActivity, Tracks, LastSession,
-        voice.Values.Where(v => people.ContainsKey(v.Peer)).OrderBy(v => v.Slot).ToArray());
+        voice.Values.Where(v => people.ContainsKey(v.Peer)).OrderBy(v => v.Slot).ToArray(), GuestPointers: true);
     // Everyone whose app supports voice reports its state once connected; each keeps a small slot that
     // labels its relayed audio frames, so listeners can tell speakers apart without per-frame names.
     private readonly Dictionary<string, VoiceMember> voice = [];
@@ -60,7 +71,7 @@ internal sealed class HostRoomCoordinator(string host)
     }
     public void Depart(string id, long now)
     {
-        departed.Add(id); people.Remove(id); limits.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); voice.Remove(id);
+        departed.Add(id); people.Remove(id); limits.Remove(id); pointerLimits.Remove(id); scopedReadiness.Remove(id); connected.Remove(id); voice.Remove(id);
         if (LibraryActivity?.Peer == id) LibraryActivity = null;
         TryResume(now);
     }

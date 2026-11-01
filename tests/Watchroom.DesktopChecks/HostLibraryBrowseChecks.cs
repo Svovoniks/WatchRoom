@@ -142,6 +142,22 @@ static class HostLibraryBrowseChecks
             Call("BrowseWithGuest", window, new RoutedEventArgs());
             Check(ReferenceEquals(grid.ItemsSource, mirror) && mirror.Count == 40 && mirror[2].IsGuestHovered && follow.Content.ToString() == "Stop following",
                 "following shows the exact loaded guest entries and highlights guest hover");
+            content.UpdateLayout();
+            var pointer = Control<FrameworkElement>("GuestPointer");
+            Call("ReceiveGuestPointer", new WireMessage("catalog-pointer", Sender: "other", Data: Wire.Serialize(new LibraryPointer(0.5, 0.5))));
+            Check(pointer.Visibility != Visibility.Visible, "only the browsing guest's pointer is drawn");
+            var shownCard = mirror.First(view => grid.ItemContainerGenerator.ContainerFromItem(view) is FrameworkElement { ActualWidth: > 0 });
+            Call("ReceiveGuestPointer", new WireMessage("catalog-pointer", Sender: "guest", Data: Wire.Serialize(new LibraryPointer(0.5, 0.5, shownCard.Card.Media.Id, 0.25, 0.75))));
+            var hoveredCard = (FrameworkElement)grid.ItemContainerGenerator.ContainerFromItem(shownCard);
+            content.UpdateLayout();
+            var centre = pointer.TranslatePoint(new Point(pointer.Width / 2, pointer.Height / 2), hoveredCard);
+            Check(pointer.Visibility == Visibility.Visible && Math.Abs(centre.X - hoveredCard.ActualWidth * 0.25) < 1 && Math.Abs(centre.Y - hoveredCard.ActualHeight * 0.75) < 1,
+                "host shows the browsing guest's mouse as a circle at the same place on the hovered card");
+            var layerOrigin = Control<FrameworkElement>("GuestPointerLayer").TranslatePoint(new Point(), grid);
+            Check(Math.Abs(layerOrigin.X) < 1 && Math.Abs(layerOrigin.Y) < 1, "the pointer layer covers the poster grid");
+            Call("ReceiveGuestPointer", new WireMessage("catalog-pointer", Sender: "guest"));
+            Check(pointer.Visibility != Visibility.Visible, "the circle hides when the guest's mouse leaves the library");
+            Check(new LibraryPointer(0.5, 0.5).Valid() && !new LibraryPointer(1.5, 0).Valid() && !new LibraryPointer(0, 0, "").Valid(), "pointer positions are bounded");
             content.UpdateLayout(); scroll.ScrollToVerticalOffset(300); content.UpdateLayout();
             Call("HostLibraryScrollInput", grid, null);
             Check(ReferenceEquals(grid.ItemsSource, mirror) && follow.Content.ToString() == "Follow Guest",

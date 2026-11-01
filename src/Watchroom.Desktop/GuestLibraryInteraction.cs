@@ -34,6 +34,74 @@ public partial class MainWindow
     {
         if (GuestLibrary) { guestHoveredId = null; ScheduleGuestView(); }
     }
+    // The guest's mouse over the library grid, sent at most every 60 ms to hosts that draw it.
+    private LibraryPointer? guestPointer, sentGuestPointer;
+    private readonly DispatcherTimer guestPointerDelay = new() { Interval = TimeSpan.FromMilliseconds(60) };
+    private bool guestPointerDelayInitialized;
+    private void LibraryPointerMove(object sender, MouseEventArgs e)
+    {
+        if (!GuestLibrary || room?.Snapshot?.GuestPointers != true || currentPage != "Library") return;
+        var scroll = LibraryScroll;
+        if (scroll.ActualWidth <= 0 || scroll.ActualHeight <= 0) return;
+        var point = e.GetPosition(scroll);
+        var pointer = new LibraryPointer(Math.Clamp(point.X / scroll.ActualWidth, 0, 1), Math.Clamp(point.Y / scroll.ActualHeight, 0, 1));
+        if (e.OriginalSource is DependencyObject source && PosterGrid.ContainerFromElement(source) is FrameworkElement { DataContext: LibraryCardView view } card &&
+            card.ActualWidth > 0 && card.ActualHeight > 0)
+        {
+            var within = e.GetPosition(card);
+            pointer = pointer with { CardId = view.Card.Media.Id, CardX = Math.Clamp(within.X / card.ActualWidth, 0, 1), CardY = Math.Clamp(within.Y / card.ActualHeight, 0, 1) };
+        }
+        guestPointer = pointer; ScheduleGuestPointer();
+    }
+    private void LibraryPointerLeave(object sender, MouseEventArgs e)
+    {
+        if (GuestLibrary) { guestPointer = null; ScheduleGuestPointer(); }
+    }
+    private void ScheduleGuestPointer()
+    {
+        if (!OwnsLibrary) return;
+        if (!guestPointerDelayInitialized) { guestPointerDelay.Tick += (_, _) => { guestPointerDelay.Stop(); SendGuestPointer(); }; guestPointerDelayInitialized = true; }
+        if (!guestPointerDelay.IsEnabled) guestPointerDelay.Start();
+    }
+    private void SendGuestPointer()
+    {
+        if (!GuestLibrary || !OwnsLibrary || room?.Snapshot?.GuestPointers != true || guestPointer == sentGuestPointer) return;
+        sentGuestPointer = guestPointer;
+        TryLibraryCommand(new("catalog-pointer", Data: guestPointer is null ? null : Wire.Serialize(guestPointer)));
+    }
+
+    // The host draws the followed guest's pointer over the same card, or at the same place in the grid when that card is not shown.
+    private LibraryPointer? mirroredPointer;
+    private void ReceiveGuestPointer(WireMessage message)
+    {
+        if (room?.Identity?.Host != true || message.Sender != room.Snapshot?.LibraryActivity?.Peer) return;
+        try { mirroredPointer = message.Data is null ? null : Wire.Read<LibraryPointer>(message.Data); }
+        catch (System.Text.Json.JsonException) { mirroredPointer = null; }
+        PlaceGuestPointer(true);
+    }
+    private void PlaceGuestPointer(bool animate = false)
+    {
+        var layer = GuestPointerLayer;
+        if (mirroredPointer is not { } pointer || !FollowingGuest || currentPage != "Library" || PosterGrid.ItemsSource != mirroredCards ||
+            layer.ActualWidth <= 0 || layer.ActualHeight <= 0) { GuestPointer.Visibility = Visibility.Collapsed; return; }
+        var at = new Point(pointer.X * layer.ActualWidth, pointer.Y * layer.ActualHeight);
+        if (pointer.CardId is { } id && mirroredCards.FirstOrDefault(view => view.Card.Media.Id == id) is { } view &&
+            PosterGrid.ItemContainerGenerator.ContainerFromItem(view) is FrameworkElement { Visibility: Visibility.Visible, ActualWidth: > 0 } card)
+            at = card.TranslatePoint(new Point(pointer.CardX * card.ActualWidth, pointer.CardY * card.ActualHeight), layer);
+        var shown = GuestPointer.Visibility == Visibility.Visible;
+        GuestPointer.Visibility = Visibility.Visible;
+        // Glide between updates so the circle follows smoothly; jump when it first appears or the layout moved.
+        if (animate && shown)
+        {
+            var duration = new Duration(guestPointerDelay.Interval);
+            GuestPointerPosition.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(at.X, duration));
+            GuestPointerPosition.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, new System.Windows.Media.Animation.DoubleAnimation(at.Y, duration));
+            return;
+        }
+        GuestPointerPosition.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, null);
+        GuestPointerPosition.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, null);
+        GuestPointerPosition.X = at.X; GuestPointerPosition.Y = at.Y;
+    }
     private bool guestHomeResume;
     private async void OpenGuestVideo(LibraryCard card, bool resume = false)
     {
@@ -172,11 +240,11 @@ public partial class MainWindow
     private LibraryBrowseView? mirroredView;
     private readonly LibraryCardCollection mirroredCards = [];
     private bool FollowingGuest => room?.Identity?.Host == true && room.Snapshot?.LibraryActivity?.View is not null && followGuest;
-    private void ResetGuestMirror() { followGuest = false; followedPeer = null; mirroredView = null; mirroredCards.Clear(); ClearHostArtworkRequests(); }
+    private void ResetGuestMirror() { followGuest = false; followedPeer = null; mirroredView = null; mirroredPointer = null; mirroredCards.Clear(); ClearHostArtworkRequests(); PlaceGuestPointer(); }
     private void RefreshGuestMirror(LibraryBrowseActivity? activity)
     {
         if (room?.Identity?.Host != true) return;
-        if (activity?.Peer != followedPeer) { followedPeer = activity?.Peer; followGuest = false; mirroredView = null; }
+        if (activity?.Peer != followedPeer) { followedPeer = activity?.Peer; followGuest = false; mirroredView = null; mirroredPointer = null; }
         HostLibraryActivityText.Text = activity is null ? room.Snapshot?.LibraryBrowsing == true ? "Guest browsing available" : "Guest browsing is off"
             : activity.Name + " · " + activity.Location + (activity.Query.Length == 0 ? "" : " · " + activity.Query);
         BrowseWithGuestButton.Content = followGuest ? "Stop following" : "Follow " + activity?.Name;
@@ -184,6 +252,7 @@ public partial class MainWindow
         if (FollowingGuest) ApplyGuestMirror();
         // The host's own library replaces the mirror once it is filtered; an update already running will do it.
         else if (PosterGrid.ItemsSource == mirroredCards && !applyingGuestMirror && librarySearchCancellation is null) FilterLibrary(backgroundUpdate: true);
+        PlaceGuestPointer();
     }
     // Stopping keeps the guest's location, and scrolling away keeps the host's place in it, in the host's own full library.
     private void DetachGuestMirror(bool keepPlace = false)
@@ -239,7 +308,7 @@ public partial class MainWindow
                 UpdateBreadcrumbs();
                 PosterGrid.ItemsSource = mirroredCards; EmptyLibrary.Visibility = NoResults.Visibility = Visibility.Collapsed;
                 var fraction = view.ScrollFraction;
-                Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() => { if (FollowingGuest) LibraryScroll.ScrollToVerticalOffset(LibraryScroll.ScrollableHeight * fraction); }));
+                Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() => { if (FollowingGuest) LibraryScroll.ScrollToVerticalOffset(LibraryScroll.ScrollableHeight * fraction); PlaceGuestPointer(); }));
             }
             mirroredView = view;
         }

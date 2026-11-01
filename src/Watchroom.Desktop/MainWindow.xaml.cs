@@ -1216,6 +1216,7 @@ public partial class MainWindow : Window
                 UpdateSessionControls();
                 break;
             case "catalog-artwork-chunk": ReceiveHostArtwork(message); break;
+            case "catalog-pointer": ReceiveGuestPointer(message); break;
             case "session-artwork-chunk": ReceiveHeroArtwork(message); break;
             case "catalog-started":
                 if (!GuestLibrary) selected = playingItem = items.FirstOrDefault(item => item.Id == message.Target);
