@@ -458,7 +458,10 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'The branch does not contain the latest origin/master. Merge it (git merge origin/master), resolve conflicts, and rerun.' }
         $changed = @(Invoke-Native git @('diff', '--name-only', '--no-renames', 'origin/master', 'HEAD'))
         if (!$changed.Count) { throw 'The branch has no changes from origin/master.' }
-        $changed | ForEach-Object { $null = Assert-ShipPathName $_ }
+        # Deleting a file adds no content, so only the submodule rule applies to removals.
+        @(Invoke-Native git @('diff', '--name-only', '--no-renames', '--diff-filter=d', 'origin/master', 'HEAD')) | ForEach-Object { $null = Assert-ShipPathName $_ }
+        @(Invoke-Native git @('diff', '--name-only', '--no-renames', '--diff-filter=D', 'origin/master', 'HEAD')) |
+            Where-Object { $_.Replace('\', '/') -match '^sites(/|$)' } | ForEach-Object { throw "Not a release source path: $_" }
         $untracked = @(Invoke-Native git @('ls-files', '--others', '--exclude-standard'))
         if ($untracked.Count) { Write-Warning "Untracked files are not shipped: $($untracked -join ', ')" }
         $existing = Find-BranchPullRequest $branch
