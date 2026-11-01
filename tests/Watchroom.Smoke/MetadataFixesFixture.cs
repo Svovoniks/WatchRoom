@@ -166,6 +166,12 @@ static class MetadataFixesFixture
         var films = new List<MediaItem>();
         foreach (var name in new[] { "Arrowhead (2016).mkv", "Showgirls (1995).mkv", "Fargo (1996).mkv", "Westworld 1973 1080p.mkv" }) films.Add(FileNames.Parse(await At("Downloads", name), "Mixed", downloads));
         films.Add(FileNames.Parse(await At("Downloads", "Fargo", "Fargo (1996).mkv"), "Mixed", downloads));
+        await At("Downloads", "Westworld", "Westworld S01E01.mkv"); await At("Downloads", "Westworld", "Westworld S01E02.mkv");
+        foreach (var name in new[] { "Westworld.1973.REMASTERED.1080p.BluRay.x264.mkv", "Westworld (1973) Remastered.mkv" }) films.Add(FileNames.Parse(await At("Downloads", "Westworld", name), "Mixed", downloads));
+        foreach (var name in new[] { "Fargo.1996.PROPER.1080p.BluRay.x264.mkv", "Fargo (1996) Director's Cut.mkv" }) films.Add(FileNames.Parse(await At("Downloads", "Fargo", name), "Mixed", downloads));
+        await At("Downloads", "Pokémon - 01.mkv"); await At("Downloads", "Pokémon - 02.mkv");
+        check(FileNames.Parse(await At("Downloads", "Pokemon - Opening.mkv"), "Mixed", downloads) is { IsBonus: true, Series: "Pokémon" },
+            "a clip spelled without the show's accents still names the show");
         check(films.All(film => film is { Kind: "Movie", Series: null, IsBonus: false }) &&
             FileNames.Parse(await At("Downloads", "Arrow - Pilot Presentation.mkv"), "Mixed", downloads) is { IsBonus: true, Series: "Arrow", EpisodeTitle: "Pilot Presentation" },
             "a film whose name only starts like a show's, or is the show's name and a year, stays a film beside that show's episodes");

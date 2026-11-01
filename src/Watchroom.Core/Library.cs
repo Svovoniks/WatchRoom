@@ -977,9 +977,13 @@ public static partial class FileNames
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Written, (string Series, int Count)[] Shows)> EpisodeFolders =
         new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     // "Arrow - Pilot" is named after Arrow, but "Arrowhead" isn't, and "Fargo (1996)" beside Fargo's episodes is the film.
+    // "Pokemon" names "Pokémon" and "Love and Peace" names "Love & Peace".
+    private static string Fold(string text) => new string(text.Replace("&", " and ").Normalize(NormalizationForm.FormD)
+        .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark).ToArray());
     private static bool NamedAfter(string text, string series, bool clip)
     {
-        var words = Regex.Split(Regex.Replace(series, @"(?i)^the\s+", ""), @"[^\p{L}\p{N}]+").Where(word => word.Length > 0).Select(Regex.Escape).ToArray();
+        text = Fold(text);
+        var words = Regex.Split(Regex.Replace(Fold(series), @"(?i)^the\s+", ""), @"[^\p{L}\p{N}]+").Where(word => word.Length > 0).Select(Regex.Escape).ToArray();
         if (words.Length == 0) return false;
         var match = Regex.Match(text, @"(?i)^(?:the[^\p{L}\p{N}]+)?" + string.Join(@"[^\p{L}\p{N}]*", words) + @"(?![\p{L}\p{N}])");
         if (!match.Success) return false;
@@ -1009,10 +1013,12 @@ public static partial class FileNames
         var root = libraryRoot is not null && string.Equals(System.IO.Path.GetFullPath(libraryRoot).TrimEnd(System.IO.Path.DirectorySeparatorChar), dir,
             OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
         var folder = StripReleaseTags(System.IO.Path.GetFileName(dir));
-        // A dated name is a film unless it names the show itself ("Sherlock The Abominable Bride 2016"), so the folder can't claim it.
-        var film = Regex.IsMatch(name, @"\(?(?:19|20)\d{2}\)?\s*$");
+        // A name that starts with the show's name is judged on that name alone: "Sherlock The Abominable Bride 2016" is a clip,
+        // "Westworld 1973 REMASTERED" the film. Any other dated name is a film, so the folder can't claim it.
+        var dated = Regex.IsMatch(name, @"(?<!\d)(?:19|20)\d{2}(?!\d)");
         return shows.OrderByDescending(show => show.Count).Select(show => show.Series).FirstOrDefault(series =>
-            MetadataTitles.Normalize(series).Length >= 2 && (NamedAfter(name, series, clip: true) || !root && !film && NamedAfter(folder, series, clip: false)));
+            MetadataTitles.Normalize(series).Length >= 2 && (NamedAfter(name, series, clip: false)
+                ? NamedAfter(name, series, clip: true) : !root && !dated && NamedAfter(folder, series, clip: false)));
     }
     private static bool IsReleaseDirectory(string directory) => Regex.IsMatch(
         Regex.Replace(System.IO.Path.GetFileName(directory), @"[._]+", " "),
