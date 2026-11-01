@@ -31,11 +31,13 @@ public static class OpenFileHandoff
         instance.Dispose(); instance = null;
         return false;
     }
-    // A closing app stops taking videos and gives up the data directory at once, so a video opened while it shuts
-    // down starts its own window instead of waiting for the old process to exit. Runs on the thread that claimed it.
+    // A closing app stops taking videos at once, and gives up the data directory once it has saved where playback
+    // stopped, so a video opened while it shuts down starts its own window instead of waiting for the old process
+    // to exit. Release runs on the thread that claimed it.
+    public static void StopListening() => listening?.Cancel();
     public static void Release()
     {
-        listening?.Cancel();
+        StopListening();
         if (instance is null) return;
         try { instance.ReleaseMutex(); } catch (ApplicationException) { }
         instance.Dispose(); instance = null;
@@ -59,7 +61,8 @@ public static class OpenFileHandoff
                 return true;
             }
             catch (TimeoutException) { }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+            // The running app closed its end; it may be shutting down.
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Thread.Sleep(50); }
             if (Claim() || Environment.TickCount64 >= deadline) return false;
         }
     }
