@@ -166,36 +166,45 @@ public partial class MainWindow
         catch (Exception ex) when (ex is FormatException or System.IO.IOException or NotSupportedException or ArgumentException) { return null; }
     }
 
-    private bool followGuest = true, applyingGuestMirror;
+    // The host browses their own library; following a guest is opt-in.
+    private bool followGuest, applyingGuestMirror;
     private string? followedPeer;
     private LibraryBrowseView? mirroredView;
     private readonly LibraryCardCollection mirroredCards = [];
     private bool FollowingGuest => room?.Identity?.Host == true && room.Snapshot?.LibraryActivity?.View is not null && followGuest;
-    private void ResetGuestMirror() { followGuest = true; followedPeer = null; mirroredView = null; mirroredCards.Clear(); ClearHostArtworkRequests(); }
+    private void ResetGuestMirror() { followGuest = false; followedPeer = null; mirroredView = null; mirroredCards.Clear(); ClearHostArtworkRequests(); }
     private void RefreshGuestMirror(LibraryBrowseActivity? activity)
     {
         if (room?.Identity?.Host != true) return;
-        if (activity?.Peer != followedPeer) { followedPeer = activity?.Peer; followGuest = true; mirroredView = null; }
+        if (activity?.Peer != followedPeer) { followedPeer = activity?.Peer; followGuest = false; mirroredView = null; }
         HostLibraryActivityText.Text = activity is null ? room.Snapshot?.LibraryBrowsing == true ? "Guest browsing available" : "Guest browsing is off"
             : activity.Name + " · " + activity.Location + (activity.Query.Length == 0 ? "" : " · " + activity.Query);
-        BrowseWithGuestButton.Content = "Browse with " + activity?.Name;
-        BrowseWithGuestButton.Visibility = activity is not null && !followGuest ? Visibility.Visible : Visibility.Collapsed;
+        BrowseWithGuestButton.Content = followGuest ? "Stop following" : "Follow " + activity?.Name;
+        BrowseWithGuestButton.Visibility = activity?.View is not null ? Visibility.Visible : Visibility.Collapsed;
         if (FollowingGuest) ApplyGuestMirror();
-        else if (activity is null && PosterGrid.ItemsSource == mirroredCards) { PosterGrid.ItemsSource = libraryCards; FilterLibrary(); }
+        // The host's own library replaces the mirror once it is filtered; an update already running will do it.
+        else if (PosterGrid.ItemsSource == mirroredCards && !applyingGuestMirror && librarySearchCancellation is null) FilterLibrary(backgroundUpdate: true);
     }
-    private void DetachGuestMirror()
+    // Stopping keeps the guest's location, and scrolling away keeps the host's place in it, in the host's own full library.
+    private void DetachGuestMirror(bool keepPlace = false)
     {
         if (applyingGuestMirror || !FollowingGuest) return;
-        followGuest = false; RefreshGuestMirror(room?.Snapshot?.LibraryActivity);
+        followGuest = false;
+        libraryKeepPlace = keepPlace;
+        RefreshGuestMirror(room?.Snapshot?.LibraryActivity);
     }
-    private void HostLibraryScrollInput(object sender, MouseWheelEventArgs e) => DetachGuestMirror();
+    private void HostLibraryScrollInput(object sender, MouseWheelEventArgs e) => DetachGuestMirror(keepPlace: true);
     private void HostLibraryPointerInput(object sender, MouseButtonEventArgs e)
     {
         for (var node = e.OriginalSource as DependencyObject; node is System.Windows.Media.Visual; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
-            if (node is System.Windows.Controls.Primitives.Thumb or System.Windows.Controls.Primitives.RepeatButton) { DetachGuestMirror(); break; }
+            if (node is System.Windows.Controls.Primitives.Thumb or System.Windows.Controls.Primitives.RepeatButton) { DetachGuestMirror(keepPlace: true); break; }
     }
-    private void HostLibraryTouchInput(object sender, TouchEventArgs e) => DetachGuestMirror();
-    private void BrowseWithGuest(object sender, RoutedEventArgs e) { followGuest = true; ShowPage("Library"); mirroredView = null; ApplyGuestMirror(); }
+    private void HostLibraryTouchInput(object sender, TouchEventArgs e) => DetachGuestMirror(keepPlace: true);
+    private void BrowseWithGuest(object sender, RoutedEventArgs e)
+    {
+        if (FollowingGuest) { DetachGuestMirror(keepPlace: true); return; }
+        followGuest = true; ShowPage("Library"); mirroredView = null; ApplyGuestMirror();
+    }
     private void ApplyGuestMirror()
     {
         if (applyingGuestMirror || !FollowingGuest || currentPage is not ("Library" or "Details")) return;
