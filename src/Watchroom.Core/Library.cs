@@ -672,9 +672,11 @@ public sealed partial class LibraryStore
                     {
                         var previous = ByIds([parsed.Id]).FirstOrDefault() ?? ByPath(parsed.Path);
                         item = music ? previous is null ? parsed : MusicFiles.Merge(parsed, previous)
-                            : previous is null ? MergeScanned(parsed, null) : MergeScanned(parsed with { Id = previous.Id }, previous) with { FileSize = parsed.FileSize,
-                                // A replaced file has its length read again.
-                                FileRuntimeMinutes = previous.FileSize == parsed.FileSize ? previous.FileRuntimeMinutes : null };
+                            : previous is null ? MergeScanned(parsed, null) : MergeScanned(parsed with { Id = previous.Id }, previous) with { FileSize = parsed.FileSize };
+                        // A replaced file has its length read again, and the old file's length isn't shown for it meanwhile.
+                        if (previous is not null && !music && previous.FileSize != parsed.FileSize && previous.FileRuntimeMinutes is not null)
+                            item = item with { FileRuntimeMinutes = null, RuntimeMinutes = previous.FileRuntimeMinutes > 0 && previous.RuntimeMinutes == previous.FileRuntimeMinutes &&
+                                LibraryRuntimes.Overrides(previous) ? null : item.RuntimeMinutes };
                         // Records compare collections by reference, so compare the stored form to skip unchanged files.
                         if (previous is null || Wire.Serialize(LibraryIdentity.Ensure(TmdbRetention.TrackLegacy(item))) != Wire.Serialize(previous)) { Save(item); changes++; }
                         if (previous is null) found.Add(item);

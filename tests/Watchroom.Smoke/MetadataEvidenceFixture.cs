@@ -63,8 +63,25 @@ static class MetadataEvidenceFixture
         await scanStore.ScanAsync(scanFolders); var unchangedScan = scanStore.All().Single();
         await File.WriteAllBytesAsync(scanned, Mkv(57).Concat(new byte[32]).ToArray()); await scanStore.ScanAsync(scanFolders);
         var replacedScan = scanStore.All().Single(); LibraryRuntimes.Backfill(scanStore, scanStore.All());
-        check(unchangedScan is { FileRuntimeMinutes: 55, RuntimeMinutes: 55 } && replacedScan.FileRuntimeMinutes is null && scanStore.All().Single().RuntimeMinutes == 57,
-            "a rescan keeps a file's length until the file is replaced, and then reads it again");
+        check(unchangedScan is { FileRuntimeMinutes: 55, RuntimeMinutes: 55 } && replacedScan is { FileRuntimeMinutes: null, RuntimeMinutes: null } && scanStore.All().Single().RuntimeMinutes == 57,
+            "a rescan keeps a file's length until the file is replaced, then drops the old length and reads the new one");
+        var offlineStore = new LibraryStore(Path.Combine(directory, "runtime-offline-db"));
+        var offline = new MediaItem("offline", Path.Combine(directory, "unplugged drive", "Ludwig S01E01.mkv"), "Ludwig", "Show", Series: "Ludwig", Season: 1, Episode: 1, RuntimeMinutes: 5);
+        var busy = await FileItem("Busy Show S01E02.mkv", "Busy Show", 55) with { Kind = "Show", Series = "Busy Show", Season = 1, Episode = 2, RuntimeMinutes = 5 };
+        var clip = await FileItem("Teaser.mkv", "Teaser", .3);
+        foreach (var entry in new[] { offline, busy, clip }) offlineStore.Save(entry);
+        using (new FileStream(busy.Path, FileMode.Open, FileAccess.Read, FileShare.None)) LibraryRuntimes.Backfill(offlineStore, offlineStore.All());
+        var offlineRuntimes = offlineStore.All().ToDictionary(entry => entry.Id);
+        check(offlineRuntimes[offline.Id] is { RuntimeMinutes: 5, FileRuntimeMinutes: null } && offlineRuntimes[busy.Id] is { RuntimeMinutes: 5, FileRuntimeMinutes: null } &&
+            offlineRuntimes[clip.Id] is { RuntimeMinutes: 1, FileRuntimeMinutes: 1 },
+            "a file on an offline drive or locked by another program is left to read later, and a clip under half a minute still has a length");
+        LibraryRuntimes.Backfill(offlineStore, offlineStore.All());
+        check(offlineStore.All().Single(entry => entry.Id == busy.Id).RuntimeMinutes == 55, "the next pass reads a file that was locked before");
+        var expiring = await FileItem("Expiring Film.mkv", "Expiring Film", 24) with { RuntimeMinutes = 24,
+            TmdbFields = new() { ["runtimeMinutes"] = new("24", "null", 0) }, TmdbRetentionVersion = 1 };
+        offlineStore.Save(expiring); LibraryRuntimes.Backfill(offlineStore, offlineStore.All()); offlineStore.ExpireTmdbContent(force: true);
+        check(offlineStore.All().Single(entry => entry.Id == expiring.Id) is { RuntimeMinutes: 24, FileRuntimeMinutes: 24 },
+            "expiring TMDB data keeps a length that matches the file");
         var mergedFilm = AutomaticArtwork.MergeDetails(new MediaItem("merged-film", "", "Merged Film", "Movie", RuntimeMinutes: 151), new MetadataMatch(7, "movie", "Merged Film", "2020", null, "", RuntimeMinutes: 148));
         var mergedEpisode = AutomaticArtwork.MergeDetails(new MediaItem("merged-episode", "", "Some Show", "Show", Series: "Some Show", RuntimeMinutes: 24), new MetadataMatch(8, "tv", "Some Show", "2020", null, "", RuntimeMinutes: 60));
         check(mergedFilm.RuntimeMinutes == 148 && mergedFilm.TmdbFields?.GetValueOrDefault("runtimeMinutes") is { Original: "151" } && mergedEpisode.RuntimeMinutes == 24,
