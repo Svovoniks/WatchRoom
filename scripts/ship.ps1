@@ -55,8 +55,8 @@ function Assert-ShipPathName {
     $attributionLogo = $relative -ceq 'src/Watchroom.Desktop/Assets/Tmdb.png' -or $relative -ceq 'src/Watchroom.Desktop/Assets/Promo/teaser-clam-intro.mp4'
     if ($relative -match '^\.\.(?:/|$)' -or [IO.Path]::IsPathRooted($relative) -or
         $relative -match '(^|/)(sites|artifacts|\.tools|\.nuget|bin|obj|node_modules|data|logs|credentials)(/|$)' -or
-        ($relative -match '(?i)(^|/)(\.env[^/]*|.*\.(html?|png|jpe?g|mp4|mkv|sqlite|db|pfx|pem|key))$' -and !$attributionLogo) -or
-        $relative -notmatch '^(src/|tests/|scripts/|packaging/|\.github/workflows/|\.claude/skills/|[^/]+\.(md|props|targets|slnx|ps1)|NuGet\.Config$|global\.json$)') {
+        ($relative -match '(?i)(^|/)(\.env[^/]*|.*\.(html?|png|jpe?g|mp4|mkv|sqlite|db|pfx|pem|key|env))$' -and !$attributionLogo) -or
+        $relative -notmatch '^(src/|tests/|scripts/|packaging/|deploy/|\.gitattributes$|\.github/workflows/|\.claude/skills/|[^/]+\.(md|props|targets|slnx|ps1)|NuGet\.Config$|global\.json$)') {
         throw "Not a release source path: $Path"
     }
     return $relative
