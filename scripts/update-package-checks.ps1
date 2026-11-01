@@ -24,17 +24,17 @@ function Copy-Fixture {
 }
 try {
     $compiler = Get-InstallerCompiler $root
-    $script = Join-Path $root 'packaging/Watchroom.iss'
+    $script = Join-Path $root 'packaging/BlackPearl.iss'
     $old = Join-Path $test 'old'; $new = Join-Path $test 'new'; $output = Join-Path $test 'out'
     $kept = @{ 'app.md' = 'AGENTS.md'; 'ISPP.dll' = '.nuget/packages/tools.innosetup/7.1.0/tools/ISPP.dll'; 'Models\notices.md' = 'THIRD-PARTY-NOTICES.md'; 'sub dir\changed.md' = 'README.md' }
     Copy-Fixture $old ($kept + @{ 'gone\old.md' = 'UPDATES.md' })
     Copy-Fixture $new ($kept + @{ 'added\new {1}.md' = 'UPDATES.md' }) @('app.md', 'sub dir\changed.md')
     & $compiler /Qp '/DAppVersion=0.0.1' "/DAppFiles=$old" "/DOutputFolder=$output" @defines $script
     if ($LASTEXITCODE -ne 0) { throw 'Fixture installer compilation failed' }
-    Install-Silently (Join-Path $output 'Watchroom-Setup-0.0.1-win-x64.exe') $installed (Join-Path $test 'install.log')
+    Install-Silently (Join-Path $output 'BlackPearl-Setup-0.0.1-win-x64.exe') $installed (Join-Path $test 'install.log')
     Check ((Get-ItemProperty $key).DisplayVersion -eq '0.0.1') 'the fixture installs under its own test identity'
 
-    $list = Join-Path $test 'Watchroom-files-0.0.1-win-x64.txt'
+    $list = Join-Path $test 'BlackPearl-files-0.0.1-win-x64.txt'
     Write-FileList (Get-FileTable $old) $list
     $published = Read-FileList $list
     Assert-SameTable (Get-FileTable $installed) $published 'The installed fixture and its file list'
@@ -42,7 +42,7 @@ try {
     $update = New-UpdateInstaller $compiler $script '0.0.1' '0.0.2' $published $new (Join-Path $test 'stage') $output $defines
     Check (((@($update.Changed) | Sort-Object) -join '|') -eq 'added\new {1}.md|app.md|sub dir\changed.md') 'only new and changed files go into the update'
     Check ((@($update.Removed) -join '|') -eq 'gone\old.md') 'files the new version dropped are listed for deletion'
-    $full = Get-Item (Join-Path $output 'Watchroom-Setup-0.0.1-win-x64.exe')
+    $full = Get-Item (Join-Path $output 'BlackPearl-Setup-0.0.1-win-x64.exe')
     Check ((Get-Item $update.Path).Length -lt 4MB) "the update installer is small ($([Math]::Round((Get-Item $update.Path).Length / 1MB, 2)) MB, full fixture $([Math]::Round($full.Length / 1MB, 2)) MB)"
 
     $log = Join-Path $test 'update.log'
@@ -65,18 +65,18 @@ try {
     [IO.File]::AppendAllText((Join-Path $newer 'Models\notices.md'), "`nChanged again.`n")
     $second = New-UpdateInstaller $compiler $script '0.0.2' '0.0.3' (Get-FileTable $new) $newer (Join-Path $test 'stage') $output $defines
     Uninstall-Silently $installed
-    Install-Silently (Join-Path $output 'Watchroom-Setup-0.0.1-win-x64.exe') $installed (Join-Path $test 'install.log')
+    Install-Silently (Join-Path $output 'BlackPearl-Setup-0.0.1-win-x64.exe') $installed (Join-Path $test 'install.log')
     function Invoke-Chain {
         param([string[]]$Installers)
         $marker = Join-Path $test 'chain-failed'
         if (Test-Path -LiteralPath $marker) { Remove-Item -LiteralPath $marker }
         # As in the app: installers named relative to the script, the installation folder from the environment.
-        $lines = @('@echo off') + @($Installers | ForEach-Object { "start `"`" /wait `"%~dp0$(Split-Path -Leaf $_)`" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `"/DIR=%WATCHROOM_INSTALL%`""; 'if errorlevel 1 goto failed' }) +
+        $lines = @('@echo off') + @($Installers | ForEach-Object { "start `"`" /wait `"%~dp0$(Split-Path -Leaf $_)`" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `"/DIR=%BLACKPEARL_INSTALL%`""; 'if errorlevel 1 goto failed' }) +
             @('exit /b 0', ':failed', 'echo failed> "%~dp0..\chain-failed"', 'exit /b 1')
         $chain = Join-Path $output 'install-chain.cmd'
         [IO.File]::WriteAllLines($chain, [string[]]$lines)
-        $env:WATCHROOM_INSTALL = $installed
-        try { $code = Invoke-Installer $env:ComSpec @('/d', '/s', '/c', "`"`"$chain`"`"") } finally { $env:WATCHROOM_INSTALL = $null }
+        $env:BLACKPEARL_INSTALL = $installed
+        try { $code = Invoke-Installer $env:ComSpec @('/d', '/s', '/c', "`"`"$chain`"`"") } finally { $env:BLACKPEARL_INSTALL = $null }
         return [pscustomobject]@{ Code = $code; Failed = (Test-Path -LiteralPath $marker) }
     }
     $run = Invoke-Chain @($update.Path, $second.Path)

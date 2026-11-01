@@ -1,6 +1,6 @@
 # Metadata and library behavior
 
-WatchRoom resolves local structure first, then enriches it with enabled remote providers. Files stay local; title searches and provider IDs are sent to the selected metadata services.
+BlackPearl resolves local structure first, then enriches it with enabled remote providers. Files stay local; title searches and provider IDs are sent to the selected metadata services.
 
 ## Shows, seasons, and files
 
@@ -37,7 +37,7 @@ Multi-episode files such as `S01E03-E04` store a range and combine episode title
 
 ## Matching and providers
 
-Settings controls provider order (`tmdb, tvmaze, wikipedia`), language, country, and the refresh interval. Empty provider order disables remote metadata. Packaged builds include WatchRoom’s application credential. An optional personal key overrides it; Windows stores that override in Credential Manager, while Mac keeps it for the session. Developers can build without the bundled credential and supply their own key. Bundled credentials are extractable from binaries. A failure or unresolved match allows the next enabled provider to run. Fallback retains other provider IDs and a manually selected primary identity.
+Settings controls provider order (`tmdb, tvmaze, wikipedia`), language, country, and the refresh interval. Empty provider order disables remote metadata. Packaged builds include BlackPearl’s application credential. An optional personal key overrides it; Windows stores that override in Credential Manager, while Mac keeps it for the session. Developers can build without the bundled credential and supply their own key. Bundled credentials are extractable from binaries. A failure or unresolved match allows the next enabled provider to run. Fallback retains other provider IDs and a manually selected primary identity.
 
 TMDB searches consider localized and original titles, exact/prefix title similarity, and exact/adjacent release years. Weak and tied candidates require a manual match. IMDb/TVDB IDs can identify a TMDB show or movie; TVmaze can identify shows through IMDb/TVDB IDs. Anime alias lookup is available to both TMDB and TVmaze through the locally cached AniDB title index. Movie/show ambiguity remains unresolved.
 
@@ -98,13 +98,13 @@ Metadata fetches refresh wanted titles every refresh interval: new episodes beco
 
 ## NFO files
 
-The scanner reads `tvshow.nfo`, `season.nfo`, `movie.nfo`, and video-name `.nfo` sidecars. Supported data includes titles, plots, dates, numbering, original title, genres, cast, ratings, provider IDs, local artwork, and metadata locks. Plain IMDb/TMDB URL NFO files can identify shows or movies. Episode IDs are never mistaken for show IDs. XML external entities are prohibited. NFO remote artwork supports the TMDB, TVmaze, and Wikimedia image hosts already used by WatchRoom.
+The scanner reads `tvshow.nfo`, `season.nfo`, `movie.nfo`, and video-name `.nfo` sidecars. Supported data includes titles, plots, dates, numbering, original title, genres, cast, ratings, provider IDs, local artwork, and metadata locks. Plain IMDb/TMDB URL NFO files can identify shows or movies. Episode IDs are never mistaken for show IDs. XML external entities are prohibited. NFO remote artwork supports the TMDB, TVmaze, and Wikimedia image hosts already used by BlackPearl.
 
 NFO fields take precedence over remote fields, including during explicit refresh. Edit the NFO to change its authoritative values. **Save metadata beside videos as NFO files** is opt-in. Export preserves unknown tags belonging to other tools and saves atomically. It writes episode/movie sidecars, show metadata in known show folders, and season metadata in separate season folders.
 
 ## Fetch diagnostics
 
-On Windows, metadata diagnostics are written to `%LOCALAPPDATA%\Watchroom\logs\diagnostics.jsonl` by default. `WATCHROOM_DATA` changes the app data directory, and `WATCHROOM_DIAGNOSTICS` overrides the log directory. The log rotates at 5 MB and retains four files, including the current file.
+On Windows, metadata diagnostics are written to `%LOCALAPPDATA%\BlackPearl\logs\diagnostics.jsonl` by default. `BLACKPEARL_DATA` changes the app data directory, and `BLACKPEARL_DIAGNOSTICS` overrides the log directory. The log rotates at 5 MB and retains four files, including the current file.
 
 Metadata events include fetch start/completion, title search aliases, missing fields, request endpoints, HTTP status, response content type/length, elapsed time, retry decisions, candidate IDs/names/years/scores/rejection reasons, deferred counts and retry times, redirect destinations/hops, conversions, and exception types, messages, stacks, and inner exceptions. Request context identifies the title, media ID, stage, season, and episode. Provider fallback, season/episode, unsupported image, and cache read/write failures are recorded even when the app handles them and continues. URL credentials, query strings, and fragments are omitted; authorization headers and response bodies are never logged.
 
@@ -112,19 +112,19 @@ Metadata events include fetch start/completion, title search aliases, missing fi
 
 ## Verification
 
-`dotnet run --project tests/Watchroom.Smoke -- --filename-schemas` verifies filename formats, movie safeguards, rescan repair and date/range mapping against fixture providers. `--metadata-pipeline` runs isolated metadata, migration, identity, provider, refresh, numbering, and placeholder checks without live provider credentials. The regular smoke suite also runs these checks. `tests/Watchroom.DesktopChecks` verifies incremental library updates and dispatcher responsiveness.
+`dotnet run --project tests/BlackPearl.Smoke -- --filename-schemas` verifies filename formats, movie safeguards, rescan repair and date/range mapping against fixture providers. `--metadata-pipeline` runs isolated metadata, migration, identity, provider, refresh, numbering, and placeholder checks without live provider credentials. The regular smoke suite also runs these checks. `tests/BlackPearl.DesktopChecks` verifies incremental library updates and dispatcher responsiveness.
 
-`dotnet run --project tests/Watchroom.Smoke -- --metadata-diagnostics` checks request context, retries, HTTP/image/cache failures, fallback and season/episode errors, report details, and URL credential redaction with synthetic providers.
+`dotnet run --project tests/BlackPearl.Smoke -- --metadata-diagnostics` checks request context, retries, HTTP/image/cache failures, fallback and season/episode errors, report details, and URL credential redaction with synthetic providers.
 
-`dotnet run --project tests/Watchroom.Smoke -- --metadata-discovery` runs the labeled alias/typo corpus and response-cache/pacing checks in isolation. It writes a synthetic accuracy report under `artifacts/metadata-discovery`; these results do not estimate accuracy on a personal library.
+`dotnet run --project tests/BlackPearl.Smoke -- --metadata-discovery` runs the labeled alias/typo corpus and response-cache/pacing checks in isolation. It writes a synthetic accuracy report under `artifacts/metadata-discovery`; these results do not estimate accuracy on a personal library.
 
-`dotnet run --project tests/Watchroom.Smoke -- --grouping-audit` reproduces the audited failures against fresh and historical records, including repeated rescans, backups, repair logs, queue IDs, manual matches, locks, extras, and movie/TV ambiguity.
+`dotnet run --project tests/BlackPearl.Smoke -- --grouping-audit` reproduces the audited failures against fresh and historical records, including repeated rescans, backups, repair logs, queue IDs, manual matches, locks, extras, and movie/TV ambiguity.
 
-`dotnet run --project tests/Watchroom.Smoke -c Release -- --metadata-fixes` replays punctuation, Russian language links, remakes, ranges, bonus content, WebP, image budgets/dimensions, redirects, isolated asset failures, image-only retry, keyless identification and retained cooldown issues. `dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --metadata-picker` verifies the Windows picker layout, explicit selection and asynchronous preview behavior.
+`dotnet run --project tests/BlackPearl.Smoke -c Release -- --metadata-fixes` replays punctuation, Russian language links, remakes, ranges, bonus content, WebP, image budgets/dimensions, redirects, isolated asset failures, image-only retry, keyless identification and retained cooldown issues. `dotnet run --project tests/BlackPearl.DesktopChecks -c Release -- --metadata-picker` verifies the Windows picker layout, explicit selection and asynchronous preview behavior.
 
 ## TMDB attribution, builds and retention
 
-Windows About and Mac Settings include the official TMDB logo, source link and non-endorsement notice. Builds embed a key from an external UTF-8 file specified by `WATCHROOM_TMDB_KEY_FILE` (or MSBuild `WatchroomTmdbKeyFile`); never commit that file. GitHub packaging uses the `WATCHROOM_TMDB_API_KEY` repository secret, only in trusted non-PR publish steps. A missing packaging secret fails the build rather than producing an installer without default metadata access.
+Windows About and Mac Settings include the official TMDB logo, source link and non-endorsement notice. Builds embed a key from an external UTF-8 file specified by `BLACKPEARL_TMDB_KEY_FILE` (or MSBuild `BlackPearlTmdbKeyFile`); never commit that file. GitHub packaging uses the `BLACKPEARL_TMDB_API_KEY` repository secret, only in trusted non-PR publish steps. A missing packaging secret fails the build rather than producing an installer without default metadata access.
 
 TMDB-derived fields retain provenance and their previous local values. After 175 days they revert to those local values; independently changed fields and other providers are preserved. Downloaded TMDB artwork expires by file age and is fetched again when needed. Cleanup runs at startup, during library reads and hourly while either desktop client is running, even with fetching disabled or offline. Locks do not extend retention. Older library records acquire conservative provenance from their provider/source and original filename; unknown fetch dates expire immediately. The short-lived HTTP response cache is pruned locally without requiring a fetch. Repair backups keep local records while expiring their TMDB fields. Old generated reports, outstanding issues and metadata diagnostic entries also expire.
 

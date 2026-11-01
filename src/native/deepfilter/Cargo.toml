@@ -1,7 +1,7 @@
 # A small C interface over DeepFilterNet 3 for room voice. The model is compiled in, and every call catches
 # panics so a failure inside the model reports an error instead of crashing the app.
 [package]
-name = "watchroom_deepfilter"
+name = "blackpearl_deepfilter"
 version = "0.1.0"
 edition = "2021"
 publish = false

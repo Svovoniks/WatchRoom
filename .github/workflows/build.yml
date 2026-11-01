@@ -75,59 +75,59 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .tools/models
-          key: models-${{ hashFiles('src/Watchroom.Desktop/Watchroom.Desktop.csproj') }}
-      # Voice processing libraries are built from pinned sources (see Watchroom.Desktop.csproj); reuse them while those are unchanged.
+          key: models-${{ hashFiles('src/BlackPearl.Desktop/BlackPearl.Desktop.csproj') }}
+      # Voice processing libraries are built from pinned sources (see BlackPearl.Desktop.csproj); reuse them while those are unchanged.
       - uses: actions/cache@v4
         with:
           path: .tools/native/*.dll
-          key: voice-native-${{ hashFiles('src/native/**', 'src/Watchroom.Desktop/Watchroom.Desktop.csproj') }}
+          key: voice-native-${{ hashFiles('src/native/**', 'src/BlackPearl.Desktop/BlackPearl.Desktop.csproj') }}
       - name: Restore and build
         shell: pwsh
         run: |
-          dotnet restore Watchroom.slnx --locked-mode
+          dotnet restore BlackPearl.slnx --locked-mode
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          dotnet build Watchroom.slnx -c Release --no-restore -p:Version=$env:APP_VERSION
+          dotnet build BlackPearl.slnx -c Release --no-restore -p:Version=$env:APP_VERSION
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Update safety checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.UpdateChecks -c Release --no-build
+        run: dotnet run --project tests/BlackPearl.UpdateChecks -c Release --no-build
       - name: TMDB access and retention checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.Smoke -c Release --no-build -- --tmdb-access
+        run: dotnet run --project tests/BlackPearl.Smoke -c Release --no-build -- --tmdb-access
       - name: Desktop regression checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build
       - name: Acquisition dialog layout checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --acquisition-layout
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --acquisition-layout
       - name: Home regression checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --home
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --home
       - name: UI findings regression checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --ui-findings
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --ui-findings
       - name: Guest library layout checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --guest-library-layout
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --guest-library-layout
       - name: Host library browsing checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --host-library-browse
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --host-library-browse
       - name: Player layout checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --player-layout
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --player-layout
       - name: Track language detection checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --language-detection
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --language-detection
       - name: Voice processing checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --voice-processing
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --voice-processing
       - name: Episode thumbnail checks
         if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --video-frames
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --video-frames
       # Includes the metadata cache and shared library transport checks.
       - name: Full playback and room checks
         if: matrix.lane == 'smoke'
-        run: dotnet run --project tests/Watchroom.Smoke -c Release --no-build -- artifacts/release-smoke
+        run: dotnet run --project tests/BlackPearl.Smoke -c Release --no-build -- artifacts/release-smoke
 
   package:
     needs: plan
@@ -148,21 +148,22 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .tools/models
-          key: models-${{ hashFiles('src/Watchroom.Desktop/Watchroom.Desktop.csproj') }}
+          key: models-${{ hashFiles('src/BlackPearl.Desktop/BlackPearl.Desktop.csproj') }}
       - uses: actions/cache@v4
         with:
           path: .tools/native/*.dll
-          key: voice-native-${{ hashFiles('src/native/**', 'src/Watchroom.Desktop/Watchroom.Desktop.csproj') }}
+          key: voice-native-${{ hashFiles('src/native/**', 'src/BlackPearl.Desktop/BlackPearl.Desktop.csproj') }}
       - name: Publish Windows app
         shell: pwsh
         env:
-          WATCHROOM_TMDB_API_KEY: ${{ secrets.WATCHROOM_TMDB_API_KEY }}
+          # The secret may still have its name from before the app was renamed from Watchroom.
+          BLACKPEARL_TMDB_API_KEY: ${{ secrets.BLACKPEARL_TMDB_API_KEY || secrets.WATCHROOM_TMDB_API_KEY }}
         run: |
-          $keyFile = Join-Path $env:RUNNER_TEMP "watchroom-tmdb-key.txt"
-          if ([string]::IsNullOrWhiteSpace($env:WATCHROOM_TMDB_API_KEY)) { throw "WATCHROOM_TMDB_API_KEY repository secret is required for packaged builds." }
-          [IO.File]::WriteAllText($keyFile, $env:WATCHROOM_TMDB_API_KEY.Trim())
-          $env:WATCHROOM_TMDB_KEY_FILE = $keyFile
-          dotnet publish src/Watchroom.Desktop -c Release -r win-x64 --self-contained true -o artifacts/Watchroom -p:Version=$env:APP_VERSION -p:VlcWindowsX86Enabled=false -p:VlcWindowsArm64Enabled=false -p:PublishReadyToRun=true
+          $keyFile = Join-Path $env:RUNNER_TEMP "blackpearl-tmdb-key.txt"
+          if ([string]::IsNullOrWhiteSpace($env:BLACKPEARL_TMDB_API_KEY)) { throw "BLACKPEARL_TMDB_API_KEY repository secret is required for packaged builds." }
+          [IO.File]::WriteAllText($keyFile, $env:BLACKPEARL_TMDB_API_KEY.Trim())
+          $env:BLACKPEARL_TMDB_KEY_FILE = $keyFile
+          dotnet publish src/BlackPearl.Desktop -c Release -r win-x64 --self-contained true -o artifacts/BlackPearl -p:Version=$env:APP_VERSION -p:VlcWindowsX86Enabled=false -p:VlcWindowsArm64Enabled=false -p:PublishReadyToRun=true
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Build installers
         shell: pwsh
@@ -180,11 +181,11 @@ jobs:
           if ($installer.State -ne 'Completed') { throw 'Full installer compilation failed' }
       - uses: actions/upload-artifact@v4
         with:
-          name: Watchroom-windows-${{ env.APP_VERSION }}
+          name: BlackPearl-windows-${{ env.APP_VERSION }}
           path: |
-            artifacts/Watchroom-Setup-*-win-x64.exe
-            artifacts/Watchroom-Update-*-win-x64.exe
-            artifacts/Watchroom-files-*-win-x64.txt
+            artifacts/BlackPearl-Setup-*-win-x64.exe
+            artifacts/BlackPearl-Update-*-win-x64.exe
+            artifacts/BlackPearl-files-*-win-x64.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -203,7 +204,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Watchroom-windows-${{ env.APP_VERSION }}
+          name: BlackPearl-windows-${{ env.APP_VERSION }}
           path: artifacts
       - name: Publish GitHub release
         shell: pwsh
@@ -211,10 +212,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          $files = @("artifacts/Watchroom-Setup-$env:APP_VERSION-win-x64.exe", "artifacts/Watchroom-files-$env:APP_VERSION-win-x64.txt") +
-            @(Get-ChildItem "artifacts/Watchroom-Update-*-to-$env:APP_VERSION-win-x64.exe" | ForEach-Object { $_.FullName })
+          $files = @("artifacts/BlackPearl-Setup-$env:APP_VERSION-win-x64.exe", "artifacts/BlackPearl-files-$env:APP_VERSION-win-x64.txt") +
+            @(Get-ChildItem "artifacts/BlackPearl-Update-*-to-$env:APP_VERSION-win-x64.exe" | ForEach-Object { $_.FullName })
+          # Installations from before the rename look for Watchroom-Setup-* and Watchroom-Update-* and accept downloads only
+          # from Svovoniks/WatchRoom, so while the repository still has that name, the installers are also published under
+          # their old names for them to update to BlackPearl. After the rename those installations cannot update anyway.
+          if ($env:GH_REPO -ceq 'Svovoniks/WatchRoom') {
+            $files += @($files | Where-Object { (Split-Path $_ -Leaf) -match '^BlackPearl-(Setup|Update)-' } | ForEach-Object {
+              $legacy = Join-Path (Split-Path $_ -Parent) ((Split-Path $_ -Leaf) -replace '^BlackPearl-', 'Watchroom-')
+              Copy-Item $_ $legacy; $legacy
+            })
+          }
           $files | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $(Split-Path $_ -Leaf)" } | Set-Content artifacts/SHA256SUMS.txt
-          gh release create $env:GITHUB_REF_NAME @files artifacts/SHA256SUMS.txt --verify-tag --draft --title "Watchroom $env:APP_VERSION" --generate-notes
+          gh release create $env:GITHUB_REF_NAME @files artifacts/SHA256SUMS.txt --verify-tag --draft --title "BlackPearl $env:APP_VERSION" --generate-notes
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           gh release edit $env:GITHUB_REF_NAME --draft=false --latest
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

@@ -1,13 +1,13 @@
-param([ValidateSet('public','local')][string]$Mode,[Parameter(Mandatory)][string]$PasswordFile,[int]$SteadySeconds=180,[string]$TestRoot='artifacts/sync-followup/desktop',[string]$GuestRoot='C:\Users\vmuser\Desktop\WatchroomSyncFollowup',[int]$StartPhase=0,[switch]$LaunchGuest,[int]$HostSequenceOffset=0,[string]$GuestExecutable,[switch]$ExperimentalSync)
+param([ValidateSet('public','local')][string]$Mode,[Parameter(Mandatory)][string]$PasswordFile,[int]$SteadySeconds=180,[string]$TestRoot='artifacts/sync-followup/desktop',[string]$GuestRoot='C:\Users\vmuser\Desktop\BlackPearlSyncFollowup',[int]$StartPhase=0,[switch]$LaunchGuest,[int]$HostSequenceOffset=0,[string]$GuestExecutable,[switch]$ExperimentalSync)
 $ErrorActionPreference='Stop'
 $testRootFull=(Resolve-Path $TestRoot).Path
 $testVBox='C:\Program Files\Oracle\VirtualBox\VBoxManage.exe'
 $testGuest="$GuestRoot\$Mode-guest"
-$testExecutable=if($GuestExecutable){$GuestExecutable}else{"$GuestRoot\app\Watchroom.exe"}
+$testExecutable=if($GuestExecutable){$GuestExecutable}else{"$GuestRoot\app\BlackPearl.exe"}
 $testPolicy=if($ExperimentalSync){"1"}else{"0"}
 $testInvite=Get-Content -Raw -LiteralPath (Join-Path $testRootFull "$Mode-host/test-invite.txt")
 if($StartPhase -eq 0 -or $LaunchGuest){
-& $testVBox guestcontrol 'Windows 11' start --username vmuser --passwordfile $PasswordFile --exe $testExecutable --putenv "WATCHROOM_DATA=$testGuest" --putenv "WATCHROOM_DIAGNOSTICS=$testGuest" --putenv 'WATCHROOM_TEST_ROLE=guest' --putenv "WATCHROOM_TEST_INVITE=$testInvite" --putenv "WATCHROOM_SYNC_EXPERIMENTAL=$testPolicy"
+& $testVBox guestcontrol 'Windows 11' start --username vmuser --passwordfile $PasswordFile --exe $testExecutable --putenv "BLACKPEARL_DATA=$testGuest" --putenv "BLACKPEARL_DIAGNOSTICS=$testGuest" --putenv 'BLACKPEARL_TEST_ROLE=guest' --putenv "BLACKPEARL_TEST_INVITE=$testInvite" --putenv "BLACKPEARL_SYNC_EXPERIMENTAL=$testPolicy"
 if($LASTEXITCODE -ne 0){throw 'Guest launch failed'}
 $testReadyDeadline=[DateTimeOffset]::UtcNow.AddMinutes(3)
 do {

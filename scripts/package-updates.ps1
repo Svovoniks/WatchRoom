@@ -1,10 +1,11 @@
-# Writes the file list of the new build (Watchroom-files-VERSION-win-x64.txt: SHA-256, size and path per line) and
+# Writes the file list of the new build (BlackPearl-files-VERSION-win-x64.txt: SHA-256, size and path per line) and
 # builds update installers that carry only the files changed since each of the last Previous releases, from their
 # published file lists. Releases from before file lists were published are read from their own installer, installed
 # silently into a scratch folder on the build machine, which registers it there, so this runs on CI only. The most
 # recent release is always installed that way: its update installer is applied over it and must reproduce the new
 # build exactly, and the installation must match its published file list.
-param([string]$Version = '', [int]$Previous = 40, [int]$InstallLimit = 3, [string]$Repository = 'Svovoniks/WatchRoom')
+# Releases from before the app was renamed from Watchroom name their assets Watchroom-*; later ones BlackPearl-*.
+param([string]$Version = '', [int]$Previous = 40, [int]$InstallLimit = 3, [string]$Repository = $(if ($env:GITHUB_REPOSITORY) { $env:GITHUB_REPOSITORY } else { 'Svovoniks/BlackPearl' }))
 $ErrorActionPreference = 'Stop'
 
 function Get-InstallerCompiler {
@@ -75,7 +76,7 @@ function New-UpdateInstaller {
     $lines = @('[InstallDelete]') + @($removed | ForEach-Object { 'Type: files; Name: "{app}\' + (ConvertTo-InnoPath $_) + '"' })
     [IO.File]::WriteAllLines($deletions, [string[]]$lines)
     $arguments = @('/Qp', "/DAppVersion=$To", "/DUpdateFrom=$From", "/DAppFiles=$Stage", "/DUpdateRemoved=$deletions", "/DOutputFolder=$Output") + $Defines + @($Script)
-    $update = [pscustomobject]@{ From = $From; Path = Join-Path $Output "Watchroom-Update-$From-to-$To-win-x64.exe"; Changed = $changed; Removed = $removed; Process = $null }
+    $update = [pscustomobject]@{ From = $From; Path = Join-Path $Output "BlackPearl-Update-$From-to-$To-win-x64.exe"; Changed = $changed; Removed = $removed; Process = $null }
     if ($NoWait) {
         $start = [Diagnostics.ProcessStartInfo]::new($Compiler)
         $arguments | ForEach-Object { $start.ArgumentList.Add($_) }
@@ -135,6 +136,15 @@ function Assert-SameFiles {
     param([string]$Installed, [string]$Expected, [string]$Name)
     Assert-SameTable (Get-FileTable $Installed) (Get-FileTable $Expected) "$Name and the new build"
 }
+# The asset of an earlier release named BlackPearl-<Kind>-VERSION-win-x64.<extension>, or Watchroom-... before the rename.
+function Get-ReleaseAssetName {
+    param($Release, [string]$Kind, [string]$From, [string]$Extension)
+    foreach ($app in 'BlackPearl', 'Watchroom') {
+        $name = "$app-$Kind-$From-win-x64.$Extension"
+        if (@($Release.assets | Where-Object name -CEQ $name).Count -eq 1) { return $name }
+    }
+    return "BlackPearl-$Kind-$From-win-x64.$Extension"
+}
 function Get-VerifiedAsset {
     param($Release, [string]$Name, [string]$Destination)
     $asset = @($Release.assets | Where-Object name -CEQ $Name)
@@ -150,13 +160,13 @@ if ($env:GITHUB_ACTIONS -ne 'true') { throw 'package-updates.ps1 installs earlie
 $root = Split-Path -Parent $PSScriptRoot
 if (!$Version) { $Version = ([xml](Get-Content (Join-Path $root 'Directory.Build.props') -Raw)).Project.PropertyGroup.Version }
 $current = [Version]$Version
-$app = Join-Path $root 'artifacts/Watchroom'
-if (!(Test-Path (Join-Path $app 'Watchroom.exe'))) { throw 'Package the app with scripts/package.ps1 first' }
+$app = Join-Path $root 'artifacts/BlackPearl'
+if (!(Test-Path (Join-Path $app 'BlackPearl.exe'))) { throw 'Package the app with scripts/package.ps1 first' }
 $output = Join-Path $root 'artifacts'
-Write-FileList (Get-FileTable $app) (Join-Path $output "Watchroom-files-$Version-win-x64.txt")
+Write-FileList (Get-FileTable $app) (Join-Path $output "BlackPearl-files-$Version-win-x64.txt")
 $compiler = Get-InstallerCompiler $root
-$script = Join-Path $root 'packaging/Watchroom.iss'
-$headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'Watchroom-build' }
+$script = Join-Path $root 'packaging/BlackPearl.iss'
+$headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'BlackPearl-build' }
 if ($env:GH_TOKEN) { $headers.Authorization = "Bearer $env:GH_TOKEN" }
 $releases = Invoke-RestMethod "https://api.github.com/repos/$Repository/releases?per_page=100" -Headers $headers
 $earlier = @($releases | Where-Object { !$_.draft -and !$_.prerelease -and $_.tag_name -match '^v(\d+\.\d+\.\d+)$' -and [Version]$Matches[1] -lt $current } |
@@ -174,7 +184,7 @@ function Step-UpdateBuilds {
         foreach ($update in @($building | Where-Object { $_.Process.HasExited })) { Wait-UpdateInstaller $update; $null = $building.Remove($update) }
         while ($building.Count -lt $limit -and $waiting.Count) {
             $next = $waiting.Dequeue()
-            $building.Add((New-UpdateInstaller $compiler $script $next.From $Version $next.Old $app (Join-Path $output "Watchroom-Update-$($next.From)") $output -NoWait))
+            $building.Add((New-UpdateInstaller $compiler $script $next.From $Version $next.Old $app (Join-Path $output "BlackPearl-Update-$($next.From)") $output -NoWait))
         }
         if (!$Finish -or !$building.Count) { return }
         $building[0].Process.WaitForExit()
@@ -185,17 +195,18 @@ $toInstall = [Collections.Generic.List[object]]::new()
 try {
     foreach ($release in $earlier) {
         $from = $release.tag_name.Substring(1)
-        $list = Get-VerifiedAsset $release "Watchroom-files-$from-win-x64.txt" (Join-Path $scratch "files-$from.txt")
+        $list = Get-VerifiedAsset $release (Get-ReleaseAssetName $release 'files' $from 'txt') (Join-Path $scratch "files-$from.txt")
+        $setup = Get-ReleaseAssetName $release 'Setup' $from 'exe'
         $newest = $release -eq $earlier[0]
         $old = if ($list) { Read-FileList $list }
-        $installable = $installs -lt $InstallLimit -and @($release.assets | Where-Object name -CEQ "Watchroom-Setup-$from-win-x64.exe").Count -eq 1
+        $installable = $installs -lt $InstallLimit -and @($release.assets | Where-Object name -CEQ $setup).Count -eq 1
         if ($old -and (!$newest -or !$installable)) {
             $waiting.Enqueue([pscustomobject]@{ From = $from; Old = $old })
             Step-UpdateBuilds
             continue
         }
         if (!$installable) { Write-Host "Skipping $from`: no published file list"; continue }
-        $installer = Get-VerifiedAsset $release "Watchroom-Setup-$from-win-x64.exe" (Join-Path $scratch "Watchroom-Setup-$from-win-x64.exe")
+        $installer = Get-VerifiedAsset $release $setup (Join-Path $scratch $setup)
         if (!$installer) { Write-Host "Skipping $from`: no verifiable installer"; continue }
         $installs++
         $toInstall.Add([pscustomobject]@{ From = $from; Old = $old; Installer = $installer })
@@ -209,7 +220,7 @@ try {
             Step-UpdateBuilds
             $table = Get-FileTable $installed
             if ($entry.Old) { Assert-SameTable $table $entry.Old "The installed $from and its published file list" }
-            $update = New-UpdateInstaller $compiler $script $from $Version $table $app (Join-Path $output 'Watchroom-Update') $output
+            $update = New-UpdateInstaller $compiler $script $from $Version $table $app (Join-Path $output 'BlackPearl-Update') $output
             Write-Host "Update from $from`: $($update.Changed.Count) changed files, $($update.Removed.Count) removed, $([Math]::Round((Get-Item $update.Path).Length / 1MB, 1)) MB, applied"
             Step-UpdateBuilds
             $code = Invoke-Installer $update.Path @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$(Join-Path $scratch "update-$from.log")`"", "/DIR=`"$installed`"")
@@ -224,6 +235,6 @@ try {
 finally {
     foreach ($update in $building) { if (!$update.Process.HasExited) { $update.Process.Kill() }; $update.Process.WaitForExit() }
     Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -LiteralPath $output -Directory -Filter 'Watchroom-Update*' | Remove-Item -Recurse -Force
-    Get-ChildItem -LiteralPath $output -File -Filter 'Watchroom-Update*-removed.iss' | Remove-Item -Force
+    Get-ChildItem -LiteralPath $output -Directory -Filter 'BlackPearl-Update*' | Remove-Item -Recurse -Force
+    Get-ChildItem -LiteralPath $output -File -Filter 'BlackPearl-Update*-removed.iss' | Remove-Item -Force
 }

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="33.3 52.3 445.3 445.3">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#173B52"/><stop offset="1" stop-color="#0B1E2C"/></linearGradient>
+    <linearGradient id="nacre" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F4EEF6"/><stop offset=".5" stop-color="#DCD2EA"/><stop offset="1" stop-color="#BFD7DC"/></linearGradient>
+    <linearGradient id="dish" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C8BCD9"/><stop offset="1" stop-color="#EEE8F3"/></linearGradient>
+    <linearGradient id="lip" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E8C066"/><stop offset="1" stop-color="#B9853A"/></linearGradient>
+    <radialGradient id="pearl" cx=".38" cy=".34" r=".78"><stop offset="0" stop-color="#55566A"/><stop offset=".4" stop-color="#1D1D29"/><stop offset="1" stop-color="#07070C"/></radialGradient>
+    <radialGradient id="teal" cx=".78" cy=".72" r=".5"><stop offset="0" stop-color="#2FB3A2" stop-opacity=".55"/><stop offset="1" stop-color="#2FB3A2" stop-opacity="0"/></radialGradient>
+    <radialGradient id="violet" cx=".2" cy=".78" r=".5"><stop offset="0" stop-color="#8A5CD0" stop-opacity=".5"/><stop offset="1" stop-color="#8A5CD0" stop-opacity="0"/></radialGradient>
+    <radialGradient id="rose" cx=".8" cy=".22" r=".42"><stop offset="0" stop-color="#C46FA0" stop-opacity=".38"/><stop offset="1" stop-color="#C46FA0" stop-opacity="0"/></radialGradient>
+    <radialGradient id="rim" cx=".5" cy=".5" r=".5"><stop offset=".8" stop-color="#9FB6D6" stop-opacity="0"/><stop offset="1" stop-color="#9FB6D6" stop-opacity=".4"/></radialGradient>
+    <radialGradient id="shine" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".95"/><stop offset=".55" stop-color="#FFFFFF" stop-opacity=".35"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
+    <radialGradient id="shadow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#4B3F66" stop-opacity=".55"/><stop offset="1" stop-color="#4B3F66" stop-opacity="0"/></radialGradient>
+  </defs>
+
+  <!-- open upper shell -->
+  <path d="M56 342 Q35 294 68 259 Q62 208 103 188 Q112 137 156 136 Q179 92 221 108 Q256 76 291 108 Q333 92 356 136 Q400 137 409 188 Q450 208 444 259 Q477 294 456 342 Z" fill="url(#nacre)"/>
+    <path d="M256 352 L56 342 Q35 294 68 259 Z" fill="#FFFFFF" opacity=".35"/>
+    <path d="M256 352 L103 188 Q112 137 156 136 Z" fill="#FFFFFF" opacity=".35"/>
+    <path d="M256 352 L221 108 Q256 76 291 108 Z" fill="#FFFFFF" opacity=".35"/>
+    <path d="M256 352 L356 136 Q400 137 409 188 Z" fill="#FFFFFF" opacity=".35"/>
+    <path d="M256 352 L444 259 Q477 294 456 342 Z" fill="#FFFFFF" opacity=".35"/>
+  <path d="M56 342 Q35 294 68 259 Q62 208 103 188 Q112 137 156 136 Q179 92 221 108 Q256 76 291 108 Q333 92 356 136 Q400 137 409 188 Q450 208 444 259 Q477 294 456 342" fill="none" stroke="#E8C066" stroke-width="9" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- lower shell interior -->
+  <ellipse cx="256" cy="342" rx="196" ry="58" fill="url(#dish)"/>
+  <ellipse cx="256" cy="360" rx="120" ry="28" fill="url(#shadow)"/>
+
+  <!-- pearl -->
+  <circle cx="256" cy="262" r="108" fill="url(#pearl)"/>
+  <circle cx="256" cy="262" r="108" fill="url(#teal)"/>
+  <circle cx="256" cy="262" r="108" fill="url(#violet)"/>
+  <circle cx="256" cy="262" r="108" fill="url(#rose)"/>
+  <circle cx="256" cy="262" r="108" fill="url(#rim)"/>
+  <ellipse cx="214" cy="214" rx="52" ry="30" transform="rotate(-35 214 214)" fill="url(#shine)"/>
+  <circle cx="206" cy="208" r="6" fill="#FFFFFF" opacity=".9"/>
+  <ellipse cx="300" cy="330" rx="34" ry="10" transform="rotate(-28 300 330)" fill="#CFE6EA" opacity=".18"/>
+
+  <!-- lower shell lip -->
+  <path d="M56 342 Q256 424 456 342 Q448 392 400 418 Q330 456 256 458 Q182 456 112 418 Q64 392 56 342 Z" fill="url(#lip)" stroke="url(#lip)" stroke-width="9" stroke-linejoin="round"/>
+  <path d="M56 342 Q256 424 456 342" fill="none" stroke="#E8C066" stroke-width="9" stroke-linecap="round"/>
+  <path d="M78 352 Q256 418 434 352" fill="none" stroke="#F3D27E" stroke-width="3" stroke-linecap="round" opacity=".8"/>
+  <path d="M120 398 Q140 420 168 432 M196 412 Q210 436 226 448 M286 448 Q302 436 316 412 M344 432 Q372 420 392 398" fill="none" stroke="#A8762F" stroke-width="5" stroke-linecap="round" opacity=".7"/>
+</svg>

@@ -1,8 +1,8 @@
 using System.IO;
 using System.Windows;
-using Watchroom.Core;
+using BlackPearl.Core;
 
-namespace Watchroom.Desktop;
+namespace BlackPearl.Desktop;
 public partial class MainWindow
 {
     private int testSequence;
@@ -10,21 +10,21 @@ public partial class MainWindow
     private readonly Queue<long> testCaptures = new();
     private async Task StartTestDriver()
     {
-        var role = Environment.GetEnvironmentVariable("WATCHROOM_TEST_ROLE");
+        var role = Environment.GetEnvironmentVariable("BLACKPEARL_TEST_ROLE");
         if (role is not ("host" or "guest")) return;
         try {
             while(player is null) await Task.Delay(100);
             player.SnapshotTaken += (_, e) => PlaybackDiagnostics.Record("frame", new { serverMs = room?.ServerNowMs, file = Path.GetFileName(e.Filename) });
             var client=NewRoom();
-            if(role=="host") { selected=FileNames.Parse(Environment.GetEnvironmentVariable("WATCHROOM_TEST_MEDIA") ?? throw new IOException("Missing test media")); playingItem=selected; client.SetHostedFile(selected.Path,selected.Title); }
-            await client.ConnectAsync(ServerBox.Text,DisplayNameBox.Text,role=="guest"?Environment.GetEnvironmentVariable("WATCHROOM_TEST_INVITE"):null,persistent:false);
+            if(role=="host") { selected=FileNames.Parse(Environment.GetEnvironmentVariable("BLACKPEARL_TEST_MEDIA") ?? throw new IOException("Missing test media")); playingItem=selected; client.SetHostedFile(selected.Path,selected.Title); }
+            await client.ConnectAsync(ServerBox.Text,DisplayNameBox.Text,role=="guest"?Environment.GetEnvironmentVariable("BLACKPEARL_TEST_INVITE"):null,persistent:false);
             File.WriteAllText(Path.Combine(App.DataDirectory,"test-invite.txt"),client.Identity!.Room);
             roomPanelVisible=true; ShowPage("Room");
         } catch(Exception ex) { File.AppendAllText(Path.Combine(App.DataDirectory,"test-driver-errors.log"),ex+Environment.NewLine); }
     }
     private void TestDriverTick()
     {
-        if(Environment.GetEnvironmentVariable("WATCHROOM_TEST_ROLE") is null) return;
+        if(Environment.GetEnvironmentVariable("BLACKPEARL_TEST_ROLE") is null) return;
         try {
             if (player is not null && PlaybackDiagnostics.Enabled)
             {

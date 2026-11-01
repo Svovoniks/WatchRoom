@@ -1,21 +1,36 @@
 # Pull request helpers shared by ship.ps1 and review-pr.ps1. Dot-source only.
-$repository = 'Svovoniks/WatchRoom'
+# The repository was Svovoniks/WatchRoom before it became Svovoniks/BlackPearl. Use-Repository picks whichever name
+# exists, so the scripts work on both sides of the rename. GitHub redirects the old name for reads only.
+$repository = 'Svovoniks/BlackPearl'
+$formerRepository = 'Svovoniks/WatchRoom'
 $apiRoot = "https://api.github.com/repos/$repository"
 $buildWorkflow = 'Build and release'
 # Review verdicts are PR comments carrying this marker. Every account here is the same
 # owner, so GitHub's own approve state is unavailable (authors cannot approve their PRs).
 # Only a marker ending the comment counts, so findings that quote another marker cannot decide the verdict.
-$reviewMarkerPattern = '<!-- watchroom-review head=([a-f0-9]{40}) verdict=(approve|changes) -->\s*\z'
+# Markers posted before the rename say watchroom-review.
+$reviewMarkerPattern = '<!-- (?:blackpearl|watchroom)-review head=([a-f0-9]{40}) verdict=(approve|changes) -->\s*\z'
 
 function Invoke-Native {
     param([string]$Command, [string[]]$Arguments)
     & $Command @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Command failed (exit $LASTEXITCODE): $($Arguments -join ' ')" }
 }
+function Use-Repository {
+    $name = $repository
+    try { $name = (Get-PublicJson "https://api.github.com/repos/$repository").full_name }
+    catch {
+        if ($_.Exception.Response.StatusCode.value__ -ne 404) { throw }
+        $name = (Get-PublicJson "https://api.github.com/repos/$formerRepository").full_name
+    }
+    if ($name -cnotin @($repository, $formerRepository)) { throw "Unexpected repository $name." }
+    $script:repository = $name
+    $script:apiRoot = "https://api.github.com/repos/$name"
+}
 function Get-PublicJson {
     param([string]$Url)
     # Public verification deliberately does not use GH_TOKEN or a GitHub CLI session.
-    Invoke-RestMethod -Uri $Url -Headers @{ 'User-Agent' = 'Watchroom-release-verification' } -TimeoutSec 60
+    Invoke-RestMethod -Uri $Url -Headers @{ 'User-Agent' = 'BlackPearl-release-verification' } -TimeoutSec 60
 }
 function Get-GitHubToken {
     # The token git already uses for pushes; it is never printed.
@@ -30,7 +45,7 @@ function Invoke-GitHub {
     if (!$script:gitHubToken) { $script:gitHubToken = Get-GitHubToken }
     $request = @{
         Method = $Method; Uri = "$apiRoot$Path"; TimeoutSec = 60
-        Headers = @{ 'User-Agent' = 'Watchroom-pull-requests'; Authorization = "Bearer $script:gitHubToken"; Accept = 'application/vnd.github+json' }
+        Headers = @{ 'User-Agent' = 'BlackPearl-pull-requests'; Authorization = "Bearer $script:gitHubToken"; Accept = 'application/vnd.github+json' }
     }
     if ($null -ne $Body) { $request.Body = $Body | ConvertTo-Json -Depth 5; $request.ContentType = 'application/json' }
     # Enumerate JSON arrays so callers can count list responses with @().
@@ -52,7 +67,7 @@ function Get-PullRequestComments {
 }
 function Format-ReviewMarker {
     param([string]$Head, [string]$Verdict)
-    return "<!-- watchroom-review head=$Head verdict=$Verdict -->"
+    return "<!-- blackpearl-review head=$Head verdict=$Verdict -->"
 }
 function Get-ReviewVerdict {
     param($Comments)
@@ -87,7 +102,7 @@ function Get-HeadCheckState {
 }
 function Format-PullRequestBody {
     param([string]$Summary, [string]$Note, [string]$Version)
-    return "$($Summary.Trim())`n`n### Release note`n`n$($Note.Trim())`n`n<!-- watchroom-release version=$Version -->"
+    return "$($Summary.Trim())`n`n### Release note`n`n$($Note.Trim())`n`n<!-- blackpearl-release version=$Version -->"
 }
 function Get-PullRequestSummary {
     param([string]$Body)
@@ -95,7 +110,7 @@ function Get-PullRequestSummary {
 }
 function Get-ReleaseNote {
     param([string]$Body)
-    $match = [regex]::Match([string]$Body, '(?s)### Release note\r?\n(.+?)\r?\n<!-- watchroom-release version=')
+    $match = [regex]::Match([string]$Body, '(?s)### Release note\r?\n(.+?)\r?\n<!-- (?:blackpearl|watchroom)-release version=')
     if (!$match.Success -or !$match.Groups[1].Value.Trim()) { return $null }
     return $match.Groups[1].Value.Trim()
 }

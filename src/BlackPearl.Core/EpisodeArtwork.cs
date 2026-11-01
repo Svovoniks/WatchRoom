@@ -1,0 +1,106 @@
+using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
+
+namespace BlackPearl.Core;
+
+/// <summary>Writes one JPEG frame of <paramref name="video"/> at <paramref name="seconds"/>; false when no frame was decoded.</summary>
+public delegate Task<bool> FrameCapture(string video, double seconds, string output, CancellationToken ct);
+
+/// <summary>Lazy artwork upgrades for a visited season; never scans the entire library.</summary>
+public sealed class EpisodeArtwork(FrameCapture? capture = null)
+{
+    private readonly SemaphoreSlim workers = new(2);
+    private readonly ConcurrentDictionary<string, Lazy<Task<MetadataSeason?>>> seasons = new();
+    private readonly ConcurrentDictionary<string, Lazy<Task<string?>>> mazeImages = new();
+
+    public async Task<MediaItem> ImproveAsync(MediaItem item, string directory, string? token, CancellationToken ct, MetadataOptions? options = null)
+    {
+        options ??= new();
+        // Episodes and clips get a frame from the file; a film's clip has no show but still wants one.
+        if (item.Series is null && item.ExtraOf is null || item.IsVirtual || item.MetadataLocked || LibraryIdentity.Locked(item, "EpisodePoster")) return item;
+        await workers.WaitAsync(ct);
+        try
+        {
+            // The exact matched episode URL also handles DVD/absolute numbering without guessing.
+            var source = Regex.Match(item.EpisodeSource ?? "", @"^https://www\.themoviedb\.org/tv/(\d+)/season/(\d+)/episode/(\d+)$");
+            if (source.Success && options.ProviderOrder.Contains("tmdb") && !MetadataTitles.IsUnverifiedCompilation(item) && TmdbCredentials.Resolve(token) is not null &&
+                (!ArtworkCache.IsUsable(item.EpisodePoster) || item.EpisodePosterQualityPath != item.EpisodePoster))
+            {
+                try
+                {
+                    using var metadata = new MetadataClient(token, options: options);
+                    var show = int.Parse(source.Groups[1].Value); var season = int.Parse(source.Groups[2].Value); var episode = int.Parse(source.Groups[3].Value);
+                    var details = await Cached(seasons, $"{LibraryIdentity.Hash(TmdbCredentials.Resolve(token)!)}:{show}:{season}", () => metadata.SeasonAsync(show, season, ct));
+                    if (details?.Episodes.FirstOrDefault(x => x.Number == episode)?.Image is { } image)
+                    {
+                        var path = await metadata.CacheImageAsync(image, $"tv-{show}-s{season}-e{episode}", Path.Combine(directory, "posters"), ct, imageSize: "w780");
+                        if (ArtworkCache.IsUsable(path)) return TmdbRetention.Record(item, item with { EpisodePoster = path, EpisodePosterQualityPath = path }, "tmdb", "episodePoster", "episodePosterQualityPath");
+                    }
+                }
+                catch (Exception ex) when (ex is HttpRequestException or IOException or System.Text.Json.JsonException or OperationCanceledException && !ct.IsCancellationRequested) { }
+            }
+            var maze = Regex.Match(item.EpisodeSource ?? "", @"^https://www\.tvmaze\.com/shows/(\d+)(?:/.*)?$");
+            if (maze.Success && options.ProviderOrder.Contains("tvmaze") && item.NumberingOrder == "aired" && item.Season is { } mazeSeason && item.Episode is { } mazeEpisode &&
+                !MetadataTitles.IsUnverifiedCompilation(item) && (!ArtworkCache.IsUsable(item.EpisodePoster) || item.EpisodePosterQualityPath != item.EpisodePoster))
+            {
+                try
+                {
+                    var url = await Cached(mazeImages, $"{maze.Groups[1].Value}:{mazeSeason}:{mazeEpisode}", () => MazeImage(maze.Groups[1].Value, mazeSeason, mazeEpisode, ct));
+                    if (url is not null)
+                    {
+                        using var http = MetadataHttp.CreateClient();
+                        var path = await AutomaticArtwork.Download(http, url, directory, ct);
+                        if (ArtworkCache.IsUsable(path)) return TmdbRetention.Record(item, item with { EpisodePoster = path, EpisodePosterQualityPath = path }, "tvmaze", "episodePoster", "episodePosterQualityPath");
+                    }
+                }
+                catch (Exception ex) when (ex is HttpRequestException or IOException or System.Text.Json.JsonException or OperationCanceledException && !ct.IsCancellationRequested) { }
+            }
+            if (ArtworkCache.IsUsable(item.EpisodePoster) || ArtworkCache.IsUsable(item.GeneratedEpisodePoster) || !item.Available || capture is null || !File.Exists(item.Path)) return item;
+            var thumbnail = await GenerateAsync(item, directory, capture, ct);
+            return thumbnail is null ? item : item with { GeneratedEpisodePoster = thumbnail };
+        }
+        finally { workers.Release(); }
+    }
+
+    // Share in-flight lookups, but forget failed or cancelled ones so a later visit retries.
+    internal static async Task<T> Cached<T>(ConcurrentDictionary<string, Lazy<Task<T>>> cache, string key, Func<Task<T>> lookup)
+    {
+        var entry = cache.GetOrAdd(key, _ => new(lookup));
+        try { return await entry.Value; }
+        catch { cache.TryRemove(new(key, entry)); throw; }
+    }
+
+    private static async Task<string?> MazeImage(string show, int season, int episode, CancellationToken ct)
+    {
+        using var http = MetadataHttp.CreateClient();
+        using var json = System.Text.Json.JsonDocument.Parse(await MetadataHttp.GetString(http, $"https://api.tvmaze.com/shows/{show}/episodebynumber?season={season}&number={episode}", ct));
+        return json.RootElement.TryGetProperty("image", out var image) && image.ValueKind == System.Text.Json.JsonValueKind.Object &&
+            image.TryGetProperty("original", out var original) ? original.GetString() : null;
+    }
+
+    public static async Task<string?> GenerateAsync(MediaItem item, string directory, FrameCapture capture, CancellationToken ct)
+    {
+        var file = new FileInfo(item.Path);
+        if (!file.Exists) return null;
+        var cache = Path.Combine(directory, "episode-thumbnails"); Directory.CreateDirectory(cache);
+        var path = Path.Combine(cache, LibraryIdentity.Hash($"{item.Path}:{file.Length}:{file.LastWriteTimeUtc.Ticks}") + ".jpg");
+        if (ArtworkCache.IsUsable(path)) return path;
+        // Skip opening credits where possible. Later seeks handle short or unknown videos, such as a
+        // ninety-second clip whose first second is black, and the grabber rejects dark frames.
+        var positions = item.RuntimeMinutes is > 0 and var minutes
+            ? minutes <= 3 ? new[] { minutes * 60 * 0.4, minutes * 60 * 0.7, minutes * 60 * 0.15 } : [Math.Min(600, minutes * 15d), 20d, 1d]
+            : [180d, 20d, 5d, 1d];
+        foreach (var seconds in positions)
+        {
+            var temporary = path + "." + Guid.NewGuid().ToString("N") + ".jpg";
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(20));
+            try
+            {
+                if (await capture(item.Path, seconds, temporary, timeout.Token) && ArtworkCache.IsUsable(temporary)) { File.Move(temporary, path, true); return path; }
+            }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException) { ct.ThrowIfCancellationRequested(); }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        }
+        return null;
+    }
+}

@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ship.ps1')
-$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('watchroom-ship-checks-' + [guid]::NewGuid().ToString('N'))
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('blackpearl-ship-checks-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $testRoot 'src') -Force | Out-Null
 [IO.File]::WriteAllText((Join-Path $testRoot 'src/app.cs'), 'fixture')
 $checks = 0
@@ -29,10 +29,10 @@ try {
     Check ((Get-PullRequestVersion '' '0.3.17' '0.3.18' '0.3.18') -eq '0.3.19') 'a branch matching a newer master version is bumped'
     Check ((Get-PullRequestVersion '0.4.0' '0.3.17' '0.3.17' '0.3.18') -eq '0.4.0') 'an explicit version replaces the branch version'
     Expect-Rejected { Get-PullRequestVersion '0.3.17' '0.3.17' '0.3.17' '0.3.18' } 'an explicit version must still be higher than every release'
-    foreach ($path in @('src/app.cs', 'Directory.Build.props', 'scripts/ship.ps1', '.claude/skills/review-pr/SKILL.md', 'src/Watchroom.Desktop/Assets/Tmdb.png', 'src/Watchroom.Desktop/Assets/Promo/teaser-clam-intro.mp4', 'deploy/haproxy.cfg', 'deploy/watchroom.env.example', '.gitattributes')) {
+    foreach ($path in @('src/app.cs', 'Directory.Build.props', 'scripts/ship.ps1', '.claude/skills/review-pr/SKILL.md', 'src/BlackPearl.Desktop/Assets/BlackPearl.png', 'src/BlackPearl.Desktop/Assets/Tmdb.png', 'src/BlackPearl.Desktop/Assets/Promo/teaser-clam-intro.mp4', 'deploy/haproxy.cfg', 'deploy/blackpearl.env.example', '.gitattributes')) {
         Check ((Assert-ShipPathName $path) -eq $path) "release source path $path is accepted"
     }
-    foreach ($path in @('../outside.cs','sites','artifacts/report.html','sites/src/app.ts','.tools/helper.ps1','src/credentials/token.json','src/.env','src/library.db','src/personal.png','src/Watchroom.Desktop/Assets/snapshot.png','src/Watchroom.Desktop/Assets/Promo/other.mp4','src/clip.mp4','TEST-REPORT.html','.claude/settings.json','deploy/watchroom.env','deploy/.env')) {
+    foreach ($path in @('../outside.cs','sites','artifacts/report.html','sites/src/app.ts','.tools/helper.ps1','src/credentials/token.json','src/.env','src/library.db','src/personal.png','src/BlackPearl.Desktop/Assets/snapshot.png','src/BlackPearl.Desktop/Assets/Promo/other.mp4','src/clip.mp4','TEST-REPORT.html','.claude/settings.json','deploy/blackpearl.env','deploy/.env')) {
         Expect-Rejected { Assert-ShipPathName $path } "excluded path $path cannot enter a pull request"
     }
     $summary = "Fixes seeking.`n`nIntentional: removes the old toggle."
@@ -54,7 +54,10 @@ try {
     $sameSecond = @((New-ReviewComment $headA 'changes'), (New-ReviewComment $headA 'approve'))
     $sameSecond[0] | Add-Member id 20; $sameSecond[1] | Add-Member id 10
     Expect-Rejected { Assert-ReviewApproval $sameSecond $headA } 'comments posted in the same second are ordered by id'
-    Expect-Rejected { Assert-ReviewApproval @([pscustomobject]@{ body = "LGTM <!-- watchroom-review head=$headA verdict=approved -->"; author_association = 'OWNER'; created_at = [datetime]::UtcNow }) $headA } 'a malformed verdict marker does not approve'
+    Expect-Rejected { Assert-ReviewApproval @([pscustomobject]@{ body = "LGTM <!-- blackpearl-review head=$headA verdict=approved -->"; author_association = 'OWNER'; created_at = [datetime]::UtcNow }) $headA } 'a malformed verdict marker does not approve'
+    $former = New-ReviewComment $headA 'approve'
+    $former.body = "Findings`n<!-- watchroom-review head=$headA verdict=approve -->"
+    Check ((Assert-ReviewApproval @($former) $headA).Verdict -eq 'approve') 'a verdict posted before the rename with the watchroom-review marker still counts'
     function New-BuildRun { param([string]$Event, [string]$Status, [string]$Conclusion, [int]$Id = 1, [int]$Attempt = 1, [string]$Head = $headA)
         [pscustomobject]@{ id = $Id; run_attempt = $Attempt; event = $Event; status = $Status; conclusion = $Conclusion; head_sha = $Head; name = 'Build and release'; html_url = "https://github.com/fixture/run/$Id" } }
     Check ((Get-HeadCheckState @() $headA).State -eq 'pending') 'merging waits for the build workflow to start'
@@ -64,15 +67,15 @@ try {
     Check ((Get-HeadCheckState @((New-BuildRun 'pull_request' 'completed' 'failure'), (New-BuildRun 'pull_request' 'completed' 'success' -Attempt 2)) $headA).State -eq 'success') 'a successful rerun replaces its failed attempt'
     Check ((Get-HeadCheckState @(New-BuildRun 'push' 'completed' 'cancelled') $headA).State -eq 'failure') 'a cancelled build of the head blocks the merge'
     Check ((Get-HeadCheckState @(New-BuildRun 'push' 'completed' 'success' -Head $headB) $headA).State -eq 'pending') 'builds of other commits do not count'
-    $fileName = 'Watchroom-Setup-0.3.18-win-x64.exe'
+    $fileName = 'BlackPearl-Setup-0.3.18-win-x64.exe'
     $filePath = Join-Path $testRoot $fileName
     [IO.File]::WriteAllBytes($filePath, [byte[]](1,2,3,4))
     $hash = (Get-FileHash $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $asset = [pscustomobject]@{ name=$fileName; size=4; digest="sha256:$hash"; browser_download_url="https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/$fileName" }
+    $asset = [pscustomobject]@{ name=$fileName; size=4; digest="sha256:$hash"; browser_download_url="https://github.com/Svovoniks/BlackPearl/releases/download/v0.3.18/$fileName" }
     $sumPath = Join-Path $testRoot 'SHA256SUMS.txt'
     [IO.File]::WriteAllText($sumPath, "$hash  $fileName`n")
-    $fileList = [pscustomobject]@{ name='Watchroom-files-0.3.18-win-x64.txt'; size=10; digest="sha256:$('a' * 64)"; browser_download_url='https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/Watchroom-files-0.3.18-win-x64.txt' }
-    $release = [pscustomobject]@{ tag_name='v0.3.18'; draft=$false; prerelease=$false; assets=@($asset, [pscustomobject]@{name='SHA256SUMS.txt';browser_download_url='https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/SHA256SUMS.txt'}, $fileList) }
+    $fileList = [pscustomobject]@{ name='BlackPearl-files-0.3.18-win-x64.txt'; size=10; digest="sha256:$('a' * 64)"; browser_download_url='https://github.com/Svovoniks/BlackPearl/releases/download/v0.3.18/BlackPearl-files-0.3.18-win-x64.txt' }
+    $release = [pscustomobject]@{ tag_name='v0.3.18'; draft=$false; prerelease=$false; assets=@($asset, [pscustomobject]@{name='SHA256SUMS.txt';browser_download_url='https://github.com/Svovoniks/BlackPearl/releases/download/v0.3.18/SHA256SUMS.txt'}, $fileList) }
     $null = Assert-ReleaseMetadata $release '0.3.18'
     $release.assets = @($release.assets | Where-Object { $_ -ne $fileList })
     Expect-Rejected { Assert-ReleaseMetadata $release '0.3.18' } 'a release without its file list cannot be reported as shipped'
@@ -86,7 +89,7 @@ try {
     Expect-Rejected { Assert-ReleaseMetadata $release '0.3.19' } 'wrong latest version cannot pass verification'
     $asset.browser_download_url='https://example.com/installer.exe'
     Expect-Rejected { Assert-ReleaseMetadata $release '0.3.18' } 'installer URL must belong to the expected release'
-    $asset.browser_download_url="https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/$fileName"
+    $asset.browser_download_url="https://github.com/Svovoniks/BlackPearl/releases/download/v0.3.18/$fileName"
     $asset.digest=''
     Expect-Rejected { Assert-ReleaseMetadata $release '0.3.18' } 'missing GitHub digest prevents verification'
     $asset.digest="sha256:$hash"
@@ -96,23 +99,32 @@ try {
     [IO.File]::WriteAllText($sumPath, ('0' * 64) + "  $fileName`n")
     Expect-Rejected { Assert-InstallerBytes $filePath $sumPath $asset } 'checksum-file disagreement is rejected'
     [IO.File]::WriteAllText($sumPath, "$hash  $fileName`n")
-    $updateName = 'Watchroom-Update-0.3.17-to-0.3.18-win-x64.exe'
+    $updateName = 'BlackPearl-Update-0.3.17-to-0.3.18-win-x64.exe'
     $updatePath = Join-Path $testRoot $updateName
     [IO.File]::WriteAllBytes($updatePath, [byte[]](5,6))
     $updateHash = (Get-FileHash $updatePath -Algorithm SHA256).Hash.ToLowerInvariant()
     [IO.File]::AppendAllText($sumPath, "$updateHash  $updateName`n")
-    $update = [pscustomobject]@{ name=$updateName; size=2; digest="sha256:$updateHash"; browser_download_url="https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/$updateName" }
-    $release.assets = @($release.assets) + @($update, [pscustomobject]@{ name='Watchroom-Update-0.3.16-to-0.3.17-win-x64.exe'; size=1; digest=''; browser_download_url='https://example.com/old.exe' })
+    $update = [pscustomobject]@{ name=$updateName; size=2; digest="sha256:$updateHash"; browser_download_url="https://github.com/Svovoniks/BlackPearl/releases/download/v0.3.18/$updateName" }
+    $release.assets = @($release.assets) + @($update, [pscustomobject]@{ name='BlackPearl-Update-0.3.16-to-0.3.17-win-x64.exe'; size=1; digest=''; browser_download_url='https://example.com/old.exe' })
     $verified = Assert-ReleaseMetadata $release '0.3.18'
-    Check (@($verified.Updates | Where-Object name -like 'Watchroom-Update-*').Count -eq 1 -and (Assert-InstallerBytes $updatePath $sumPath $update) -eq $updateHash) 'update installers for this version are verified like the full installer'
+    Check (@($verified.Updates | Where-Object name -like 'BlackPearl-Update-*').Count -eq 1 -and (Assert-InstallerBytes $updatePath $sumPath $update) -eq $updateHash) 'update installers for this version are verified like the full installer'
     $update.browser_download_url = 'https://example.com/update.exe'
     Expect-Rejected { Assert-ReleaseMetadata $release '0.3.18' } 'update installer URL must belong to the expected release'
-    $update.browser_download_url = "https://github.com/Svovoniks/WatchRoom/releases/download/v0.3.18/$updateName"
+    $update.browser_download_url = "https://github.com/Svovoniks/BlackPearl/releases/download/v0.3.18/$updateName"
     $update.digest = ''
     Expect-Rejected { Assert-ReleaseMetadata $release '0.3.18' } 'update installer without a GitHub digest prevents verification'
     $update.digest = "sha256:$updateHash"
     [IO.File]::WriteAllBytes($updatePath, [byte[]](6,5))
     Expect-Rejected { Assert-InstallerBytes $updatePath $sumPath $update } 'corrupted update installer is rejected'
+    # Before the repository rename, installations from before the app rename update from Watchroom-named copies.
+    $repository = $formerRepository
+    $legacyAssets = @(foreach ($name in 'BlackPearl-Setup-0.3.18-win-x64.exe', 'Watchroom-Setup-0.3.18-win-x64.exe', 'BlackPearl-files-0.3.18-win-x64.txt', 'SHA256SUMS.txt') {
+        [pscustomobject]@{ name = $name; size = 4; digest = "sha256:$hash"; browser_download_url = "https://github.com/$formerRepository/releases/download/v0.3.18/$name" } })
+    $legacyRelease = [pscustomobject]@{ tag_name = 'v0.3.18'; draft = $false; prerelease = $false; assets = $legacyAssets }
+    Check (@((Assert-ReleaseMetadata $legacyRelease '0.3.18').Updates | Where-Object name -CEQ 'Watchroom-Setup-0.3.18-win-x64.exe').Count -eq 1) 'before the repository rename the Watchroom-named installer copy is verified too'
+    $legacyRelease.assets = @($legacyAssets | Where-Object name -CNE 'Watchroom-Setup-0.3.18-win-x64.exe')
+    Expect-Rejected { Assert-ReleaseMetadata $legacyRelease '0.3.18' } 'before the repository rename a release needs a Watchroom-named installer for older installations'
+    $repository = 'Svovoniks/BlackPearl'
     function Get-PublicJson {
         param([string]$Url)
         return @{ workflow_runs = @(
@@ -133,7 +145,7 @@ finally {
     # This is the exact fresh directory created above, beneath the system temp root.
     $resolved = [IO.Path]::GetFullPath($testRoot)
     if ($resolved.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase) -and
-        (Split-Path -Leaf $resolved) -match '^watchroom-ship-checks-[a-f0-9]{32}$') {
+        (Split-Path -Leaf $resolved) -match '^blackpearl-ship-checks-[a-f0-9]{32}$') {
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }
 }

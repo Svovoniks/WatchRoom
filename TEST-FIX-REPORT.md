@@ -52,8 +52,8 @@ The fixes remove the demonstrated clock poisoning and repeated room pause feedba
 
 ## Outputs and evidence
 
-- Portable app: `artifacts/Watchroom/Watchroom.exe`
-- Installer: `artifacts/Watchroom-Setup-0.1.0-win-x64.exe`
+- Portable app: `artifacts/BlackPearl/BlackPearl.exe`
+- Installer: `artifacts/BlackPearl-Setup-0.1.0-win-x64.exe`
 - Installer SHA-256: `0FA4CB60A928E746A4D78094D5996671C9593CEC7E05B64B74F7DD26E360BFE3`
 - `artifacts/retest/final-smoke.log`
 - `artifacts/retest/public-retest.log`

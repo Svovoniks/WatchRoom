@@ -9,7 +9,7 @@ appears on:
   **Acquire season** button while browsing it;
 - a film added with **Add title** that has no file yet: its card's menu and its page.
 
-Watchroom only offers plugins that support the title's content type: `anime`,
+BlackPearl only offers plugins that support the title's content type: `anime`,
 `show` or `movie`. Interactive plugins open a picker for provider titles, quality,
 filters and release selection before downloading. Command-only plugins run
 directly, with a provider menu when several are available. The plugin downloads
@@ -27,12 +27,12 @@ provider setup and downloader settings.
 Each plugin is a folder in the plugins folder:
 
 ```
-%LOCALAPPDATA%\Watchroom\plugins\<plugin folder>\plugin.json
+%LOCALAPPDATA%\BlackPearl\plugins\<plugin folder>\plugin.json
 ```
 
 **Folders > Acquisition plugins** lists the loaded plugins and any that failed to
 load. **Open plugins folder** opens the folder, and **Reload** reads it again after
-you change it. The `WATCHROOM_PLUGINS` environment variable sets a different
+you change it. The `BLACKPEARL_PLUGINS` environment variable sets a different
 plugins folder.
 
 ## plugin.json
@@ -57,9 +57,9 @@ plugins folder.
 | `contentTypes` | Required. Any of `anime`, `show` (or `shows`, `tv`, `series`) and `movie` (or `movies`, `film`). |
 | `command` | Required. A file in the plugin folder, an absolute path or a program on `PATH`. `.ps1` scripts run with Windows PowerShell (`-NoProfile -ExecutionPolicy Bypass`). `.cmd`, `.bat` and `.exe` files run directly. |
 | `arguments` | Optional. `{request}` is replaced with the path of the request file. |
-| `timeoutSeconds` | Optional, 5–3600, default 120. Watchroom stops the plugin after this time. Long downloads should be handed to a downloader instead of waited for. |
-| `interactive` | Optional, default false. Opens Watchroom's provider/title/release picker. The plugin must support the interactive actions below. |
-| `settingsSchema` | Optional path relative to the plugin folder. A JSON array of settings fields; Watchroom displays a Settings button and preserves other fields when saving `settings.json`. |
+| `timeoutSeconds` | Optional, 5–3600, default 120. BlackPearl stops the plugin after this time. Long downloads should be handed to a downloader instead of waited for. |
+| `interactive` | Optional, default false. Opens BlackPearl's provider/title/release picker. The plugin must support the interactive actions below. |
+| `settingsSchema` | Optional path relative to the plugin folder. A JSON array of settings fields; BlackPearl displays a Settings button and preserves other fields when saving `settings.json`. |
 
 ## Interactive plugins
 
@@ -82,7 +82,7 @@ Interactive requests use the same JSON process protocol. Additional fields are:
 
 `search` and `releases` must be read-only. `search` returns catalog choices with
 `stage: "shows"`, or release choices with `stage: "releases"` for a provider that
-searches releases directly. After choosing a catalog title, Watchroom sends
+searches releases directly. After choosing a catalog title, BlackPearl sends
 `releases` with its title as `options.query` and its ID as `options.sourceUrl`.
 The plugin's final output line can be:
 
@@ -92,7 +92,7 @@ The plugin's final output line can be:
 
 For releases, `matches` indicates whether the release satisfies the requested
 missing episodes, quality, filter and numbering. `episode` groups alternate
-versions so Watchroom can select one release per episode. IDs are opaque to the
+versions so BlackPearl can select one release per episode. IDs are opaque to the
 host; the provider must revalidate them. `suggestedFilter` is an optional editable
 Sparrow-style literal template. Catalog choices need only `id`, `title`, `detail`.
 
@@ -103,7 +103,7 @@ episode request still defines what is missing and its destination. Legacy
 requests omit `action`, `options` and `selectedReleases` (or send null); existing
 command-only plugins retain their direct acquisition behavior.
 
-Watchroom saves opted-in choices by plugin, title, year, content type and season.
+BlackPearl saves opted-in choices by plugin, title, year, content type and season.
 It cancels pending searches on edits or close and ignores stale responses.
 
 ### Settings form
@@ -127,8 +127,8 @@ preserving keys absent from the schema, including existing title bindings.
 
 The plugin runs with its own folder as the working directory. The request is JSON
 on **standard input**. It is also saved to a temporary file, whose path is in
-`WATCHROOM_REQUEST_FILE`. Watchroom deletes that file when the plugin exits.
-`WATCHROOM_PLUGIN_DIR` holds the plugin's folder.
+`BLACKPEARL_REQUEST_FILE`. BlackPearl deletes that file when the plugin exits.
+`BLACKPEARL_PLUGIN_DIR` holds the plugin's folder.
 
 ```json
 {
@@ -180,7 +180,7 @@ on **standard input**. It is also saved to a temporary file, whose path is in
   show's folder. Season 0 uses `Specials`. If the show keeps every episode directly
   in its own folder, the episode goes there instead.
 - A show with no files at all, added with **Add title**, gets a folder named
-  `Title (Year)` in a library folder of its kind. Watchroom looks for a folder
+  `Title (Year)` in a library folder of its kind. BlackPearl looks for a folder
   marked Show (Anime for anime) first and a Mixed folder next. An anime film looks
   for Anime, then Movie, then Mixed.
 - If there are no library folders, Acquire isn't offered.
@@ -196,11 +196,11 @@ The last line the plugin prints may be JSON, which then decides the result:
 ```
 
 `success` can be replaced by `status`. The values `ok`, `success`, `queued` and
-`started` count as success. Watchroom shows `message` in a notification. Without a
+`started` count as success. BlackPearl shows `message` in a notification. Without a
 JSON line, it shows the last line of output on success and the last line of error
 output on failure.
 
-After a successful run, Watchroom scans the library again a few seconds later.
+After a successful run, BlackPearl scans the library again a few seconds later.
 Files that arrive later are picked up when the folder watcher notices them, or by
 the next scan.
 
@@ -220,7 +220,7 @@ Replace the logging with a call to your downloader:
 ```powershell
 $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $line = "{0:u} {1} {2} -> {3}" -f (Get-Date), $request.scope, $request.name, $request.targetDirectory
-Add-Content -Path (Join-Path $env:WATCHROOM_PLUGIN_DIR 'requests.log') -Value $line
+Add-Content -Path (Join-Path $env:BLACKPEARL_PLUGIN_DIR 'requests.log') -Value $line
 if (-not $request.targetExists) { New-Item -ItemType Directory -Force -Path $request.targetDirectory | Out-Null }
 @{ success = $true; message = "Logged $($request.name)" } | ConvertTo-Json -Compress
 ```

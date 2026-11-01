@@ -12,8 +12,8 @@
 
 ## Delivered
 
-- `artifacts/Watchroom-Setup-0.1.0-win-x64.exe`: per-user Windows installer, compiled with Inno Setup 7.1.0. Installer generation succeeded; installation/uninstallation on a clean Windows machine has not been tested.
-- `artifacts/Watchroom/Watchroom.exe`: self-contained Windows x64 app. Startup was checked without the workspace SDK in `DOTNET_ROOT`.
+- `artifacts/BlackPearl-Setup-0.1.0-win-x64.exe`: per-user Windows installer, compiled with Inno Setup 7.1.0. Installer generation succeeded; installation/uninstallation on a clean Windows machine has not been tested.
+- `artifacts/BlackPearl/BlackPearl.exe`: self-contained Windows x64 app. Startup was checked without the workspace SDK in `DOTNET_ROOT`.
 - WPF folder setup, persisted SQLite library, file watching/rescan, search/category filters, grouped series/episode selection, artwork lookup and match correction, local poster selection, dark/light themes.
 - Bundled LibVLCSharp/libVLC playback, native video surface, seeking, volume, audio/subtitle selectors, external subtitles and fullscreen.
 - ASP.NET Core private rooms: expiring codes, host admission/removal, host/shared playback permissions, chat, shared queue titles, scheduled playback commands, buffering pause/resume and server-clock estimation.

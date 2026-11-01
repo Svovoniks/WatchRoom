@@ -1,0 +1,21 @@
+[Unit]
+Description=BlackPearl room service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/blackpearl/blackpearl.env
+Environment=BLACKPEARL_DATA=/var/lib/blackpearl DOTNET_gcServer=0 DOTNET_GCHeapHardLimit=0xC000000
+ExecStart=/usr/bin/dotnet /opt/blackpearl/BlackPearl.Server.dll --urls http://127.0.0.1:5080
+DynamicUser=yes
+StateDirectory=blackpearl
+Restart=on-failure
+RestartSec=3s
+MemoryMax=300M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

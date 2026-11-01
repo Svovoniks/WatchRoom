@@ -7,16 +7,16 @@ Push-Location $root
 try {
     if (!$Version) { $Version = ([xml](Get-Content 'Directory.Build.props' -Raw)).Project.PropertyGroup.Version }
     if (!$SkipPublish -and $Step -ne 'Installer') { & ./build.ps1 -Publish }
-    $output = Join-Path $root 'artifacts/Watchroom'
-    if (!(Test-Path (Join-Path $output 'Watchroom.exe'))) { throw 'Publish the app first' }
-    $publishedVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $output 'Watchroom.dll')).ProductVersion.Split('+')[0]
+    $output = Join-Path $root 'artifacts/BlackPearl'
+    if (!(Test-Path (Join-Path $output 'BlackPearl.exe'))) { throw 'Publish the app first' }
+    $publishedVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $output 'BlackPearl.dll')).ProductVersion.Split('+')[0]
     if ($publishedVersion -ne $Version) { throw "Published app version $publishedVersion does not match installer version $Version. Publish the correct app first." }
     if ($Step -ne 'Installer') {
         & ./scripts/copy-native-runtime.ps1 -Destination $output
         Copy-Item 'README.md','THIRD-PARTY-NOTICES.md' $output
         $licenses = Join-Path $output 'licenses'
         New-Item -ItemType Directory -Force $licenses | Out-Null
-        $lock = Get-Content 'src/Watchroom.Desktop/packages.lock.json' -Raw | ConvertFrom-Json
+        $lock = Get-Content 'src/BlackPearl.Desktop/packages.lock.json' -Raw | ConvertFrom-Json
         $seen = @{}
         foreach ($framework in $lock.dependencies.PSObject.Properties) {
             foreach ($package in $framework.Value.PSObject.Properties) {
@@ -45,7 +45,7 @@ try {
     $compiler = Get-ChildItem '.nuget/packages/tools.innosetup/7.1.0' -Recurse -Filter ISCC.exe | Select-Object -First 1
     if (!$compiler) { throw 'Inno Setup compiler not found' }
     if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Version must be major.minor.patch' }
-    & $compiler.FullName /Qp "/DAppVersion=$Version" packaging/Watchroom.iss
+    & $compiler.FullName /Qp "/DAppVersion=$Version" packaging/BlackPearl.iss
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
-    Get-FileHash "artifacts/Watchroom-Setup-$Version-win-x64.exe" -Algorithm SHA256 | Format-List
+    Get-FileHash "artifacts/BlackPearl-Setup-$Version-win-x64.exe" -Algorithm SHA256 | Format-List
 } finally { Pop-Location }

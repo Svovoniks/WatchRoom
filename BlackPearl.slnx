@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/tests/">
+    <Project Path="tests/BlackPearl.DesktopChecks/BlackPearl.DesktopChecks.csproj" />
+    <Project Path="tests/BlackPearl.UpdateChecks/BlackPearl.UpdateChecks.csproj" />
+  </Folder><Project Path="src/BlackPearl.Core/BlackPearl.Core.csproj" /><Project Path="src/BlackPearl.Server/BlackPearl.Server.csproj" /><Project Path="src/BlackPearl.Desktop/BlackPearl.Desktop.csproj" /><Project Path="tests/BlackPearl.Smoke/BlackPearl.Smoke.csproj" /></Solution>

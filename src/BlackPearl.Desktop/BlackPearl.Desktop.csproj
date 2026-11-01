@@ -1,0 +1,130 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows10.0.17763.0</TargetFramework><UseWPF>true</UseWPF><PlatformTarget>x64</PlatformTarget><AssemblyName>BlackPearl</AssemblyName><ApplicationIcon>Assets/BlackPearl.ico</ApplicationIcon><ApplicationManifest>app.manifest</ApplicationManifest><StartupObject>BlackPearl.Desktop.Program</StartupObject></PropertyGroup><ItemGroup><PackageReference Include="NAudio.Wasapi" Version="3.3.0" /><ProjectReference Include="../BlackPearl.Core/BlackPearl.Core.csproj" /><PackageReference Include="LibVLCSharp.WPF" Version="3.10.1" /><PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" /><PackageReference Include="Whisper.net" Version="1.9.1" /><PackageReference Include="Whisper.net.Runtime" Version="1.9.1" /><PackageReference Include="Whisper.net.Runtime.NoAvx" Version="1.9.1" /><PackageReference Include="Panlingo.LanguageIdentification.CLD3" Version="0.8.1" /><PackageReference Include="TesseractOCR" Version="5.5.2" /><PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.1" /></ItemGroup><ItemGroup><Resource Include="Assets/BlackPearl.ico" /><Resource Include="Assets/BlackPearl.png" /><Resource Include="Assets/Tmdb.png" /></ItemGroup><ItemGroup><AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" /><InternalsVisibleTo Include="BlackPearl.DesktopChecks" /></ItemGroup>
+  <!-- Whisper tiny (MIT, OpenAI; ggml conversion by whisper.cpp) identifies spoken languages of untagged audio tracks.
+       Downloaded once per checkout from a pinned revision and verified before it is bundled under Models/. -->
+  <PropertyGroup><LanguageModelName>ggml-tiny-q5_1.bin</LanguageModelName><LanguageModelSha256>818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7</LanguageModelSha256><LanguageModelUrl>https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/$(LanguageModelName)</LanguageModelUrl><LanguageModelDirectory>$(MSBuildThisFileDirectory)../../.tools/models/</LanguageModelDirectory><LanguageModelPath>$(LanguageModelDirectory)$(LanguageModelName)</LanguageModelPath></PropertyGroup>
+  <ItemGroup><None Include="$(LanguageModelPath)" Link="Models/$(LanguageModelName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" /><None Include="Models/LICENSE-whisper.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
+  <Target Name="FetchLanguageModel" BeforeTargets="AssignTargetPaths;PrepareForBuild" Condition="!Exists('$(LanguageModelPath)')">
+    <DownloadFile SourceUrl="$(LanguageModelUrl)" DestinationFolder="$(LanguageModelDirectory)" DestinationFileName="$(LanguageModelName).download" Retries="3" RetryDelayMilliseconds="2000" />
+    <VerifyFileHash File="$(LanguageModelDirectory)$(LanguageModelName).download" Hash="$(LanguageModelSha256)" Algorithm="SHA256" />
+    <Move SourceFiles="$(LanguageModelDirectory)$(LanguageModelName).download" DestinationFiles="$(LanguageModelPath)" />
+  </Target>
+  <!-- Tesseract script models (Apache-2.0, tessdata_fast) read picture subtitles (PGS, VobSub) for language identification.
+       Downloaded once per checkout from a pinned revision and verified, then bundled under Models/tessdata without their
+       word lists: those are most of each file (87 of Latin's 89 MB) and would lean the text toward one language. -->
+  <PropertyGroup><TextModelRevision>87416418657359cb625c412a48b6e1d6d41c29bd</TextModelRevision><TextModelDirectory>$(MSBuildThisFileDirectory)../../.tools/models/tessdata/</TextModelDirectory></PropertyGroup>
+  <ItemGroup>
+    <TextModel Include="Latin" Sha256="6dbdaf8ecc6c40f025c2648bf3b3f3fbffe073e1fd2df2047fde2e2b2f020d53" />
+    <TextModel Include="Cyrillic" Sha256="a80325ebb1c7aa2dca5002ec05b15052a51dcb2e9e65373c264a3df7ac284358" />
+    <TextModel Include="Greek" Sha256="52e201e4a22336d89ee202b579aca04f15ffd6e5e6af1fe164498f2c7de898e6" />
+    <TextModel Include="Arabic" Sha256="47c262ac4e843c024df87ffa1363b77a821a843c069c71ef7650f4d2ecfea1e8" />
+    <TextModel Include="Hebrew" Sha256="4f4f3405404a61e21e5c16316ed5c3052ddb3572a75e0b3dc3fe118b12dea76e" />
+    <TextModel Include="Devanagari" Sha256="3bbb87c1de2a6a2ef0a97dc041e6eea2723a1c22d638f5e38157a5cd441c12b7" />
+    <TextModel Include="Thai" Sha256="d9e34be94556ddb65fd7e04892ff606e1a5b696d0eb422b5a7efc6859943702d" />
+    <TextModel Include="Hangul" Sha256="cae2d12b8cdac6b62643b65915bec347e80970adc55228ca42ac1ec8909b198a" />
+    <TextModel Include="Japanese" Sha256="c176cdca0c17e9be97bda854ac91baea90b92e2813b45749ad05e409477ba8b2" />
+    <TextModel Include="HanS" Sha256="d03c250faaa48015bfde2213f3d7d5bda82bcee93422fceac5906a32073d9152" />
+    <TextModel Include="HanT" Sha256="29588327f0d830b5c112209045d826b9be014138266b20f2b08843aac2730fbb" />
+    <TextModel Include="Vietnamese" Sha256="30546eea618459e79761f962391e6879778b026ad7b4459a11664a1b654758bd" />
+  </ItemGroup>
+  <ItemGroup><None Include="@(TextModel->'$(TextModelDirectory)%(Identity).traineddata')" Link="Models/tessdata/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" /><None Include="Models/LICENSE-tesseract.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
+  <Target Name="FetchTextModels" BeforeTargets="AssignTargetPaths;PrepareForBuild">
+    <ItemGroup><MissingTextModel Include="@(TextModel)" Condition="!Exists('$(TextModelDirectory)%(Identity).traineddata')" /></ItemGroup>
+    <DownloadFile Condition="'@(MissingTextModel)' != ''" SourceUrl="https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/$(TextModelRevision)/script/%(MissingTextModel.Identity).traineddata" DestinationFolder="$(TextModelDirectory)download/" DestinationFileName="%(MissingTextModel.Identity).traineddata" Retries="3" RetryDelayMilliseconds="2000" />
+    <VerifyFileHash Condition="'@(MissingTextModel)' != ''" File="$(TextModelDirectory)download/%(MissingTextModel.Identity).traineddata" Hash="%(MissingTextModel.Sha256)" Algorithm="SHA256" />
+    <StripTextModels Condition="'@(MissingTextModel)' != ''" Models="@(MissingTextModel->'$(TextModelDirectory)download/%(Identity).traineddata')" Destination="$(TextModelDirectory)" />
+    <RemoveDir Condition="'@(MissingTextModel)' != ''" Directories="$(TextModelDirectory)download/" />
+  </Target>
+  <!-- A traineddata file: the number of components, each one's offset (-1 when absent), then the components in order.
+       The LSTM word list is component 19. -->
+  <UsingTask TaskName="StripTextModels" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup><Models ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" /><Destination Required="true" /></ParameterGroup>
+    <Task><Code Type="Fragment" Language="cs"><![CDATA[
+      foreach (var model in Models)
+      {
+          var bytes = System.IO.File.ReadAllBytes(model.ItemSpec);
+          var count = System.BitConverter.ToInt32(bytes, 0);
+          var offsets = new long[count];
+          for (var i = 0; i < count; i++) offsets[i] = System.BitConverter.ToInt64(bytes, 4 + 8 * i);
+          var kept = new long[count];
+          var parts = new byte[count][];
+          var position = 4L + 8L * count;
+          for (var i = 0; i < count; i++)
+          {
+              kept[i] = -1;
+              if (offsets[i] < 0 || i == 19) continue;
+              var end = (long)bytes.Length;
+              for (var j = i + 1; j < count; j++) if (offsets[j] >= 0) { end = offsets[j]; break; }
+              parts[i] = new byte[end - offsets[i]];
+              System.Array.Copy(bytes, offsets[i], parts[i], 0, parts[i].Length);
+              kept[i] = position; position += parts[i].Length;
+          }
+          var output = new System.IO.MemoryStream();
+          output.Write(System.BitConverter.GetBytes(count), 0, 4);
+          foreach (var offset in kept) output.Write(System.BitConverter.GetBytes(offset), 0, 8);
+          foreach (var part in parts) if (part != null) output.Write(part, 0, part.Length);
+          var target = System.IO.Path.Combine(Destination, System.IO.Path.GetFileName(model.ItemSpec));
+          System.IO.File.WriteAllBytes(target + ".tmp", output.ToArray());
+          if (System.IO.File.Exists(target)) System.IO.File.Delete(target);
+          System.IO.File.Move(target + ".tmp", target);
+      }
+    ]]></Code></Task>
+  </UsingTask>
+  <!-- Room voice processing (VoiceProcessing.cs): BlackPearl's own echo cancellation, noise removal and speech detection
+       instead of Windows' voice pipeline. Each piece is fetched or built once per checkout under .tools/ from a pinned,
+       verified source: Silero VAD's model; webrtc-apm.dll (WebRTC audio processing with a C interface) from SoundFlow's
+       package; rnnoise.dll built from the RNNoise 0.2 release with the Visual Studio C compiler; and deepfilter.dll
+       built from src/native/deepfilter with Cargo. -->
+  <PropertyGroup>
+    <VoiceNativeDirectory>$(MSBuildThisFileDirectory)../../.tools/native/</VoiceNativeDirectory>
+    <SpeechModelName>silero_vad.onnx</SpeechModelName><SpeechModelSha256>1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3</SpeechModelSha256>
+    <SpeechModelUrl>https://raw.githubusercontent.com/snakers4/silero-vad/5cd7945676eb32225748052e2e6a0580e4686a08/src/silero_vad/data/$(SpeechModelName)</SpeechModelUrl>
+    <EchoPackageUrl>https://www.nuget.org/api/v2/package/SoundFlow.Extensions.WebRtc.Apm/1.4.0</EchoPackageUrl><EchoPackageSha256>b7b5d54ec40187b85919801f05530f5b178eeafa18227643b6757394d6854eaf</EchoPackageSha256>
+    <EchoLibrarySha256>89ab213150e0a3f7d0ca6424ef8f72e2402adabcfae8a369976b8b27df207411</EchoLibrarySha256>
+    <RnnoiseUrl>https://github.com/xiph/rnnoise/releases/download/v0.2/rnnoise-0.2.tar.gz</RnnoiseUrl><RnnoiseSha256>90fce4b00b9ff24c08dbfe31b82ffd43bae383d85c5535676d28b0a2b11c0d37</RnnoiseSha256>
+    <DeepFilterProject>$(MSBuildThisFileDirectory)../native/deepfilter/</DeepFilterProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(LanguageModelDirectory)$(SpeechModelName)" Link="Models/$(SpeechModelName)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(VoiceNativeDirectory)webrtc-apm.dll;$(VoiceNativeDirectory)rnnoise.dll;$(VoiceNativeDirectory)deepfilter.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+    <None Include="Models/LICENSE-silero.txt;Models/LICENSE-webrtc.txt;Models/LICENSE-rnnoise.txt;Models/LICENSE-deepfilternet.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="FetchSpeechModel" BeforeTargets="AssignTargetPaths;PrepareForBuild" Condition="!Exists('$(LanguageModelDirectory)$(SpeechModelName)')">
+    <DownloadFile SourceUrl="$(SpeechModelUrl)" DestinationFolder="$(LanguageModelDirectory)" DestinationFileName="$(SpeechModelName).download" Retries="3" RetryDelayMilliseconds="2000" />
+    <VerifyFileHash File="$(LanguageModelDirectory)$(SpeechModelName).download" Hash="$(SpeechModelSha256)" Algorithm="SHA256" />
+    <Move SourceFiles="$(LanguageModelDirectory)$(SpeechModelName).download" DestinationFiles="$(LanguageModelDirectory)$(SpeechModelName)" />
+  </Target>
+  <Target Name="FetchEchoCanceller" BeforeTargets="AssignTargetPaths;PrepareForBuild" Condition="!Exists('$(VoiceNativeDirectory)webrtc-apm.dll')">
+    <DownloadFile SourceUrl="$(EchoPackageUrl)" DestinationFolder="$(VoiceNativeDirectory)apm/" DestinationFileName="apm.zip" Retries="3" RetryDelayMilliseconds="2000" />
+    <VerifyFileHash File="$(VoiceNativeDirectory)apm/apm.zip" Hash="$(EchoPackageSha256)" Algorithm="SHA256" />
+    <Unzip SourceFiles="$(VoiceNativeDirectory)apm/apm.zip" DestinationFolder="$(VoiceNativeDirectory)apm/package/" />
+    <VerifyFileHash File="$(VoiceNativeDirectory)apm/package/runtimes/win-x64/native/webrtc-apm.dll" Hash="$(EchoLibrarySha256)" Algorithm="SHA256" />
+    <Copy SourceFiles="$(VoiceNativeDirectory)apm/package/runtimes/win-x64/native/webrtc-apm.dll" DestinationFolder="$(VoiceNativeDirectory)" />
+    <RemoveDir Directories="$(VoiceNativeDirectory)apm/" />
+  </Target>
+  <Target Name="BuildRnnoise" BeforeTargets="AssignTargetPaths;PrepareForBuild" Condition="!Exists('$(VoiceNativeDirectory)rnnoise.dll')">
+    <DownloadFile SourceUrl="$(RnnoiseUrl)" DestinationFolder="$(VoiceNativeDirectory)rnnoise/" DestinationFileName="rnnoise.tar.gz" Retries="3" RetryDelayMilliseconds="2000" />
+    <VerifyFileHash File="$(VoiceNativeDirectory)rnnoise/rnnoise.tar.gz" Hash="$(RnnoiseSha256)" Algorithm="SHA256" />
+    <Exec Command="tar -xzf rnnoise.tar.gz" WorkingDirectory="$(VoiceNativeDirectory)rnnoise/" />
+    <Exec Command="&quot;$(MSBuildThisFileDirectory)../native/rnnoise/build.cmd&quot; &quot;$(VoiceNativeDirectory)rnnoise/rnnoise-0.2&quot; &quot;$(VoiceNativeDirectory)rnnoise/build&quot;" />
+    <Copy SourceFiles="$(VoiceNativeDirectory)rnnoise/build/rnnoise.dll" DestinationFolder="$(VoiceNativeDirectory)" />
+    <RemoveDir Directories="$(VoiceNativeDirectory)rnnoise/" />
+  </Target>
+  <Target Name="BuildDeepFilter" BeforeTargets="AssignTargetPaths;PrepareForBuild" Condition="!Exists('$(VoiceNativeDirectory)deepfilter.dll')">
+    <Exec Command="cargo build --release --locked --manifest-path &quot;$(DeepFilterProject)Cargo.toml&quot;" EnvironmentVariables="CARGO_TARGET_DIR=$(VoiceNativeDirectory)deepfilter-target" />
+    <Copy SourceFiles="$(VoiceNativeDirectory)deepfilter-target/release/deepfilter.dll" DestinationFolder="$(VoiceNativeDirectory)" />
+  </Target>
+  <!-- libVLC's plugin cache, written by scripts/vlc-plugin-cache.ps1: the player then loads only the plugins a video needs
+       instead of all of them at start, which matters most on the first start after an install, when antivirus scans each
+       DLL it loads. The cache is written once into the build output and published from there. -->
+  <PropertyGroup><VlcPluginCacheScript>$(MSBuildThisFileDirectory)../../scripts/vlc-plugin-cache.ps1</VlcPluginCacheScript></PropertyGroup>
+  <Target Name="WriteVlcPluginCache" AfterTargets="CopyFilesToOutputDirectory" Inputs="$(OutDir)libvlc\win-x64\libvlccore.dll;$(VlcPluginCacheScript)" Outputs="$(OutDir)libvlc\win-x64\plugins\plugins.dat">
+    <Exec Command="pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(VlcPluginCacheScript)&quot; -Directory &quot;$(OutDir)libvlc\win-x64&quot;" />
+  </Target>
+  <Target Name="PublishVlcPluginCache" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup><ResolvedFileToPublish Include="$(OutDir)libvlc\win-x64\plugins\plugins.dat" RelativePath="libvlc\win-x64\plugins\plugins.dat" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
+  </Target>
+  <!-- The app is x64 only. -->
+  <Target Name="DropX86Tesseract" BeforeTargets="AssignTargetPaths">
+    <ItemGroup><None Remove="@(None)" Condition="$([System.String]::Copy('%(None.Link)').StartsWith('x86'))" /></ItemGroup>
+  </Target>
+</Project>

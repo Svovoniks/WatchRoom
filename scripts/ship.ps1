@@ -50,9 +50,9 @@ function Get-PropsVersion {
 function Assert-ShipPathName {
     param([string]$Path)
     $relative = $Path.Replace('\', '/')
-    # The approved attribution logo and postplay promo belong to the app, unlike local
+    # The app icon, approved attribution logo and postplay promo belong to the app, unlike local
     # reports and generated media. Keep the exception to these exact source paths.
-    $attributionLogo = $relative -ceq 'src/Watchroom.Desktop/Assets/Tmdb.png' -or $relative -ceq 'src/Watchroom.Desktop/Assets/Promo/teaser-clam-intro.mp4'
+    $attributionLogo = $relative -ceq 'src/BlackPearl.Desktop/Assets/BlackPearl.png' -or $relative -ceq 'src/BlackPearl.Desktop/Assets/Tmdb.png' -or $relative -ceq 'src/BlackPearl.Desktop/Assets/Promo/teaser-clam-intro.mp4'
     if ($relative -match '^\.\.(?:/|$)' -or [IO.Path]::IsPathRooted($relative) -or
         $relative -match '(^|/)(sites|artifacts|\.tools|\.nuget|bin|obj|node_modules|data|logs|credentials)(/|$)' -or
         ($relative -match '(?i)(^|/)(\.env[^/]*|.*\.(html?|png|jpe?g|mp4|mkv|sqlite|db|pfx|pem|key|env))$' -and !$attributionLogo) -or
@@ -65,18 +65,18 @@ function Get-CheckRecordPath {
     param([string]$Root, [string]$Commit)
     # Shared by every worktree, so -Merge can run anywhere and still see what was checked.
     $common = (Invoke-Native git @('-C', $Root, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
-    return Join-Path $common "watchroom-checks/$Commit.json"
+    return Join-Path $common "blackpearl-checks/$Commit.json"
 }
-# Voice libraries and models are fetched or built once per checkout (see Watchroom.Desktop.csproj), and each check
+# Voice libraries and models are fetched or built once per checkout (see BlackPearl.Desktop.csproj), and each check
 # copy is a fresh checkout. Like the CI cache, this keeps them between runs while their pinned inputs are unchanged.
 function Get-BuildCacheEntries {
     param([string]$Checkout)
     $common = (Invoke-Native git @('-C', $Checkout, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
-    $project = (Invoke-Native git @('-C', $Checkout, 'rev-parse', 'HEAD:src/Watchroom.Desktop/Watchroom.Desktop.csproj')).Trim()
+    $project = (Invoke-Native git @('-C', $Checkout, 'rev-parse', 'HEAD:src/BlackPearl.Desktop/BlackPearl.Desktop.csproj')).Trim()
     $native = (Invoke-Native git @('-C', $Checkout, 'rev-parse', 'HEAD:src/native')).Trim()
     return @(
-        [pscustomobject]@{ Path = Join-Path $Checkout '.tools/native'; Files = '*.dll'; Kind = 'native'; Cache = Join-Path $common "watchroom-build-cache/native-$native-$project" },
-        [pscustomobject]@{ Path = Join-Path $Checkout '.tools/models'; Files = '*'; Kind = 'models'; Cache = Join-Path $common "watchroom-build-cache/models-$project" })
+        [pscustomobject]@{ Path = Join-Path $Checkout '.tools/native'; Files = '*.dll'; Kind = 'native'; Cache = Join-Path $common "blackpearl-build-cache/native-$native-$project" },
+        [pscustomobject]@{ Path = Join-Path $Checkout '.tools/models'; Files = '*'; Kind = 'models'; Cache = Join-Path $common "blackpearl-build-cache/models-$project" })
 }
 function Restore-BuildCache {
     param([string]$Checkout)
@@ -111,23 +111,23 @@ function Invoke-ReleaseChecks {
     Push-Location $Checkout
     try {
         Restore-BuildCache $Checkout
-        Invoke-Native $Sdk @('restore', 'Watchroom.slnx', '--locked-mode', "-p:RestorePackagesPath=$PackagePath")
-        Invoke-Native $Sdk @('build', 'Watchroom.slnx', '-c', 'Release', '--no-restore', "-p:RestorePackagesPath=$PackagePath")
+        Invoke-Native $Sdk @('restore', 'BlackPearl.slnx', '--locked-mode', "-p:RestorePackagesPath=$PackagePath")
+        Invoke-Native $Sdk @('build', 'BlackPearl.slnx', '-c', 'Release', '--no-restore', "-p:RestorePackagesPath=$PackagePath")
         Save-BuildCache $Checkout
         # The main desktop suite's input responsiveness gates are timing-sensitive, so it runs alone first.
-        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build')
+        Invoke-Native $Sdk @('run', '--project', 'tests/BlackPearl.DesktopChecks', '-c', 'Release', '--no-build')
         # The full smoke suite, the longest, then runs in the background beside the other checks. It includes the
         # metadata cache and shared library transport checks. Some nested metadata fixtures create long SQLite backup
         # filenames, so it gets a short directory under the temp folder.
         $freshSmoke = Join-Path ([IO.Path]::GetTempPath()) ('wr-smoke-' + [guid]::NewGuid().ToString('N'))
         $smokeLog = "$freshSmoke.log"
-        $smoke = Start-Process -FilePath $Sdk -ArgumentList @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', "`"$freshSmoke`"") `
+        $smoke = Start-Process -FilePath $Sdk -ArgumentList @('run', '--project', 'tests/BlackPearl.Smoke', '-c', 'Release', '--no-build', '--', "`"$freshSmoke`"") `
             -WorkingDirectory $Checkout -RedirectStandardOutput $smokeLog -RedirectStandardError "$smokeLog.err" -NoNewWindow -PassThru
         $null = $smoke.Handle # keeps the exit code readable after the process ends
-        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.UpdateChecks', '-c', 'Release', '--no-build')
-        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', '--tmdb-access')
+        Invoke-Native $Sdk @('run', '--project', 'tests/BlackPearl.UpdateChecks', '-c', 'Release', '--no-build')
+        Invoke-Native $Sdk @('run', '--project', 'tests/BlackPearl.Smoke', '-c', 'Release', '--no-build', '--', '--tmdb-access')
         foreach ($check in @('--acquisition-layout', '--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout', '--language-detection', '--voice-processing')) {
-            Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build', '--', $check)
+            Invoke-Native $Sdk @('run', '--project', 'tests/BlackPearl.DesktopChecks', '-c', 'Release', '--no-build', '--', $check)
         }
         Write-Host 'Waiting for the full smoke suite...'
         $smoke.WaitForExit()
@@ -257,23 +257,32 @@ function Assert-ReleaseMetadata {
     if ($Release.tag_name -cne "v$ExpectedVersion" -or $Release.draft -or $Release.prerelease) {
         throw "The public updater feed does not expose stable v$ExpectedVersion."
     }
-    $name = "Watchroom-Setup-$ExpectedVersion-win-x64.exe"
+    $name = "BlackPearl-Setup-$ExpectedVersion-win-x64.exe"
     $installer = @($Release.assets | Where-Object name -CEQ $name)
     $checksums = @($Release.assets | Where-Object name -CEQ 'SHA256SUMS.txt')
     if ($installer.Count -ne 1 -or $installer[0].size -le 0 -or $installer[0].digest -cnotmatch '^sha256:[a-f0-9]{64}$' -or $checksums.Count -ne 1) {
         throw 'Missing installer, size, SHA-256 digest, or checksum asset.'
     }
     # Update installers carry only the files changed since an earlier version and are verified like the full one.
-    $updates = @($Release.assets | Where-Object name -CMatch "^Watchroom-Update-\d+\.\d+\.\d+-to-$([regex]::Escape($ExpectedVersion))-win-x64\.exe$")
+    $updates = @($Release.assets | Where-Object name -CMatch "^BlackPearl-Update-\d+\.\d+\.\d+-to-$([regex]::Escape($ExpectedVersion))-win-x64\.exe$")
     foreach ($update in $updates) {
         if ($update.size -le 0 -or $update.digest -cnotmatch '^sha256:[a-f0-9]{64}$') { throw "Missing size or SHA-256 digest for $($update.name)." }
     }
     # The file list lets later releases build update installers from this one and lets the app check its files.
-    $files = @($Release.assets | Where-Object name -CEQ "Watchroom-files-$ExpectedVersion-win-x64.txt")
+    $files = @($Release.assets | Where-Object name -CEQ "BlackPearl-files-$ExpectedVersion-win-x64.txt")
     if ($files.Count -ne 1 -or $files[0].size -le 0 -or $files[0].digest -cnotmatch '^sha256:[a-f0-9]{64}$') { throw 'Missing file list, size, or SHA-256 digest.' }
+    # Until the repository is renamed, installations from before the app was renamed update from Watchroom-* copies of
+    # the installers; they must be the same files.
+    if ($repository -ceq $formerRepository) {
+        foreach ($asset in @($installer[0]) + $updates) {
+            $legacy = @($Release.assets | Where-Object name -CEQ ($asset.name -creplace '^BlackPearl-', 'Watchroom-'))
+            if ($legacy.Count -ne 1 -or $legacy[0].size -ne $asset.size -or $legacy[0].digest -cne $asset.digest) { throw "Missing Watchroom-named copy of $($asset.name)." }
+            $files += $legacy[0]
+        }
+    }
     $updates = @($updates) + $files
     foreach ($asset in @($installer[0], $checksums[0]) + $updates) {
-        $expected = "https://github.com/Svovoniks/WatchRoom/releases/download/v$ExpectedVersion/$($asset.name)"
+        $expected = "https://github.com/$repository/releases/download/v$ExpectedVersion/$($asset.name)"
         if ($asset.browser_download_url -cne $expected) { throw 'Unexpected release asset URL.' }
     }
     return @{ Installer = $installer[0]; Checksums = $checksums[0]; Updates = $updates }
@@ -352,7 +361,8 @@ $checkout = $null
 Push-Location $root
 try {
     $remote = Invoke-Native git @('remote', 'get-url', 'origin')
-    if ($remote.Trim() -notmatch '^(https://github\.com/|git@github\.com:)Svovoniks/WatchRoom(?:\.git)?$') { throw 'origin must be the public Svovoniks/WatchRoom repository.' }
+    Use-Repository
+    if ($remote.Trim() -notmatch '^(https://github\.com/|git@github\.com:)Svovoniks/(?:BlackPearl|WatchRoom)(?:\.git)?$') { throw 'origin must be the public Svovoniks/BlackPearl repository (Svovoniks/WatchRoom before its rename).' }
     Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', '--tags')
     $deadline = [datetime]::UtcNow.AddMinutes($TimeoutMinutes)
     if ($VerifyOnly) {
@@ -367,7 +377,7 @@ try {
             if (!$pull) { throw "No open pull request for branch $branch. Pass -Pr." }
         }
         if ($pull.state -ne 'open' -or $pull.draft -or $pull.base.ref -cne 'master' -or $pull.head.repo.full_name -cne $repository) {
-            throw 'Only an open, non-draft pull request from Svovoniks/WatchRoom into master can be shipped.'
+            throw "Only an open, non-draft pull request from $repository into master can be shipped."
         }
         $number = $pull.number; $head = $pull.head.sha
         Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', "pull/$number/head")
@@ -393,8 +403,8 @@ try {
             if ($LASTEXITCODE -eq 0) { throw "Tag v$Version already exists. Rerun ship.ps1 with a higher -Version, then request a re-review." }
             $note = Get-ReleaseNote $pull.body
             if (!$note) { $note = $pull.title }
-            $mergeTitle = "Release Watchroom ${Version}: $note"
-            Write-Host "Merge #$number ($head) as Watchroom $Version, approved in $($approval.Url)"
+            $mergeTitle = "Release BlackPearl ${Version}: $note"
+            Write-Host "Merge #$number ($head) as BlackPearl $Version, approved in $($approval.Url)"
         }
         if ($Plan) { Write-Host 'Preview complete. Nothing was merged, tagged, or released.'; return }
         $checks = $null
@@ -425,7 +435,7 @@ try {
                 throw "The merged tree differs from the reviewed head $head, so it was not tagged."
             }
             if (!$NoRelease) {
-                Invoke-Native git @('tag', '-a', "v$Version", $commit, '-m', "Watchroom ${Version}: $note")
+                Invoke-Native git @('tag', '-a', "v$Version", $commit, '-m', "BlackPearl ${Version}: $note")
                 Invoke-Native git @('push', 'origin', "v$Version")
             }
         }
@@ -479,7 +489,7 @@ try {
             & git show-ref --verify --quiet "refs/tags/v$Version"
             if ($LASTEXITCODE -eq 0) { throw "Tag v$Version already exists. Choose a higher version." }
         }
-        Write-Host "$(if ($existing) { "Update #$($existing.number)" } else { 'Open a pull request' }) for $branch $(if ($NoRelease) { 'without a release' } else { "as Watchroom $Version" }) with these files:"
+        Write-Host "$(if ($existing) { "Update #$($existing.number)" } else { 'Open a pull request' }) for $branch $(if ($NoRelease) { 'without a release' } else { "as BlackPearl $Version" }) with these files:"
         $changed | ForEach-Object { Write-Host "  $_" }
         if ($Plan) { Write-Host 'Preview complete. No files, commits, branches, or pull requests changed.'; return }
         if (!$Sdk) {
@@ -501,7 +511,7 @@ try {
         $head = (Invoke-Native git @('rev-parse', 'HEAD')).Trim()
         # Check a clean copy of the commit: untracked files in the worktree cannot affect the result,
         # and SQLite fixture paths stay within legacy Windows limits under the temp directory.
-        $checkout = Join-Path ([IO.Path]::GetTempPath()) ('watchroom-ship-' + [guid]::NewGuid().ToString('N'))
+        $checkout = Join-Path ([IO.Path]::GetTempPath()) ('blackpearl-ship-' + [guid]::NewGuid().ToString('N'))
         Invoke-Native git @('worktree', 'add', '--detach', $checkout, $head)
         Invoke-ReleaseChecks $checkout $Sdk (Join-Path (Split-Path -Parent $commonDir) '.nuget/packages')
         Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', 'master')
@@ -519,7 +529,7 @@ try {
         else { Invoke-GitHub '/pulls' -Method Post -Body @{ title = $prTitle; head = $branch; base = 'master'; body = $body } }
         Invoke-Native git @('worktree', 'remove', '--force', $checkout); $checkout = $null
         Write-Host "Pull request: $($pull.html_url)"
-        Write-Host "Head: $head ($(if ($NoRelease) { 'not released' } else { "Watchroom $Version" }), release checks passed)"
+        Write-Host "Head: $head ($(if ($NoRelease) { 'not released' } else { "BlackPearl $Version" }), release checks passed)"
         Write-Host "Next: ask a separate reviewer agent to review #$($pull.number) at $head with the review-pr skill (.claude/skills/review-pr/SKILL.md)."
         Write-Host "Fix what it finds and rerun this script until it approves, then run ship.ps1 -Merge$(if ($NoRelease) { ' -NoRelease' })."
         return
@@ -535,7 +545,7 @@ try {
     catch { throw "Release v$Version is publicly verified, but local master was not synchronized. $_" }
     $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $record 'verified.json')
     $outcome = if ($VerifyOnly) { 'Verified existing release' } else { 'Shipped' }
-    Write-Host "$outcome Watchroom ${Version}: $($result.Release)"
+    Write-Host "$outcome BlackPearl ${Version}: $($result.Release)"
     Write-Host "Actions: $($run.html_url)"
     Write-Host "Verified SHA-256: $($result.Sha256)"
     Write-Host "Verified file list and update installers: $(if ($result.Updates.Count) { $result.Updates -join ', ' } else { 'none' })"

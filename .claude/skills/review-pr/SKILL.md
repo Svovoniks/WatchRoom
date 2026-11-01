@@ -1,9 +1,9 @@
 ---
 name: review-pr
-description: Review a Watchroom pull request as the independent reviewer in the shipping flow, then post an approve or changes verdict that gates the merge. Use when asked to review a Watchroom PR, or when an author agent hands you a PR number and head commit to review.
+description: Review a BlackPearl pull request as the independent reviewer in the shipping flow, then post an approve or changes verdict that gates the merge. Use when asked to review a BlackPearl PR, or when an author agent hands you a PR number and head commit to review.
 ---
 
-# Reviewing a Watchroom pull request
+# Reviewing a BlackPearl pull request
 
 You are the reviewer another agent asked for while shipping. Your verdict gates the
 merge: `scripts/ship.ps1 -Merge` refuses to merge unless your latest verdict approves
@@ -83,16 +83,16 @@ them separately. They never block approval on their own.
   it unconfirmed and explain what would settle it.
 - CI and the author's release checks must pass. `ship.ps1` ran the full release suite
   on the head before pushing. Run the checks for the area you are worried about in the
-  review worktree, such as `tests/Watchroom.DesktopChecks -- --player-layout` or the
+  review worktree, such as `tests/BlackPearl.DesktopChecks -- --player-layout` or the
   smoke suite against a fresh temp directory. The commands are in UPDATES.md. A fresh
-  worktree needs `dotnet build Watchroom.slnx -c Release` first. Use
+  worktree needs `dotnet build BlackPearl.slnx -c Release` first. Use
   `.tools/dotnet/dotnet.exe` from the main checkout when `dotnet` is not on PATH.
 - For a suspected performance regression, measure before and after where practical:
   time the operation, count calls, or compare allocations against `origin/master`.
   Otherwise, explain the cost from the code with concrete numbers, for example "now
   runs per list item: 2,000 items means 2,000 synchronous database reads on the UI
   thread".
-- Do not open, close, or relaunch the user's installed Watchroom app.
+- Do not open, close, or relaunch the user's installed BlackPearl app.
 
 ## 5. Post the verdict
 
@@ -108,7 +108,7 @@ Approve only when no blocking findings remain. Use this shape:
 
 ```markdown
 ### Blocking
-1. `src/Watchroom.Desktop/Player.cs:212`: <defect>. Scenario: <inputs/state → wrong result>. Confirmed by <trace/test/measurement>. Fix: <direction>.
+1. `src/BlackPearl.Desktop/Player.cs:212`: <defect>. Scenario: <inputs/state → wrong result>. Confirmed by <trace/test/measurement>. Fix: <direction>.
 
 ### Non-blocking
 - `path:line`: <suggestion>.

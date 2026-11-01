@@ -2,7 +2,8 @@
 
 ## Release checklist for agents
 
-The public source and release repository is `Svovoniks/WatchRoom`, and the release
+The public source and release repository is `Svovoniks/BlackPearl` (`Svovoniks/WatchRoom`
+until it is renamed; see [Renaming from Watchroom](#renaming-from-watchroom)), and the release
 branch is `master`. The updater uses its public `/releases/latest` endpoint.
 Shipping is authorized when the user asks to ship an update. Complete the whole
 flow below rather than stopping at a pushed branch, an open pull request, or a
@@ -58,7 +59,7 @@ and becomes the release commit message and tag message.
 **Review.** `scripts/review-pr.ps1 -Pr N` checks out the head in a fresh temp
 worktree and prints the description, changed files, CI state, and earlier verdicts.
 `-Verdict approve|changes -Head <sha> -BodyFile <path>` posts the verdict as a PR
-comment with a `watchroom-review` marker for that exact commit. Every account here
+comment with a `blackpearl-review` marker for that exact commit. Every account here
 is the repository owner, and GitHub does not let authors approve their own pull
 requests, so the marker comment is the approval. Only markers from the owner,
 members, or collaborators count. The newest one wins.
@@ -73,7 +74,7 @@ hold:
 - Its version is higher than the latest release and has no tag.
 
 It waits for the `Build and release` workflow runs on the head to succeed. It then
-squash-merges with GitHub's head-SHA guard and the title `Release Watchroom X:
+squash-merges with GitHub's head-SHA guard and the title `Release BlackPearl X:
 <release note>`. It confirms the merged tree is exactly the reviewed tree, then
 tags and pushes `vX`. It deletes the merged branch, waits for the tag workflow, and
 verifies the public release, updater feed, installer size, and SHA-256 against both
@@ -178,26 +179,26 @@ Use this only to recover when the scripts cannot run:
 PowerShell checks (use `dotnet` instead of the workspace SDK path on other machines):
 
 ```powershell
-.tools/dotnet/dotnet.exe restore Watchroom.slnx --locked-mode
-.tools/dotnet/dotnet.exe run --project tests/Watchroom.UpdateChecks -c Release
-.tools/dotnet/dotnet.exe run --project tests/Watchroom.Smoke -c Release -- --metadata-cache
-.tools/dotnet/dotnet.exe run --project tests/Watchroom.DesktopChecks -c Release
+.tools/dotnet/dotnet.exe restore BlackPearl.slnx --locked-mode
+.tools/dotnet/dotnet.exe run --project tests/BlackPearl.UpdateChecks -c Release
+.tools/dotnet/dotnet.exe run --project tests/BlackPearl.Smoke -c Release -- --metadata-cache
+.tools/dotnet/dotnet.exe run --project tests/BlackPearl.DesktopChecks -c Release
 ```
 
-When voice chat changes, also run `tests/Watchroom.DesktopChecks -- --voice-processing`; a fresh checkout builds
+When voice chat changes, also run `tests/BlackPearl.DesktopChecks -- --voice-processing`; a fresh checkout builds
 the voice processing libraries once, which needs Visual Studio's C++ tools and Rust (`cargo`).
 
 When packaging or the updater changes, also run `./scripts/update-package-checks.ps1`.
 The release workflow runs it on every packaged build.
 
-Inspect Actions at https://github.com/Svovoniks/WatchRoom/actions and releases at
-https://github.com/Svovoniks/WatchRoom/releases. Public REST endpoints work without
+Inspect Actions at https://github.com/Svovoniks/BlackPearl/actions and releases at
+https://github.com/Svovoniks/BlackPearl/releases. Public REST endpoints work without
 authentication; never print credentials when using authenticated APIs.
 
 Public updater verification:
 
 ```powershell
-$release = Invoke-RestMethod 'https://api.github.com/repos/Svovoniks/WatchRoom/releases/latest'
+$release = Invoke-RestMethod 'https://api.github.com/repos/Svovoniks/BlackPearl/releases/latest'
 $release | Select-Object tag_name,draft,prerelease
 $release.assets | Select-Object name,size,digest,browser_download_url
 ```
@@ -252,7 +253,7 @@ from a playback hold. The `applied` event records issuing the native player acti
 `native-time` and `settle-end` establish when the native position catches up.
 
 Windows builds save connection and playback diagnostics automatically to
-`%LOCALAPPDATA%\Watchroom\logs`. Settings offers **Open logs folder**. After
+`%LOCALAPPDATA%\BlackPearl\logs`. Settings offers **Open logs folder**. After
 reproducing a failed watch session, close both apps and share the logs from both
 devices, together with the approximate time of the failure.
 
@@ -265,7 +266,7 @@ transfer cannot queue playback commands behind its SCTP traffic. Diagnostics
 record `media-transport-isolated` and `media-transport-state` for this connection.
 Peers without this optional capability retain the legacy media protocol.
 The logger keeps four files of up to 5 MiB each and writes asynchronously.
-`WATCHROOM_DIAGNOSTICS` still overrides the output directory for test runs.
+`BLACKPEARL_DIAGNOSTICS` still overrides the output directory for test runs.
 
 ## Build and updater behavior
 
@@ -278,9 +279,9 @@ retain installers as workflow artifacts for 14 days.
 
 Push a version tag such as `v0.2.1` to publish a GitHub Release. Tags must use
 `vMAJOR.MINOR.PATCH`; the same version is embedded in the application and installer.
-The workflow uploads `Watchroom-Setup-VERSION-win-x64.exe`, the file list
-`Watchroom-files-VERSION-win-x64.txt` (SHA-256, size and path of every installed
-file), update installers `Watchroom-Update-FROM-to-VERSION-win-x64.exe` from
+The workflow uploads `BlackPearl-Setup-VERSION-win-x64.exe`, the file list
+`BlackPearl-files-VERSION-win-x64.txt` (SHA-256, size and path of every installed
+file), update installers `BlackPearl-Update-FROM-to-VERSION-win-x64.exe` from
 each of the 40 previous stable releases, and `SHA256SUMS.txt` covering all of
 them. Only tagged builds publish releases. Do not replace an existing release
 with different bytes; publish a new version instead.
@@ -317,7 +318,7 @@ installation older than the last 40 releases chains update installers through
 intermediate releases (the cheapest chain among the last 100 releases) when the
 chain is smaller than half the full installer; a short script in the `updates`
 folder runs them one after another once the app has closed, only the last one
-reopens Watchroom, and a failed step reopens the version installed by then.
+reopens BlackPearl, and a failed step reopens the version installed by then.
 Before using update installers the app checks its installed files against its
 own release's published file list. If the files differ, any download fails
 verification, or an installer cannot be started (antivirus software may hold
@@ -325,7 +326,7 @@ back a fresh download briefly, which is retried, or remove it), the full
 installer is downloaded instead; update installers that ran without reaching a
 version are not offered for it again. The update card shows the download size. After successful verification,
 the per-user Inno Setup installer updates the installed app's directory, and
-reopens Watchroom. Only the copy running from the installer-registered folder (or
+reopens BlackPearl. Only the copy running from the installer-registered folder (or
 the default folder when none is registered) updates itself; development builds and
 copied folders disable update checks so they cannot take over the installation.
 Library data, rooms, queues, and credentials remain outside the installation
@@ -336,8 +337,51 @@ Checksums protect against transfer corruption, not a compromised GitHub account.
 
 Update downloads require a public releases repository. No GitHub token is stored
 in the distributed app. `UpdateRepository` is an MSBuild property baked into the
-Windows assembly; it defaults to `Svovoniks/WatchRoom`.
+Windows assembly; it defaults to `Svovoniks/BlackPearl;Svovoniks/WatchRoom`, a list of the
+repository's names that the updater tries in order.
 
-To test: `dotnet run --project tests/Watchroom.UpdateChecks -c Release`.
-For isolated desktop tests set `WATCHROOM_DISABLE_UPDATES=1`; normal users do not
+## Renaming from Watchroom
+
+The app was called Watchroom, and its repository `Svovoniks/WatchRoom`. The code, installers
+and release assets are now BlackPearl. What existing installations rely on keeps working:
+
+- **Installations.** The installer keeps the same Inno Setup `AppId`, so it updates a Watchroom
+  installation in place, in its existing `Programs\Watchroom` folder. It removes the old
+  `Watchroom.exe` and `Watchroom.*.dll`, the Watchroom Start menu shortcut, and the
+  Watchroom file-association registration. It relaunches the app when asked with either
+  `/BLACKPEARLUPDATE=1` or the older `/WATCHROOMUPDATE=1`.
+- **Data.** A library in `%LOCALAPPDATA%\Watchroom` stays there and stays in use; new
+  installations use `%LOCALAPPDATA%\BlackPearl`. A TMDB key saved under the Watchroom
+  credential name moves to the BlackPearl name when it is first read. Every `WATCHROOM_*`
+  environment setting still applies when the matching `BLACKPEARL_*` one is not set, in the app
+  and on the room server, and plugins receive both names.
+- **Compatibility with older versions.** The single-instance lock, the peer control channel
+  (`watchroom-control-v2`) and the `X-Watchroom-Request-Id` header keep their names, so
+  BlackPearl and Watchroom still work together in rooms and on one library.
+- **Updates.** Watchroom 0.3.90 and older look only for `Watchroom-Setup-*` and
+  `Watchroom-Update-*` assets, and accept downloads only from URLs under
+  `Svovoniks/WatchRoom`. While the repository still has that name, the release workflow also
+  publishes each installer under its Watchroom name, and `ship.ps1` verifies those copies.
+  BlackPearl tries `Svovoniks/BlackPearl` first, then `Svovoniks/WatchRoom`, and accepts
+  downloads under either name.
+
+To rename the repository:
+
+1. Ship the first BlackPearl release while the repository is still `Svovoniks/WatchRoom`.
+2. Wait until every installation that should keep updating runs that release or later. After
+   the rename, GitHub lists downloads under `Svovoniks/BlackPearl`, which Watchroom 0.3.90 and
+   older reject, so they can only be updated by running the full installer by hand.
+3. Rename the repository on GitHub to `BlackPearl`. Never create another repository named
+   `WatchRoom` under the account: GitHub would stop redirecting the old name.
+4. Point local clones at the new name: `git remote set-url origin
+   https://github.com/Svovoniks/BlackPearl.git`. The scripts accept either name, and pick the
+   one that exists through `Use-Repository` in `scripts/github-pr.ps1`.
+5. Optionally rename the `WATCHROOM_TMDB_API_KEY` Actions secret to
+   `BLACKPEARL_TMDB_API_KEY`; the workflow reads either.
+
+From then on releases carry only BlackPearl names, and the workflow stops publishing the
+Watchroom-named copies by itself.
+
+To test: `dotnet run --project tests/BlackPearl.UpdateChecks -c Release`.
+For isolated desktop tests set `BLACKPEARL_DISABLE_UPDATES=1`; normal users do not
 need this environment variable.
