@@ -53,6 +53,8 @@ public partial class MainWindow
             menu.PlacementTarget = pill;
             // A folded pill's menu opens from the overflow pill, so a click there only closes it.
             menu.Dismissing += (_, _) => OpenPillUnderPointer(menu.PlacementTarget as System.Windows.Controls.Primitives.ToggleButton ?? pill);
+            menu.Dismissing += (_, _) => TakeFocusFromMenu(menu);
+            menu.Closed += (_, _) => TakeFocusFromMenu(menu);
             pill.SetBinding(System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, new Binding(nameof(System.Windows.Controls.Primitives.Popup.IsOpen)) { Source = menu, Mode = BindingMode.TwoWay });
         }
         foreach (var (text, detail, list, fallback) in new[] { (AudioPillText, AudioPillDetail, AudioTracks, "Audio"), (SubtitlePillText, SubtitlePillDetail, SubtitleTracks, "Subtitles") })
@@ -62,6 +64,16 @@ public partial class MainWindow
         }
         // Closing the menu without choosing a queue returns the switch to Episodes / Off.
         PlayerQueueMenu.Closed += (_, _) => { if (queueModeRequested && !HasPlaybackQueue) { queueModeRequested = false; UpdateSessionControls(); } };
+    }
+
+    // A menu takes keyboard focus as it opens. Left there once it closes, focus sits on a track row or a
+    // button nobody can see, and the player's shortcuts skip lists and buttons, so Space would not pause.
+    // Hand it back to the player. Escape and Enter move focus to the pill afterwards themselves.
+    private void TakeFocusFromMenu(System.Windows.Controls.Primitives.Popup menu)
+    {
+        if (menu.Child is not { } child) return;
+        var focused = Keyboard.FocusedElement as DependencyObject;
+        if (focused is null || child.IsKeyboardFocusWithin || child.IsAncestorOf(focused)) PlayerOverlay.Focus();
     }
 
     // An open menu holds the mouse, so the press that dismisses it never reaches another pill. When that
