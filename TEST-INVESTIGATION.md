@@ -4,7 +4,7 @@ Reviewed `TEST-REPORT.html`, its saved VM evidence, current application and serv
 
 ## 1. Clock estimation: confirmed defect, highest playback priority
 
-`src/Watchroom.Core/RoomClient.cs:90–111` sends wall-clock timestamps and calculates RTT from `Wire.Now`, which is `DateTimeOffset.UtcNow`. It keeps only a strictly lower RTT for the entire connection. There is no sample expiry, clock-jump detection, or rejection of negative RTTs.
+`src/BlackPearl.Core/RoomClient.cs:90–111` sends wall-clock timestamps and calculates RTT from `Wire.Now`, which is `DateTimeOffset.UtcNow`. It keeps only a strictly lower RTT for the entire connection. There is no sample expiry, clock-jump detection, or rejection of negative RTTs.
 
 Two failure modes follow:
 
@@ -19,11 +19,11 @@ Recommended implementation: measure RTT with a monotonic clock, correlate respon
 
 ## 2. Windows runtime packaging: confirmed dependency omission
 
-The published `artifacts/Watchroom/datachannel.dll` PE import table explicitly names `MSVCP140.dll`, `VCRUNTIME140.dll`, and `VCRUNTIME140_1.dll`. None of those three files is present in the current publish directory. `vcruntime140_cor3.dll`, bundled with .NET, is a differently named file and does not fulfill those imports.
+The published `artifacts/BlackPearl/datachannel.dll` PE import table explicitly names `MSVCP140.dll`, `VCRUNTIME140.dll`, and `VCRUNTIME140_1.dll`. None of those three files is present in the current publish directory. `vcruntime140_cor3.dll`, bundled with .NET, is a differently named file and does not fulfill those imports.
 
 The saved guest log records native load error `0x8007007E`. After the testers added these runtime files, the guest connected directly and read 32,768 bytes with a RIFF header. This is strong evidence for the dependency diagnosis.
 
-`build.ps1`, `scripts/package.ps1`, and `packaging/Watchroom.iss` neither bundle these dependencies nor install/check the Visual C++ runtime. Self-contained .NET publishing covers the managed runtime but does not remove this native prerequisite.
+`build.ps1`, `scripts/package.ps1`, and `packaging/BlackPearl.iss` neither bundle these dependencies nor install/check the Visual C++ runtime. Self-contained .NET publishing covers the managed runtime but does not remove this native prerequisite.
 
 Recommended implementation: deliberately distribute supported app-local runtime dependencies or install/detect the x64 Visual C++ Redistributable, matching the installer privilege model. Validate the packaged and portable distributions on a clean VM, and provide a specific native-load error before attempting a peer connection.
 

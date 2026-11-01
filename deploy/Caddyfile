@@ -16,7 +16,7 @@
 	}
 }
 
-{$WATCHROOM_DOMAIN} {
+{$BLACKPEARL_DOMAIN} {
 	tls {
 		issuer acme {
 			disable_http_challenge

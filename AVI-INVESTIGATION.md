@@ -1,6 +1,6 @@
 # AVI synchronization investigation — 1 October 2026
 
-The updated tester report's repeated AVI correction loop is reproducible without a VM or remote-network delay. The trigger is VLC's native AVI demuxer operating on Watchroom's seekable HTTP media bridge. Switching room AVI playback to VLC's `avformat` demuxer removes the coarse read-ahead timeline in the tested fixture. Windows and Mac room loaders now select it for `.avi` media; other formats and the synchronization policy are unchanged. Mac runtime playback has not been exercised.
+The updated tester report's repeated AVI correction loop is reproducible without a VM or remote-network delay. The trigger is VLC's native AVI demuxer operating on BlackPearl's seekable HTTP media bridge. Switching room AVI playback to VLC's `avformat` demuxer removes the coarse read-ahead timeline in the tested fixture. Windows and Mac room loaders now select it for `.avi` media; other formats and the synchronization policy are unchanged. Mac runtime playback has not been exercised.
 
 ## Evidence for the cause
 
@@ -31,7 +31,7 @@ All six aggregate controls pass in both runs: paused seek to 90 seconds, authori
 
 Both runs produced all 20 scheduled host/guest snapshot pairs. The maximum sampled frame difference was 200 ms in each run, with snapshot request times up to 197 ms apart experimentally and 180 ms under the default policy. This is sparse frame evidence at 10 fps, not a continuous presentation or audio-alignment guarantee. Pair-position analysis matches the nearest guest sample within 150 ms and can reuse a guest sample; experimental host-playing coverage was 99.26%, with 266 distinct guest samples for 267 pairs.
 
-Validation: full solution build has zero warnings/errors; **129 local and 129 public smoke checks pass**, including AVI seeking, pause and replay using the new demux path; **6 worker tests pass**. The final portable Windows application is `artifacts/timing-investigation/release-app/Watchroom.exe`, with the verified Microsoft native runtime bundled.
+Validation: full solution build has zero warnings/errors; **129 local and 129 public smoke checks pass**, including AVI seeking, pause and replay using the new demux path; **6 worker tests pass**. The final portable Windows application is `artifacts/timing-investigation/release-app/BlackPearl.exe`, with the verified Microsoft native runtime bundled.
 
 The VM was retried using the supplied credential file, but VirtualBox returned “The guest execution service is not ready (yet)” twice. Its guest run level remained 1 and screenshot collection also failed. No new VM playback result is claimed. The temporary extracted password file was deleted. The tighter synchronization controller remains opt-in until cross-machine and broader media testing completes.
 

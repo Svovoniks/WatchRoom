@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'github-pr.ps1')
 $root = Split-Path -Parent $PSScriptRoot
+Use-Repository
 $pull = Invoke-GitHub "/pulls/$Pr"
 if ($pull.state -ne 'open') { throw "Pull request #$Pr is $($pull.state)." }
 

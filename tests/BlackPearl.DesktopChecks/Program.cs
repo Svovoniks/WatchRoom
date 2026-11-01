@@ -1,0 +1,777 @@
+using System.Reflection;
+using System.IO;
+using System.Diagnostics;
+using System.Collections.ObjectModel;
+using System.Windows;
+using System.Windows.Threading;
+using BlackPearl.Core;
+using BlackPearl.Desktop;
+
+static class Program
+{
+    [STAThread]
+    static void Main(string[] args)
+    {
+        if (HiddenDesktop.Relaunch(out var hiddenExitCode)) { Environment.ExitCode = hiddenExitCode; return; }
+        // Voice runs on simulated devices so the checks never open the microphone; --voice-devices checks the real ones.
+        if (args.FirstOrDefault() != "--voice-devices") Environment.SetEnvironmentVariable("BLACKPEARL_SIMULATED_AUDIO", "1");
+        if (args.FirstOrDefault() == "--video-frames")
+        {
+            VideoFrameChecks.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? Path.Combine("artifacts", "video-frames-" + Guid.NewGuid().ToString("N")))).GetAwaiter().GetResult(); return;
+        }
+        if (args.FirstOrDefault() == "--language-probe") { LanguageProbe.Run(args.Skip(1)).GetAwaiter().GetResult(); return; }
+        if (args.FirstOrDefault() == "--metadata-probe") { MetadataProbe.Run(args[1], args[2]).GetAwaiter().GetResult(); return; }
+        if (args.FirstOrDefault() == "--remaining-audit") { MetadataProbe.Audit(args[1], args[2], args.Contains("--apply")).GetAwaiter().GetResult(); return; }
+        if (args.FirstOrDefault() == "--render-screens")
+        {
+            // Uses the library in BLACKPEARL_DATA; point it at a copy, never at a live profile.
+            if (Environment.GetEnvironmentVariable("BLACKPEARL_DATA") is null) throw new InvalidOperationException("Set BLACKPEARL_DATA to a library copy.");
+            Environment.SetEnvironmentVariable("BLACKPEARL_DISABLE_UPDATES", "1");
+            System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly; // deterministic captures; App.OnStartup uses this only as a fallback
+            new LibraryStore(Environment.GetEnvironmentVariable("BLACKPEARL_DATA")!).Setting("artwork", "false");
+            var renderApp = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown, Resources = LoadAppResources() };
+            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+            var renderWindow = new MainWindow { Left = -20000, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+            renderWindow.Loaded += async (_, _) =>
+            {
+                try { await ScreenRender.Run(renderWindow, args[1], args.Length > 3 ? int.Parse(args[2]) : 1280, args.Length > 3 ? int.Parse(args[3]) : 810); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { renderWindow.Close(); renderApp.Shutdown(); }
+            };
+            renderWindow.Show(); renderApp.Run(); return;
+        }
+        var directory = Path.GetFullPath(Path.Combine("artifacts/library-responsiveness-check", Guid.NewGuid().ToString("N"))); Directory.CreateDirectory(directory);
+        Environment.SetEnvironmentVariable("BLACKPEARL_DATA", directory);
+        Environment.SetEnvironmentVariable("BLACKPEARL_DISABLE_UPDATES", "1");
+        var store = new LibraryStore(directory); store.Setting("artwork", "false");
+        store.Setting("folders", Wire.Serialize(new[] { new LibraryFolder(directory) }));
+        var entries = Enumerable.Range(0, 750).Select(index => new MediaItem("item-" + index, Path.Combine(directory, "movie-" + index + ".mp4"), $"Movie {index:0000}", "Movie")).ToArray();
+        foreach (var entry in entries) store.Save(entry);
+        var startupQueue = new SavedQueue("startup-queue", "Startup queue", [entries[0].Id, entries[^1].Id]);
+        store.Setting("queues", Wire.Serialize(new[] { startupQueue })); store.Setting("activeQueue", startupQueue.Id);
+        store.Setting("queue", Wire.Serialize(startupQueue.MediaIds)); store.Setting("queuePosition", "1");
+        store.Setting("watched:" + entries[3].Id, "true");
+        var app = new Application();
+        SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
+        app.Resources = LoadAppResources();
+        if (args.FirstOrDefault() == "--metadata-picker")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                try { await MetadataPickerChecks.Run(directory); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
+        }
+        if (args.FirstOrDefault() == "--acquisition-layout")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var layoutWindow = new MainWindow { Left = 0, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+            layoutWindow.Loaded += (_, _) =>
+            {
+                var count = 0;
+                try { AcquisitionLayoutChecks.Run(layoutWindow, directory, (condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); count++; }); Console.WriteLine($"{count} acquisition layout checks passed."); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { layoutWindow.Close(); app.Shutdown(); }
+            };
+            layoutWindow.Show(); app.Run(); return;
+        }
+        if (args.FirstOrDefault() == "--voice-ui")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var voiceWindow = new MainWindow { Left = -20000, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+            voiceWindow.Loaded += async (_, _) =>
+            {
+                var count = 0;
+                try { await VoiceUiChecks.Run(voiceWindow, store, directory, (condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); count++; }); Console.WriteLine($"{count} voice UI checks passed."); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { voiceWindow.Close(); app.Shutdown(); }
+            };
+            voiceWindow.Show(); app.Run(); return;
+        }
+        if (args.FirstOrDefault() == "--guest-recovery")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var recoveryWindow = new MainWindow { Left = -20000, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+            recoveryWindow.Loaded += async (_, _) =>
+            {
+                try { await GuestRecoveryChecks.Run(recoveryWindow, directory); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { recoveryWindow.Close(); app.Shutdown(); }
+            };
+            recoveryWindow.Show(); app.Run(); return;
+        }
+        if (args.FirstOrDefault() == "--ui-findings")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            UiFindingsChecks.Run(); app.Shutdown(); return;
+        }
+        if (args.FirstOrDefault() == "--ui-experience")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            UiExperienceChecks.Run(); app.Shutdown(); return;
+        }
+        if (args.FirstOrDefault() == "--player-layout")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            PlayerLayoutChecks.Run(); app.Shutdown(); return;
+        }
+        if (args.FirstOrDefault() == "--room-playback-status")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            RoomPlaybackStatusChecks.Run(args.Contains("--screenshots")); app.Shutdown(); return;
+        }
+        if (args.FirstOrDefault() == "--room-tracks")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                try { await RoomTrackChecks.Run(args[1], directory); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
+        }
+        if (args.FirstOrDefault() == "--language-detection")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                try { await LanguageDetectionChecks.Run(directory); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
+        }
+        if (args.FirstOrDefault() == "--track-preferences")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            TrackPreferenceChecks.Run(args[1]); app.Shutdown(); return;
+        }
+        if (args.FirstOrDefault() == "--guest-library-layout")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            GuestLibraryLayoutChecks.Run(); app.Shutdown(); return;
+        }
+        if (args.FirstOrDefault() == "--host-library-browse")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            HostLibraryBrowseChecks.Run(directory); app.Shutdown(); return;
+        }
+        if (args.FirstOrDefault() == "--voice-devices")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                var count = 0;
+                try { await VoiceDeviceChecks.Run((condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); count++; }); Console.WriteLine($"{count} voice device checks passed."); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
+        }
+        if (args.FirstOrDefault() == "--voice-probe") { VoiceProbe.Run(args[1], args.ElementAtOrDefault(2)); return; }
+        if (args.FirstOrDefault() == "--voice-processing")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                var count = 0;
+                try { await VoiceProcessingChecks.Run((condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); count++; }); Console.WriteLine($"{count} voice processing checks passed."); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
+        }
+        if (args.FirstOrDefault() == "--home")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            app.Dispatcher.BeginInvoke(async () =>
+            {
+                try { await HomeChecks.Run(directory); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { app.Shutdown(); }
+            });
+            app.Run(); return;
+        }
+        var startupGaps = new List<double>(); var startupClock = Stopwatch.StartNew(); var startupPrior = startupClock.Elapsed.TotalMilliseconds;
+        var startupHeartbeat = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(10) };
+        startupHeartbeat.Tick += (_, _) => { var now = startupClock.Elapsed.TotalMilliseconds; startupGaps.Add(now - startupPrior); startupPrior = now; };
+        var window = new MainWindow { Left = -20000, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+        var checks = 0;
+        void Check(bool condition, string message) { if (!condition) throw new Exception("FAIL: " + message); checks++; Console.WriteLine("PASS: " + message); }
+        try
+        {
+            Check(MetadataCredential.Load(directory) == "", "new profile has no saved token");
+            MetadataCredential.Save(directory, "fixture-token-one");
+            Check(MetadataCredential.Load(directory) == "fixture-token-one", "credential vault restores a saved token");
+            MetadataCredential.Save(directory, "fixture-token-two");
+            Check(MetadataCredential.Load(directory) == "fixture-token-two", "credential vault replaces a saved token");
+            MetadataCredential.Save(directory, "");
+            Check(MetadataCredential.Load(directory) == "", "clearing the token removes the saved credential");
+        }
+        finally { MetadataCredential.Save(directory, ""); }
+        window.Loaded += async (_, _) =>
+        {
+            try
+            {
+                startupPrior = startupClock.Elapsed.TotalMilliseconds; startupHeartbeat.Start();
+                typeof(MainWindow).GetMethod("ShowPage", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, ["Library"]);
+                await Task.Delay(2500);
+                await CheckScrolling(Check);
+                var field = typeof(MainWindow).GetField("libraryCards", BindingFlags.NonPublic | BindingFlags.Instance)!;
+                var cards = (ObservableCollection<LibraryCardView>)field.GetValue(window)!;
+                Check(cards.Count == entries.Length, "large library is displayed");
+                Check(cards.Single(card => card.Card.Media.Id == entries[3].Id).IsWatched, "background startup restores persisted watched flags");
+                var restoredQueue = (List<MediaItem>)typeof(MainWindow).GetField("queue", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+                Check(restoredQueue.Select(item => item.Id).SequenceEqual(startupQueue.MediaIds) && store.Setting("queuePosition") == "1",
+                    "background startup restores queue order and cursor before persisting them");
+                startupHeartbeat.Stop();
+                Console.WriteLine($"Startup max input gap: {startupGaps.DefaultIfEmpty().Max():F1} ms");
+                Check(startupGaps.Count > 20 && startupGaps.Max() < 350, "startup library loading keeps processing input");
+                var grid = (System.Windows.Controls.ItemsControl)window.FindName("PosterGrid");
+                int Realized() => Enumerable.Range(0, cards.Count).Count(index => grid.ItemContainerGenerator.ContainerFromIndex(index) is not null);
+                Check(Realized() < 50, "large library realizes only visible rows");
+                var libraryScroll = (System.Windows.Controls.ScrollViewer)window.FindName("LibraryScroll");
+                libraryScroll.ScrollToBottom(); await Task.Delay(150);
+                Console.WriteLine($"Library viewport {libraryScroll.ViewportHeight:F0}, extent {libraryScroll.ExtentHeight:F0}, offset {libraryScroll.VerticalOffset:F0}, realized {Realized()}");
+                Check(grid.ItemContainerGenerator.ContainerFromIndex(cards.Count - 1) is not null && Realized() < 50,
+                    "scrolling reaches the final card without realizing the entire library");
+                libraryScroll.ScrollToTop(); await Task.Delay(150);
+                Check(grid.ItemContainerGenerator.ContainerFromIndex(0) is not null && Realized() < 50,
+                    "scrolling back recreates the first cards and releases offscreen rows");
+                var originalWidth = window.Width; window.Width = 900; await Task.Delay(150);
+                libraryScroll.ScrollToBottom(); await Task.Delay(150);
+                Check(grid.ItemContainerGenerator.ContainerFromIndex(cards.Count - 1) is not null && Realized() < 50,
+                    "resizing recalculates library rows and keeps the final card reachable");
+                window.Width = originalWidth; libraryScroll.ScrollToTop(); await Task.Delay(150);
+                await LibraryScrollingChecks.Run(grid, libraryScroll, Check);
+                // A click focuses a card; focusing a half-visible card must not scroll the grid.
+                libraryScroll.ScrollToVerticalOffset(165); await Task.Delay(150);
+                var halfVisible = Enumerable.Range(0, grid.Items.Count).Select(index => grid.ItemContainerGenerator.ContainerFromIndex(index) as FrameworkElement)
+                    .Where(container => container is not null).Select(container =>
+                    {
+                        var top = container!.TransformToAncestor(libraryScroll).Transform(new Point()).Y;
+                        return (container, top);
+                    }).First(pair => pair.top < libraryScroll.ViewportHeight && pair.top + 312 > libraryScroll.ViewportHeight).container;
+                var requests = new List<string>();
+                void Trace(object sender, RequestBringIntoViewEventArgs e) => requests.Add(e.TargetObject?.GetType().Name + (e.Handled ? " handled" : ""));
+                window.AddHandler(FrameworkElement.RequestBringIntoViewEvent, (RequestBringIntoViewEventHandler)Trace, true);
+                var cardButton = LibraryScrollingChecks.Descendants(halfVisible).OfType<System.Windows.Controls.Button>().First(button => button.Tag is LibraryCard);
+                var before = libraryScroll.VerticalOffset;
+                cardButton.Focus(); await Task.Delay(150);
+                window.RemoveHandler(FrameworkElement.RequestBringIntoViewEvent, (RequestBringIntoViewEventHandler)Trace);
+                Console.WriteLine($"Focus requests: {string.Join(", ", requests)}; offset {before} -> {libraryScroll.VerticalOffset}");
+                Check(Math.Abs(libraryScroll.VerticalOffset - before) < .5, "focusing a half-visible library card does not scroll the grid");
+                var tick = LibraryScrollingChecks.Descendants(halfVisible).OfType<System.Windows.Controls.Button>().First(button => button.Tag is not LibraryCard);
+                tick.Focus(); await Task.Delay(150);
+                Check(Math.Abs(libraryScroll.VerticalOffset - before) < .5, "focusing the watched tick on a half-visible card does not scroll the grid");
+                System.Windows.Input.Keyboard.ClearFocus(); libraryScroll.ScrollToTop(); await Task.Delay(150);
+                var previous = cards.ToArray();
+                await CheckSearchLayout(window, Check);
+                var tracker = new LibraryCardView(new("Example", "Movie", null, entries[0], "movie"));
+                var properties = new List<string>(); tracker.PropertyChanged += (_, e) => properties.Add(e.PropertyName!);
+                tracker.Update(tracker.Card with { Media = entries[0] with { Overview = "New metadata" } });
+                Check(properties.SequenceEqual(["Card"]), "metadata-only update keeps poster and displayed text bindings intact");
+                var posterPath = Path.Combine(directory, "thumbnail.png");
+                await File.WriteAllBytesAsync(posterPath, Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII="));
+                tracker.Update(tracker.Card with { Poster = posterPath });
+                await tracker.LoadPosterAsync();
+                Check(tracker.Poster?.IsFrozen == true, "background thumbnail decode returns a frozen WPF image");
+                var frozen = tracker.Poster; await tracker.LoadPosterAsync();
+                Check(ReferenceEquals(frozen, tracker.Poster), "unchanged image is reused");
+                var dead = new LibraryCardView(tracker.Card with { Poster = Path.Combine(directory, "missing.png") });
+                await dead.LoadPosterAsync(); await dead.LoadPosterAsync();
+                Check(dead.Poster is null, "missing poster keeps fallback without reloading forever");
+                await File.WriteAllBytesAsync(dead.Card.Poster!, await File.ReadAllBytesAsync(posterPath));
+                dead.Update(dead.Card); await dead.LoadPosterAsync();
+                Check(dead.Poster?.IsFrozen == true, "poster created at the same path retries after an earlier load failure");
+                File.SetLastWriteTimeUtc(posterPath, File.GetLastWriteTimeUtc(posterPath).AddSeconds(2));
+                tracker.Update(tracker.Card); await tracker.LoadPosterAsync();
+                Check(tracker.Poster is not null && !ReferenceEquals(frozen, tracker.Poster), "replaced image at the same path invalidates the WPF thumbnail cache");
+                var retained = tracker.Poster;
+                var replacementPath = Path.Combine(directory, "replacement.png");
+                await File.WriteAllBytesAsync(replacementPath, await File.ReadAllBytesAsync(posterPath));
+                var blankFrames = 0;
+                tracker.PropertyChanged += (_, e) => { if (e.PropertyName == "Poster" && tracker.Poster is null) blankFrames++; };
+                tracker.Update(tracker.Card with { Poster = replacementPath });
+                Check(ReferenceEquals(retained, tracker.Poster), "artwork refresh retains old image while replacement decodes");
+                await tracker.LoadPosterAsync();
+                Check(blankFrames == 0 && tracker.Poster is not null, "successful artwork replacement never publishes a blank frame");
+                retained = tracker.Poster;
+                tracker.Update(tracker.Card with { Poster = Path.Combine(directory, "failed-replacement.png") }); await tracker.LoadPosterAsync();
+                Check(ReferenceEquals(retained, tracker.Poster), "failed artwork replacement keeps the previous image");
+                var episodeView = new LibraryCardView(new("Episode 1", "Example", posterPath, entries[0] with { Series = "Example", Season = 1, Episode = 1, RuntimeMinutes = 20 }, "episode"));
+                episodeView.SetPlayback(600000, false);
+                Check(episodeView.Progress == 50 && episodeView.PlaybackLabel == "Resume · 10:00", "episode playback progress uses runtime and saved resume point");
+                episodeView.SetPlayback(0, true);
+                Check(episodeView.Progress == 100 && episodeView.PlaybackLabel == "Watched", "completed episode retains watched progress");
+                Check(episodeView.IsWatched, "completed episodes expose the watched checkmark state");
+                episodeView.SetPlayback(0, false);
+                Check(!episodeView.IsWatched, "restarting an episode clears its watched checkmark state");
+                var movieView = new LibraryCardView(new("Movie", "", null, entries[0], "movie"));
+                movieView.SetPlayback(0, true);
+                Check(movieView.IsWatched, "watched checkmark state is available for movies as well as episodes");
+                var episodeButton = new System.Windows.Controls.Button { Style = (Style)app.Resources["PosterCard"], DataContext = episodeView };
+                episodeButton.Measure(new Size(600, 600)); await Dispatcher.Yield(DispatcherPriority.DataBind);
+                Check(episodeButton.Width == 300 && episodeButton.Height == 278, "episode cards use landscape layout without changing movie cards");
+
+                var gaps = new List<double>(); var clock = Stopwatch.StartNew(); var prior = clock.Elapsed.TotalMilliseconds;
+                var heartbeat = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(10) };
+                heartbeat.Tick += (_, _) => { var now = clock.Elapsed.TotalMilliseconds; gaps.Add(now - prior); prior = now; };
+                heartbeat.Start();
+                var activeStore = (LibraryStore)typeof(MainWindow).GetField("library", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+                await Task.Run(() => { foreach (var entry in entries) activeStore.Save(entry with { Overview = "Updated during scan" }); });
+                await Task.Delay(1500); heartbeat.Stop();
+                Check(cards.Count == previous.Length && cards.Zip(previous).All(pair => ReferenceEquals(pair.First, pair.Second)),
+                    "scan updates preserve all existing card instances");
+                Check(cards.All(card => card.Card.Media.Overview == "Updated during scan"), "incremental metadata reaches every card");
+                Check(grid.IsEnabled, "background refresh leaves the library interactive");
+                typeof(MainWindow).GetMethod("FilterLibrary", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [false, false]);
+                Check(grid.IsEnabled, "full refresh never dims or disables the poster grid");
+                Console.WriteLine($"Observed {gaps.Count} input heartbeats; maximum gap {(gaps.Count == 0 ? 0 : gaps.Max()):F1} ms.");
+                Check(gaps.Count > 50 && gaps.Max() < 250, "dispatcher input continues during 750 scan updates");
+                await CheckLibraryNavigation(window, activeStore, cards, directory, posterPath, Check);
+                CheckRoomSettings(window, activeStore, Check);
+                CheckQueueEditing(window, activeStore, Check);
+                StreamingBufferChecks.Run(window, activeStore, directory, Check);
+                PreferenceNavigationChecks.Run(window, activeStore, Check);
+                await QueuePlaybackChecks.Run(window, activeStore, directory, Check);
+                await EpisodeEndChecks.Run(window, Check);
+                await MusicPlaybackChecks.Run(window, Check);
+                await LoopChecks.Run(window, Check);
+                await OpenFileChecks.Run(window, Check);
+                RenameChecks.Run(Check);
+                await PictureInPictureChecks.Run(window, Check);
+                await EndedSeekChecks.Run(window, Check);
+                await CheckBackNavigation(window, Check);
+                PlayerInteractionChecks.Run(window, Check);
+                UnavailableLibraryChecks.Run(window, activeStore, directory, Check);
+                WantedLibraryChecks.Run(window, activeStore, directory, Check);
+                AcquisitionChecks.Run(window, activeStore, directory, Check);
+                await PlayerShutdownChecks.Run(window, Check);
+                await RoomRecoveryChecks.Run(window, directory, Check);
+                await GuestRecoveryChecks.Run(window, directory, Check);
+                await VoiceUiChecks.Run(window, activeStore, directory, Check);
+                Console.WriteLine($"Input heartbeat: maximum {gaps.Max():F1} ms; p95 {gaps.Order().ElementAt((int)(gaps.Count * .95)):F1} ms");
+                Console.WriteLine($"{checks} desktop responsiveness checks passed.");
+            }
+            catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+            finally { window.Close(); app.Shutdown(); }
+        };
+        app.Run(window);
+    }
+
+    // App.xaml's resources without its compiled code-behind, so checks run against the same styles as the app.
+    private static ResourceDictionary LoadAppResources()
+    {
+        var resourceXml = System.Xml.Linq.XDocument.Load("src/BlackPearl.Desktop/App.xaml");
+        var resourceRoot = new System.Xml.Linq.XElement(System.Xml.Linq.XName.Get("ResourceDictionary", "http://schemas.microsoft.com/winfx/2006/xaml/presentation"), resourceXml.Root!.Elements().Single().Elements());
+        resourceRoot.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + "x", "http://schemas.microsoft.com/winfx/2006/xaml");
+        resourceRoot.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + "local", "clr-namespace:BlackPearl.Desktop;assembly=BlackPearl");
+        foreach (var element in resourceRoot.Descendants().Where(element => element.Name.NamespaceName == "clr-namespace:BlackPearl.Desktop"))
+            element.Name = System.Xml.Linq.XName.Get(element.Name.LocalName, "clr-namespace:BlackPearl.Desktop;assembly=BlackPearl");
+        return (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(resourceRoot.ToString());
+    }
+    private static async Task CheckLibraryNavigation(MainWindow window, LibraryStore store, ObservableCollection<LibraryCardView> cards,
+        string directory, string poster, Action<bool, string> check)
+    {
+        var show = new MediaItem("navigation-show", Path.Combine(directory, "Show S01E01.mkv"), "Navigation Show", "Show", Series: "Navigation Show", Season: 1, Episode: 1, EpisodeTitle: "The Beginning");
+        var special = show with { Id = "navigation-special", Path = Path.Combine(directory, "Show S00E01.mkv"), Season = 0 };
+        var unknown = show with { Id = "navigation-unknown", Path = Path.Combine(directory, "Unknown episode.mkv"), Season = null };
+        var anime = show with { Id = "navigation-anime", Path = Path.Combine(directory, "Anime S01E01.mkv"), Kind = "Anime", Series = "Navigation Anime", Title = "Navigation Anime" };
+        var animeMovie = new MediaItem("navigation-anime-film", Path.Combine(directory, "Anime film.mkv"), "Navigation Anime Film", "Anime", Poster: poster, Available: false);
+        foreach (var item in new[] { show, special, unknown, anime, animeMovie }) store.Save(item);
+        await Task.Delay(600);
+        void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, arguments);
+        void Navigate(int category, string? series = null, string? kind = null, int? season = null) => Call("NavigateLibrary", category, series, kind, season);
+        async Task Wait(Func<bool> ready)
+        {
+            var until = Stopwatch.StartNew();
+            while (!ready() && until.ElapsedMilliseconds < 4000) await Task.Delay(25);
+            check(ready(), "navigation finishes with the expected library cards");
+        }
+        LibraryBreadcrumb[] Crumbs(bool details = false) => ((System.Windows.Controls.ItemsControl)window.FindName(details ? "DetailBreadcrumbs" : "LibraryBreadcrumbs")).Items.Cast<LibraryBreadcrumb>().ToArray();
+        void ClickCrumb(LibraryBreadcrumb crumb) => Call("BreadcrumbClick", window,
+            new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent, new System.Windows.Controls.Button { DataContext = crumb }));
+        Navigate(3); await Wait(() => cards.Count == 1 && cards.All(x => x.Card.Media.Kind == "Anime"));
+        var categoryButton = (System.Windows.Controls.Button)window.FindName("ShowsLibraryNav");
+        categoryButton.Focus(); Call("LibraryCategoryClick", categoryButton, new RoutedEventArgs());
+        await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
+        check(!((System.Windows.Controls.TextBox)window.FindName("SearchBox")).IsKeyboardFocusWithin, "category navigation does not move the cursor into search");
+        Navigate(3); await Wait(() => cards.Count == 1 && cards.All(x => x.Card.Media.Kind == "Anime"));
+        check(Crumbs().Select(x => x.Label).SequenceEqual(["All", "Anime"]), "Anime category excludes unavailable titles and preserves its category path");
+        var status = (System.Windows.Controls.ComboBox)window.FindName("LibraryStatusFilter");
+        Navigate(4); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == animeMovie.Id);
+        check(Crumbs().Last().Label == "Unavailable" && cards.All(x => !x.Card.Media.Available), "unavailable videos appear only in their separate library tab");
+        Navigate(3);
+        status.SelectedIndex = 1; await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == anime.Id);
+        check(cards[0].Card.Poster is null, "artwork status combines with the sidebar category");
+        Navigate(2); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
+        status.SelectedIndex = 1; await Wait(() => cards.Count == 1);
+        check(!status.Items.OfType<System.Windows.Controls.ComboBoxItem>().Any(item => Equals(item.Content, "Unavailable")),
+            "availability is a separate tab rather than a status filter");
+        Navigate(2, LibraryIdentity.ShowKey(show), "Show"); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
+        check(Crumbs().Select(x => x.Label).SequenceEqual(["All", "Shows", "Navigation Show"]), "show breadcrumb points to the season grid");
+        Navigate(2, LibraryIdentity.ShowKey(show), "Show", 0); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == special.Id);
+        check(Crumbs().Last().Label == "Specials", "specials have an explicit clickable breadcrumb");
+        Navigate(2, LibraryIdentity.ShowKey(show), "Show", -1); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == unknown.Id);
+        check(Crumbs().Last().Label == "Season unknown", "unknown seasons preserve their navigation identity");
+        Navigate(2, LibraryIdentity.ShowKey(show), "Show", 1); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == show.Id);
+        Call("Select", show);
+        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["All", "Shows", "Navigation Show", "Season 1", "Episode 1 · The Beginning"]), "episode details display the complete hierarchy");
+        window.UpdateLayout(); var clipped = BorderAudit.Find((System.Windows.Media.Visual)window.Content);
+        check(clipped.Count == 0, "details breadcrumbs and disclosure outlines are not clipped" + string.Concat(clipped.Select(x => Environment.NewLine + "  " + x)));
+        ClickCrumb(Crumbs(true).Single(x => x.Level == "season"));
+        await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == show.Id);
+        check(((FrameworkElement)window.FindName("LibraryPage")).Visibility == Visibility.Visible && Crumbs().Last().Level == "season", "season breadcrumb returns from episode details to its grid");
+        ClickCrumb(Crumbs().Single(x => x.Level == "show")); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
+        ClickCrumb(Crumbs().Single(x => x.Label == "Shows")); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
+        var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
+        search.Text = "no matching title"; await Wait(() => cards.Count == 0);
+        ClickCrumb(Crumbs().First()); await Wait(() => cards.Count == 752);
+        check(Crumbs().Length == 1 && Crumbs()[0].IsCurrent, "All breadcrumb clears category, show, season, search, and status restrictions");
+        var menu = (FrameworkElement)window.FindName("LibraryCategories");
+        Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Collapsed, "Library button collapses its category menu");
+        Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Visible, "Library button expands its category menu");
+        Navigate(1); await Wait(() => cards.Count == 750 && cards.All(x => x.Card.Media.Kind == "Movie"));
+        Call("Select", animeMovie);
+        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["All", "Unavailable", "Navigation Anime Film"]), "unavailable film details link back to the unavailable tab");
+        ClickCrumb(Crumbs(true).First()); await Wait(() => cards.Count == 752);
+    }
+
+    private static async Task CheckSearchLayout(MainWindow window, Action<bool, string> check)
+    {
+        var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
+        var scan = (System.Windows.Controls.Button)window.FindName("RescanButton");
+        var status = (System.Windows.Controls.ComboBox)window.FindName("LibraryStatusFilter");
+        var frame = (FrameworkElement)window.FindName("SearchFrame");
+        var toolbar = (FrameworkElement)window.FindName("LibraryToolbar");
+        var grid = (FrameworkElement)window.FindName("PosterGrid");
+        var content = (FrameworkElement)window.FindName("ContentArea");
+        window.UpdateLayout();
+        var location = grid.TranslatePoint(new Point(0, 0), content);
+        var width = frame.ActualWidth; var height = toolbar.ActualHeight;
+        search.Focus(); await Dispatcher.Yield(DispatcherPriority.Input); window.UpdateLayout();
+        check(grid.TranslatePoint(new Point(0, 0), content) == location && toolbar.ActualHeight == height, "focusing search does not move the poster grid");
+        scan.Focus(); await Dispatcher.Yield(DispatcherPriority.Input); window.UpdateLayout();
+        check(grid.TranslatePoint(new Point(0, 0), content) == location && frame.ActualWidth == width, "button focus does not resize the search toolbar or shift the grid");
+        var original = scan.Content; scan.Content = "Cancel scan"; window.UpdateLayout();
+        check(frame.ActualWidth == width && toolbar.ActualHeight == height, "scan button label changes keep the search field and toolbar dimensions stable");
+        scan.Content = original;
+        search.Text = "Movie"; await Task.Delay(300); window.UpdateLayout();
+        check(frame.ActualWidth == width && toolbar.ActualHeight == height, "search text and clear button do not resize the field");
+        search.Clear(); await Task.Delay(300);
+        var scroll = (System.Windows.Controls.ScrollViewer)window.FindName("LibraryScroll");
+        check(scroll.VerticalScrollBarVisibility == System.Windows.Controls.ScrollBarVisibility.Hidden, "poster grid scrolls without a scrollbar, so filters never shift its width");
+        check(height >= 40 && status.ActualHeight == height && scan.ActualHeight == height && frame.ActualHeight == height,
+            "search, status filter, and rescan align to a single usable toolbar height");
+        status.Focus(); window.UpdateLayout();
+    }
+
+    private static async Task CheckBackNavigation(MainWindow window, Action<bool, string> check)
+    {
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+        object? Call(string name, params object[] values) => typeof(MainWindow).GetMethod(name, flags)!.Invoke(window, values);
+        object? Field(string name) => typeof(MainWindow).GetField(name, flags)!.GetValue(window);
+        var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
+        var filter = (System.Windows.Controls.ComboBox)window.FindName("LibraryStatusFilter");
+        Call("NavigateLibrary", 4, null!, null!, null!); search.Text = "Navigation"; filter.SelectedIndex = 1;
+        Call("ShowPage", "Settings");
+        Call("BrowseHistory", true); await Task.Delay(150);
+        check(Field("currentPage") as string == "Library" && (int)Field("libraryCategory")! == 4 && search.Text == "Navigation" && filter.SelectedIndex == 1, "back restores unavailable tab, search, and artwork filter");
+        Call("BrowseHistory", false);
+        check(Field("currentPage") as string == "Settings", "forward restores the page left by Back");
+        Call("BrowseHistory", true); Call("ShowPage", "Queues");
+        check(!(bool)Call("BrowseHistory", false)!, "a new navigation clears forward history");
+        var mouse = new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount, System.Windows.Input.MouseButton.XButton1) { RoutedEvent = System.Windows.Input.Mouse.PreviewMouseUpEvent };
+        Call("NavigationMouseUp", window, mouse);
+        check(mouse.Handled && Field("currentPage") as string == "Library", "mouse back button uses the same browsing history");
+        var media = ((IEnumerable<MediaItem>)Field("items")!).First(x => x.Series is not null);
+        Call("NavigateLibrary", 2, LibraryIdentity.ShowKey(media), media.Kind, 1);
+        Call("Select", media); Call("BrowseHistory", true);
+        check(Field("currentPage") as string == "Library" && (int?)Field("browseSeason") == 1, "Back from an episode returns to its previous season view");
+        check((bool)Call("GestureControl", search)!, "swipe navigation ignores text entry controls");
+        Call("ShowPage", "Settings");
+        var hook = typeof(MainWindow).GetMethod("NavigationWindowMessage", flags)!;
+        void Horizontal(int delta)
+        {
+            hook.Invoke(window, new object[] { IntPtr.Zero, 0x020e, new IntPtr((long)(ushort)(short)delta << 16), IntPtr.Zero, false });
+        }
+        Horizontal(-120); Horizontal(-120);
+        check(Field("currentPage") as string == "Settings", "small horizontal movements do not accidentally navigate");
+        Horizontal(-120); Horizontal(-360);
+        check(Field("currentPage") as string == "Library", "horizontal swipe goes Back once and ignores its inertia");
+    }
+
+    private static void CheckQueueEditing(MainWindow window, LibraryStore store, Action<bool, string> check)
+    {
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        object Field(string name) => typeof(MainWindow).GetField(name, flags)!.GetValue(window)!;
+        void Set(string name, object value) => typeof(MainWindow).GetField(name, flags)!.SetValue(window, value);
+        void Call(string name, params object[] values) => typeof(MainWindow).GetMethod(name, flags)!.Invoke(window, values);
+        var saved = (List<SavedQueue>)Field("savedQueues");
+        var media = ((IEnumerable<MediaItem>)Field("items")).Take(2).ToArray();
+        var fixture = new SavedQueue("queue-edit-fixture", "Test queue", [media[0].Id, "missing-media", media[0].Id, media[1].Id]);
+        saved.Add(fixture); Call("SelectPlaybackQueue", fixture); Call("OpenQueue", fixture.Id); Set("queuePosition", 1);
+        var list = (System.Windows.Controls.ListBox)window.FindName("SavedQueueItems");
+        check(list.Items.Count == 4, "queue cards retain missing entries and duplicate occurrences");
+        Call("MoveSavedEntry", fixture, 2, 0);
+        var reordered = saved.Single(x => x.Id == fixture.Id);
+        check(reordered.MediaIds.SequenceEqual([media[0].Id, media[0].Id, "missing-media", media[1].Id]), "drag reorder moves one duplicate occurrence to the requested position");
+        check((int)Field("queuePosition") == 0, "reordering keeps the exact playing duplicate as the active entry");
+        Call("ApplyQueueOrder", fixture, new[] { 0 });
+        check(saved.Single(x => x.Id == fixture.Id).MediaIds.Length == 4, "stale queue edits cannot overwrite newer ordering");
+        var button = new System.Windows.Controls.Button { Tag = list.Items[2] };
+        Call("RemoveSavedItem", button, new RoutedEventArgs());
+        var afterRemoval = saved.Single(x => x.Id == fixture.Id);
+        check(afterRemoval.MediaIds.SequenceEqual([media[0].Id, media[0].Id, media[1].Id]), "card remove targets a missing entry without removing another video");
+        check((int)Field("queuePosition") == 0, "removing another card preserves the playback position");
+        button.Tag = list.Items[0]; Call("RemoveSavedItem", button, new RoutedEventArgs());
+        check((int)Field("queuePosition") == -1, "removing the current entry leaves the following duplicate next to play");
+        var persisted = Wire.Read<SavedQueue[]>(store.Setting("queues")!).Single(x => x.Id == fixture.Id);
+        check(persisted.MediaIds.SequenceEqual([media[0].Id, media[1].Id]), "queue reordering and per-card deletion persist immediately");
+        Call("ShowPage", "Queues"); window.UpdateLayout();
+        check(list.ActualHeight > 100 && list.AllowDrop, "redesigned queue keeps a usable drag-and-drop list");
+        Call("ShowAllQueues");
+        check(((FrameworkElement)window.FindName("QueueGalleryView")).Visibility == Visibility.Visible, "the queue page returns to the gallery of queues");
+        Call("BrowseHistory", true);
+        check(Field("openQueueId") as string == fixture.Id && ((FrameworkElement)window.FindName("QueueDetailView")).Visibility == Visibility.Visible,
+            "Back from the gallery reopens the queue that was open");
+        var picker = (System.Windows.Controls.ComboBox)window.FindName("PlayerQueuePicker");
+        check(picker.Items.Cast<SavedQueue>().All(item => item.Name != "No queue"), "the player queue picker lists only queues; the switch turns the queue off");
+        Call("QueueModeOffClicked", window, new RoutedEventArgs());
+        check(((List<MediaItem>)Field("queue")).Count == 0 && (int)Field("queuePosition") == -1,
+            "No queue disables active queue playback and clears its cursor");
+        check(saved.Single(item => item.Id == fixture.Id).MediaIds.SequenceEqual([media[0].Id, media[1].Id]),
+            "No queue preserves saved queue contents");
+        check(store.Setting("activeQueue") == "" && Wire.Read<string[]>(store.Setting("queue")!).Length == 0,
+            "No queue persists independently of saved queues");
+        var lastQueue = store.Setting("lastQueue"); store.Setting("lastQueue", "");
+        void Drain() { var frame = new DispatcherFrame(); Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, () => frame.Continue = false); Dispatcher.PushFrame(frame); }
+        var queueMenu = (PlayerMenuPopup)window.FindName("PlayerQueueMenu");
+        Call("ShowPage", "Room"); Call("ShowPlayerControls");
+        for (var wait = 0; wait < 200 && !queueMenu.IsLoaded; wait++) { Drain(); Thread.Sleep(10); }
+        queueMenu.IsOpen = true; Drain();
+        var sizer = (MenuSizer)queueMenu.Child; var menuCard = (FrameworkElement)sizer.Child;
+        for (var wait = 0; wait < 200 && menuCard.ActualHeight == 0; wait++) { Drain(); Thread.Sleep(10); }
+        var episodesHeight = menuCard.ActualHeight;
+        Call("QueueModeOnClicked", window, new RoutedEventArgs());
+        Drain(); // Anything queued to open the picker has run by now.
+        var resizeStarted = sizer.IsResizing;
+        for (var wait = 0; wait < 50 && !resizeStarted; wait++) { Drain(); Thread.Sleep(10); resizeStarted = sizer.IsResizing; }
+        for (var wait = 0; wait < 200 && sizer.IsResizing; wait++) { Drain(); Thread.Sleep(10); }
+        menuCard.Measure(new Size(menuCard.ActualWidth + menuCard.Margin.Left + menuCard.Margin.Right, double.PositiveInfinity));
+        check((resizeStarted || !SystemParameters.ClientAreaAnimation) && !sizer.IsResizing && double.IsNaN(menuCard.Height) &&
+            Math.Abs(menuCard.ActualHeight - (menuCard.DesiredSize.Height - menuCard.Margin.Top - menuCard.Margin.Bottom)) < 1 && sizer.ActualHeight >= menuCard.DesiredSize.Height - 1,
+            $"switching modes eases the queue menu from {episodesHeight:F0} to its new height inside a popup that holds it");
+        check(queueMenu.IsOpen && !picker.IsDropDownOpen && ((FrameworkElement)window.FindName("QueuePickerRow")).Visibility == Visibility.Visible,
+            "switching to queue mode shows the queue picker without opening it");
+        queueMenu.CloseNow(); Call("ShowPage", "Queues");
+        Call("QueueModeOffClicked", window, new RoutedEventArgs()); store.Setting("lastQueue", lastQueue ?? "");
+        var card = new LibraryCardView(new(media[0].Title, "", null, media[0], "movie"));
+        var cards = (ObservableCollection<LibraryCardView>)Field("libraryCards"); cards.Add(card);
+        var watchedButton = new System.Windows.Controls.Button { DataContext = card };
+        var watchedClick = new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent);
+        Call("ToggleCardWatched", watchedButton, watchedClick);
+        check(card.IsWatched && store.Setting("watched:" + media[0].Id) == "true" && watchedClick.Handled,
+            "card action marks watched immediately without opening the video's details");
+        Call("ToggleCardWatched", watchedButton, new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        check(!card.IsWatched && store.Setting("watched:" + media[0].Id) == "false",
+            "card action clears watched state immediately");
+        cards.Remove(card);
+        var episode = ((IEnumerable<MediaItem>)Field("items")).First(item => item.Series is not null && item.Season == 1);
+        var seasonCard = new LibraryCardView(new("Season 1", "", null, episode, "season", 1)); cards.Add(seasonCard);
+        watchedButton.DataContext = seasonCard; Call("ToggleCardWatched", watchedButton, new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        var showEpisodes = ((IEnumerable<MediaItem>)Field("items")).Where(item => LibraryIdentity.SameShow(item, episode)).ToArray();
+        check(seasonCard.IsWatched && showEpisodes.Where(item => item.Season == 1).All(item => store.Setting("watched:" + item.Id) == "true") &&
+            showEpisodes.Where(item => item.Season != 1).All(item => store.Setting("watched:" + item.Id) != "true"),
+            "season checkmark toggles only that season's episodes");
+        var showCard = new LibraryCardView(new(episode.Series!, "", null, episode, "series")); cards.Add(showCard);
+        watchedButton.DataContext = showCard; Call("ToggleCardWatched", watchedButton, new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        check(showCard.IsWatched && showEpisodes.All(item => store.Setting("watched:" + item.Id) == "true"),
+            "show checkmark marks every season watched");
+        Call("ToggleCardWatched", watchedButton, new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        check(!showCard.IsWatched && !seasonCard.IsWatched && showEpisodes.All(item => store.Setting("watched:" + item.Id) == "false"),
+            "show checkmark clears all watched episode and season states");
+        cards.Remove(seasonCard); cards.Remove(showCard);
+    }
+
+    private static void CheckRoomSettings(MainWindow window, LibraryStore store, Action<bool, string> Check)
+    {
+        var rooms = (ObservableCollection<SavedRoom>)typeof(MainWindow).GetField("savedRooms", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+        var first = new SavedRoom("room-one", "Movie night", "https://room.test", new string('A', 24), new string('1', 64));
+        var second = new SavedRoom("room-two", "Anime night", first.Server, new string('B', 24), new string('2', 64));
+        var guest = new SavedRoom("room-guest", "Friend's room", first.Server, new string('C', 24));
+        rooms.Add(first); rooms.Add(second); rooms.Add(guest);
+        var list = (System.Windows.Controls.ListBox)window.FindName("SavedRoomsList");
+        var controls = (System.Windows.Controls.Primitives.ToggleButton)window.FindName("SavedRoomSharedControls");
+        list.SelectedItem = first;
+        // With nothing watched yet, the hero still shows the selected room with a placeholder instead of hiding.
+        string HeroText(string name) => ((System.Windows.Controls.TextBlock)window.FindName(name)).Text;
+        FrameworkElement HeroPart(string name) => (FrameworkElement)window.FindName(name);
+        Check(HeroPart("RoomHero").Visibility == Visibility.Visible && HeroText("RoomHeroLiveText") == "CLOSED" && HeroText("RoomHeroTitle") == "Nothing watched here yet" &&
+            ((System.Windows.Controls.Button)window.FindName("RoomHeroResume")).Content as string == "Open room" &&
+            ((System.Windows.Controls.Button)window.FindName("RoomHeroSecondary")).Content as string == "Copy invite" && HeroPart("RoomHeroSecondary").Visibility == Visibility.Visible &&
+            HeroPart("RoomHeroBadge").Visibility == Visibility.Visible && HeroText("RoomHeroBadgeText") == "M", "an unused host room shows a closed hero with Open room, Copy invite and its initial");
+        list.SelectedItem = guest;
+        Check(HeroText("RoomHeroLiveText") == "OFFLINE" && ((System.Windows.Controls.Button)window.FindName("RoomHeroResume")).Content as string == "Connect" &&
+            HeroPart("RoomHeroSecondary").Visibility == Visibility.Collapsed && HeroText("RoomHeroBadgeText") == "F", "an unused guest room shows an offline hero with Connect");
+        Check(HeroPart("SavedRoomHostControls").Visibility == Visibility.Collapsed && System.Windows.Controls.Grid.GetRow(HeroPart("SavedRoomActions")) == 0 &&
+            HeroText("SavedRoomGuestHeading") == "PEOPLE" && HeroText("SavedRoomSessionTitle") == "Nothing watched here yet", "a guest room drops the permissions tile and lists people instead of guests");
+        list.SelectedItem = first;
+        Check(HeroText("SavedRoomCode") == "AAAAAA AAAAAA AAAAAA AAAAAA" && HeroPart("SavedRoomHostControls").Visibility == Visibility.Visible &&
+            System.Windows.Controls.Grid.GetRow(HeroPart("SavedRoomActions")) == 2 && HeroText("SavedRoomGuestHeading") == "GUESTS", "a host room shows its grouped code and the permissions tile");
+        string Initials(string text, int count) => (string)typeof(MainWindow).GetMethod("Initials", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [text, count])!;
+        Check(Initials("Spy x Family · S1E4", 2) == "SF" && Initials("The Office", 2) == "O" && Initials("holiday_video_2019 mkv", 2) == "HV" && Initials("!!!", 2) == "?",
+            "title cards use the leading words' initials");
+        int Hue(string title) => (int)typeof(MainWindow).GetMethod("TitleHue", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [title])!;
+        Check(Hue("Dune") == Hue("Dune") && Hue("Dune") is >= 0 and < 360, "a title keeps the same card colour");
+        list.SelectedItem = first;
+        Check(controls.IsEnabled && controls.IsChecked == false, "saved host room exposes its playback-control setting");
+        controls.IsChecked = true;
+        var browsing = (System.Windows.Controls.CheckBox)window.FindName("SavedRoomLibraryBrowsing");
+        Check(browsing.IsEnabled && browsing.IsChecked == false, "library permission is integrated into host room settings and defaults off");
+        browsing.IsChecked = true;
+        Check(store.Setting("room:" + first.Server + ":" + first.Code + ":libraryBrowsing") == "true", "library permission persists per room while offline");
+        typeof(MainWindow).GetMethod("SavedRoomControlsChanged", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [controls, new RoutedEventArgs()]);
+        Check(store.Setting("room:" + first.Server + ":" + first.Code + ":sharedControls") == "true", "offline room setting saves immediately");
+        list.SelectedItem = second;
+        Check(browsing.IsChecked == false, "library permission is isolated between saved rooms");
+        Check(controls.IsChecked == false, "each room has an independent shared-controls setting");
+        list.SelectedItem = first;
+        Check(controls.IsChecked == true, "returning to a saved room restores its control setting");
+        list.SelectedItem = guest;
+        Check(!browsing.IsEnabled, "guest cannot change host library permission");
+        Check(!controls.IsEnabled, "guests cannot edit room settings");
+        var rename = (System.Windows.Controls.Button)window.FindName("RenameSavedRoomButton");
+        Check(!rename.IsEnabled, "guest room name is read only");
+        typeof(MainWindow).GetMethod("RenameHostRoom", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [guest, "Guest override"]);
+        Check(rooms.Single(x => x.Id == guest.Id).Name == guest.Name, "guest cannot rename a room through its handler");
+        list.SelectedItem = first;
+        Check(rename.IsEnabled, "host can rename their saved room offline");
+        typeof(MainWindow).GetMethod("RenameHostRoom", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [first, "New movie night"]);
+        Check(rooms.Single(x => x.Id == first.Id).Name == "New movie night" && store.Setting("room:" + first.Server + ":" + first.Code + ":name") == "New movie night", "host rename persists for reconnection");
+        var roomField = typeof(MainWindow).GetField("room", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var previousRoom = roomField.GetValue(window);
+        var waitingClient = new RoomClient();
+        var waitingSnapshot = new RoomSnapshot([new("host", "Host", true, true), new("guest", "Guest", false, false)], null, null, false, [], Name: "Host's shared name");
+        typeof(RoomClient).GetProperty(nameof(RoomClient.ServerAddress))!.SetValue(waitingClient, guest.Server);
+        typeof(RoomClient).GetProperty(nameof(RoomClient.Identity))!.SetValue(waitingClient, new Welcome(guest.Code, "guest", false, [], false));
+        typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, waitingSnapshot);
+        roomField.SetValue(window, waitingClient);
+        try
+        {
+            list.SelectedItem = guest;
+            typeof(MainWindow).GetMethod("SyncCurrentRoomName", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [waitingSnapshot]);
+            Check(((System.Windows.Controls.TextBlock)window.FindName("SavedRoomHeading")).Text == waitingSnapshot.Name &&
+                rooms.Single(x => x.Id == guest.Id).Name == waitingSnapshot.Name && !rename.IsEnabled,
+                "waiting guest replaces its room-code label with the host name and cannot rename it");
+            Check(Wire.Read<SavedRoom[]>(store.Setting("rooms")!).Single(x => x.Id == guest.Id).Name == waitingSnapshot.Name,
+                "waiting guest's canonical room name is saved for the next app launch");
+            void RefreshLibraryUi() => typeof(MainWindow).GetMethod("RefreshSharedLibrary", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, []);
+            RefreshLibraryUi();
+            Check(((FrameworkElement)window.FindName("GuestLibraryStatus")).Visibility == Visibility.Visible &&
+                ((FrameworkElement)window.FindName("LocalLibraryContent")).Visibility == Visibility.Visible,
+                "guest library shares the regular library layout within the Library tab");
+            Check(!(bool)typeof(MainWindow).GetField("guestBrowsePending", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!, "waiting guest cannot start browsing before direct admission");
+            ((TaskCompletionSource)typeof(RoomClient).GetField("directConnected", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(waitingClient)!).TrySetResult();
+            var busy = waitingSnapshot with { LibraryBrowsing = true, LibraryActivity = new("other", "Alice", "Example", "pilot", Wire.Now) };
+            typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, busy);
+            RefreshLibraryUi();
+            Check(!(bool)typeof(MainWindow).GetField("guestBrowsePending", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)! &&
+                ((System.Windows.Controls.TextBlock)window.FindName("GuestLibraryStatus")).Text.Contains("Alice"), "busy library identifies the current guest and locks the browse action");
+            typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, busy with { LibraryActivity = null });
+            RefreshLibraryUi();
+            Check(!((System.Windows.Controls.TextBlock)window.FindName("GuestLibraryStatus")).Text.Contains("Alice"), "released browsing slot becomes available without reconnecting");
+            var pageField = typeof(MainWindow).GetField("currentPage", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            var previousPage = pageField.GetValue(window);
+            typeof(MainWindow).GetMethod("ShowPage", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, ["Library"]);
+            typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, busy with { LibraryActivity = new("guest", "Guest", "All titles", "", Wire.Now) });
+            var requestNumber = (long)typeof(MainWindow).GetField("guestBrowseRequest", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+            var catalog = new LibraryBrowsePage([
+                new("1", "The Grand Budapest Hotel", "Movie · 2014", "movie", null, "A concierge and his lobby boy become unlikely friends during a journey across a changing Europe."),
+                new("2", "Cowboy Bebop", "1 season · 26 episodes", "series", null, "A crew of bounty hunters travels through the solar system."),
+                new("3", "Severance", "2 seasons · 19 episodes", "series", null, "Office workers discover the consequences of separating their memories.")], 3, 0, "All titles");
+            var dispatch = typeof(MainWindow).GetMethod("OnRoomMessage", BindingFlags.NonPublic | BindingFlags.Instance)!;
+            void Receive(WireMessage message) => ((Task)dispatch.Invoke(window, [message])!).GetAwaiter().GetResult();
+            Receive(new WireMessage("catalog-page", Number: requestNumber, Data: Wire.Serialize(catalog)));
+            var entries = (System.Windows.Controls.ItemsControl)window.FindName("PosterGrid");
+            Check(entries.Items.Count == 3, "active guest renders host catalog cards in the Library tab");
+            Receive(new WireMessage("catalog-page", Number: requestNumber - 1, Data: Wire.Serialize(catalog with { Entries = [] })));
+            Check(entries.Items.Count == 3, "stale library responses cannot replace current results");
+            typeof(MainWindow).GetField("guestBrowsePending", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(window, true);
+            Receive(new WireMessage("catalog-error", Number: requestNumber, Text: "The host has no available titles."));
+            Check(((System.Windows.Controls.TextBlock)window.FindName("GuestLibraryStatus")).Text == "The host has no available titles." &&
+                !(bool)typeof(MainWindow).GetField("guestBrowsePending", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!, "catalog error dispatch ends loading and displays the host response");
+            Receive(new WireMessage("catalog-page", Number: requestNumber, Data: Wire.Serialize(catalog)));
+            window.UpdateLayout();
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            bitmap.Render(window);
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder(); encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+            using (var imageFile = File.Create(Path.GetFullPath("artifacts/shared-library-ui.png"))) encoder.Save(imageFile);
+            typeof(RoomClient).GetProperty(nameof(RoomClient.Snapshot))!.SetValue(waitingClient, busy with { LibraryBrowsing = false, LibraryActivity = null });
+            RefreshLibraryUi();
+            Check(entries.Items.Count == 0 && !(bool)typeof(MainWindow).GetField("guestBrowsePending", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!, "revocation immediately clears visible catalog and pending requests");
+            typeof(MainWindow).GetMethod("ShowPage", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [previousPage!]);
+        }
+        finally
+        {
+            roomField.SetValue(window, previousRoom);
+            typeof(MainWindow).GetMethod("RefreshSharedLibrary", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, []);
+            waitingClient.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            list.SelectedItem = rooms.Single(x => x.Id == first.Id);
+        }
+        Check(!first.ToString().Contains(first.HostKey!), "saved-room accessibility labels exclude the private host key");
+    }
+
+    private static async Task CheckScrolling(Action<bool, string> check)
+    {
+        var innerContent = new System.Windows.Controls.Border { Height = 1200 };
+        var inner = new System.Windows.Controls.ScrollViewer { Height = 100, Content = innerContent };
+        var content = new System.Windows.Controls.StackPanel();
+        content.Children.Add(inner);
+        content.Children.Add(new System.Windows.Controls.Border { Height = 2000 });
+        var outer = new System.Windows.Controls.ScrollViewer { Content = content };
+        var host = new Window { Content = outer, Width = 300, Height = 220, Left = -20000, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+        host.Show();
+        try
+        {
+            await Task.Delay(50);
+            check(PrecisionScrolling.GetEnabled(outer) && PrecisionScrolling.GetEnabled(inner), "precision scrolling is enabled by the application style");
+            async Task Flush() { await Dispatcher.CurrentDispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle); await Task.Delay(20); }
+            void Wheel(System.Windows.UIElement source, int delta) => source.RaiseEvent(new System.Windows.Input.MouseWheelEventArgs(System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount, delta) { RoutedEvent = System.Windows.UIElement.PreviewMouseWheelEvent });
+            var step = SystemParameters.WheelScrollLines < 0 ? inner.ViewportHeight : SystemParameters.WheelScrollLines * 16d;
+            inner.ScrollToVerticalOffset(100); await Flush();
+            Wheel(innerContent, -6); await Flush();
+            check(Math.Abs(inner.VerticalOffset - (100 + step / 20)) < .1 && outer.VerticalOffset == 0, "tiny trackpad delta moves proportionally inside the nearest scroll viewer");
+            inner.ScrollToVerticalOffset(100); await Flush();
+            for (var index = 0; index < 20; index++) Wheel(innerContent, -6);
+            await Flush();
+            check(Math.Abs(inner.VerticalOffset - (100 + step)) < .1, "a burst of small trackpad events totals one wheel notch without losing movement");
+            Wheel(innerContent, 120); await Flush();
+            check(Math.Abs(inner.VerticalOffset - 100) < .1, "reversing scroll direction moves back by the same amount");
+            Wheel(innerContent, -240); await Flush();
+            check(Math.Abs(inner.VerticalOffset - (100 + step * 2)) < .1, "larger wheel deltas preserve their proportional distance");
+            inner.ScrollToBottom(); await Flush();
+            Wheel(innerContent, -120); await Flush();
+            var outerStep = SystemParameters.WheelScrollLines < 0 ? outer.ViewportHeight : step;
+            check(Math.Abs(outer.VerticalOffset - outerStep) < .1, "scrolling at a nested viewer edge continues in its parent");
+            var rows = new System.Windows.Controls.StackPanel();
+            for (var index = 0; index < 100; index++) rows.Children.Add(new System.Windows.Controls.Border { Height = 20 });
+            inner.Content = rows; inner.CanContentScroll = true;
+            outer.ScrollToTop(); await Flush(); inner.ScrollToVerticalOffset(10); await Flush();
+            var logicalStep = SystemParameters.WheelScrollLines < 0 ? inner.ViewportHeight : SystemParameters.WheelScrollLines;
+            if (SystemParameters.WheelScrollLines >= 0 && SystemParameters.WheelScrollLines < 20)
+            {
+                Wheel(rows, -6); await Flush();
+                check(inner.VerticalOffset == 10, "logical lists retain small deltas instead of jumping a full item immediately");
+                for (var index = 1; index < 20; index++) { Wheel(rows, -6); await Flush(); }
+                check(Math.Abs(inner.VerticalOffset - (10 + logicalStep)) < .1, "logical lists accumulate fractional deltas across separate frames");
+            }
+        }
+        finally { host.Close(); }
+    }
+}

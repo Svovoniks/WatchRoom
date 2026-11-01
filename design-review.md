@@ -1,4 +1,4 @@
-# Watchroom — final implementation plan
+# BlackPearl — final implementation plan
 
 Status: plan finalized on September 30, 2026; implementation subsequently authorized. A working Windows preview, coordination server, native WebRTC transport, tests, and installer are implemented. See IMPLEMENTATION.md for verified behavior and remaining release work. This document retains the full intended release scope.
 
@@ -8,7 +8,7 @@ A Windows desktop app for watching video files from one participant’s computer
 
 ## Visual direction
 
-Working name: Watchroom. A quiet, cinema-inspired interface with a left navigation rail, large portrait posters, spacious title details, and a restrained violet accent. Follow system light/dark appearance, with an explicit dark-mode option. Use Segoe UI, accessible contrast, keyboard navigation, and scalable Windows text. No advertisements or discovery feed.
+Working name: BlackPearl. A quiet, cinema-inspired interface with a left navigation rail, large portrait posters, spacious title details, and a restrained violet accent. Follow system light/dark appearance, with an explicit dark-mode option. Use Segoe UI, accessible contrast, keyboard navigation, and scalable Windows text. No advertisements or discovery feed.
 
 The accompanying preview uses fictional titles and stylized poster placeholders. The actual app uses matched movie and series artwork.
 

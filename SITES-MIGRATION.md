@@ -1,4 +1,4 @@
-# Watchroom on Sites
+# BlackPearl on Sites
 
 The app no longer uses Sites by default. Rooms run on the VPS service described in `deploy/README.md`, with Cloudflare TURN relaying media when direct connections fail. Saved settings that point to the Sites address move to the VPS automatically. This document records the earlier Sites migration.
 
@@ -8,9 +8,9 @@ The pre-migration preview is saved in root commit `d1ea5d4`. Migration work is o
 
 ## Try the migrated Windows app
 
-Run `artifacts/Watchroom-Sites/Watchroom.exe`. This is a separate self-contained build; the original installer and published app remain available.
+Run `artifacts/BlackPearl-Sites/BlackPearl.exe`. This is a separate self-contained build; the original installer and published app remain available.
 
-For a local test, start `node sites/scripts/preview.mjs`, use `http://localhost:5091` in both app instances, and use different `WATCHROOM_DATA` directories. The preview uses an in-memory SQLite database and applies the same migration as production. It is a test adapter, not the production service.
+For a local test, start `node sites/scripts/preview.mjs`, use `http://localhost:5091` in both app instances, and use different `BLACKPEARL_DATA` directories. The preview uses an in-memory SQLite database and applies the same migration as production. It is a test adapter, not the production service.
 
 Hosted server address: `https://watchroom-rooms.svovoniks.chatgpt.site`
 
@@ -22,7 +22,7 @@ The web page provides room creation, joining, admission, removal, chat and servi
 
 - `POST /sessions`: create/join with a display name and invitation; returns a random 256-bit bearer token.
 - `GET /session?since=N`: ordered discovery event polling; native clients poll every 100 ms during connection establishment and every second after the direct control handshake.
-- `POST /session`: existing Watchroom wire messages.
+- `POST /session`: existing BlackPearl wire messages.
 - `DELETE /session`: leave; host leaving closes the room.
 - `/health`: protocol and transport discovery.
 
@@ -30,7 +30,7 @@ D1 stores discovery and admission state with a version for compare-and-swap upda
 
 Once direct connections are established, playback continues if discovery becomes unavailable. New joins require the discovery service. Host disconnection ends the room and pauses guest playback; host migration is not implemented. See `DIRECT-CONTROLS.md` for validation of the direct control path.
 
-Sites runtime environment values can configure `WATCHROOM_STUN`, `WATCHROOM_TURN`, `WATCHROOM_TURN_SECRET`, and `WATCHROOM_FORCE_RELAY`. Use Sites' secret/environment settings; never commit a relay secret. Coturn remains external. The deployment has no relay credentials or STUN address configured, so public-network connectivity is not validated. Hosted access and real network-separated Windows testing remain required before treating this as an internet-ready release. Polling also consumes D1 reads/writes and should be measured before broader use.
+Sites runtime environment values can configure `BLACKPEARL_STUN`, `BLACKPEARL_TURN`, `BLACKPEARL_TURN_SECRET`, and `BLACKPEARL_FORCE_RELAY`. Use Sites' secret/environment settings; never commit a relay secret. Coturn remains external. The deployment has no relay credentials or STUN address configured, so public-network connectivity is not validated. Hosted access and real network-separated Windows testing remain required before treating this as an internet-ready release. Polling also consumes D1 reads/writes and should be measured before broader use.
 
 ## Validation
 
@@ -39,7 +39,7 @@ Sites runtime environment values can configure `WATCHROOM_STUN`, `WATCHROOM_TURN
 - Three additional Node tests passed: protocol/admission/control/buffering/revocation, concurrent updates and token storage, and TURN credential construction/host expiry.
 - The Windows solution builds without warnings/errors; the Sites artifact exports a callable Worker `fetch` handler.
 
-Run `node --test sites/tests/rooms.test.mjs` for the D1 adapter tests. Set `WATCHROOM_TEST_SERVER=http://localhost:5091` before running the existing smoke executable to use the migration instead of its temporary ASP.NET server.
+Run `node --test sites/tests/rooms.test.mjs` for the D1 adapter tests. Set `BLACKPEARL_TEST_SERVER=http://localhost:5091` before running the existing smoke executable to use the migration instead of its temporary ASP.NET server.
 
 ## Build and publish
 

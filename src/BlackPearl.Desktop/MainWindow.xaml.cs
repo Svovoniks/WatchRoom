@@ -1,0 +1,2321 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
+using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using LibVLCSharp.Shared;
+using LibVLCSharp.Shared.Structures;
+using Microsoft.Win32;
+using BlackPearl.Core;
+
+namespace BlackPearl.Desktop;
+
+public partial class MainWindow : Window
+{
+    private sealed record TrackChoice(int Id, string Name)
+    {
+        public override string ToString() => Name;
+        // VLC names tracks "Title - [Language]"; menus and pills lead with the language and mute the rest.
+        // Parsed once per track; both parts derive from Name, so record equality is unchanged.
+        public string Label { get; } = Id == -1 ? "Off" : TrackNameParts(Name).Label;
+        public string Detail { get; } = Id == -1 ? "" : TrackNameParts(Name).Detail;
+    }
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(.*?)\s*-\s*\[([^\]]+)\]$")]
+    private static partial System.Text.RegularExpressions.Regex TrackNamePattern();
+    [System.Text.RegularExpressions.GeneratedRegex(@"^Track\s*\d+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex GenericTrackTitle();
+    private static (string Label, string Detail) TrackNameParts(string name)
+    {
+        var match = TrackNamePattern().Match(name);
+        if (!match.Success) return (name, "");
+        var title = match.Groups[1].Value.Trim(); var language = match.Groups[2].Value.Trim();
+        var generic = title.Length == 0 || GenericTrackTitle().IsMatch(title);
+        return (language, generic || string.Equals(title, language, StringComparison.OrdinalIgnoreCase) ? "" : title);
+    }
+    private readonly LibraryStore library;
+    private readonly ConcurrentDictionary<string, MediaItem> libraryUpdates = new();
+    private readonly LibraryCardCollection libraryCards = [];
+    private readonly EpisodeArtwork episodeArtwork;
+    private readonly HashSet<string> episodeArtworkRequests = [];
+    private bool libraryViewDirty;
+    // Set when the host stops following a guest by scrolling: the guest's list stays on screen until the host's
+    // own library is ready, which then takes over at the place the host has scrolled to.
+    private bool libraryKeepPlace;
+    private bool libraryLoaded;
+    private string? detailPosterPath;
+    private int detailPosterGeneration;
+    private string? pendingScanStatus;
+    private sealed class ScanProgressSink(MainWindow window) : IProgress<string>
+    {
+        public void Report(string value) => Interlocked.Exchange(ref window.pendingScanStatus, value);
+    }
+    private readonly DispatcherTimer libraryUpdateTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private readonly ObservableCollection<LibraryFolder> folders = [];
+    private readonly Dictionary<string, Guid> pendingAdmissions = [];
+    private readonly List<FileSystemWatcher> watchers = [];
+    private readonly List<MediaItem> queue = [];
+    private int queuePosition = -1;
+    private readonly List<SavedQueue> savedQueues = [];
+    private readonly ObservableCollection<string> exclusions = [];
+    private string? activeQueueId;
+    private bool updatingQueues;
+    private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    // A click on the video plays or pauses at once. The second click of a double-click undoes that and toggles fullscreen,
+    // so this holds the playback state from before the click until the next one, along with the video it applied to.
+    private bool? videoClickUndo;
+    private int videoClickGeneration;
+    private readonly DispatcherTimer metadataRetentionTimer = new() { Interval = TimeSpan.FromHours(1) };
+    private readonly DispatcherTimer scanDelay = new() { Interval = TimeSpan.FromSeconds(3) };
+    private readonly SemaphoreSlim loading = new(1);
+    private readonly SemaphoreSlim librarySearchGate = new(1);
+    private CancellationTokenSource? librarySearchCancellation;
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly TaskCompletionSource playerRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource playerInitialized = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource firstPlayback = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private List<MediaItem> items = [];
+    private MediaItem? selected;
+    private MediaItem? playingItem;
+    private bool roomBusy;
+    private CancellationTokenSource? scanCancellation;
+    private long localResume;
+    private LibVLC? vlc;
+    private LibVLCSharp.Shared.MediaPlayer? player;
+    private RoomClient? room;
+    private MediaBridge? bridge;
+    private PlaybackState? target;
+    private string? loadedMedia;
+    private bool scanning, seeking, tracksUpdating, ready, closing, fullscreen, light, updatingThemeChoices;
+    private ThemePalette palette = ThemePalette.All[0];
+    private long appliedRevision = -1;
+    private readonly PlaybackSettling settling = new();
+    private readonly PlaybackIntent playbackIntent = new();
+    private long appliedGeneration = -1, readyGeneration = -1;
+    private readonly PlaybackPause playbackPause = new();
+    private readonly PlaybackPosition playbackPosition = new();
+    private readonly PlaybackRateControl playbackRate = new();
+    private PlaybackBuffering buffering = new();
+    private int loadGeneration;
+    private CancellationTokenSource? mediaLoadCancellation;
+    private int nativeStopCount;
+    private long? pendingSeek;
+    // A finished local video ignores seeks, so the chosen position waits here until it plays again.
+    private long? endedSeek;
+    private long seekExpires, seekRevision;
+    private WindowState previousState;
+    private Rect previousBounds;
+    private ResizeMode previousResizeMode;
+    private long lastPlayerInteraction;
+    private Point lastPlayerMouse;
+    private string? browseSeries, browseKind;
+    private int? browseSeason;
+    private int libraryCategory;
+    private IReadOnlyList<LibraryBreadcrumb> breadcrumbItems = [];
+    private bool artworkBusy, artworkRerun;
+    private string savedMetadataToken = "";
+    private bool displaySpecialsWithinSeasons;
+    private ScrollViewer LibraryScroll
+    {
+        get { PosterGrid.ApplyTemplate(); return (ScrollViewer)PosterGrid.Template.FindName("LibraryScroll", PosterGrid); }
+    }
+
+    public MainWindow() : this(null) { }
+    public MainWindow(string? startupFile)
+    {
+        episodeArtwork = new(CaptureEpisodeFrame);
+        // The TMDB retention sweep reads every record; it runs in the background once the library has rendered.
+        library = new LibraryStore(App.DataDirectory, deferRetention: true);
+        var savedFolders = Wire.Read<List<LibraryFolder>>(library.Setting("folders") ?? "[]");
+        var savedExclusions = Wire.Read<string[]>(library.Setting("exclusions") ?? "[]");
+        // A video opened at launch is matched against the library while the window is built.
+        var startupCandidates = startupFile is null ? null : Task.Run(() => StartupFileCandidates(startupFile, savedFolders, savedExclusions));
+        InitializeComponent();
+        RegisterName("LibraryScroll", LibraryScroll);
+        MixedFolderMusic.IsChecked = library.MixedFoldersListMusic;
+        RoomPage.SizeChanged += (_, _) => AudioTracks.MaxHeight = SubtitleTracks.MaxHeight = QueueList.MaxHeight = Math.Clamp(RoomPage.ActualHeight - 260, 120, 360);
+        // Menus are separate popup windows; close them when the bar hides, moves to fullscreen or the player closes.
+        PlaybackControls.IsVisibleChanged += (_, _) => { if (!PlaybackControls.IsVisible) ClosePlayerMenusNow(); };
+        InitializeBackNavigation(); InitializeOpenFiles();
+        // Keep the initial window inside the usable desktop on smaller displays.
+        Height = Math.Min(Height, SystemParameters.WorkArea.Height);
+        Width = Math.Min(Width, SystemParameters.WorkArea.Width);
+        InitializeUpdates();
+        light = library.Setting("theme") == "light"; palette = ThemePalette.Find(library.Setting("colorTheme"));
+        ApplyTheme();
+        if (startupFile is null) ShowPage("Home");
+        foreach (var f in savedFolders) folders.Add(f);
+        FolderList.ItemsSource = folders; InitializePlayerChrome(); LoadAcquisitionPlugins();
+        ScanButton.IsEnabled = folders.Count > 0;
+        try
+        {
+            MetadataToken.Password = savedMetadataToken = MetadataCredential.Load(App.DataDirectory);
+        }
+        catch (Win32Exception) { SetStatus("Could not read the saved TMDB token. Enter it again in Settings."); }
+        InitializeVoice();
+        InitializePreferences();
+        displaySpecialsWithinSeasons = MetadataOptions.Load(library).DisplaySpecialsWithinSeasons;
+        foreach (var path in savedExclusions) exclusions.Add(path);
+        ExcludedFolderList.ItemsSource = exclusions;
+        try { savedQueues.AddRange(Wire.Read<List<SavedQueue>>(library.Setting("queues") ?? "[]")); }
+        catch (System.Text.Json.JsonException) { }
+        if (savedQueues.Count == 0 && library.Setting("queues") is null)
+        {
+            string[] legacyIds = [];
+            try { legacyIds = Wire.Read<string[]>(library.Setting("queue") ?? "[]"); } catch (System.Text.Json.JsonException) { }
+            if (legacyIds.Length > 0) savedQueues.Add(new(Guid.NewGuid().ToString("N"), "Default queue", legacyIds));
+        }
+        var savedActiveQueue = library.Setting("activeQueue");
+        activeQueueId = savedActiveQueue == "" ? null : savedQueues.FirstOrDefault(x => x.Id == savedActiveQueue)?.Id ?? savedQueues.FirstOrDefault()?.Id;
+        var savedQueue = library.Setting("queue") ?? (activeQueueId is null ? "[]" : Wire.Serialize(savedQueues.First(x => x.Id == activeQueueId).MediaIds));
+        // Read the catalog after the window has appeared, without blocking input.
+        library.MediaSaved += QueueLibraryUpdate;
+        libraryUpdateTimer.Tick += (_, _) => ApplyLibraryUpdates();
+        libraryUpdateTimer.Start();
+        InitializeSharedLibrary(); InitializeQueueSharing();
+        var savedCursor = library.Setting("queuePosition");
+        LoadSavedRooms(); RefreshQueuePickers();
+        if (int.TryParse(library.Setting("volume"), out var savedVolume)) Volume.Value = Math.Clamp(savedVolume, 0, 100);
+        timer.Tick += (_, _) => PlaybackTick(); timer.Start();
+        metadataRetentionTimer.Tick += async (_, _) => await Guard(async () =>
+        { if (await Task.Run(() => library.ExpireTmdbContent())) await RefreshLibrary(); });
+        metadataRetentionTimer.Start();
+        scanDelay.Tick += async (_, _) => { scanDelay.Stop(); if (!scanning) await Guard(() => Scan(fromWatcher: true)); };
+        if (startupFile is not null) ShowStartupPlayer(startupFile);
+        PlaybackDiagnostics.Record("startup-stage", new { stage = "window" });
+        Loaded += async (_, _) =>
+        {
+            PlaybackDiagnostics.Record("startup-stage", new { stage = "loaded" });
+            SetStatus("Loading library…"); ResultCount.Text = "Loading library…";
+            EmptyLibrary.Visibility = Visibility.Collapsed;
+            var roots = folders.ToArray(); var excluded = exclusions.ToArray();
+            var catalog = Task.Run(() => library.PruneAndLoad(roots, excluded));
+            // A video opened at launch starts the player and plays alongside the library load.
+            var playerStart = startupFile is null ? null : StartPlayer();
+            if (startupFile is not null) _ = Guard(() => OpenStartupFileAsync(startupFile, startupCandidates!));
+            await Guard(async () =>
+            {
+                var loaded = await catalog;
+                if (closing) return;
+                PlaybackDiagnostics.Record("startup-stage", new { stage = "library", items = loaded.Count });
+                // Restore the saved queue before refresh persists any queue edits.
+                items = loaded;
+                var byId = loaded.ToDictionary(item => item.Id);
+                try { foreach (var id in Wire.Read<string[]>(savedQueue).Take(10000)) if (byId.TryGetValue(id, out var queued)) queue.Add(queued); }
+                catch (System.Text.Json.JsonException) { }
+                // An opened video plays on its own, outside the saved queue.
+                if (!openedFile && int.TryParse(savedCursor, out var cursor)) queuePosition = Math.Clamp(cursor, -1, queue.Count - 1);
+                libraryLoaded = true;
+                RefreshLibraryFromItems(loaded); WatchFolders();
+            });
+            if (closing) return;
+            OpenFilesReady();
+            // Background work reads files and the whole catalog; while a video opened at launch starts, it waits.
+            var housekeeping = openedFile ? Task.WhenAny(firstPlayback.Task, Task.Delay(TimeSpan.FromSeconds(10), lifetime.Token)) : Task.CompletedTask;
+            _ = Guard(async () =>
+            {
+                await housekeeping;
+                if (closing) return;
+                BackfillRuntimes();
+                if (await Task.Run(() => library.ExpireTmdbContent(force: true)) && !closing) await RefreshLibrary();
+            });
+            // Background housekeeping: a failure only means stale entries stay until the next launch.
+            _ = housekeeping.ContinueWith(_ =>
+            {
+                try { library.RemoveStaleTrackLanguages(); }
+                catch (Exception ex) { PlaybackDiagnostics.Record("track-language-cleanup-failed", new { error = ex.GetType().Name }); }
+            }, TaskScheduler.Default);
+            if (closing) return;
+            // Starting the native player loads DLLs under the process loader lock, which stalls the UI
+            // thread's own first-frame work. Wait until the library has rendered unless playback is
+            // requested sooner.
+            if (playerStart is null)
+            {
+                await Task.WhenAny(Task.Delay(1000), playerRequested.Task);
+                if (closing) return;
+                playerStart = StartPlayer();
+            }
+            await playerStart;
+            if (closing) return;
+            if (folders.Count == 0 && savedRooms.Count == 0 && wanted.Count == 0 && !openedFile && currentPage is "Home" or "Library") ShowPage("Welcome");
+            else if (SavedAutoArtwork)
+            {
+                await housekeeping;
+                if (!closing) await Guard(FetchArtwork);
+            }
+        };
+    }
+    private sealed record NativePlayer(LibVLC Engine, LibVLCSharp.Shared.MediaPlayer Player);
+    private static Task<NativePlayer>? earlyPlayer;
+    // A video opened at launch starts the native player while the window is built; StartPlayer takes it from here.
+    public static void StartPlayerEarly() => earlyPlayer ??= Task.Run(CreateNativePlayer);
+    private static NativePlayer CreateNativePlayer()
+    {
+        PrefetchVlcLibraries();
+        LibVLCSharp.Shared.Core.Initialize();
+        var engine = new LibVLC("--no-video-title-show", "--no-snapshot-preview", "--no-osd", "--quiet");
+        try { return new(engine, new LibVLCSharp.Shared.MediaPlayer(engine) { EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false }); }
+        catch { engine.Dispose(); throw; }
+    }
+    private async Task StartPlayer()
+    {
+        await Guard(async () =>
+        {
+            var native = await (Interlocked.Exchange(ref earlyPlayer, null) ?? Task.Run(CreateNativePlayer));
+            if (closing) { native.Player.Dispose(); native.Engine.Dispose(); return; }
+            vlc = native.Engine; player = native.Player; player.Volume = (int)Volume.Value;
+            Video.MediaPlayer = player;
+            PlaybackDiagnostics.Record("startup-stage", new { stage = "player" });
+            player.TimeChanged += (_, e) =>
+            {
+                var mono = Environment.TickCount64; playbackPosition.Observe(e.Time, mono);
+                if (PlaybackDiagnostics.Detailed) PlaybackDiagnostics.Record("native-time", new { position = e.Time });
+                Dispatcher.BeginInvoke(() => { if (!closing) settling.Observe(e.Time, mono); });
+            };
+            RefreshTracks();
+            // Track lists change only when streams are added, removed or selected; refresh once per burst.
+            void TracksChanged()
+            {
+                if (Interlocked.Exchange(ref trackRefreshQueued, 1) == 0)
+                    Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { trackRefreshQueued = 0; if (!closing && ready) RefreshTracks(); });
+            }
+            // Each new video output starts without the subtitle lift; it comes from LibVLC's thread.
+            player.Vout += (_, _) => Dispatcher.BeginInvoke(() => { if (!closing) SubtitleOutputChanged(); });
+            player.ESAdded += (_, _) => TracksChanged(); player.ESDeleted += (_, _) => TracksChanged(); player.ESSelected += (_, _) => TracksChanged();
+            player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; firstPlayback.TrySetResult(); if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); ReportReady(); if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
+            player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus(room?.IsPeerRecovering == true ? "Connection interrupted · Reconnecting…" : "Playback failed. Check that the file is available and the connection is active."); });
+            player.Buffering += (_, e) => Dispatcher.BeginInvoke(() =>
+            {
+                if (closing) return;
+                if (PlaybackDiagnostics.Detailed) PlaybackDiagnostics.Record("buffer", new { cache = e.Cache, position = player?.Time, revision = target?.Revision });
+                if (buffering.Cache(e.Cache, Environment.TickCount64)) { readyGeneration = -1; ReportReady(); }
+            });
+            player.EndReached += (_, _) =>
+            {
+                var endedItem = playingItem; var endedRoom = room; var generation = loadGeneration;
+                Dispatcher.BeginInvoke(async () => await Guard(() => PlaybackEnded(endedItem, endedRoom, generation)));
+            };
+        });
+        playerInitialized.TrySetResult();
+    }
+    private async Task<bool> EnsurePlayer()
+    {
+        playerRequested.TrySetResult();
+        if (player is null) await playerInitialized.Task.WaitAsync(lifetime.Token);
+        return player is not null && !closing;
+    }
+    private static void PrefetchVlcLibraries()
+    {
+        // After an install or update, antivirus scans new DLLs on first access. Reading them here
+        // lets that scan finish before LoadLibrary, which would otherwise hold the process loader
+        // lock for the whole scan and stall the UI thread's first library render.
+        var buffer = new byte[81920];
+        foreach (var name in new[] { "libvlc.dll", "libvlccore.dll" })
+        {
+            try { using var stream = File.OpenRead(Path.Combine(AppContext.BaseDirectory, "libvlc", "win-x64", name)); while (stream.Read(buffer) > 0) { } }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+    }
+    private void SetStatus(string text)
+    {
+        StatusText.Text = text;
+        StatusText.ToolTip = text;
+        if (RoomPage.Visibility == Visibility.Visible) { ConnectionStatus.Text = text; ConnectionStatus.ToolTip = text; }
+    }
+    private async Task Guard(Func<Task> action)
+    {
+        try { await action(); }
+        catch (OperationCanceledException) { SetStatus("Operation cancelled or timed out."); }
+        catch (Exception ex) { PlaybackDiagnostics.Record("action-failed", new { error = ex.GetType().Name, stack = ex.StackTrace }); SetStatus(ex.Message); Dialogs.Alert(this, "Something went wrong", ex.Message); }
+    }
+    private void ShowPage(string name)
+    {
+        if (!ConfirmPageNavigation(name)) return;
+        if (name == "Home" && ready) SavePlaybackPosition();
+        if (name == "Home" && currentPage != "Home") homeSeed = Random.Shared.Next();
+        if (GuestLibrary && currentPage is "Home" or "Library" or "Details" && name is not ("Home" or "Library" or "Details")) ReleaseHostLibrary();
+        if (GuestLibrary && name == "Home" && currentPage != "Home")
+        {
+            guestBrowse = new(Home: true, Seed: homeSeed); guestLibraryNotice = null;
+            guestCurrentBrowse = null; guestLibraryCards.Clear(); guestBrowsePending = false; ++guestBrowseRequest;
+        }
+        else if (GuestLibrary && name == "Library" && guestBrowse.Home)
+        {
+            guestBrowse = new(Category: libraryCategory); guestCurrentBrowse = null;
+            guestLibraryCards.Clear(); guestBrowsePending = false; ++guestBrowseRequest;
+        }
+        if (name != currentPage)
+        {
+            RememberLocation();
+            StatusText.Text = scanning ? (string.IsNullOrEmpty(ScanStatus.Text) ? "Scanning your library…" : ScanStatus.Text)
+                : artworkBusy ? "Fetching artwork and metadata…"
+                : $"{items.Count(x => x.Available)} videos available · {folders.Count} folders";
+            StatusText.ToolTip = StatusText.Text;
+        }
+        currentPage = name;
+        if (name != "Room") videoClickUndo = null;
+        if (fullscreen && name != "Room") SetFullscreen(false);
+        if (pictureInPicture && name == "Room") SetPictureInPicture(false, openPlayer: false);
+        // VideoView hosts its content in a separate native overlay window. Collapsing
+        // only RoomPage does not update that window's visibility or hit testing.
+        // Hide the view itself before changing the shell layout, and restore both
+        // the view and its overlay content when returning to the player.
+        // Picture in picture keeps showing the video in its own window while the app shows another page.
+        var playerVisibility = name == "Room" || pictureInPicture ? Visibility.Visible : Visibility.Collapsed;
+        PlayerOverlay.Visibility = playerVisibility;
+        Video.Visibility = playerVisibility;
+        WelcomePage.Visibility = name == "Welcome" ? Visibility.Visible : Visibility.Collapsed;
+        HomePage.Visibility = name == "Home" ? Visibility.Visible : Visibility.Collapsed;
+        LibraryPage.Visibility = name == "Library" ? Visibility.Visible : Visibility.Collapsed;
+        Details.Visibility = name == "Details" ? Visibility.Visible : Visibility.Collapsed;
+        FoldersPage.Visibility = name == "Folders" ? Visibility.Visible : Visibility.Collapsed;
+        RoomsPage.Visibility = name == "Rooms" ? Visibility.Visible : Visibility.Collapsed;
+        QueuesPage.Visibility = name == "Queues" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPage.Visibility = name == "Settings" ? Visibility.Visible : Visibility.Collapsed;
+        RoomPage.Visibility = name == "Room" ? Visibility.Visible : Visibility.Collapsed;
+        ApplyPlayerLayout();
+        UpdateSessionControls();
+        RefreshSharedLibrary();
+        if (name == "Library") FilterLibrary();
+        if (name == "Home") RefreshHome();
+        if (name == "Rooms") RefreshSavedRooms();
+        if (name == "Queues") RefreshSavedItems();
+        UpdateLibraryCategorySelection(name is "Library" or "Details");
+        // Music has its own sidebar entry, so the Library entry isn't selected alongside it.
+        var page = name == "Details" ? "Library" : name == "Room" ? "Rooms" : name;
+        if (page == "Library" && (name == "Details" ? selected?.IsMusic == true : libraryCategory == LibraryCatalog.Music)) page = "Music";
+        foreach (var button in new[] { HomeNav, LibraryNav, QueuesNav, RoomNav, FoldersNav, SettingsNav })
+            System.Windows.Automation.AutomationProperties.SetItemStatus(button, (string)button.Tag == page ? "Selected" : "");
+        System.Windows.Automation.AutomationProperties.SetItemStatus(MusicLibraryNav, page == "Music" ? "Selected" : "");
+    }
+    private void Navigate(object sender, RoutedEventArgs e)
+    {
+        var page = (string)((Button)sender).Tag;
+        // The sidebar opens the gallery of queues; Manage queues in the player opens the queue in use.
+        if (page == "Queues" && sender == QueuesNav) { if (currentPage == "Queues") ShowAllQueues(); else { CloseQueueAddPanel(); openQueueId = null; } }
+        else if (page == "Queues" && activeQueueId is not null && openQueueId != activeQueueId) { CloseQueueAddPanel(); openQueueId = activeQueueId; }
+        ShowPage(page);
+    }
+    private static int CategoryFor(MediaItem item) => item.IsMusic ? LibraryCatalog.Music : item.Kind == "Anime" ? 3 : item.Series is not null ? 2 : 1;
+    private static string CategoryName(int category) => category switch { 1 => "Movies", 2 => "Shows", 3 => "Anime", 4 => "Unavailable", 5 => "Missing", LibraryCatalog.Music => "Music", _ => "All" };
+    private static string SeasonName(int season, IEnumerable<MediaItem>? members = null) => LibraryCatalog.SeasonName(season, members);
+    private void UpdateLibraryCategorySelection(bool active)
+    {
+        UnavailableLibraryNav.Visibility = !GuestLibrary && items.Any(item => !item.Available && !item.IsExtra && !item.IsVirtual)
+            ? Visibility.Visible : Visibility.Collapsed;
+        MissingLibraryNav.Visibility = !GuestLibrary && missingTitleCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+        // A guest can't tell whether the host has music, so the category stays listed while browsing a host's library.
+        MusicLibraryNav.Visibility = GuestLibrary || folders.Any(x => x.Kind == MusicFiles.Kind) || items.Any(x => x.IsMusic) ? Visibility.Visible : Visibility.Collapsed;
+        MissingLibraryCount.Text = missingTitleCount.ToString();
+        System.Windows.Automation.AutomationProperties.SetName(MissingLibraryNav, $"Missing, {missingTitleCount} {(missingTitleCount == 1 ? "title" : "titles")}");
+        foreach (var button in new[] { AllLibraryNav, AnimeLibraryNav, ShowsLibraryNav, MoviesLibraryNav, UnavailableLibraryNav, MissingLibraryNav })
+            System.Windows.Automation.AutomationProperties.SetItemStatus(button, active && int.Parse((string)button.Tag) == libraryCategory ? "Selected" : "");
+    }
+    private void LibraryMenuClick(object sender, RoutedEventArgs e)
+    {
+        if (!ConfirmPageNavigation("Library")) return;
+        var visible = LibraryCategories.Visibility == Visibility.Visible;
+        LibraryCategories.Visibility = LibraryPage.Visibility == Visibility.Visible && visible ? Visibility.Collapsed : Visibility.Visible;
+        LibraryChevron.Text = LibraryCategories.Visibility == Visibility.Visible ? "" : "";
+        ShowPage("Library"); UpdateBreadcrumbs();
+    }
+    private void LibraryCategoryClick(object sender, RoutedEventArgs e) => NavigateLibrary(int.Parse((string)((Button)sender).Tag));
+    private void NavigateLibrary(int category, string? series = null, string? kind = null, int? season = null)
+    {
+        if (!ConfirmPageNavigation("Library")) return;
+        if (GuestLibrary)
+        {
+            libraryCategory = category; guestBrowse = new(Category: category); SearchBox.Clear(); ShowPage("Library");
+            return;
+        }
+        if (currentPage != "Library" || libraryCategory != category || browseSeries != series || browseKind != kind || browseSeason != season || SearchBox.Text.Length > 0 || LibraryStatusFilter.SelectedIndex != 0) RememberLocation();
+        var restoring = restoringNavigation; restoringNavigation = true;
+        libraryCategory = category; browseSeries = series; browseKind = kind; browseSeason = season;
+        ShowPage("Library"); SearchBox.Clear(); LibraryStatusFilter.SelectedIndex = 0;
+        restoringNavigation = restoring;
+        FilterLibrary();
+    }
+    private void UpdateBreadcrumbs()
+    {
+        if (LibraryBreadcrumbs is null || DetailBreadcrumbs is null) return;
+        if (GuestLibrary) { UpdateHostBreadcrumbs(); return; }
+        var detail = Details.Visibility == Visibility.Visible ? selected : null;
+        var show = detail?.Series is not null ? detail : browseSeries is null ? null : items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind));
+        var category = detail is not null ? detail.Available || detail.IsVirtual ? CategoryFor(detail) : 4 : libraryCategory;
+        // Music is its own section, so its trail starts at Music rather than at All videos.
+        var crumbs = new List<LibraryBreadcrumb> { category == LibraryCatalog.Music ? new("Music", "category", category, Separator: "") : new("All", "category", Separator: "") };
+        if (category is not (0 or LibraryCatalog.Music)) crumbs.Add(new(CategoryName(category), "category", category));
+        if (show?.Series is not null)
+        {
+            var showId = LibraryIdentity.ShowKey(show);
+            crumbs.Add(new(show.Series, "show", category, showId, show.Kind));
+            var season = detail is not null ? detail.Season ?? -1 : browseSeason;
+            if (season is { } number && !show.IsMusic) crumbs.Add(new(SeasonName(number, items.Where(x => !x.IsExtra && LibraryIdentity.InShow(x, showId, show.Kind) && (x.Season ?? -1) == number)), "season", category, showId, show.Kind, number));
+        }
+        if (detail is not null) crumbs.Add(new(detail.Series is null ? detail.DisplayTitle : detail.EpisodeDisplayTitle, "media", category, MediaId: detail.Id));
+        crumbs[^1] = crumbs[^1] with { IsCurrent = true };
+        // Metadata refreshes should not recreate an unchanged navigation bar.
+        if (breadcrumbItems.SequenceEqual(crumbs)) return;
+        breadcrumbItems = crumbs; LibraryBreadcrumbs.ItemsSource = crumbs; DetailBreadcrumbs.ItemsSource = crumbs;
+    }
+    private void BreadcrumbClick(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is not FrameworkElement element) return;
+        var crumb = element.DataContext as LibraryBreadcrumb;
+        if (crumb is null) return;
+        if (GuestLibrary) { NavigateHostBreadcrumb(crumb); e.Handled = true; return; }
+        if (crumb.Level == "media") { if (items.FirstOrDefault(x => x.Id == crumb.MediaId) is { } item) Select(item); }
+        else NavigateLibrary(crumb.Category, crumb.Series, crumb.Kind, crumb.Season);
+        e.Handled = true;
+    }
+    private int libraryRefresh;
+    // Reads the catalog off the UI thread; when refreshes overlap, only the latest one is applied.
+    private async Task RefreshLibrary()
+    {
+        var refresh = ++libraryRefresh;
+        var roots = folders.ToArray(); var excluded = exclusions.ToArray();
+        libraryUpdates.Clear();
+        var loaded = await Task.Run(() => library.PruneAndLoad(roots, excluded));
+        if (closing || refresh != libraryRefresh) return;
+        RefreshLibraryFromItems(loaded);
+        BackfillRuntimes();
+    }
+    private bool runtimeBackfillRunning, runtimeBackfillAgain;
+    // Reads video lengths from file headers in the background; they replace provider runtimes, and Home's length filters need them.
+    private async void BackfillRuntimes()
+    {
+        if (runtimeBackfillRunning) { runtimeBackfillAgain = true; return; }
+        runtimeBackfillRunning = true;
+        try
+        {
+            do
+            {
+                runtimeBackfillAgain = false;
+                var candidates = items.Where(LibraryRuntimes.NeedsRuntime).ToArray();
+                if (candidates.Length == 0 || closing) break;
+                using var stop = new CancellationTokenSource();
+                void Stop(object? sender, EventArgs e) => stop.Cancel();
+                Closed += Stop;
+                try { await Task.Run(() => LibraryRuntimes.Backfill(library, candidates, stop.Token)); }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { PlaybackDiagnostics.Record("runtime-backfill-failed", new { ex.Message }); }
+                finally { Closed -= Stop; }
+            } while (runtimeBackfillAgain && !closing);
+        }
+        finally { runtimeBackfillRunning = false; }
+    }
+    private void RefreshLibraryFromItems(List<MediaItem> refreshedItems)
+    {
+        room?.SetHostedLibrary(refreshedItems);
+        items = refreshedItems; RefreshPlayingItem();
+        ReloadWanted(); CountMissingTitles();
+        RefreshHome();
+        UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
+        if (browseSeries is not null && !items.Any(x => LibraryIdentity.InShow(x, browseSeries, browseKind)))
+        {
+            var changed = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries));
+            if (changed is null) { browseSeries = browseKind = null; browseSeason = null; }
+            else browseKind = changed.Kind;
+        }
+        FilterLibrary();
+        var byId = items.ToDictionary(item => item.Id);
+        for (int i = 0; i < savedQueues.Count; i++) savedQueues[i] = savedQueues[i] with { MediaIds = savedQueues[i].MediaIds.Where(byId.ContainsKey).ToArray() };
+        if (savedQueues.Count > 0) { SaveQueues(); RefreshQueuePickers(); }
+        var priorCursorId = queuePosition >= 0 && queuePosition < queue.Count ? queue[queuePosition].Id : null;
+        var refreshedQueue = queue.Select(x => byId.GetValueOrDefault(x.Id)).OfType<MediaItem>().ToArray();
+        queue.Clear(); foreach (var queued in refreshedQueue) queue.Add(queued);
+        queuePosition = priorCursorId is null ? -1 : queue.FindIndex(x => x.Id == priorCursorId);
+        PublishQueue();
+        if (selected is not null && !items.Any(x => x.Id == selected.Id)) { selected = null; if (Details.Visibility == Visibility.Visible) ShowPage("Library"); }
+        if (Details.Visibility == Visibility.Visible && selected is not null && items.FirstOrDefault(x => x.Id == selected.Id) is { } updated) Select(updated);
+        SetStatus($"{items.Count(x => x.Available)} videos available · {folders.Count} {(folders.Count == 1 ? "folder" : "folders")}");
+    }
+    private void QueueLibraryUpdate(MediaItem item) => libraryUpdates[item.Id] = item;
+    private void ApplyLibraryUpdates()
+    {
+        if (closing) return;
+        // Scans and metadata passes save many records; rebuild the views less often while they run.
+        var interval = TimeSpan.FromMilliseconds(scanning || artworkBusy || runtimeBackfillRunning ? 1000 : 250);
+        if (libraryUpdateTimer.Interval != interval) libraryUpdateTimer.Interval = interval;
+        if (Interlocked.Exchange(ref pendingScanStatus, null) is { } progress && scanning)
+        { ScanStatus.Text = progress; SetStatus(progress); }
+        if (libraryUpdates.IsEmpty)
+        {
+            if (libraryViewDirty && librarySearchCancellation is null) FilterLibrary(backgroundUpdate: true);
+            return;
+        }
+        var updated = items.ToDictionary(item => item.Id);
+        var changed = false;
+        foreach (var id in libraryUpdates.Keys)
+            if (libraryUpdates.TryRemove(id, out var item) && (!updated.TryGetValue(id, out var previous) || previous != item))
+            { updated[id] = item; changed = true; }
+        if (!changed) return;
+        var browsedId = items.FirstOrDefault(item => LibraryIdentity.InShow(item, browseSeries, browseKind))?.Id;
+        items = updated.Values.ToList(); RefreshPlayingItem(); CountMissingTitles();
+        room?.SetHostedLibrary(items);
+        RefreshHome();
+        UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
+        if (browseSeries is not null && !items.Any(item => LibraryIdentity.InShow(item, browseSeries, browseKind)))
+        {
+            var current = browsedId is null ? null : updated.GetValueOrDefault(browsedId);
+            if (current?.Series is not null) { browseSeries = LibraryIdentity.ShowKey(current); browseKind = current.Kind; }
+            else { browseSeries = browseKind = null; browseSeason = null; }
+        }
+        libraryViewDirty = true;
+        if (librarySearchCancellation is null) FilterLibrary(backgroundUpdate: true);
+        if (selected is not null && items.FirstOrDefault(item => item.Id == selected.Id) is { } refreshed && refreshed != selected)
+        {
+            selected = refreshed;
+            if (Details.Visibility == Visibility.Visible) Select(refreshed);
+        }
+    }
+    private async void FilterLibrary(bool debounce = false, bool backgroundUpdate = false)
+    {
+        if (PosterGrid is null || LibraryStatusFilter is null || NoResults is null || library is null || closing) return;
+        // Local library updates don't change the host's library, and re-filtering it scrolls back to the top.
+        if (GuestLibrary) { if (!backgroundUpdate) await FilterHostLibraryAsync(debounce); return; }
+        if (FollowingGuest) { if (!applyingGuestMirror) ApplyGuestMirror(); return; }
+        if (!libraryLoaded) return;
+        if (!backgroundUpdate) libraryKeepPlace = false;
+        librarySearchCancellation?.Cancel();
+        using var request = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        librarySearchCancellation = request;
+        libraryViewDirty = false;
+        var cancellation = request.Token;
+        // Capture one immutable library and navigation state before leaving the UI thread.
+        var status = LibraryStatusFilter.SelectedIndex;
+        // Missing and upcoming episode placeholders browse inside shows that still have a playable file, and in
+        // wanted titles, which have their placeholders before any file; Unavailable lists only files that have gone missing.
+        var playableShows = items.Where(x => x.Available && x.Series is not null).Select(LibraryIdentity.ShowKey).ToHashSet();
+        var wantedKeys = wanted.Keys.ToHashSet();
+        var source = items.Where(x => libraryCategory == 4 ? !x.Available && !x.IsVirtual : x.Available || x.IsVirtual && (playableShows.Contains(LibraryIdentity.ShowKey(x)) || wantedKeys.Contains(LibraryIdentity.ShowKey(x)))).ToList();
+        // All lists videos; music has its own category, and an album opened from search stays browsable.
+        if (libraryCategory is 0 or 5 && browseSeries is null) source.RemoveAll(x => x.IsMusic);
+        var missingOnly = libraryCategory == 5 && browseSeries is null;
+        var series = browseSeries; var kind = browseKind; var season = browseSeason;
+        var showTitle = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind))?.Series ?? browseSeries;
+        var album = browseKind == MusicFiles.Kind;
+        SearchHint.Text = browseSeries is null ? libraryCategory == LibraryCatalog.Music ? "Search your music" : "Search your library" : album ? "Search tracks" : browseSeason is null ? "Search seasons" : "Search episodes";
+        SearchBox.ToolTip = browseSeries is null ? "Search your library (Ctrl+F)" : "Search within " + showTitle + (browseSeason is null ? "" : $" · Season {browseSeason}");
+        System.Windows.Automation.AutomationProperties.SetName(SearchBox, SearchHint.Text);
+        var filter = libraryCategory is 4 or 5 ? 0 : libraryCategory;
+        var query = SearchBox.Text.Trim();
+        if (!backgroundUpdate)
+        {
+            ResultCount.Text = "Searching…";
+
+            NoResults.Visibility = Visibility.Collapsed;
+        }
+        ClearSearchButton.Visibility = query.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        UpdateBreadcrumbs();
+        UpdateLibraryCategorySelection(LibraryPage.Visibility == Visibility.Visible || Details.Visibility == Visibility.Visible);
+        var seasonItem = browseSeason is null ? null : items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind) && (x.Season ?? -1) == browseSeason);
+        SeasonInformation.Visibility = seasonItem is null ? Visibility.Collapsed : Visibility.Visible;
+        SeasonSummary.Text = seasonItem is null ? "" : (string.IsNullOrWhiteSpace(seasonItem.SeasonTitle) ? "" : seasonItem.SeasonTitle + "\n\n") + (seasonItem.SeasonOverview ?? seasonItem.Overview ?? "No season overview available.") + (seasonItem.SeasonSource is null ? "" : "\n\nMetadata: " + seasonItem.SeasonSource);
+        EmptyLibrary.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ShowWantedPanels(); ShowAcquireSeason();
+        try
+        {
+            if (debounce) await Task.Delay(200, cancellation);
+            // A slow artwork drive must not spawn overlapping searches on every keystroke.
+            await librarySearchGate.WaitAsync(cancellation);
+            List<LibraryCard> cards;
+            try { cards = await LibraryCatalog.SearchAsync(source, query, filter, series, kind, season, cancellation, displaySpecialsWithinSeasons, season is null ? null : PreferredVersion(series)); }
+            finally { librarySearchGate.Release(); }
+            if (status == 1) cards = cards.Where(card => card.Poster is null).ToList();
+            if (missingOnly) cards = cards.Where(card => card.Status is not null).ToList();
+            var views = libraryCards.ToDictionary(view => view.Key);
+            // Read playback flags once and calculate aggregate show progress off-thread.
+            var playback = await Task.Run(() =>
+            {
+                var settings = library.PlaybackSettings();
+                var shows = source.Where(item => item.Series is not null).GroupBy(LibraryIdentity.ShowKey)
+                    .ToDictionary(group => group.Key, group => group.ToArray());
+                var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                bool Aired(MediaItem x) => !DateOnly.TryParse(x.AirDate, out var date) || date <= today;
+                return cards.Select(card =>
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    var members = card.Media.Series is null ? Array.Empty<MediaItem>() : shows.GetValueOrDefault(LibraryIdentity.ShowKey(card.Media)) ?? [];
+                    var placeholders = (card.Level switch { "series" => members, "season" => members.Where(x => (x.Season ?? -1) == card.Season), _ => [card.Media] }).Where(x => x.IsVirtual).ToArray();
+                    var position = card.Level is "episode" or "movie" && long.TryParse(settings.GetValueOrDefault("position:" + card.Media.Id), out var saved) ? saved : 0;
+                    var existing = views.GetValueOrDefault(LibraryCardView.Identity(card));
+                    return (Card: card, View: existing ?? new LibraryCardView(card),
+                        PosterFile: existing is null ? default : LibraryCardView.Version(card.Poster), Position: position, Watched: LibraryWatchProgress.IsWatched(members, card, id => settings.GetValueOrDefault("watched:" + id) == "true"),
+                        Continuing: status == 2 && LibraryWatchProgress.CanContinue(members, card, settings),
+                        Missing: placeholders.Any(Aired), Upcoming: placeholders.Any(x => !Aired(x)));
+                }).Where(state => status switch { 2 => state.Continuing, 3 => !state.Watched, 4 => state.Watched, 5 => state.Missing, 6 => state.Upcoming, _ => true }).ToArray();
+            }, cancellation);
+            if (cancellation.IsCancellationRequested || librarySearchCancellation != request) return;
+            cards = playback.Select(state => state.Card).ToList();
+            // A guest's mirrored list stays visible until the host's own cards are in place.
+            var replacingMirror = PosterGrid.ItemsSource == mirroredCards;
+            if (!replacingMirror && PosterGrid.ItemsSource != libraryCards) PosterGrid.ItemsSource = libraryCards;
+            var desiredKeys = cards.Select(LibraryCardView.Identity).ToHashSet();
+            var slice = Stopwatch.StartNew();
+            async Task YieldForInput()
+            {
+                // Batch card changes within one frame so the extra card actions
+                // do not force a full WrapPanel layout after every few inserts.
+                if (slice.ElapsedMilliseconds < 12) return;
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                cancellation.ThrowIfCancellationRequested(); slice.Restart();
+            }
+            for (var index = libraryCards.Count - 1; index >= 0; index--)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (!desiredKeys.Contains(libraryCards[index].Key)) libraryCards.RemoveAt(index);
+                await YieldForInput();
+            }
+            // When the grid is empty, publish one batch instead of repeatedly
+            // laying out all preceding cards as a large library is inserted.
+            var initialBatch = libraryCards.Count == 0 && cards.Count > 100 ? new List<LibraryCardView>() : null;
+            for (var index = 0; index < cards.Count; index++)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                var view = playback[index].View;
+                if (views.ContainsKey(view.Key)) view.Update(cards[index], playback[index].PosterFile);
+                view.SetPlayback(playback[index].Position, playback[index].Watched);
+                if (initialBatch is not null) initialBatch.Add(view);
+                else if (index >= libraryCards.Count || libraryCards[index] != view)
+                {
+                    var existingIndex = libraryCards.IndexOf(view);
+                    if (existingIndex >= 0) libraryCards.Move(existingIndex, index);
+                    else libraryCards.Insert(index, view);
+                }
+                await YieldForInput();
+            }
+            cancellation.ThrowIfCancellationRequested();
+            if (initialBatch is not null) libraryCards.AddBatch(initialBatch);
+            ResultCount.Text = $"{cards.Count} {(cards.Count == 1 ? "item" : "items")}";
+            NoResults.Visibility = items.Count > 0 && cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            ShowFindTitle(query, cards.Count == 0 && series is null);
+            if (replacingMirror && !FollowingGuest)
+            {
+                var offset = libraryKeepPlace ? LibraryScroll.VerticalOffset : 0;
+                libraryKeepPlace = false;
+                PosterGrid.ItemsSource = libraryCards;
+                if (offset > 0) _ = Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => LibraryScroll.ScrollToVerticalOffset(offset));
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (librarySearchCancellation == request && !closing)
+            {
+                ResultCount.Text = "Search failed"; SetStatus("Library search failed: " + ex.Message);
+            }
+        }
+        finally
+        {
+            if (librarySearchCancellation == request)
+            {
+                librarySearchCancellation = null;
+
+            }
+        }
+    }
+    private void SearchChanged(object sender, TextChangedEventArgs e)
+    {
+        DetachGuestMirror(); FilterLibrary(debounce: true);
+    }
+    private void ClearSearch(object sender, RoutedEventArgs e) { SearchBox.Clear(); SearchBox.Focus(); }
+    private void SearchFrameClick(object sender, MouseButtonEventArgs e) => SearchBox.Focus();
+    private void ResetFilters(object sender, RoutedEventArgs e)
+    {
+        NavigateLibrary(0);
+    }
+    private void FilterChanged(object sender, SelectionChangedEventArgs e) => FilterLibrary();
+    private void CardArtworkFailed(object sender, ExceptionRoutedEventArgs e)
+    {
+        // An unavailable or invalid image should use the same fallback as missing artwork.
+        ((Image)sender).Source = null;
+        e.Handled = true;
+    }
+    // A click focuses the card, and a focused control scrolls itself fully into view, which lurches the grid
+    // when the card is half visible. Keyboard focus still scrolls, so arrow and tab navigation keep working.
+    private void LibraryCardBringIntoView(object sender, RequestBringIntoViewEventArgs e)
+    {
+        if (InputManager.Current.MostRecentInputDevice is not KeyboardDevice) e.Handled = true;
+    }
+    private void SelectMovie(object sender, RoutedEventArgs e)
+    {
+        DetachGuestMirror();
+        var card = (LibraryCard)((Button)sender).Tag;
+        if (GuestLibrary) { OpenHostCard(card); return; }
+        if (card.Level == "series") NavigateLibrary(CategoryFor(card.Media), LibraryIdentity.ShowKey(card.Media), card.Media.Kind);
+        else if (card.Level == "season") NavigateLibrary(libraryCategory, browseSeries, browseKind, card.Season);
+        else { Select(card.Media); Details.ScrollToTop(); }
+    }
+    private void Select(MediaItem item)
+    {
+        DetailHost.Visibility = DetailQueue.Visibility = DetailWatched.Visibility = Visibility.Visible;
+        if (currentPage != "Details" || selected?.Id != item.Id) RememberLocation();
+        var restoring = restoringNavigation; restoringNavigation = true;
+        selected = item; libraryCategory = CategoryFor(item);
+        browseSeries = item.Series is null ? null : LibraryIdentity.ShowKey(item); browseKind = item.Series is null ? null : item.Kind;
+        browseSeason = item.Series is null || item.IsMusic ? null : item.Season ?? -1;
+        ShowPage("Details"); UpdateBreadcrumbs(); DetailTitle.Text = item.EpisodeDisplayTitle;
+        restoringNavigation = restoring;
+        DetailPlay.IsEnabled = DetailHost.IsEnabled = DetailQueue.IsEnabled = item.Available && File.Exists(item.Path);
+        DetailAvailability.Text = DetailPlay.IsEnabled ? "" : item.IsVirtual ? PlaceholderNotice(item)
+            : (item.IsMusic ? "Audio" : "Video") + " file unavailable. Reconnect its drive, then rescan your library.";
+        // A wanted film's own panel says when it comes out and what can be done; its play buttons have nothing to play.
+        var wantedFilm = item.IsVirtual && item.Series is null && wanted.ContainsKey(item.Id);
+        if (wantedFilm) DetailAvailability.Text = "";
+        DetailPlay.Visibility = DetailHost.Visibility = DetailQueue.Visibility = wantedFilm ? Visibility.Collapsed : Visibility.Visible;
+        DetailAvailability.Visibility = DetailAvailability.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        DetailRemove.Visibility = item.Available || item.IsVirtual ? Visibility.Collapsed : Visibility.Visible;
+        DetailWatched.Visibility = item.IsVirtual && item.Series is null || item.IsMusic ? Visibility.Collapsed : Visibility.Visible;
+        DetailRemove.IsEnabled = !scanning;
+        UpdateDetailPlayback(item);
+        var film = item.ExtraOf is { } parent ? items.FirstOrDefault(x => x.Id == parent) : null;
+        DetailContext.Text = item.Series ?? (film is null ? "" : film.Title + " · Extra");
+        ShowDetailExtras(item, film);
+        var versions = LibraryCatalog.Versions(items, item);
+        var version = versions.Length > 1 ? LibraryCatalog.VersionLabel(item, versions) : null;
+        DetailMeta.Text = item.Caption + (item.IsVirtual ? "" : " · " + Path.GetExtension(item.Path).TrimStart('.').ToUpperInvariant()) + (string.IsNullOrWhiteSpace(item.AirDate) ? "" : " · " + item.AirDate) + (item.RuntimeMinutes is > 0 ? $" · {item.RuntimeMinutes} min" : "") +
+            (version is null ? "" : " · " + version);
+        ShowDetailVersions(item, versions);
+        _ = UpdateDetailPosterAsync(item);
+        if (item.ExtraOf is not null && !ArtworkCache.IsUsable(item.GeneratedEpisodePoster)) _ = ImproveClipArtwork(item);
+        DetailFile.Text = item.IsVirtual ? "" : item.Path;
+        ShowWantedPanels();
+        ShowAcquireDetail(item);
+        ShowDetailTracks(item);
+        var overviewSource = !string.IsNullOrWhiteSpace(item.EpisodeOverview) ? item.EpisodeSource : !string.IsNullOrWhiteSpace(item.SeasonOverview) ? item.SeasonSource : item.PosterSource;
+        DetailSummary.Text = item.IsMusic ? MusicSummary(item) : (item.DetailOverview ?? "No overview available yet.") +
+            (item.Genres?.Length > 0 ? "\n\nGenres: " + string.Join(", ", item.Genres) : "") + (item.Cast?.Length > 0 ? "\nCast: " + string.Join(", ", item.Cast) : "") +
+            (item.Rating is > 0 ? $"\nRating: {item.Rating:0.0}/10" : "") + (item.NumberingConflict is null ? "" : "\n\n" + item.NumberingConflict) + (overviewSource is null ? "" : "\n\nMetadata: " + overviewSource);
+        Episodes.Visibility = Visibility.Collapsed;
+    }
+    // The releases of one episode, each a pill; picking one opens that file and makes its release the show's choice.
+    private void ShowDetailVersions(MediaItem item, MediaItem[] versions)
+    {
+        DetailVersions.Children.Clear();
+        var available = versions.Where(x => x.Available).ToArray();
+        DetailVersions.Visibility = available.Length > 1 ? Visibility.Visible : Visibility.Collapsed;
+        if (available.Length < 2) return;
+        DetailVersions.Children.Add(new TextBlock { Text = "Version", Style = (Style)FindResource("MutedText"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 8) });
+        foreach (var candidate in available)
+        {
+            var label = LibraryCatalog.VersionLabel(candidate, versions);
+            var pill = new Button { Content = label, ToolTip = candidate.Path, Margin = new Thickness(0, 0, 8, 8), Tag = candidate.Id };
+            if (candidate.Id == item.Id) pill.Style = (Style)FindResource("Primary");
+            System.Windows.Automation.AutomationProperties.SetName(pill, $"Version {label}");
+            pill.Click += (_, _) => ChooseVersion(candidate, label);
+            DetailVersions.Children.Add(pill);
+        }
+    }
+    // A film's page lists the clips that came with it; a clip's page leads back to the film and its other clips.
+    private void ShowDetailExtras(MediaItem item, MediaItem? film)
+    {
+        DetailExtras.Children.Clear();
+        var owner = film ?? item;
+        var clips = LibraryCatalog.Extras(items, owner).Where(x => x.Available).ToArray();
+        DetailExtrasSection.Visibility = clips.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (clips.Length == 0) return;
+        foreach (var entry in film is null ? clips : clips.Prepend(owner))
+        {
+            var pill = new Button { Content = entry.Id == owner.Id ? "Film" : entry.Title, ToolTip = entry.Path, Margin = new Thickness(0, 0, 8, 8), Tag = entry.Id };
+            if (entry.Id == item.Id) pill.Style = (Style)FindResource("Primary");
+            pill.Click += (_, _) => { Select(entry); Details.ScrollToTop(); };
+            DetailExtras.Children.Add(pill);
+        }
+    }
+    private string? PreferredVersion(MediaItem? item) => item?.Series is null ? null : PreferredVersion(LibraryIdentity.ShowKey(item));
+    private string? PreferredVersion(string? showKey) => showKey is null ? null : library.Setting("version:" + showKey);
+    private void ChooseVersion(MediaItem version, string label)
+    {
+        library.Setting("version:" + LibraryIdentity.ShowKey(version), label);
+        Select(version);
+        // Season cards and queues now lead with this release.
+        FilterLibrary(); RefreshHome();
+    }
+    private async Task UpdateDetailPosterAsync(MediaItem item)
+    {
+        var generation = ++detailPosterGeneration;
+        var path = await Task.Run(() => LibraryCatalog.EpisodeArtwork(item));
+        if (closing || generation != detailPosterGeneration) return;
+        if (path == detailPosterPath && (path is null || DetailPoster.Source is not null)) return;
+        detailPosterPath = path; DetailPoster.Source = null;
+        var view = new LibraryCardView(new LibraryCard(item.DisplayTitle, item.Caption, path, item, "episode"));
+        await view.LoadPosterAsync();
+        if (!closing && generation == detailPosterGeneration) DetailPoster.Source = view.Poster;
+    }
+    private void EpisodeChanged(object sender, SelectionChangedEventArgs e) { if (Episodes.SelectedItem is MediaItem item) { selected = item; DetailSummary.Text = item.Caption + (item.Available ? "" : " · File unavailable"); } }
+    private void AddFolder(object sender, RoutedEventArgs e)
+    {
+        var picker = new OpenFolderDialog { Title = "Choose a movie, show, anime or music folder", Multiselect = true };
+        if (picker.ShowDialog(this) != true) return;
+        foreach (var path in picker.FolderNames.Where(path => !folders.Any(x => x.Path.Equals(path, StringComparison.OrdinalIgnoreCase))))
+            folders.Add(new(path, "Mixed"));
+        SaveFolders();
+        scanDelay.Stop(); scanDelay.Start(); SetStatus("Folder added. Scanning your library…");
+    }
+    private void RemoveFolder(object sender, RoutedEventArgs e)
+    {
+        if (FolderList.SelectedItem is LibraryFolder folder) { folders.Remove(folder); SaveFolders(); scanDelay.Stop(); scanDelay.Start(); _ = Guard(async () => { await RefreshLibrary(); SetStatus("Folder removed from library."); }); }
+    }
+    private void ChangeFolderKind(object sender, RoutedEventArgs e)
+    {
+        if (FolderList.SelectedItem is not LibraryFolder folder) { SetStatus("Select a folder, then choose its category."); return; }
+        folders[folders.IndexOf(folder)] = folder with { Kind = ((ComboBoxItem)FolderKind.SelectedItem).Content.ToString()! };
+        SaveFolders(); scanDelay.Stop(); scanDelay.Start(); SetStatus("Folder category updated. Scanning your library…");
+    }
+    private void MixedFolderMusicClick(object sender, RoutedEventArgs e)
+    {
+        var on = MixedFolderMusic.IsChecked == true;
+        library.MixedFoldersListMusic = on; WatchFolders(); scanDelay.Stop(); scanDelay.Start();
+        // Turning it off drops the music now; turning it on finds it with the scan.
+        _ = Guard(async () => { await RefreshLibrary(); SetStatus(on ? "Mixed folders now list music. Scanning your library…" : "Mixed folders no longer list music."); });
+    }
+    private void FolderSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (RemoveFolderButton is null || ChangeFolderButton is null) return;
+        var selectedFolder = FolderList.SelectedItem as LibraryFolder;
+        FolderEditor.Visibility = selectedFolder is null ? Visibility.Collapsed : Visibility.Visible;
+        if (selectedFolder is not null) FolderKind.SelectedItem = FolderKind.Items.OfType<ComboBoxItem>().FirstOrDefault(x => (string)x.Content == selectedFolder.Kind);
+        RemoveFolderButton.IsEnabled = ChangeFolderButton.IsEnabled = !scanning && selectedFolder is not null;
+    }
+    private void SaveFolders() { library.Setting("folders", Wire.Serialize(folders)); WatchFolders(); ScanButton.IsEnabled = !scanning && folders.Count > 0; }
+    private void WatchFolders()
+    {
+        foreach (var watcher in watchers) watcher.Dispose(); watchers.Clear();
+        foreach (var folder in folders.Where(x => Directory.Exists(x.Path)))
+        {
+            try
+            {
+                var watcher = new FileSystemWatcher(folder.Path) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName, EnableRaisingEvents = true };
+                void Changed() => Dispatcher.BeginInvoke(() => { scanDelay.Stop(); scanDelay.Start(); });
+                var music = folder.Kind == MusicFiles.Kind || folder.Kind == "Mixed" && library.MixedFoldersListMusic;
+                watcher.Created += (_, e) => { if (FileNames.AffectsLibrary(e.FullPath, false, music)) Changed(); };
+                watcher.Deleted += (_, e) => { if (FileNames.AffectsLibrary(e.FullPath, true, music)) Changed(); };
+                watcher.Renamed += (_, e) => { if (FileNames.AffectsLibrary(e.OldFullPath, true, music) || FileNames.AffectsLibrary(e.FullPath, false, music)) Changed(); };
+                watchers.Add(watcher);
+            }
+            catch (IOException) { }
+        }
+    }
+    private async void ScanClick(object sender, RoutedEventArgs e)
+    {
+        if (scanning) { scanCancellation?.Cancel(); return; }
+        await Guard(Scan);
+    }
+    private Task Scan() => Scan(fromWatcher: false);
+    private async Task Scan(bool fromWatcher)
+    {
+        if (scanning) return; scanning = true;
+        ScanButton.IsEnabled = false;
+        AddFolderButton.IsEnabled = RemoveFolderButton.IsEnabled = ChangeFolderButton.IsEnabled = FolderKind.IsEnabled = MixedFolderMusic.IsEnabled = ExcludeFolderButton.IsEnabled = RestoreFolderButton.IsEnabled = false;
+        RescanButton.Content = "Cancel scan";
+        RescanButton.ToolTip = "Stop scanning; keep files already indexed";
+        ScanProgress.Visibility = Visibility.Visible;
+        scanCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        CancelScanButton.Visibility = Visibility.Visible;
+        try
+        {
+            var progress = new ScanProgressSink(this);
+            var scannedItems = await library.ScanAsync(folders.ToArray(), progress, scanCancellation.Token, exclusions.ToArray());
+            Interlocked.Exchange(ref pendingScanStatus, null);
+            var candidates = wanted.Values.Where(x => x.Candidate is not null).Select(x => x.Id).ToHashSet();
+            RefreshLibraryFromItems(scannedItems);
+            AnnounceArrivals(candidates);
+            ScanStatus.Text = $"Scan complete · {items.Count} files indexed.";
+            // A watcher scan that changed nothing has nothing new to identify.
+            if (SavedAutoArtwork && !scanCancellation.IsCancellationRequested && (!fromWatcher || library.LastScanChanges > 0)) await FetchArtwork(scanCancellation.Token);
+        }
+        catch (OperationCanceledException) when (!lifetime.IsCancellationRequested) { var partial = await Task.Run(library.All); RefreshLibraryFromItems(partial); ScanStatus.Text = "Scan cancelled. Files already indexed remain in your library."; SetStatus(ScanStatus.Text); }
+        finally
+        {
+            scanning = false;
+            ScanButton.IsEnabled = folders.Count > 0; RescanButton.IsEnabled = true;
+            AddFolderButton.IsEnabled = FolderKind.IsEnabled = MixedFolderMusic.IsEnabled = ExcludeFolderButton.IsEnabled = true;
+            RestoreFolderButton.IsEnabled = ExcludedFolderList.SelectedItem is string;
+            RemoveFolderButton.IsEnabled = ChangeFolderButton.IsEnabled = FolderList.SelectedItem is LibraryFolder;
+            RescanButton.Content = "Rescan";
+            RescanButton.ToolTip = "Check your folders for new videos";
+            ScanProgress.Visibility = Visibility.Collapsed;
+            CancelScanButton.Visibility = Visibility.Collapsed;
+            scanCancellation.Dispose(); scanCancellation = null;
+        }
+    }
+    private void CancelScan(object sender, RoutedEventArgs e) => scanCancellation?.Cancel();
+    private async void FetchArtworkClick(object sender, RoutedEventArgs e)
+    {
+        await Guard(() => FetchArtwork(lifetime.Token, refresh: (MetadataRefresh)MetadataRefreshMode.SelectedIndex));
+    }
+    private void OpenTmdbAttribution(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+    {
+        if (e.Uri.AbsoluteUri is "https://www.themoviedb.org/" or "https://www.justwatch.com/")
+            Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+        e.Handled = true;
+    }
+    private bool SaveMetadataToken()
+    {
+        if (MetadataToken.Password == savedMetadataToken) return true;
+        // Accept a pasted "Bearer …" token, but never save a key every provider would reject.
+        var entered = MetadataToken.Password.Trim();
+        if (entered.Length > 0 && !TmdbCredentials.TryNormalize(entered, out entered))
+        { MetadataKeyStatus.Text = "This isn't a TMDB API key or read access token. Paste only the key from your TMDB account settings."; return false; }
+        try
+        {
+            MetadataCredential.Save(App.DataDirectory, entered);
+            MetadataToken.Password = savedMetadataToken = entered;
+            return true;
+        }
+        catch (Exception ex) when (ex is Win32Exception or ArgumentException)
+        { MetadataKeyStatus.Text = "Could not save the TMDB key. " + ex.Message; return false; }
+    }
+    private void MetadataKeyChanged(object sender, RoutedEventArgs e)
+    {
+        PreferencesChanged(sender, e);
+        MetadataKeyStatus.Text = MetadataToken.Password != savedMetadataToken ? "Unsaved key." : savedMetadataToken.Length > 0 ? "Personal key saved securely." : TmdbCredentials.DefaultStatus;
+    }
+    private Task FetchArtwork() => FetchArtwork(lifetime.Token);
+    private async Task FetchArtwork(CancellationToken cancellation, bool force = false, MetadataRefresh? refresh = null)
+    {
+        // A forced refresh requested mid-fetch (such as a numbering change) runs next.
+        if (artworkBusy) { if (force) { artworkRerun = true; SetStatus("Metadata will refresh when the current fetch finishes."); } return; }
+        artworkBusy = true;
+        var token = savedMetadataToken;
+        var progress = new Progress<string>(SetStatus);
+        try
+        {
+            var report = await Task.Run(() => AutomaticArtwork.FetchAsync(library, App.DataDirectory, token, progress, cancellation, force: force, refresh: refresh), cancellation);
+            var roots = folders.ToArray(); var excluded = exclusions.ToArray();
+            var refreshed = await Task.Run(() => library.PruneAndLoad(roots, excluded), cancellation);
+            if (closing) return;
+            RefreshLibraryFromItems(refreshed); SetStatus(report);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        finally
+        {
+            ApplyLibraryUpdates(); artworkBusy = false;
+            if (artworkRerun && !closing) { artworkRerun = false; _ = Guard(async () => { await FetchArtwork(lifetime.Token, true); await RefreshLibrary(); }); }
+        }
+    }
+    private async void MatchClick(object sender, RoutedEventArgs e) => await Guard(async () =>
+    {
+        if (selected is null) return;
+        if (selected.MetadataLocked) { SetStatus("Metadata is locked for this title. Unlock it before choosing a match."); return; }
+        var item = selected; var query = Dialogs.Prompt(this, "Find artwork", "Search by movie or series title", item.DisplayTitle, action: "Search"); if (query is null) return;
+        var result = await MetadataIdentification.SearchAsync(library, item, query, savedMetadataToken, lifetime.Token);
+        if (result.Matches.Count == 0) { SetStatus("No matches. " + string.Join(" ", result.Warnings)); return; }
+        var match = Dialogs.Choose(this, result.Matches, candidate => MetadataIdentification.PosterAsync(candidate, App.DataDirectory, savedMetadataToken, lifetime.Token), string.Join(" ", result.Warnings));
+        if (match is null) return;
+        match = await MetadataIdentification.DetailsAsync(library, match, savedMetadataToken, lifetime.Token);
+        string? poster = null;
+        try { poster = await MetadataIdentification.PosterAsync(match, App.DataDirectory, savedMetadataToken, lifetime.Token); }
+        catch (Exception ex) when (!lifetime.IsCancellationRequested && ex is IOException or HttpRequestException or TaskCanceledException)
+        { PlaybackDiagnostics.Record("metadata-manual-artwork-failure", new { item.Id, item.Title, match.Provider, Error = ex.GetType().Name }); }
+        foreach (var entry in library.All().Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item)))
+            library.Save(MetadataIdentification.Apply(entry, match, poster));
+        if (item.Series is not null && LibraryIdentity.InShow(item, browseSeries, browseKind))
+        { browseSeries = match.Type == "tv" ? LibraryIdentity.ShowKey(item) : null; browseKind = match.Kind; if (browseSeries is null) browseSeason = null; }
+        if (match.Type == "tv")
+        {
+            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(20) };
+            await SeriesMetadata.FetchAsync(library, App.DataDirectory, savedMetadataToken, new Progress<string>(SetStatus), lifetime.Token, http, true);
+        }
+        await RefreshLibrary(); if (items.FirstOrDefault(x => x.Id == item.Id) is { } matched) Select(matched);
+        SetStatus(poster is null ? "Title matched. Poster unavailable; use Retry missing artwork to try again." : "Title matched with " + match.Provider + ".");
+    });
+    private async void EditTitle(object sender, RoutedEventArgs e) => await Guard(async () =>
+    {
+        if (selected is null) return;
+        var item = selected;
+        var title = Dialogs.Prompt(this, "Correct title", item.Series is null ? "Movie title" : "Series title (applies to every episode)", item.DisplayTitle,
+            text => text.Length > 300 ? "Use a title with at most 300 characters." : null, action: "Save title");
+        if (title is null) return;
+        foreach (var entry in items.Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item)))
+            library.Save(entry with { Title = title, Series = entry.Series is null ? null : title, Matched = true, LockedFields = (entry.LockedFields ?? []).Append("Title").Distinct().ToArray() });
+        if (item.Series is not null && LibraryIdentity.InShow(item, browseSeries, browseKind)) browseSeries = LibraryIdentity.ShowKey(item);
+        await RefreshLibrary(); if (items.FirstOrDefault(x => x.Id == item.Id) is { } corrected) Select(corrected);
+        SetStatus("Title corrected. Rescanning will preserve your changes.");
+    });
+    private void LocalPoster(object sender, RoutedEventArgs e)
+    {
+        if (selected is null) return;
+        var picker = new OpenFileDialog { Filter = "Poster image|*.jpg;*.jpeg;*.png" };
+        if (picker.ShowDialog(this) != true) return;
+        var dir = Path.Combine(App.DataDirectory, "posters"); Directory.CreateDirectory(dir);
+        var dest = Path.Combine(dir, selected.Id + "-" + Guid.NewGuid().ToString("N") + Path.GetExtension(picker.FileName)); File.Copy(picker.FileName, dest, true);
+        foreach (var entry in items.Where(x => x.Id == selected.Id || LibraryIdentity.SameShow(x, selected))) library.Save(entry with { Poster = dest, SeriesPoster = entry.Series is null ? null : dest, Matched = true, PosterSource = "Local artwork", LockedFields = (entry.LockedFields ?? []).Append("Poster").Distinct().ToArray() });
+        _ = Guard(RefreshLibrary);
+    }
+    private async void PlayLocal(object sender, RoutedEventArgs e) => await Guard(async () => { if (GuestLibrary) { WatchGuestVideo(); return; } if (selected is not null) { queuePosition = -1; await PlayLocalItem(selected); PublishQueue(); } });
+    private async Task PlayLocalItem(MediaItem item)
+    {
+        if (!await EnsurePlayer()) return;
+        if (!File.Exists(item.Path)) throw new FileNotFoundException("Movie file is unavailable. Reconnect its drive and rescan.");
+        await Disconnect(preserveFullscreen: (fullscreen || pictureInPicture) && room is null); target = null; loadedMedia = null; playingItem = item;
+        var generation = loadGeneration;
+        localResume = !WasWatched(item.Id) && !item.IsMusic && long.TryParse(library.Setting("position:" + item.Id), out var saved) ? saved : 0;
+        using var media = new Media(vlc!, item.Path, FromType.FromPath);
+        ready = false; RoomHeading.Text = PlaybackTitle(item); RoomSubtitle.Text = item.Caption;
+        ConnectionStatus.Text = "Local playback";
+        ShowKnownMusic();
+        await PrepareVideoSurface();
+        if (closing || generation != loadGeneration || room is not null) return;
+        player!.Play(media);
+    }
+    private void RestartLocal(object sender, RoutedEventArgs e)
+    {
+        if (selected is null) return;
+        library.Setting("position:" + selected.Id, "0");
+        SetWatched(selected, false);
+        if (playingItem?.Id == selected.Id) playingItem = null;
+        PlayLocal(sender, e);
+    }
+    private void UpdateCardPlayback(LibraryCardView view)
+    {
+        var position = (view.IsEpisode || view.IsMovie) && long.TryParse(library.Setting("position:" + view.Card.Media.Id), out var saved) ? saved : 0;
+        view.SetPlayback(position, LibraryWatchProgress.IsWatched(items, view.Card, WasWatched));
+    }
+    private void SavePlaybackPosition()
+    {
+        // Songs always start from the beginning, so they keep no resume position and stay out of Continue watching.
+        if (nativeStopCount == 0 && (room is null || room.Identity?.Host == true) && playingItem is { IsMusic: false } && player is not null && player.Time >= 0)
+        {
+            var time = player.Time; var length = player.Length;
+            var saved = new List<KeyValuePair<string, string>> { KeyValuePair.Create("position:" + playingItem.Id, WasWatched(playingItem.Id) || length > 0 && time >= length - 2000 ? "0" : Math.Max(0, time).ToString()) };
+            // Home orders unfinished titles by when they were last played.
+            if (time >= 10000) saved.Add(KeyValuePair.Create("played:" + playingItem.Id, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()));
+            library.SetSettings(saved);
+            foreach (var card in libraryCards.Where(x => x.Card.Media.Id == playingItem.Id)) UpdateCardPlayback(card);
+        }
+    }
+    private async void HostClick(object sender, RoutedEventArgs e) => await Guard(async () =>
+    {
+        if (GuestLibrary) { WatchGuestVideo(); return; }
+        if (selected is null || roomBusy) return;
+        if (!File.Exists(selected.Path)) throw new FileNotFoundException("Movie file is unavailable.");
+        var item = selected;
+        if (room?.IsConnected == true) RememberCurrentRoom();
+        var current = savedRooms.FirstOrDefault(saved => room?.IsConnected == true && room.Identity?.Host == true &&
+            saved.Server == room.ServerAddress && saved.Code == room.Identity.Room);
+        var choice = Dialogs.ChooseWatchRoom(this, savedRooms.Where(saved => saved.HostKey is not null), current, ValidateRoomName);
+        if (choice is null) return;
+        if (choice.Room is { } chosen && room?.IsConnected == true && room.Identity?.Host == true &&
+            chosen.Server == room.ServerAddress && chosen.Code == room.Identity.Room)
+        {
+            StartHostedVideo(item);
+            ShowPage("Room"); return;
+        }
+        var server = choice.Room?.Server ?? SavedServerAddress;
+        RoomAddress.ValidateServer(server);
+        pendingRoomName = choice.NewRoomName;
+        roomBusy = true; DetailHost.IsEnabled = false; RefreshSavedRooms();
+        try {
+        await Disconnect(); playingItem = item; var client = NewRoom();
+        client.SetHostedFile(item.Path, PlaybackTitle(item));
+        SetStatus("Connecting to the room service…");
+        try { await client.ConnectAsync(server, SavedDisplayName, choice.Room?.Code, choice.Room?.HostKey,
+            persistent: true, roomName: choice.NewRoomName ?? choice.Room?.Name); }
+        catch (Exception ex) when (ex is System.Net.Http.HttpRequestException or IOException or OperationCanceledException)
+        {
+            await Disconnect();
+            throw new IOException($"Cannot reach the room service at {server}. Check the server address in Settings. Localhost requires a server running on this computer.", ex);
+        }
+        catch { await Disconnect(); throw; }
+        StartHostedVideo(item);
+        RememberCurrentRoom(); ShowPage("Room"); SetStatus("Private room connected. Waiting for guests.");
+        } finally { pendingRoomName = null; roomBusy = false; DetailHost.IsEnabled = selected?.Available == true && File.Exists(selected.Path); RefreshSavedRooms(); UpdateSessionControls(); }
+    });
+    private async void JoinClick(object sender, RoutedEventArgs e) => await Guard(async () =>
+    {
+        if (roomBusy) return;
+        var invitation = Dialogs.Prompt(this, "Join a watch room", "Paste the invitation link or room code", validate: text =>
+        { try { RoomAddress.Parse(text, SavedServerAddress); return null; } catch (ArgumentException ex) { return ex.Message; } },
+            action: "Join room", help: "Ask your friend for an invitation. You can join without any video files; the host approves your entry."); if (string.IsNullOrWhiteSpace(invitation)) return;
+        var address = RoomAddress.Parse(invitation, SavedServerAddress);
+        roomBusy = true;
+        RefreshSavedRooms();
+        try {
+            await Disconnect(); playingItem = null; var client = NewRoom(); SetStatus("Joining room…");
+            try { await client.ConnectAsync(address.Server, SavedDisplayName, address.Code); }
+            catch { await Disconnect(); throw; }
+            RoomHeading.Text = "Your watch room";
+            RememberCurrentRoom(); RoomSubtitle.Text = "Waiting for host approval"; ShowPage("Room");
+        } finally { roomBusy = false; RefreshSavedRooms(); UpdateSessionControls(); }
+    });
+    private RoomClient NewRoom()
+    {
+        var client = new RoomClient(library); room = client; ResetHeroArtworkRequests();
+        guestBrowse = new(); guestLibraryNotice = null; guestBrowsePending = false; ++guestBrowseRequest;
+        guestCurrentBrowse = null; guestHadLibraryLease = false; guestParentTitle = null;
+        client.LibraryThumbnail = CachedLibraryThumbnail;
+        client.LibraryArtwork = HighResolutionLibraryArtwork;
+        client.FullHdArtwork = FullHdLibraryArtwork;
+        ResetGuestMirror();
+        guestLibraryCache.Clear(); guestLibraryCards.Clear();
+        client.SetHostedLibrary(items);
+        // A burst of snapshots only needs the latest one; other messages are handled one by one, in order.
+        var pendingSnapshot = new System.Runtime.CompilerServices.StrongBox<WireMessage?>();
+        client.Message += msg =>
+        {
+            if (msg.Type == "snapshot")
+            {
+                if (Interlocked.Exchange(ref pendingSnapshot.Value, msg) is not null) return;
+                Dispatcher.BeginInvoke(async () =>
+                {
+                    if (Interlocked.Exchange(ref pendingSnapshot.Value, null) is { } latest && room == client) await Guard(() => OnRoomMessage(latest));
+                });
+                return;
+            }
+            Dispatcher.BeginInvoke(async () => { if (room == client) await Guard(() => OnRoomMessage(msg)); });
+        };
+        // A guest's connection is ready for the host's queues; queue messages and edits travel on it.
+        client.LibraryPeerReady += id => Dispatcher.BeginInvoke(() => { if (room == client && client.Identity?.Host == true) ShareQueues(id); });
+        client.LibraryMessage += (id, message) => Dispatcher.BeginInvoke(() => { if (room == client) ReceiveQueueMessage(client, id, message); });
+        client.Status += text => Dispatcher.BeginInvoke(() =>
+        {
+            if (room != client) return; ConnectionStatus.Text = text;
+            if (text.StartsWith("Host disconnected", StringComparison.Ordinal) || text.StartsWith("Host offline", StringComparison.Ordinal))
+            { playbackRecovery.Clear(); player?.SetPause(true); target = null; loadedMedia = null; ready = false; ++loadGeneration; RoomSubtitle.Text = "Host offline · Waiting for the host to return"; SetStatus(text); UpdateSessionControls(); RefreshVoice(); }
+            if (text.StartsWith("Disconnected", StringComparison.Ordinal) || text.StartsWith("Room discovery is offline", StringComparison.Ordinal))
+            { SetStatus(text); _ = ReconnectRoomAsync(client); }
+            if (text.StartsWith("Host connection restored", StringComparison.Ordinal) || text.StartsWith("Reconnecting to host", StringComparison.Ordinal)) RefreshVoice();
+        });
+        VoiceRoomChanged(client, reconnecting: roomReconnect is not null);
+        return client;
+    }
+    private string[] guestQueueTitles = [];
+    private System.Collections.IEnumerable? guestQueueSource;
+    private async Task OnRoomMessage(WireMessage message)
+    {
+        if (room is null) return;
+        switch (message.Type)
+        {
+            case "peer-left": _ = NotifyPeerDeparture(room, message); break;
+            case "peer-connected": CancelPeerNotice(message.Sender); break;
+            case "peer-recovering":
+                // Let the native forward buffer cover a temporary transport loss.
+                BeginBufferedRecovery();
+                RoomSubtitle.Text = "Connection interrupted · Reconnecting…";
+                UpdateSessionControls();
+                break;
+            case "peer-recovered":
+                playbackRecovery.Clear();
+                CancelPeerNotice(message.Sender);
+                appliedRevision = readyGeneration = -1;
+                // A long outage can exhaust VLC's HTTP input. Reopen only that
+                // failed input; ordinary reconnects retain the same player/bridge.
+                if (player?.State == VLCState.Error && room.Snapshot?.Media is { } recoveredMedia)
+                    await LoadRoomMedia(recoveredMedia);
+                ApplyRoomPlayback(); ReportReady();
+                UpdateSessionControls();
+                break;
+            case "catalog-artwork-chunk": ReceiveHostArtwork(message); break;
+            case "catalog-pointer": ReceiveGuestPointer(message); break;
+            case "session-artwork-chunk": ReceiveHeroArtwork(message); break;
+            case "catalog-started":
+                if (!GuestLibrary) selected = playingItem = items.FirstOrDefault(item => item.Id == message.Target);
+                ShowPage("Room"); break;
+            case "catalog-page": case "catalog-error": if (!ReceiveArtworkError(message)) ReceiveHostLibrary(message); break;
+            case "welcome":
+                RememberCurrentRoom();
+                if (room.Identity!.Host && room.HostedMedia is not null)
+                {
+                    room.Send(new("media", Data: Wire.Serialize(room.HostedMedia.Media)));
+                    PublishQueue();
+                    RoomSubtitle.Text = "Private room · Share your invitation to bring friends";
+                    SetThreadExecutionState(0x80000003);
+                }
+                break;
+            case "admitted": RoomSubtitle.Text = "Admitted · Connecting to host…"; break;
+            case "snapshot":
+                var snapshot = Wire.Read<RoomSnapshot>(message.Data!);
+                ShareQueuesWithNewGuests(snapshot);
+                SyncCurrentRoomName(snapshot);
+                if (room.Identity?.Host == false)
+                {
+                    QueueStatus.Text = $"{snapshot.Queue?.Length ?? 0} videos in the host's queue";
+                    SetQueuePill("Queue", snapshot.Queue?.Length > 0 ? $"{snapshot.Queue.Length} videos" : "Off");
+                    if (guestQueueSource is null || !ReferenceEquals(QueueList.ItemsSource, guestQueueSource) || !(snapshot.Queue ?? []).SequenceEqual(guestQueueTitles))
+                    { guestQueueTitles = snapshot.Queue ?? []; QueueList.ItemsSource = guestQueueSource = guestQueueTitles.Select(title => new { QueueTitle = title }).ToArray(); }
+                }
+                foreach (var id in pendingAdmissions.Keys.ToArray())
+                {
+                    var participant = snapshot.People.FirstOrDefault(p => p.Id == id);
+                    if (participant is null || participant.Approved)
+                    {
+                        pendingAdmissions.Remove(id);
+                        ShowRoomFeedback(participant is null ? "The guest left the room." : $"{participant.Name} admitted.");
+                    }
+                }
+                RecordRoomSession();
+                RefreshPeople(snapshot, settings: false); RefreshSavedRooms();
+                VoiceSnapshot(snapshot);
+                SharedControls.IsEnabled = room.Identity?.Host == true; SharedControls.IsChecked = snapshot.SharedControls; RefreshSharedControlsChip();
+                if (room.Identity?.Host != true && !snapshot.SharedControls) { playbackPause.Clear(); playbackIntent.Clear(); }
+                if (snapshot.Playback is not null) AcceptState(snapshot.Playback);
+                if (snapshot.Media is not null && snapshot.Media.Id != loadedMedia) await LoadRoomMedia(snapshot.Media);
+                if (ready) RefreshTracks();
+                UpdateSessionControls();
+                RefreshSharedLibrary();
+                break;
+            case "playback": AcceptState(Wire.Read<PlaybackState>(message.Data!)); break;
+            case "error" when ReceiveHeroArtworkError(message): break;
+            case "error": ShowRoomFeedback(message.Text ?? "Room error"); SetStatus(message.Text ?? "Room error"); break;
+        }
+        UpdateRoomPlaybackStatus();
+    }
+    private void AcceptState(PlaybackState state)
+    {
+        if (target is null || state.Revision > target.Revision)
+        {
+            if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("revision", new { state.Revision, state.Playing, state.PositionMs, state.AtUnixMs, state.CommandId, state.Generation, state.RequestedPlaying, serverMs = room?.ServerNowMs });
+            target = state; appliedRevision = -1;
+            playbackPause.Observe(state); playbackIntent.Observe(state);
+            ApplyRoomPlayback();
+            if (room is { } client && state.AtUnixMs > client.ServerNowMs)
+                _ = ApplyScheduledPlayback(client, state);
+        }
+    }
+    private async void CardArtworkLoaded(object sender, RoutedEventArgs e)
+    {
+        if (((Image)sender).DataContext is LibraryCardView view) { await view.LoadPosterAsync(); await ImproveEpisodeArtwork(view); }
+    }
+    // The card's title tooltip only appears when the caption is cut short and the card has artwork;
+    // otherwise the full title is already on screen and the tooltip would just cover it.
+    private void CardToolTipOpening(object sender, ToolTipEventArgs e)
+    {
+        if (sender is not FrameworkElement card) return;
+        var artwork = card.FindName("CardArtwork") as Image;
+        if (card.FindName("CardTitle") is TextBlock title && (artwork?.Source is null || !IsTrimmed(title))) e.Handled = true;
+    }
+    private static bool IsTrimmed(TextBlock text)
+    {
+        if (string.IsNullOrEmpty(text.Text) || text.ActualWidth <= 0) return false;
+        var formatted = new FormattedText(text.Text, System.Globalization.CultureInfo.CurrentUICulture, text.FlowDirection,
+            new Typeface(text.FontFamily, text.FontStyle, text.FontWeight, text.FontStretch), text.FontSize, Brushes.Black,
+            VisualTreeHelper.GetDpi(text).PixelsPerDip);
+        if (text.TextWrapping == TextWrapping.NoWrap) return formatted.Width > text.ActualWidth + 0.5;
+        formatted.MaxTextWidth = text.ActualWidth;
+        if (!double.IsNaN(text.LineHeight)) formatted.LineHeight = text.LineHeight;
+        return formatted.Height > text.ActualHeight + 0.5;
+    }
+    private async void CardArtworkUpdated(object sender, System.Windows.Data.DataTransferEventArgs e)
+    {
+        if (((Image)sender).DataContext is LibraryCardView view) await view.LoadPosterAsync();
+    }
+    // A black thumbnail from an earlier capture is dropped so the next capture can replace it.
+    private static MediaItem WithoutFlatThumbnail(MediaItem item)
+    {
+        if (!VideoFrames.IsFlatThumbnail(item.GeneratedEpisodePoster)) return item;
+        try { File.Delete(item.GeneratedEpisodePoster!); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return item with { GeneratedEpisodePoster = null };
+    }
+    // A film's clip has no card of its own, so its frame thumbnail is taken when its page opens.
+    private async Task ImproveClipArtwork(MediaItem item)
+    {
+        if (!episodeArtworkRequests.Add(item.Id + ":clip")) return;
+        try
+        {
+            item = await Task.Run(() => WithoutFlatThumbnail(item));
+            var improved = await Task.Run(() => episodeArtwork.ImproveAsync(item, App.DataDirectory, savedMetadataToken, lifetime.Token, MetadataOptions.Load(library) with { Providers = [] }));
+            if (closing || improved == item || !ArtworkCache.IsUsable(improved.GeneratedEpisodePoster)) return;
+            var current = await Task.Run(() => library.Get(item.Id));
+            if (current is null || current.Path != item.Path) return;
+            var saved = current with { GeneratedEpisodePoster = improved.GeneratedEpisodePoster };
+            library.Save(saved);
+            if (selected?.Id == item.Id) { selected = saved; _ = UpdateDetailPosterAsync(saved); }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or UnauthorizedAccessException) { }
+    }
+    private async Task ImproveEpisodeArtwork(LibraryCardView view)
+    {
+        // Runs for every card realized while scrolling: return before any settings reads.
+        if (view.IsRemote || !view.IsEpisode || view.Card.Media.IsMusic) return;
+        var item = view.Card.Media;
+        var token = savedMetadataToken;
+        var options = await Task.Run(() =>
+        {
+            var options = MetadataOptions.Load(library);
+            return SavedAutoArtwork ? options : options with { Providers = [] };
+        });
+        if (closing || !episodeArtworkRequests.Add(item.Id + ":" + item.EpisodeSource + ":" + LibraryIdentity.Hash(token) + ":" + string.Join(',', options.ProviderOrder))) return;
+        try
+        {
+            item = await Task.Run(() => WithoutFlatThumbnail(item));
+            var improved = await Task.Run(() => episodeArtwork.ImproveAsync(item, App.DataDirectory, token, lifetime.Token, options));
+            if (closing || improved == item) return;
+            var current = await Task.Run(() => library.Get(item.Id));
+            if (current is null || current.EpisodeSource != item.EpisodeSource || current.Path != item.Path ||
+                current.EpisodePoster != item.EpisodePoster || current.Season != item.Season || current.Episode != item.Episode ||
+                current.ShowId != item.ShowId || current.MetadataId != item.MetadataId || current.MetadataProvider != item.MetadataProvider ||
+                current.NumberingOrder != item.NumberingOrder || LibraryIdentity.Locked(current, "EpisodePoster")) return;
+            library.Save(current with { EpisodePoster = improved.EpisodePoster, EpisodePosterQualityPath = improved.EpisodePosterQualityPath,
+                GeneratedEpisodePoster = improved.GeneratedEpisodePoster });
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or HttpRequestException or UnauthorizedAccessException) { }
+    }
+    private async Task<bool> CaptureEpisodeFrame(string video, double seconds, string output, CancellationToken ct)
+    {
+        // Native libraries load under the loader lock; wait until the player has started so startup stays smooth.
+        await playerInitialized.Task.WaitAsync(ct);
+        try { return await VideoFrames.CaptureAsync(video, seconds, output, ct); }
+        catch (VLCException) { return false; }
+    }
+    private async Task ApplyScheduledPlayback(RoomClient client, PlaybackState state)
+    {
+        try
+        {
+            // Resume on the UI context at the server deadline, without waiting
+            // for the next 250 ms UI refresh. Superseded commands do no work.
+            while (room == client && ReferenceEquals(target, state) && client.IsConnected)
+            {
+                var remaining = state.AtUnixMs - client.ServerNowMs;
+                if (remaining <= 0) { ApplyRoomPlayback(); return; }
+                await Task.Delay((int)Math.Min(remaining, 1000), lifetime.Token);
+            }
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+    }
+    private async Task LoadRoomMedia(SharedMedia media)
+    {
+        PlaybackDiagnostics.Record("media-load-start", new { media.Extension, bytes = media.Length });
+        var client = room; if (client is null) return;
+        var generation = ++loadGeneration; loadedMedia = media.Id;
+        ResetRoomTracks();
+        mediaLoadCancellation?.Cancel();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        mediaLoadCancellation = cancellation;
+        var locked = false;
+        try
+        {
+            await loading.WaitAsync(cancellation.Token); locked = true;
+            if (!await EnsurePlayer() || client != room || generation != loadGeneration) return;
+            ready = false; buffering = new(); appliedGeneration = readyGeneration = -1; bridge?.CancelPendingReads(); await StopNativePlayback();
+            playbackRecovery.Clear(); activeStreamingBufferSeconds = SavedStreamingBufferSeconds; readAheadMediaBytes = null;
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (target?.Playing == true) SendReadiness("buffering");
+            if (bridge is not null) await bridge.DisposeAsync(); bridge = null;
+            var source = await client.GetSourceAsync(media, cancellation.Token);
+            if (client != room || generation != loadGeneration) return;
+            Uri? streamUri = null;
+            if (source is not ILocalMediaSource)
+            {
+                bridge = new(); streamUri = await bridge.StartAsync(source);
+            }
+            // The host owns the file already. Feeding it back through HTTP adds
+            // network buffering and slow-seek behavior to otherwise local playback.
+            using var vlcMedia = source is ILocalMediaSource local
+                ? new Media(vlc!, local.LocalPath, FromType.FromPath)
+                : new Media(vlc!, streamUri!);
+            // Start from a short RTT-based cache. The configured buffer is filled
+            // as read-ahead after playback starts and never gates readiness.
+            var networkCacheMs = MediaStreaming.NetworkCacheForRtt(client.RecentRttMs);
+            if (streamUri is not null) { vlcMedia.AddOption($":network-caching={networkCacheMs}"); readAheadMediaBytes = media.Length; }
+            if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("media-input", new { local = source is ILocalMediaSource, media.Extension,
+                networkCacheMs = streamUri is not null ? networkCacheMs : (int?)null, bufferSeconds = streamUri is not null ? activeStreamingBufferSeconds : (int?)null });
+            // VLC's AVI demuxer reads slow-seekable HTTP inputs in 1.5-second
+            // steps, exposing read-ahead time to the synchronization controller.
+            // The avformat demuxer provides a regularly advancing timeline.
+            if (media.Extension.Equals(".avi", StringComparison.OrdinalIgnoreCase)) vlcMedia.AddOption(":demux=avformat");
+            vlcMedia.AddOption(":sub-autodetect-file=0");
+            if (client != room || generation != loadGeneration) return;
+            RoomHeading.Text = client.Snapshot?.Name ?? media.Title; RoomSubtitle.Text = media.Title + " · " + (client.Identity?.Host == true ? "You are hosting" : "Streaming from host");
+            ShowKnownMusic();
+            await PrepareVideoSurface(openPlayer: RoomPage.Visibility == Visibility.Visible);
+            if (client != room || generation != loadGeneration) return;
+            var started = player!.Play(vlcMedia);
+            PlaybackDiagnostics.Record("media-play-request", new { started });
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception ex) { PlaybackDiagnostics.Record("media-load-failed", new { error = ex.GetType().Name, media.Extension }); if (generation == loadGeneration) loadedMedia = null; throw; }
+        finally { if (locked) loading.Release(); if (mediaLoadCancellation == cancellation) mediaLoadCancellation = null; }
+    }
+    private async Task PrepareVideoSurface(bool openPlayer = true)
+    {
+        PlayerEmpty.Visibility = Visibility.Collapsed;
+        // A video started while picture in picture is open plays there; the app stays on its page.
+        if (!openPlayer || pictureInPicture) return;
+        ShowPage("Room");
+        await Dispatcher.InvokeAsync(() => Video.UpdateLayout(), DispatcherPriority.Render);
+        PlayerOverlay.Focus();
+    }
+    private void PlaybackTick()
+    {
+        PlaybackTickCore();
+        RoomSessionTick();
+        // Nothing on screen depends on the player at 250 ms while it is idle behind the library.
+        var active = upNextChoice is not null || room is not null || fullscreen || pictureInPicture || RoomPage.Visibility == Visibility.Visible ||
+            HasMediaPlayback && player?.IsPlaying == true;
+        var interval = TimeSpan.FromMilliseconds(active ? 250 : 1000);
+        if (timer.Interval != interval) timer.Interval = interval;
+    }
+    private long lastTrackRefresh, lastPositionSave, lastDiagnosticSample;
+    private int trackRefreshQueued;
+    private void PlaybackTickCore()
+    {
+        UpdateSystemMediaControls();
+        if (player is not null && RoomPage.Visibility == Visibility.Visible) RefreshSubtitleLift();
+        UpdateAudioPlayback();
+        // The bars float over the video, so they fade when idle: always in fullscreen, and while playing in the window.
+        // Music has nothing behind them to see, so they stay. Cheap managed checks run first; the native playing state is read only once the bars are idle.
+        if (!pictureInPicture && !audioPlayback && PlaybackControls.Visibility == Visibility.Visible && Environment.TickCount64 - lastPlayerInteraction > 2600 &&
+            !seeking && !PlayerMenuOpen && !PlaybackControls.IsMouseOver && !RoomHeader.IsMouseOver &&
+            (fullscreen || RoomPage.Visibility == Visibility.Visible && player?.IsPlaying == true))
+        {
+            if (PlaybackControls.IsKeyboardFocusWithin || RoomHeader.IsKeyboardFocusWithin) PlayerOverlay.Focus();
+            PlaybackControls.Visibility = FullscreenHint.Visibility = Visibility.Collapsed;
+            PlayerOverlay.Cursor = Cursors.None;
+        }
+        UpdateRoomPlaybackStatus();
+        if (player is null || nativeStopCount > 0) return;
+        FitPictureInPictureToVideo();
+        PollBufferedRecovery();
+        StartReadAhead();
+        buffering.Recover(Environment.TickCount64);
+        if (room is not null && !room.IsPeerRecovering && ready && buffering.Poll(target?.WantsPlayback == true, Environment.TickCount64))
+        { readyGeneration = -1; SendReadiness("buffering"); }
+        ReportReady();
+        UpdateSessionControls();
+        RefreshVolumeIndicator();
+        if (pendingSeek is { } requested && (Wire.Now >= seekExpires || (room is null || target?.Revision > seekRevision) && Math.Abs(player.Time - requested) < 1500)) pendingSeek = null;
+        if (!seeking)
+        {
+            Timeline.Maximum = Math.Max(1, player.Length); var shown = pendingSeek ?? endedSeek ?? Math.Max(0, player.Time);
+            Timeline.Value = shown;
+            PlaybackTime.Text = FormatTime(shown) + " / " + FormatTime(player.Length);
+        }
+        var wantsPlayback = WantsMediaPlayback;
+        PlayButton.Content = wantsPlayback ? "\uF8AE" : "\uF5B0";
+        PlayButton.ToolTip = wantsPlayback ? "Pause (Space)" : "Play (Space)";
+        var mono = Environment.TickCount64;
+        // Stream events drive track refreshes; this slow poll only catches anything they miss.
+        if (ready && mono - lastTrackRefresh >= 10000) { lastTrackRefresh = mono; RefreshTracks(); }
+        if (ready && mono - lastPositionSave >= 5000) { lastPositionSave = mono; SavePlaybackPosition(); }
+        // Without detailed diagnostics, sample every 2 s and only while something is playing or a room is open.
+        if (PlaybackDiagnostics.Detailed || PlaybackDiagnostics.Enabled && mono - lastDiagnosticSample >= 2000 && (room is not null || wantsPlayback))
+        {
+            lastDiagnosticSample = mono;
+            var serverMs = room?.ServerNowMs ?? Wire.Now;
+            PlaybackDiagnostics.Record("sample", new { serverMs, position = player.Time,
+                estimated = playbackPosition.Estimate(player.Time, player.IsPlaying, player.Rate, Environment.TickCount64), rate = player.Rate, policy = SyncMath.UseTunedPolicy ? "experimental" : "stable",
+                state = player.State.ToString(), playing = player.IsPlaying, ready, revision = target?.Revision, targetPlaying = target?.Playing,
+                desired = target is null ? (long?)null : SyncMath.TargetPosition(target, serverMs), connected = room?.IsConnected ?? false });
+        }
+        ApplyRoomPlayback();
+    }
+    private void ApplyRoomPlayback()
+    {
+        if (player is null || room is null || !room.IsConnected || room.IsPeerRecovering || target is null || loadedMedia != target.MediaId || !ready) return;
+        // Pause before clock checks, settling, or a potentially slow remote seek.
+        if (playbackPause.Pending || !target.Playing) player.SetPause(true);
+        if (playbackPause.Pending || seeking || pendingSeek is not null && target.Revision <= seekRevision) return;
+        // Seeking or accelerating a starved input discards its recovering buffer
+        // and can turn a brief network delay into repeated audio/video dropouts.
+        var newSeek = appliedGeneration != target.Generation;
+        if (newSeek && target.Seek) { buffering = new(); readyGeneration = -1; }
+        if (!newSeek && (buffering.IsActive || player.State == VLCState.Buffering)) return;
+        long now = room.ServerNowMs;
+        if (now < target.AtUnixMs) { player.SetPause(true); return; }
+        long desired = SyncMath.TargetPosition(target, now);
+        long drift = desired - playbackPosition.Estimate(player.Time, player.IsPlaying, player.Rate, Environment.TickCount64);
+        if (!newSeek && settling.Waiting(target.Revision, Math.Max(0, player.Time), Environment.TickCount64)) return;
+        if (appliedRevision != target.Revision || Math.Abs(drift) > SyncMath.HardSeekMs)
+        {
+            if ((player.State is VLCState.Ended or VLCState.Stopped) && (target.Playing || desired < player.Length - 250))
+            {
+                // Like local replay, reset an ended input before starting it again.
+                // Native Playing will mark it ready; apply this revision afterward.
+                var previous = player.State.ToString(); ready = false; player.Stop();
+                var restarted = player.Play();
+                if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("restart", new { revision = target.Revision, previous, restarted, desired });
+                if (!restarted) SetStatus("Playback could not restart. Reopen the video to try again.");
+                return;
+            }
+            if (target.Playing && appliedRevision != target.Revision) settling.Seek(target.Revision, desired, Environment.TickCount64);
+            if (Math.Abs(drift) > 200 || newSeek && target.Seek)
+            {
+                if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("seek", new { serverMs = now, revision = target.Revision, position = player.Time, desired, drift });
+                settling.Seek(target.Revision, desired, Environment.TickCount64, target.Playing); player.Time = desired;
+            }
+            playbackRate.Reset();
+            player.SetPause(!target.Playing); ApplyPlaybackRate(1); appliedRevision = target.Revision; appliedGeneration = target.Generation;
+            if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("applied", new { revision = appliedRevision, target.CommandId, target.Generation, target.RequestedPlaying, serverMs = now, desired, drift });
+        }
+        else if (target.Playing) ApplyPlaybackRate(SyncMath.UseTunedPolicy ? SyncMath.Correction(drift) : playbackRate.Update(drift, Environment.TickCount64));
+    }
+    private void ApplyPlaybackRate(float rate)
+    {
+        if (player is null || Math.Abs(player.Rate - rate) < .001f) return;
+        var result = player.SetRate(rate);
+        if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("rate", new { requested = rate, actual = player.Rate, result });
+    }
+    private static string FormatTime(long milliseconds) => TimeSpan.FromMilliseconds(Math.Max(0, milliseconds)).ToString(milliseconds >= 3600000 ? @"h\:mm\:ss" : @"mm\:ss");
+    private void SendReadiness(string type)
+    {
+        if (room is null || target is null) return;
+        try
+        {
+            room.Send(new(type, Data: Wire.Serialize(new PlaybackReadiness(target.MediaId, target.Generation))));
+            PlaybackDiagnostics.Record("readiness-sent", new { type, target.Generation, target.Revision, position = player?.Time });
+        }
+        catch (IOException) { }
+    }
+    private void ReportReady()
+    {
+        if (!ready || player is null || target is null || room?.IsPeerRecovering == true || loadedMedia != target.MediaId ||
+            appliedGeneration != target.Generation || readyGeneration == target.Generation || buffering.IsActive ||
+            player.State == VLCState.Buffering || settling.Waiting(target.Revision, Math.Max(0, player.Time), Environment.TickCount64)) return;
+        readyGeneration = target.Generation;
+        SendReadiness("ready");
+    }
+    private void UpdateRoomPlaybackStatus()
+    {
+        var snapshot = room?.Snapshot;
+        var explanation = RoomPlaybackStatus.Describe(snapshot, room?.IsPeerRecovering == true);
+        RoomPlaybackNoticeText.Text = explanation ?? "";
+        RoomPlaybackNotice.Visibility = explanation is null || PlayerEmpty.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        if (explanation is not null) RoomSubtitle.Text = explanation;
+        else if (snapshot?.Media is { } movie)
+            RoomSubtitle.Text = movie.Title + " · " + (room!.Identity?.Host == true ? "You are hosting" : "Streaming from host");
+    }
+    private void SendPlayback(bool playing, long position, bool seek = false, string? stopReason = null)
+    {
+        if (room?.Snapshot?.Media is not { } media) return;
+        if (room.Identity?.Host != true && room.Snapshot.SharedControls != true) { SetStatus("The host controls playback."); return; }
+        if (!seek && target is { } current && player?.State != VLCState.Ended)
+            position = playbackIntent.Position(current, Math.Max(0, player?.Time ?? 0), room.ServerNowMs);
+        var command = new PlaybackState(0, media.Id, playing, position, 0, Guid.NewGuid().ToString("N"), Seek: seek, Stop: stopReason is null ? null : new(stopReason));
+        room.Send(new("playback", Data: Wire.Serialize(command)));
+        playbackPause.Request(command, target?.Revision ?? -1);
+        playbackIntent.Request(command, target?.Revision ?? -1);
+        if (!playing)
+        {
+            player?.SetPause(true);
+            PlayButton.Content = "\uF5B0";
+        }
+        if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("control-request", new { command.CommandId, playing, position, revision = target?.Revision });
+    }
+    // Like VLC: off, then the whole queue or show, then just this video.
+    private enum LoopMode { Off, All, One }
+    private LoopMode loopMode;
+    private void LoopClicked(object sender, RoutedEventArgs e) => ToggleLoop(sender, e);
+    // The button, the L key and the … menu row all step to the next mode.
+    private void ToggleLoop(object sender, RoutedEventArgs e)
+    {
+        if (!LoopButton.IsEnabled) { RefreshLoopButton(); SetStatus("The host controls looping."); return; }
+        loopMode = loopMode switch { LoopMode.Off => LoopMode.All, LoopMode.All => LoopMode.One, _ => LoopMode.Off };
+        RefreshLoopButton();
+        // A folded Loop row in the … menu shows the new mode too.
+        if (LoopButton.Visibility != Visibility.Visible) RefreshOverflowMenu();
+        SetStatus(loopMode switch
+        {
+            LoopMode.All => "Loop all: the queue or show starts again after the last video.",
+            LoopMode.One => "Loop one: this video replays when it ends.",
+            _ => "Loop off.",
+        });
+    }
+    private string LoopLabel => loopMode switch { LoopMode.All => "Loop all", LoopMode.One => "Loop one", _ => "Loop off" };
+    private void RefreshLoopButton()
+    {
+        // A guest's own earlier choice must neither show nor carry over if hosting passes to them; the host chooses.
+        if (room?.Identity is { Host: false } && loopMode != LoopMode.Off) { loopMode = LoopMode.Off; RefreshOverflowMenu(); }
+        // The toggle's own click flips IsChecked; the mode decides it.
+        LoopButton.IsChecked = loopMode != LoopMode.Off;
+        LoopButton.Content = loopMode == LoopMode.One ? "" : "";
+        var label = LoopLabel;
+        LoopButton.ToolTip = !LoopButton.IsEnabled ? "The host controls looping" : label + " (L)";
+        System.Windows.Automation.AutomationProperties.SetName(LoopButton, label);
+    }
+    private void TogglePlayback(object sender, RoutedEventArgs e)
+    {
+        RequestPlayback(!WantsMediaPlayback);
+    }
+    private void RequestPlayback(bool playing)
+    {
+        videoClickUndo = null;
+        // During the up-next countdown, Play continues to the next episode instead of replaying this one;
+        // once the countdown is paused, Play restarts it.
+        if (playing && upNextChoice is not null) { if (upNextPaused) StartUpNextCountdown(); else EndUpNext(true); return; }
+        if (!playing && UpNextCounting) { PauseUpNext(); return; }
+        if (!HasMediaPlayback) return;
+        if (room is not null) SendPlayback(playing, player!.Length > 0 && player.Time >= player.Length - 250 ? 0 : Math.Max(0, player.Time));
+        else if (!playing) player!.SetPause(true);
+        else
+        {
+            // Playing again after the end starts from the timeline position chosen meanwhile, or the beginning.
+            if (player!.State == VLCState.Ended) { player.Stop(); localResume = endedSeek ?? 0; }
+            endedSeek = null;
+            player.Play();
+        }
+    }
+    private bool CanSeek() => player is not null && player.Length > 0 && (room is null || room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
+    private void SeekStarted(object sender, MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        if (!CanSeek()) { SetStatus("The host controls playback, or the video is not ready to seek."); return; }
+        seeking = true; Timeline.CaptureMouse(); UpdateScrub(e.GetPosition(Timeline).X);
+    }
+    private void UpdateScrub(double x)
+    {
+        // Account for the thumb inset so both ends remain reachable.
+        var fraction = Math.Clamp((x - 8) / Math.Max(1, Timeline.ActualWidth - 16), 0, 1);
+        Timeline.Value = fraction * Timeline.Maximum;
+        PlaybackTime.Text = FormatTime((long)Timeline.Value) + " / " + FormatTime(player?.Length ?? 0);
+    }
+    private void SeekMoved(object sender, MouseEventArgs e) { if (seeking && Timeline.IsMouseCaptured) { UpdateScrub(e.GetPosition(Timeline).X); e.Handled = true; } }
+    private void CommitSeek()
+    {
+        if (!seeking) return;
+        seeking = false;
+        if (CanSeek())
+        {
+            var position = (long)Timeline.Value;
+            pendingSeek = position; seekRevision = target?.Revision ?? -1; seekExpires = Wire.Now + 5000;
+            if (room is null) SeekLocal(position); else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true);
+        }
+        if (Timeline.IsMouseCaptured) Timeline.ReleaseMouseCapture();
+    }
+    private void SeekLocal(long position)
+    {
+        if (player!.State == VLCState.Ended) { endedSeek = position; pendingSeek = null; }
+        else { endedSeek = null; player.Time = position; }
+    }
+    private void SeekFinished(object sender, MouseButtonEventArgs e) { if (seeking) { UpdateScrub(e.GetPosition(Timeline).X); CommitSeek(); e.Handled = true; } }
+    private void SeekCaptureLost(object sender, MouseEventArgs e) => CommitSeek();
+    private void SeekKeyStarted(object sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Left or Key.Right or Key.Home or Key.End)) return;
+        e.Handled = true; if (!CanSeek()) return; seeking = true;
+        Timeline.Value = e.Key switch { Key.Home => 0, Key.End => Timeline.Maximum, Key.Left => Math.Max(0, Timeline.Value - 5000), _ => Math.Min(Timeline.Maximum, Timeline.Value + 5000) };
+    }
+    private void SeekKeyFinished(object sender, KeyEventArgs e) { if (e.Key is Key.Left or Key.Right or Key.Home or Key.End) { CommitSeek(); e.Handled = true; } }
+    private void MovePlayback(long offset) { if (player is null || player.Length <= 0) return; var position = Math.Clamp((room is null ? endedSeek ?? player.Time : playbackIntent.Position(target, player.Time, room.ServerNowMs)) + offset, 0, player.Length); if (room is null) SeekLocal(position); else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true); }
+    private async void StopPlayback(object sender, RoutedEventArgs e) => await Guard(async () =>
+    {
+        if (player is null || nativeStopCount > 0) return;
+        if (room is not null) { SendPlayback(false, 0, seek: true, stopReason: "stopped"); return; }
+        ready = false;
+        await loading.WaitAsync();
+        try { await StopNativePlayback(); }
+        finally { loading.Release(); }
+    });
+    private void MutePlayback(object sender, RoutedEventArgs e) { if (player is not null) { player.Mute = !player.Mute; RefreshVolumeIndicator(); } }
+    private void VolumeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (player is not null) { ApplyPlayerVolume(); if (e.NewValue > 0) player.Mute = false; }
+        RefreshVolumeIndicator();
+        ShowVolumeFlyout();
+    }
+    private void VolumeWheel(object sender, MouseWheelEventArgs e)
+    {
+        e.Handled = true;
+        ShowPlayerControls();
+        Volume.Value = Math.Clamp(Volume.Value + e.Delta * 5d / 120, Volume.Minimum, Volume.Maximum);
+    }
+    private void VideoWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.OriginalSource == PlayerOverlay) VolumeWheel(sender, e);
+    }
+    private void TimelineWheel(object sender, MouseWheelEventArgs e)
+    {
+        e.Handled = true;
+        if (!CanSeek() || seeking) return;
+        var position = pendingSeek is { } pending && Wire.Now < seekExpires ? pending :
+            room is null ? endedSeek ?? Math.Max(0, player!.Time) : playbackIntent.Position(target, player!.Time, room.ServerNowMs);
+        Timeline.Maximum = player!.Length;
+        Timeline.Value = Math.Clamp(position + e.Delta * 5000d / 120, 0, player.Length);
+        seeking = true; CommitSeek();
+        PlaybackTime.Text = FormatTime((long)Timeline.Value) + " / " + FormatTime(player.Length);
+        ShowPlayerControls();
+    }
+    private void RefreshTracks()
+    {
+        if (player is null || nativeStopCount > 0) return; tracksUpdating = true;
+        try
+        {
+            DetectTrackLanguages(); DetectSubtitleFiles();
+            var audio = player.AudioTrackDescription.Select(x => new TrackChoice(x.Id, TrackDisplayName(TrackType.Audio, x.Id, x.Name))).ToArray();
+            var subs = player.SpuDescription.Select(x => new TrackChoice(x.Id, TrackDisplayName(TrackType.Text, x.Id, RoomSubtitleName(x.Id, x.Name)))).ToArray();
+            ApplyTrackPreferences(audio, subs);
+            SynchronizeRoomTracks(audio, subs);
+            if (!(AudioTracks.ItemsSource is TrackChoice[] currentAudio) || !currentAudio.SequenceEqual(audio)) AudioTracks.ItemsSource = audio;
+            if (!(SubtitleTracks.ItemsSource is TrackChoice[] currentSubs) || !currentSubs.SequenceEqual(subs)) SubtitleTracks.ItemsSource = subs;
+            AudioTracks.SelectedItem = audio.FirstOrDefault(x => x.Id == player.AudioTrack);
+            SubtitleTracks.SelectedItem = subs.FirstOrDefault(x => x.Id == player.Spu);
+            AudioTracks.IsEnabled = audio.Length > 0 && CanChangeRoomTracks;
+            SubtitleTracks.IsEnabled = subs.Length > 0 && CanChangeRoomTracks;
+        }
+        finally { tracksUpdating = false; }
+    }
+    private void AudioChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!tracksUpdating && CanChangeRoomTracks && AudioTracks.SelectedItem is TrackChoice t && player?.SetAudioTrack(t.Id) == true)
+        {
+            audioTrackChosen = true;
+            var subtitle = ApplySubtitlesForAudio(t.Id);
+            PublishRoomTrack(t.Id, false, subtitle);
+        }
+    }
+    private void SubtitlesChanged(object sender, SelectionChangedEventArgs e) { if (!tracksUpdating && CanChangeRoomTracks && SubtitleTracks.SelectedItem is TrackChoice t) { subtitleTrackChosen = subtitleTrackManuallyChosen = true; player?.SetSpu(t.Id); PublishRoomTrack(t.Id, true); } }
+    private void LoadSubtitles(object sender, RoutedEventArgs e)
+    {
+        if (player is null || !ready || room?.Identity?.Host == false) return;
+        var picker = new OpenFileDialog { Filter = "Subtitles|*.srt;*.ass;*.ssa;*.sub" };
+        if (picker.ShowDialog(this) == true)
+        {
+            if (room is not null)
+            {
+                try { room.ShareSubtitle(picker.FileName); subtitleTrackChosen = subtitleTrackManuallyChosen = true; SetStatus("Sharing subtitles with the room…"); }
+                catch (IOException ex) { SetStatus(ex.Message); }
+                return;
+            }
+            var before = player.SpuDescription.Select(t => t.Id).ToHashSet();
+            if (!player.AddSlave(MediaSlaveType.Subtitle, new Uri(picker.FileName).AbsoluteUri, true)) SetStatus("Subtitles could not be loaded. Check the file format and try again.");
+            else { subtitleTrackChosen = subtitleTrackManuallyChosen = true; RefreshTracks(); _ = WatchLoadedSubtitle(picker.FileName, before, loadGeneration); SetStatus("Subtitles loaded for your player."); }
+        }
+    }
+    private void CopyInvite(object sender, RoutedEventArgs e)
+    {
+        if (room?.IsConnected != true || room.Identity is null) { SetStatus("Create a room from the library first."); return; }
+        try { Clipboard.SetText(room.ServerAddress + "#" + room.Identity.Room); SetStatus("Invitation copied. Guests need the Windows app and host approval."); }
+        catch (ExternalException) { SetStatus("Clipboard is busy. Try Copy invite again."); }
+    }
+    private void ShowRoomFeedback(string text)
+    {
+        RoomFeedback.Text = text; RoomFeedback.Visibility = Visibility.Visible;
+    }
+    private void RefreshPeople(RoomSnapshot? snapshot = null, bool settings = true)
+    {
+        snapshot ??= room?.Snapshot;
+        if (snapshot is null) return;
+        var people = snapshot.People.Select(p => new
+        {
+            p.Id, p.Name,
+            Voice = PresenceFor(p.Id, p.Name),
+            Status = !p.Approved ? (pendingAdmissions.ContainsKey(p.Id) ? "Waiting for admission confirmation…" : "Waiting for approval")
+                : (p.IsHost ? "Host · " : "Admitted · ") + (p.Ready ? "Ready" : "Buffering"),
+            Actions = room?.Identity?.Host == true && !p.IsHost ? Visibility.Visible : Visibility.Collapsed,
+            AdmitVisibility = p.Approved ? Visibility.Collapsed : Visibility.Visible,
+            AdmitLabel = pendingAdmissions.ContainsKey(p.Id) ? "Admitting…" : "Admit",
+            CanAdmit = !pendingAdmissions.ContainsKey(p.Id)
+        }).ToList();
+        // Unchanged rows keep their containers instead of being rebuilt on every snapshot.
+        if (PeopleList.ItemsSource is not System.Collections.IEnumerable shown || !shown.Cast<object>().SequenceEqual(people)) PeopleList.ItemsSource = people;
+        // The pill counts everyone in the room; for the host, guests waiting to be let in stand out instead.
+        var waiting = room?.Identity?.Host == true ? snapshot.People.Count(p => !p.Approved) : 0;
+        ParticipantsPillDetail.Text = waiting > 0 ? $"{waiting} waiting" : snapshot.People.Count().ToString();
+        ParticipantsPillDetail.Foreground = (Brush)FindResource(waiting > 0 ? "PlayerAccent" : "PlayerMuted");
+        if (settings) RefreshRoomSettings();
+    }
+    private async void Admit(object sender, RoutedEventArgs e)
+    {
+        var client = room;
+        if (client?.Identity?.Host != true || ((Button)sender).Tag is not string id || pendingAdmissions.ContainsKey(id)) return;
+        if (client.Snapshot?.People.Count(p => p.Approved) >= 5)
+        {
+            ShowRoomFeedback("The room is full (5 participants). Remove someone before admitting another guest."); return;
+        }
+        var request = Guid.NewGuid();
+        pendingAdmissions[id] = request;
+        ShowRoomFeedback("Admitting guest…"); RefreshPeople();
+        try
+        {
+            client.Send(new("admit", Target: id));
+            await Task.Delay(TimeSpan.FromSeconds(10), lifetime.Token);
+            if (room == client && pendingAdmissions.GetValueOrDefault(id) == request)
+            {
+                pendingAdmissions.Remove(id); RefreshPeople();
+                ShowRoomFeedback("Admission has not been confirmed. Check the connection and try again.");
+            }
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            if (room != client || pendingAdmissions.GetValueOrDefault(id) != request) return;
+            pendingAdmissions.Remove(id); RefreshPeople(); ShowRoomFeedback(ex.Message);
+        }
+    }
+    private void RemovePeer(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var id = (string)((Button)sender).Tag;
+            room?.Send(new("remove", Target: id));
+        }
+        catch (IOException ex) { ShowRoomFeedback(ex.Message); SetStatus(ex.Message); }
+    }
+    private void ControlsChanged(object sender, RoutedEventArgs e)
+    {
+        if (room?.Identity?.Host == true) room.Send(new("controls", Number: SharedControls.IsChecked == true ? 1 : 0));
+        RefreshSharedControlsChip();
+    }
+    private void QueueClick(object sender, RoutedEventArgs e)
+    {
+        if (selected is null) return;
+        if (GuestLibrary) { if (ShowingHostQueues) ShowAddToQueueMenu(DetailQueue, [selected]); return; }
+        if (!File.Exists(selected.Path)) { SetStatus("This file is unavailable. Reconnect its drive and rescan."); return; }
+        ShowAddToQueueMenu(DetailQueue, [selected]);
+    }
+
+    private void PublishQueue()
+    {
+        var titles = queue.Select(PlaybackTitle).ToArray(); QueueStatus.Text = titles.Length == 0 ? "Queue is empty." : queuePosition >= 0 && queuePosition < queue.Count ? $"{queuePosition + 1} / {queue.Count} · {titles[queuePosition]}" : $"{queue.Count} videos";
+        RefreshQueueList(true); UpdateSessionControls();
+        library.Setting("queuePosition", queuePosition.ToString());
+        library.Setting("queue", Wire.Serialize(queue.Select(x => x.Id).ToArray()));
+        if (room?.Identity?.Host == true) room.Send(new("queue", Data: Wire.Serialize(titles.Take(150).ToArray())));
+        ScheduleQueueShare();
+    }
+    private async void NextQueued(object sender, RoutedEventArgs e) => await Guard(() =>
+    {
+        return PlayQueueStep(1);
+    });
+    private async void PreviousQueued(object sender, RoutedEventArgs e) => await Guard(() => PlayQueueStep(-1));
+    private async Task PlayQueueStep(int direction)
+    {
+        if (ShowingEpisodeList)
+        {
+            if (AdjacentEpisode(direction) is { } episode) await PlayListedEpisode(episode);
+            else SetStatus(direction > 0 ? "This is the last episode." : "This is the first episode.");
+            return;
+        }
+        if (!CanEditQueue()) return;
+        var index = QueuePlayback.FindNext(queue, queuePosition, direction, QueueItemAvailable);
+        if (index < 0) { SetStatus(direction > 0 ? "End of queue." : "Start of queue."); return; }
+        await PlayQueueAt(index);
+    }
+    private void StartHostedVideo(MediaItem item)
+    {
+        var prepared = RoomClient.PrepareHostedFile(item.Path, PlaybackTitle(item));
+        room!.PublishHostedFile(prepared, true); playingItem = item;
+    }
+    private async void LeaveRoom(object sender, RoutedEventArgs e) => await Guard(async () => { var wasRoom = room is not null; ShowPage(wasRoom ? "Rooms" : "Library"); await Disconnect(); RoomHeading.Text = "Your watch room"; RoomSubtitle.Text = "Room closed"; RefreshSavedRooms(); });
+    private async Task Disconnect(bool preserveFullscreen = false, bool reconnecting = false)
+    {
+        await VoiceRoomClosed(reconnecting);
+        CancelPeerNotices();
+        playbackRecovery.Clear();
+        if (!reconnecting) { roomReconnect?.Cancel(); roomReconnect = null; }
+        ClearHostQueues();
+        videoClickUndo = null;
+        SavePlaybackPosition(); localResume = 0; endedSeek = null;
+        RecordRoomSession(force: true);
+        if (fullscreen && !preserveFullscreen) SetFullscreen(false);
+        if (pictureInPicture && !preserveFullscreen) SetPictureInPicture(false, openPlayer: false);
+        PlayerEmpty.Visibility = Visibility.Visible;
+        SetAudioPlayback(false);
+        UpdateSystemMediaControls();
+        RoomPlaybackNotice.Visibility = Visibility.Collapsed;
+        RoomPlaybackNoticeText.Text = "";
+        pendingSeek = null; seeking = false; playbackPause.Clear(); playbackIntent.Clear(); appliedGeneration = readyGeneration = -1; ++loadGeneration; var old = room; room = null; target = null; loadedMedia = null; ready = false;
+        mediaLoadCancellation?.Cancel();
+        bridge?.CancelPendingReads();
+        ResetRoomTracks();
+        var disconnect = old is null ? Task.CompletedTask : Task.Run(async () => await old.DisposeAsync());
+        playingItem = null;
+        await loading.WaitAsync();
+        try
+        {
+            var oldBridge = bridge; bridge = null;
+            oldBridge?.CancelPendingReads();
+            var stopBridge = oldBridge is null ? Task.CompletedTask : oldBridge.DisposeAsync().AsTask();
+            await Task.WhenAll(StopNativePlayback(), stopBridge, disconnect);
+        }
+        finally { loading.Release(); }
+        PeopleList.ItemsSource = null; ParticipantsPillDetail.Text = ""; pendingAdmissions.Clear(); RoomFeedback.Text = ""; RoomFeedback.Visibility = Visibility.Collapsed;
+        SetThreadExecutionState(0x80000000); ConnectionStatus.Text = "Local playback";
+        guestBrowsePending = false; ++guestBrowseRequest; RefreshSharedLibrary();
+        UpdateSessionControls(); RefreshVoice();
+    }
+    private static string PlaybackTitle(MediaItem item) => item.QueueTitle;
+    private void RemoveQueued(object sender, RoutedEventArgs e)
+    {
+        if (room is not null && room.Identity?.Host != true || ShowingEpisodeList) return;
+        if (QueueList.SelectedIndex < 0) return;
+        var removedIndex = QueueList.SelectedIndex;
+        queue.RemoveAt(removedIndex);
+        if (removedIndex <= queuePosition) queuePosition--;
+        SaveActiveQueueEdits(); PublishQueue();
+    }
+    private void QueueSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateSessionControls();
+    private void MoveQueued(object sender, RoutedEventArgs e)
+    {
+        if (room is not null && room.Identity?.Host != true || ShowingEpisodeList) return;
+        var index = QueueList.SelectedIndex;
+        var destination = index + (((string)((Button)sender).Tag) == "Earlier" ? -1 : 1);
+        if (index < 0 || destination < 0 || destination >= queue.Count) return;
+        var reordered = queue.ToArray(); (reordered[index], reordered[destination]) = (reordered[destination], reordered[index]);
+        queue.Clear(); queue.AddRange(reordered);
+        if (queuePosition == index) queuePosition = destination; else if (queuePosition == destination) queuePosition = index;
+        SaveActiveQueueEdits(); PublishQueue(); QueueList.SelectedIndex = destination;
+    }
+    private void UpdateSessionControls()
+    {
+        if (InviteButton is null || QueueList is null) return;
+        RefreshQueueList();
+        var connectedRoom = room?.IsConnected == true;
+        // Guests see the shared-controls chip as read-only status; only the host can change it.
+        SharedControls.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
+        SharedControls.IsEnabled = connectedRoom && room!.Identity?.Host == true;
+        RefreshSharedControlsChip(); RefreshRoomStatusDot();
+        NowPlayingButton.Visibility = ready || room is not null ? Visibility.Visible : Visibility.Collapsed;
+        NowPlayingLabel.Text = playingItem is not null ? PlaybackTitle(playingItem) : room?.Snapshot?.Media?.Title ?? RoomHeading.Text;
+        var canControl = room is null || connectedRoom && !room!.IsPeerRecovering && (room.Identity?.Host == true || room.Snapshot?.SharedControls == true);
+        InviteButton.Visibility = connectedRoom ? Visibility.Visible : Visibility.Collapsed;
+        PillStrip.SetShown(ParticipantsPill, connectedRoom);
+        RefreshLeaveButton();
+        PlayButton.IsEnabled = StopButton.IsEnabled = canControl && (ready || playingItem is not null && player?.State is VLCState.Stopped or VLCState.Ended);
+        Timeline.IsEnabled = canControl && player?.Length > 0;
+        // Previous and Next stay in the bar; they are disabled when there is nothing to step to.
+        NextButton.ToolTip = ShowingEpisodeList ? "Next episode (N)" : HasPlaybackQueue ? "Next in queue (N)" : "Next video (N)";
+        PreviousButton.ToolTip = ShowingEpisodeList ? "Previous episode (P)" : "Previous video (P)";
+        RefreshEpisodeEndAction();
+        var canManageEpisodes = room is null || connectedRoom && room!.Identity?.Host == true;
+        NextButton.IsEnabled = ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(1) is not null
+            : QueuePlayback.FindNext(queue, queuePosition, 1, x => RecentlyExists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
+        PreviousButton.IsEnabled = ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(-1) is not null
+            : QueuePlayback.FindNext(queue, queuePosition, -1, x => RecentlyExists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
+        // Looping restarts the video when it ends, which only the host decides in a room.
+        LoopButton.IsEnabled = canManageEpisodes;
+        RefreshLoopButton();
+        ReturnToRoomButton.IsEnabled = ready || room is not null;
+        var canManageQueue = room is null || connectedRoom && room!.Identity?.Host == true;
+        QueueEditActions.Visibility = canManageQueue && QueueList.HasItems ? Visibility.Visible : Visibility.Collapsed;
+        PlayPlayerQueueButton.IsEnabled = canManageQueue && queue.Any(item => item.Available);
+        // An episode list can be played from but not reordered or edited.
+        RemoveQueueButton.IsEnabled = QueueList.SelectedIndex >= 0 && canManageQueue && !ShowingEpisodeList;
+        PlaySelectedQueueButton.IsEnabled = canManageQueue && ((QueueList.SelectedItem as EpisodeEntry)?.Media ?? QueueList.SelectedItem as MediaItem) is { } chosen && QueueItemAvailable(chosen);
+        QueueEarlier.IsEnabled = RemoveQueueButton.IsEnabled && QueueList.SelectedIndex > 0;
+        QueueLater.IsEnabled = RemoveQueueButton.IsEnabled && QueueList.SelectedIndex < queue.Count - 1;
+        LoadSubtitlesButton.IsEnabled = ready && room?.Identity?.Host != false;
+        AudioPill.IsEnabled = AudioTracks.IsEnabled && AudioTracks.HasItems;
+        RefreshQueueMode(canManageQueue); RefreshQueuePill(); RefreshAudioPreferenceHint();
+        SubtitlePill.IsEnabled = SubtitleTracks.IsEnabled && SubtitleTracks.HasItems || LoadSubtitlesButton.IsEnabled;
+        // Checking which saved-queue videos are playable scans the library, so playback ticks leave it to the Queues page,
+        // which refreshes when it opens. Losing permission still disables its actions at once.
+        if (QueuesPage.Visibility == Visibility.Visible) UpdateSavedQueueActions();
+        else if (!canManageQueue) PlaySavedQueueButton.IsEnabled = PlaySelectedSavedQueueButton.IsEnabled = AddQueueVideosButton.IsEnabled = false;
+    }
+    private void Fullscreen(object sender, RoutedEventArgs e)
+    {
+        SetFullscreen(!fullscreen);
+    }
+    private void ApplyPlayerLayout()
+    {
+        bool inPlayer = RoomPage.Visibility == Visibility.Visible;
+        Rail.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
+        RailWidth.Width = new GridLength(inPlayer ? 0 : 212);
+        ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(28, 22, 28, 16);
+        AppStatusBar.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
+        StatusRow.Height = new GridLength(inPlayer ? 0 : 30);
+        // The player shrinks well below the library's minimum size; leaving it brings that minimum back.
+        MinWidth = inPlayer ? 400 : 900;
+        MinHeight = inPlayer ? 220 : 640;
+        ApplyCaptionLayout(inPlayer);
+        PlaceUpdateCard(inPlayer);
+    }
+    private void SetFullscreen(bool value)
+    {
+        if (value && pictureInPicture) SetPictureInPicture(false);
+        if (fullscreen == value || RoomPage.Visibility != Visibility.Visible) return;
+        ClosePlayerMenusNow();
+        var handle = new WindowInteropHelper(this).Handle;
+        if (value)
+        {
+            var monitor = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            if (!GetMonitorInfo(MonitorFromWindow(handle, 2), ref monitor)) return;
+            previousState = WindowState;
+            previousBounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+            previousResizeMode = ResizeMode;
+            fullscreen = true;
+            // Use the entire monitor, including the taskbar area. Maximizing uses the work area.
+            WindowState = WindowState.Normal;
+            WindowStyle = WindowStyle.None;
+            ResizeMode = ResizeMode.NoResize;
+            ApplyWindowCorners(handle);
+            ApplyPlayerLayout();
+            SetWindowPos(handle, IntPtr.Zero, monitor.Monitor.Left, monitor.Monitor.Top,
+                monitor.Monitor.Right - monitor.Monitor.Left, monitor.Monitor.Bottom - monitor.Monitor.Top, 0x0020 | 0x0040);
+        }
+        else
+        {
+            fullscreen = false;
+            ApplyWindowCorners(handle);
+            WindowStyle = WindowStyle.SingleBorderWindow;
+            ResizeMode = previousResizeMode;
+            Left = previousBounds.Left; Top = previousBounds.Top;
+            Width = previousBounds.Width; Height = previousBounds.Height;
+            WindowState = previousState;
+            ApplyPlayerLayout();
+        }
+        FullscreenButton.Content = fullscreen ? "\uE73F" : "\uE740";
+        FullscreenButton.ToolTip = fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen (F or double-click video)";
+        System.Windows.Automation.AutomationProperties.SetName(FullscreenButton, fullscreen ? "Exit fullscreen" : "Fullscreen");
+        ShowPlayerControls();
+        PlayerOverlay.Focus();
+    }
+    private bool PlayerMenuOpen => AudioMenu.IsOpen || SubtitleMenu.IsOpen || PlayerQueueMenu.IsOpen || ParticipantsMenu.IsOpen || OverflowMenu.IsOpen;
+    private void ClosePlayerMenus() => AudioMenu.IsOpen = SubtitleMenu.IsOpen = PlayerQueueMenu.IsOpen = ParticipantsMenu.IsOpen = OverflowMenu.IsOpen = false;
+    // Skips the fade when the bar itself hides or the window changes size.
+    private void ClosePlayerMenusNow() { AudioMenu.CloseNow(); SubtitleMenu.CloseNow(); PlayerQueueMenu.CloseNow(); ParticipantsMenu.CloseNow(); OverflowMenu.CloseNow(); HideVolumeFlyout(); }
+    private void PlayerMenuOpened(object sender, EventArgs e)
+    {
+        ShowPlayerControls();
+        // Move focus into the menu so arrow keys pick tracks instead of seeking.
+        var menu = (System.Windows.Controls.Primitives.Popup)sender;
+        if (menu == OverflowMenu || menu == ParticipantsMenu)
+        { Dispatcher.BeginInvoke(() => ((FrameworkElement)menu.Child).MoveFocus(new TraversalRequest(FocusNavigationDirection.First)), DispatcherPriority.Input); return; }
+        var list = menu == AudioMenu ? AudioTracks : menu == SubtitleMenu ? SubtitleTracks : QueueList;
+        // Rows are virtualized, so bring the selected one into view before focusing it.
+        if (list.SelectedItem is { } chosen) list.ScrollIntoView(chosen);
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (list.ItemContainerGenerator.ContainerFromIndex(Math.Max(0, list.SelectedIndex)) is ListBoxItem item) item.Focus();
+            else menu.Child.MoveFocus(new TraversalRequest(FocusNavigationDirection.First));
+        }, DispatcherPriority.Input);
+    }
+    private void PlayerMenuKeyDown(object sender, KeyEventArgs e)
+    {
+        ShowPlayerControls();
+        // Arrow keys select tracks as they move; Enter confirms. The queue list handles Enter itself.
+        var trackConfirmed = e.Key == Key.Enter && e.OriginalSource is ListBoxItem && !PlayerQueueMenu.IsOpen;
+        if (e.Key != Key.Escape && !trackConfirmed) return;
+        var pill = OverflowMenu.IsOpen ? OverflowPill : ParticipantsMenu.IsOpen ? ParticipantsPill : AudioMenu.IsOpen ? AudioPill : SubtitleMenu.IsOpen ? SubtitlePill : QueuePill;
+        ClosePlayerMenus(); (pill.IsVisible ? pill : OverflowPill).Focus(); e.Handled = true;
+    }
+    private void TrackMenuClicked(object sender, MouseButtonEventArgs e)
+    {
+        // Selection happens on mouse down; close once the click on a track completes.
+        if (ItemsControl.ContainerFromElement((ItemsControl)sender, (DependencyObject)e.OriginalSource) is ListBoxItem) ClosePlayerMenus();
+    }
+    private void ShowPlayerControls()
+    {
+        lastPlayerMouse = Mouse.GetPosition(this);
+        lastPlayerInteraction = Environment.TickCount64;
+        PlaybackControls.Visibility = Visibility.Visible;
+        if (pictureInPicture) PictureInPictureControls.Visibility = Visibility.Visible;
+        FullscreenHint.Visibility = fullscreen ? Visibility.Visible : Visibility.Collapsed;
+        PlayerOverlay.Cursor = Cursors.Arrow;
+    }
+    private void PlayerMouseMoved(object sender, MouseEventArgs e)
+    {
+        var position = e.GetPosition(this);
+        if ((position - lastPlayerMouse).Length < 2) return;
+        lastPlayerMouse = position;
+        ShowPlayerControls();
+        if (pictureInPicture) PictureInPictureMouseMoved(e);
+        else ShowDockedEdgeCursor(e.GetPosition(PlayerOverlay));
+    }
+    private void ControlsMouseMoved(object sender, MouseEventArgs e) => PlayerMouseMoved(sender, e);
+    private void ControlsKeyPressed(object sender, KeyEventArgs e) => ShowPlayerControls();
+    private void VideoClicked(object sender, MouseButtonEventArgs e)
+    {
+        // Controls and menus inside the native-video overlay keep their own clicks.
+        if (e.OriginalSource != PlayerOverlay) return;
+        PlayerOverlay.Focus();
+        ShowPlayerControls();
+        var undo = videoClickUndo; videoClickUndo = null;
+        if (pictureInPicture) { PictureInPicturePressed(e); e.Handled = true; return; }
+        if (e.ClickCount == 2)
+        {
+            // The first click already played or paused; put that back if the video is the same. A local toggle always takes
+            // effect even before LibVLC reports it, while in a room the requested state shows at once unless the host refused it.
+            if (undo is { } before && videoClickGeneration == loadGeneration && (room is null || before != WantsMediaPlayback)) RequestPlayback(before);
+            SetFullscreen(!fullscreen);
+        }
+        else if (e.ClickCount == 1)
+        {
+            var before = WantsMediaPlayback;
+            TogglePlayback(this, new RoutedEventArgs());
+            videoClickUndo = before; videoClickGeneration = loadGeneration;
+        }
+        e.Handled = true;
+    }
+    private void KeyPressed(object sender, KeyEventArgs e)
+    {
+        if (e.Handled) return;
+        if (MediaKeyPressed(e)) return;
+        if (VoiceKey(e, true)) return;
+        if (e.Key is Key.BrowserBack or Key.BrowserForward || Keyboard.Modifiers == ModifierKeys.Alt && e.SystemKey is Key.Left or Key.Right)
+        { BrowseHistory(e.Key == Key.BrowserBack || e.SystemKey == Key.Left); e.Handled = true; return; }
+        if (e.Key == Key.Escape && upNextChoice is not null) { EndUpNext(false); e.Handled = true; return; }
+        if (e.Key == Key.Escape && fullscreen) { SetFullscreen(false); e.Handled = true; return; }
+        if (e.Key == Key.Escape && pictureInPicture) { SetPictureInPicture(false); e.Handled = true; return; }
+        // The main window and the player overlay share this handler; picture in picture keys come only from the overlay.
+        var inPlayer = RoomPage.Visibility == Visibility.Visible || pictureInPicture && sender == PlayerOverlay;
+        if (inPlayer && e.Key == Key.Tab) ShowPlayerControls();
+        if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen)
+        {
+            if (!ConfirmPageNavigation("Library")) { e.Handled = true; return; }
+            ShowPage("Library");
+            var search = SearchBox;
+            search.Focus(); search.SelectAll(); e.Handled = true; return;
+        }
+        if (e.Key == Key.N && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen && !GuestLibrary && InAppDialog.Open.Count == 0 && !inPlayer)
+        { AddTitleClick(sender, e); e.Handled = true; return; }
+        if (e.Key == Key.Escape && LibraryPage.Visibility == Visibility.Visible && SearchBox.IsKeyboardFocused)
+        { SearchBox.Clear(); e.Handled = true; return; }
+        if (Keyboard.FocusedElement is TextBox or PasswordBox or ComboBox or ListBox or ListBoxItem || !inPlayer) return;
+        if (e.Key == Key.Space && (Keyboard.FocusedElement is Button || Keyboard.FocusedElement == LoopButton)) return;
+        if (e.Key is Key.F or Key.F11) { Fullscreen(sender, e); e.Handled = true; }
+        else if (e.Key == Key.I) { SetPictureInPicture(!pictureInPicture); e.Handled = true; }
+        else if (e.Key == Key.Space) { TogglePlayback(sender, e); e.Handled = true; }
+        else if (Keyboard.FocusedElement is not Slider && e.Key is Key.Left or Key.Right) { MovePlayback(e.Key == Key.Left ? -10000 : 10000); e.Handled = true; }
+        else if (e.Key == Key.M) { MutePlayback(sender, e); e.Handled = true; }
+        else if (e.Key == Key.S) { StopPlayback(sender, e); e.Handled = true; }
+        else if (e.Key == Key.P) { PreviousQueued(sender, e); e.Handled = true; }
+        else if (e.Key == Key.N) { NextQueued(sender, e); e.Handled = true; }
+        else if (e.Key == Key.L) { ToggleLoop(sender, e); e.Handled = true; }
+        else if (Keyboard.FocusedElement is not Slider && e.Key is Key.Up or Key.Down) { ShowPlayerControls(); Volume.Value = Math.Clamp(Volume.Value + (e.Key == Key.Up ? 5 : -5), 0, 100); e.Handled = true; }
+    }
+    private void ToggleTheme(object sender, RoutedEventArgs e)
+    {
+        light = !light;
+        library.Setting("theme", light ? "light" : "dark");
+        ApplyTheme();
+    }
+    private void ChooseColorTheme(object sender, RoutedEventArgs e)
+    {
+        if (updatingThemeChoices || sender is not FrameworkElement { Tag: ThemePalette chosen } || chosen == palette) return;
+        palette = chosen;
+        library.Setting("colorTheme", palette.Id);
+        ApplyTheme();
+    }
+    // One tile per palette; each preview shows the palette in the current light or dark mode.
+    private void BuildThemeChoices()
+    {
+        foreach (var option in ThemePalette.All)
+        {
+            var choice = new RadioButton { Tag = option, Style = (Style)ThemeChoices.FindResource("ThemeChoice"), GroupName = "ColorTheme" };
+            System.Windows.Automation.AutomationProperties.SetName(choice, option.Name + " theme");
+            choice.Checked += ChooseColorTheme;
+            ThemeChoices.Children.Add(choice);
+        }
+    }
+    private void UpdateThemeChoices()
+    {
+        if (ThemeChoices is null) return;
+        if (ThemeChoices.Children.Count == 0) BuildThemeChoices();
+        Brush Solid(Color color) { var brush = new SolidColorBrush(color); brush.Freeze(); return brush; }
+        updatingThemeChoices = true;
+        foreach (RadioButton choice in ThemeChoices.Children)
+        {
+            var option = (ThemePalette)choice.Tag; var c = option.Colors(light);
+            var bar = new Border { Height = 6, Width = 44, CornerRadius = new(3), Background = Solid(c[4]), Opacity = 0.6, HorizontalAlignment = HorizontalAlignment.Left, Margin = new(0, 0, 0, 7) };
+            var pill = new Border { Height = 12, Width = 34, CornerRadius = new(6), Background = Solid(c[6]), HorizontalAlignment = HorizontalAlignment.Left };
+            var side = new Border { Width = 26, Background = Solid(c[1]), BorderBrush = Solid(c[5]), BorderThickness = new(0, 0, 1, 0) };
+            var body = new StackPanel { Margin = new(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center, Children = { new Border { Height = 7, Width = 64, CornerRadius = new(3.5), Background = Solid(c[3]), HorizontalAlignment = HorizontalAlignment.Left, Margin = new(0, 0, 0, 6) }, bar, pill } };
+            var preview = new DockPanel { Children = { side, body } }; DockPanel.SetDock(side, Dock.Left);
+            choice.Content = new StackPanel
+            {
+                Children =
+                {
+                    new Border { Height = 62, CornerRadius = new(6), Background = Solid(c[0]), BorderBrush = Solid(c[5]), BorderThickness = new(1), Child = preview, ClipToBounds = true },
+                    new TextBlock { Text = option.Name, FontWeight = FontWeights.SemiBold, FontSize = 13, Margin = new(2, 8, 0, 0) },
+                },
+            };
+            choice.IsChecked = option == palette;
+        }
+        updatingThemeChoices = false;
+    }
+    private void ApplyTheme()
+    {
+        if (ThemeStatus is not null) ThemeStatus.Text = light ? "Current mode: Light" : "Current mode: Dark";
+        var resources = Application.Current.Resources;
+        SolidColorBrush Solid(Color color) { var brush = new SolidColorBrush(color); brush.Freeze(); return brush; }
+        static Color Alpha(Color color, byte alpha) => Color.FromArgb(alpha, color.R, color.G, color.B);
+        var colors = palette.Colors(light);
+        for (int i = 0; i < ThemePalette.Keys.Length; i++) resources[ThemePalette.Keys[i]] = Solid(colors[i]);
+        var canvas = colors[0]; var surface = colors[1]; var accent = colors[6];
+        resources["Scrim"] = Solid(Alpha(canvas, 0xC8));
+        // Accent glows and outlines are drawn with these, so they follow the theme instead of a fixed colour.
+        resources["AccentEdge"] = Solid(Alpha(accent, 0x59));
+        resources["AccentColor"] = accent; resources["AccentClear"] = Alpha(accent, 0);
+        resources["ElevatedColor"] = colors[2]; resources["AccentSoftColor"] = colors[9];
+        var stripes = new LinearGradientBrush([new(Alpha(accent, 0), 0), new(Alpha(accent, 0), 0.5), new(Alpha(accent, 0x1F), 0.5), new(Alpha(accent, 0x1F), 1)], new Point(0, 0), new Point(13, 13))
+            { MappingMode = BrushMappingMode.Absolute, SpreadMethod = GradientSpreadMethod.Repeat };
+        stripes.Freeze(); resources["CardStripes"] = stripes;
+        var fade = new LinearGradientBrush([new(Alpha(canvas, 0), 0), new(Alpha(canvas, 0x4F), 0.45), new(canvas, 1)], 90);
+        fade.Freeze(); resources["BackdropFade"] = fade;
+        var hero = new LinearGradientBrush([new(surface, 0), new(Alpha(surface, 0xE6), 0.38), new(Alpha(surface, 0), 0.8)], 0);
+        hero.Freeze(); resources["HeroFade"] = hero;
+        var fadeLeft = new LinearGradientBrush(canvas, Alpha(canvas, 0), 0); fadeLeft.Freeze(); resources["EdgeFadeLeft"] = fadeLeft;
+        var fadeRight = new LinearGradientBrush(Alpha(canvas, 0), canvas, 0); fadeRight.Freeze(); resources["EdgeFadeRight"] = fadeRight;
+        // The player stays dark in both modes and uses the theme's dark accent.
+        var player = palette.Colors(light: false); var playerAccent = player[6];
+        resources["PlayerAccent"] = Solid(playerAccent); resources["PlayerAccentInk"] = Solid(player[7]); resources["PlayerAccentSoft"] = Solid(player[9]);
+        resources["PlayerAccentTint"] = Solid(Alpha(playerAccent, 0x38)); resources["PlayerAccentEdge"] = Solid(Alpha(playerAccent, 0x73));
+        RoomPage.Resources["Accent"] = resources["PlayerAccent"]; RoomPage.Resources["AccentInk"] = resources["PlayerAccentInk"]; RoomPage.Resources["AccentSoft"] = resources["PlayerAccentSoft"];
+        UpdateThemeChoices();
+        ApplyTitleBarTheme();
+    }
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(NavigationWindowMessage);
+        InitializeCaption(new WindowInteropHelper(this).Handle);
+        InitializePictureInPicture(new WindowInteropHelper(this).Handle);
+        InitializeMediaControls();
+        ApplyTitleBarTheme();
+        Activated += (_, _) => ApplyTitleBarTheme();
+        Deactivated += (_, _) => ApplyTitleBarTheme();
+    }
+    private void ApplyTitleBarTheme()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero) return;
+        // The app draws the caption row; DWM still themes the window border and system menus.
+        // Unsupported attributes on older Windows versions leave the system defaults.
+        uint dark = !light && !SystemParameters.HighContrast ? 1u : 0u;
+        DwmSetWindowAttribute(handle, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, ref dark, sizeof(uint));
+        uint ColorRef(string resource)
+        {
+            if (SystemParameters.HighContrast) return uint.MaxValue; // DWMWA_COLOR_DEFAULT
+            var color = ((SolidColorBrush)Application.Current.Resources[resource]).Color;
+            return (uint)(color.R | color.G << 8 | color.B << 16);
+        }
+        var caption = ColorRef("Canvas"); var text = ColorRef(IsActive ? "Ink" : "Muted"); var border = ColorRef("Line");
+        DwmSetWindowAttribute(handle, 35 /* DWMWA_CAPTION_COLOR */, ref caption, sizeof(uint));
+        DwmSetWindowAttribute(handle, 36 /* DWMWA_TEXT_COLOR */, ref text, sizeof(uint));
+        DwmSetWindowAttribute(handle, 34 /* DWMWA_BORDER_COLOR */, ref border, sizeof(uint));
+    }
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref uint value, int size);
+    private async void WindowClosing(object? sender, CancelEventArgs e)
+    {
+        if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop();
+        OpenFileHandoff.StopListening();
+        DisableSystemMediaControls();
+        disconnectToast?.Invoke();
+        guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); metadataRetentionTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
+        library.Setting("volume", ((int)Volume.Value).ToString());
+        await Task.Yield(); // Let WPF finish the first Closing event before calling Close again.
+        foreach (var watcher in watchers) watcher.Dispose();
+        Hide();
+        try { await Disconnect(); }
+        finally
+        {
+            // Playback position and the room session are saved; a video opened now can start its own window.
+            OpenFileHandoff.Release();
+            pictureInPictureWindow?.Close();
+            Video.MediaPlayer = null;
+            var native = player; var engine = vlc; player = null; vlc = null;
+            await Task.Run(() => { native?.Dispose(); engine?.Dispose(); });
+            Close();
+        }
+    }
+    [DllImport("kernel32.dll")] private static extern uint SetThreadExecutionState(uint flags);
+    [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct MonitorInfo { public int Size; public NativeRect Monitor, Work; public uint Flags; }
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Auto)] [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+}
