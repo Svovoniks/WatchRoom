@@ -20,6 +20,7 @@ Watchroom dynamically links the following components. Package versions and conte
 | Silero VAD model `silero_vad.onnx` (voice speech detection; MIT) | 6.2.3 | https://github.com/snakers4/silero-vad |
 | ONNX Runtime (runs the speech detection model; MIT) | 1.31.1 | https://github.com/microsoft/onnxruntime |
 | SkiaSharp / native Skia (artwork decoding) | 2.88.9 | https://github.com/mono/SkiaSharp |
+| TagLib# (reading music tags and embedded album art; LGPL-2.1) | 2.3.0 | https://github.com/mono/taglib-sharp |
 | Whisper.net / whisper.cpp runtime (spoken-language identification) | 1.9.1 | https://github.com/sandrohanea/whisper.net |
 | Whisper tiny model, ggml `ggml-tiny-q5_1.bin` (MIT, OpenAI) | whisper.cpp revision 5359861c | https://huggingface.co/ggerganov/whisper.cpp |
 | Panlingo CLD3 / Google CLD3 (subtitle-language identification) | 0.8.1 | https://github.com/gluschenko/panlingo, https://github.com/google/cld3 |

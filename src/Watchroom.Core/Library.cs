@@ -248,7 +248,7 @@ public sealed partial class LibraryStore
     // years and no differing provider identities. The identified copy lends its identity and kind to the rest.
     private void MergeDuplicateShows()
     {
-        var items = All().Where(x => x.Series is not null && x.SeriesPath is not null && !x.IsExtra && !x.IsVirtual).ToArray();
+        var items = All().Where(x => x.Series is not null && x.SeriesPath is not null && !x.IsExtra && !x.IsVirtual && !x.IsMusic).ToArray();
         var providers = new[] { "tmdb", "tvdb", "imdb", "tvmaze" }; var wanted = Wanted().Select(x => x.Id).ToHashSet();
         foreach (var name in items.GroupBy(x => LibraryIdentity.Normalize(x.Series!)).Where(g => g.Select(LibraryIdentity.ShowKey).Distinct().Count() > 1))
         {
@@ -274,7 +274,7 @@ public sealed partial class LibraryStore
     }
     private void AttachLooseReleases()
     {
-        var items = All().Where(x => x.Series is not null && !x.IsExtra).ToArray();
+        var items = All().Where(x => x.Series is not null && !x.IsExtra && !x.IsMusic).ToArray();
         var structured = items.Where(x => x.SeriesPath is not null).GroupBy(LibraryIdentity.ShowKey).ToArray();
         foreach (var loose in items.Where(x => x.SeriesPath is null && !x.IsVirtual))
         {
@@ -553,7 +553,7 @@ public sealed partial class LibraryStore
         foreach (var provider in new[] { "tmdb", "tvdb", "imdb" })
         {
             // Re-read only after a provider's grouping changed records.
-            items ??= All().Where(x => x.Series is not null && !x.IsExtra).ToArray();
+            items ??= All().Where(x => x.Series is not null && !x.IsExtra && !x.IsMusic).ToArray();
             var merged = false;
             foreach (var group in items.Where(x => LibraryIdentity.ProviderId(x, provider) is not null).GroupBy(x => LibraryIdentity.ProviderId(x, provider)))
             {
@@ -588,8 +588,9 @@ public sealed partial class LibraryStore
     public MediaItem? Get(string id) => ByIds([id]).FirstOrDefault();
     private (int Removed, List<MediaItem> Remaining) Prune(IEnumerable<LibraryFolder> folders, IEnumerable<string>? exclusions, List<MediaItem> all)
     {
-        var roots = folders.ToArray(); var excluded = exclusions?.ToArray() ?? [];
-        bool Retained(MediaItem item) => roots.Any(f => IsWithin(item.Path, f.Path)) && !excluded.Any(f => IsWithin(item.Path, f));
+        var roots = folders.ToArray(); var excluded = exclusions?.ToArray() ?? []; var mixedMusic = MixedFoldersListMusic;
+        // Changing a folder's category, or whether Mixed folders list music, drops what it no longer lists.
+        bool Retained(MediaItem item) => ListedBy(roots, item.Path, mixedMusic) is not null && !excluded.Any(f => IsWithin(item.Path, f));
         // A wanted title keeps its placeholders while none of its files are here.
         var retainedShows = all.Where(x => !x.IsVirtual && Retained(x)).Select(LibraryIdentity.ShowKey).Concat(Wanted().Select(x => x.Id)).ToHashSet();
         var removed = all.Where(x => x.IsVirtual ? !retainedShows.Contains(LibraryIdentity.ShowKey(x)) : !Retained(x)).ToArray();
@@ -613,9 +614,22 @@ public sealed partial class LibraryStore
     }
     // Files added, changed or removed by the most recent completed scan.
     public int LastScanChanges { get; private set; }
+    // Off unless chosen: video folders often hold audio that isn't music to browse, such as soundtracks and commentaries.
+    public const string MixedMusicSetting = "mixedMusic";
+    public bool MixedFoldersListMusic
+    {
+        get => Setting(MixedMusicSetting) == "true";
+        set => Setting(MixedMusicSetting, value ? "true" : "false");
+    }
+    // Music folders list audio files, Mixed folders list videos and, when chosen, audio files, and other folders list videos.
+    private static bool Lists(LibraryFolder folder, string path, bool mixedMusic) =>
+        MusicFiles.IsAudio(path) ? folder.Kind == MusicFiles.Kind || mixedMusic && folder.Kind == "Mixed" : folder.Kind != MusicFiles.Kind;
+    // The innermost folder holding a file decides whether it is listed, so a folder inside another can list other files.
+    private static LibraryFolder? ListedBy(LibraryFolder[] roots, string path, bool mixedMusic) =>
+        roots.Where(f => IsWithin(path, f.Path)).MaxBy(f => f.Path.Length) is { } root && Lists(root, path, mixedMusic) ? root : null;
     public async Task<List<MediaItem>> ScanAsync(IEnumerable<LibraryFolder> folders, IProgress<string>? progress = null, CancellationToken cancellation = default, IEnumerable<string>? exclusions = null)
     {
-        var roots = folders.ToArray(); var excluded = exclusions?.ToArray() ?? [];
+        var roots = folders.ToArray(); var excluded = exclusions?.ToArray() ?? []; var mixedMusic = MixedFoldersListMusic;
         return await Task.Run(() =>
         {
             var changes = Prune(roots, excluded);
@@ -631,22 +645,39 @@ public sealed partial class LibraryStore
                     cancellation.ThrowIfCancellationRequested();
                     var path = file.FullName;
                     if (excluded.Any(f => IsWithin(path, f))) continue;
-                    if (!FileNames.Extensions.Contains(System.IO.Path.GetExtension(path))) continue;
+                    var music = MusicFiles.IsAudio(path);
+                    if (!music && !FileNames.Extensions.Contains(System.IO.Path.GetExtension(path)) || !Lists(folder, path, mixedMusic)) continue;
+                    // A folder inside this one that doesn't list this kind of file keeps it out.
+                    if (roots.Any(r => r.Path.Length > folder.Path.Length && IsWithin(path, r.Path)) && ListedBy(roots, path, mixedMusic) is null) continue;
+                    MediaItem parsed;
+                    if (music)
+                    {
+                        // Tags are read again only when a track's file changed.
+                        var writeTime = file.LastWriteTimeUtc.Ticks;
+                        if (ByPath(path) is { IsMusic: true, Available: true } unchanged && unchanged.FileSize == file.Length && unchanged.FileWriteTime == writeTime)
+                        {
+                            seen.Add(unchanged.Id);
+                            progress?.Report($"Found {seen.Count} files · {unchanged.Title}");
+                            continue;
+                        }
+                        parsed = MusicFiles.Parse(path, folder.Path, DataDirectory) with { FileSize = file.Length, FileWriteTime = writeTime };
+                    }
                     // Samples and film trailers stay out; a show's extras folder joins the show as bonus clips.
-                    var parsed = FileNames.Parse(path, folder.Kind, folder.Path) with { FileSize = file.Length };
+                    else parsed = FileNames.Parse(path, folder.Kind, folder.Path) with { FileSize = file.Length };
                     if (parsed.IsExtra) continue;
                     // Merge into the record as stored now: edits and fetches can land while a scan runs.
                     MediaItem item;
                     lock (writeGate)
                     {
                         var previous = ByIds([parsed.Id]).FirstOrDefault() ?? ByPath(parsed.Path);
-                        item = previous is null ? MergeScanned(parsed, null) : MergeScanned(parsed with { Id = previous.Id }, previous) with { FileSize = parsed.FileSize };
+                        item = music ? previous is null ? parsed : MusicFiles.Merge(parsed, previous)
+                            : previous is null ? MergeScanned(parsed, null) : MergeScanned(parsed with { Id = previous.Id }, previous) with { FileSize = parsed.FileSize };
                         // Records compare collections by reference, so compare the stored form to skip unchanged files.
                         if (previous is null || Wire.Serialize(LibraryIdentity.Ensure(TmdbRetention.TrackLegacy(item))) != Wire.Serialize(previous)) { Save(item); changes++; }
                         if (previous is null) found.Add(item);
                     }
                     seen.Add(item.Id);
-                    progress?.Report($"Found {seen.Count} videos · {item.Title}");
+                    progress?.Report($"Found {seen.Count} files · {item.Title}");
                 }
             }
             changes += RecoverMoved(found, seen, progress);
@@ -697,7 +728,7 @@ public sealed partial class LibraryStore
             {
                 if (ByIds([olds[0].Id]).FirstOrDefault() is not { IsVirtual: false } stored || File.Exists(stored.Path) || ByIds([now.Id]).Count == 0) continue;
                 var parsed = now with { Id = stored.Id };
-                var moved = MergeScanned(parsed, stored) with { FileSize = now.FileSize };
+                var moved = parsed.IsMusic ? MusicFiles.Merge(parsed, stored) : MergeScanned(parsed, stored) with { FileSize = now.FileSize };
                 // Joining a folder that already holds the show groups the file with its new siblings.
                 if (CanRepairGrouping(stored) && parsed.SeriesPath is not null && !comparer.Equals(stored.SeriesPath, parsed.SeriesPath) &&
                     all.FirstOrDefault(x => x.Id != now.Id && x.Available && !x.IsVirtual && seen.Contains(x.Id) && comparer.Equals(x.SeriesPath, parsed.SeriesPath)) is { ShowId: { } showId })
@@ -771,7 +802,7 @@ public static partial class FileNames
     public static bool AffectsLibrary(string path, bool deleted)
     {
         var extension = System.IO.Path.GetExtension(path);
-        if (Extensions.Contains(extension)) return true;
+        if (Extensions.Contains(extension) || MusicFiles.Extensions.Contains(extension)) return true;
         // A deleted folder can no longer be checked, so only skip names that look like a known non-video file.
         if (deleted) return !IgnoredChanges.Contains(extension);
         return Directory.Exists(path);

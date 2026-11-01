@@ -210,7 +210,8 @@ public partial class MainWindow
             var show = parent is null ? null : LibraryIdentity.ShowKey(parent);
             if (mirroredView?.Browse != view.Browse || mirroredView.LoadedCount != view.LoadedCount)
             {
-                var cards = LibraryCatalog.Search(source.Where(item => view.Browse.Category switch { 1 => item.Kind == "Movie", 2 => item.Kind == "Show", 3 => item.Kind == "Anime", _ => true }),
+                var cards = LibraryCatalog.Search(source.Where(item => view.Browse.Category switch { 1 => item.Kind == "Movie", 2 => item.Kind == "Show", 3 => item.Kind == "Anime",
+                    LibraryCatalog.Music => item.IsMusic, _ => parent is not null || !item.IsMusic }),
                     view.Browse.Query, show, parent?.Kind, view.Browse.Season).Take(view.LoadedCount);
                 mirroredCards.Clear(); mirroredCards.AddBatch(cards.Select(card => new LibraryCardView(card)));
                 libraryCategory = view.Browse.Category; browseSeries = show; browseKind = parent?.Kind; browseSeason = view.Browse.Season;

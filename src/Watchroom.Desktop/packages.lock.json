@@ -216,6 +216,11 @@
         "resolved": "9.0.0",
         "contentHash": "hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A=="
       },
+      "TagLibSharp": {
+        "type": "Transitive",
+        "resolved": "2.3.0",
+        "contentHash": "Qo4z6ZjnIfbR3Us1Za5M2vQ97OWZPmODvVmepxZ8XW0UIVLGdO2T63/N3b23kCcyiwuIe0TQvMEQG8wUCCD1mA=="
+      },
       "Whisper.net.Runtime.Metal": {
         "type": "Transitive",
         "resolved": "1.9.1",
@@ -229,7 +234,8 @@
           "Microsoft.Data.Sqlite": "[10.0.12, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )",
           "SkiaSharp": "[2.88.9, )",
-          "SkiaSharp.NativeAssets.Linux.NoDependencies": "[2.88.9, )"
+          "SkiaSharp.NativeAssets.Linux.NoDependencies": "[2.88.9, )",
+          "TagLibSharp": "[2.3.0, )"
         }
       }
     }

@@ -21,15 +21,19 @@ public record MediaItem(string Id, string Path, string Title, string Kind, int? 
     int? SourcePart = null, int? SourcePartEpisode = null, int? SourcePartEpisodeEnd = null,
     string? NumberingSource = null, string? SourceLibraryKind = null, bool IsExtra = false, string? GeneratedEpisodePoster = null, string? EpisodePosterQualityPath = null, bool IsBonus = false, Dictionary<string, TmdbField>? TmdbFields = null, int TmdbRetentionVersion = 0, long? FileSize = null,
     // The film this clip came with, for a clip from a film's own extras folder.
-    string? ExtraOf = null)
+    string? ExtraOf = null,
+    // A music track's performer and length, read from its tags; its album is Series and its disc and track are Season and Episode.
+    // FileWriteTime lets a rescan skip reading the tags of a track whose file has not changed.
+    string? Artist = null, int? DurationSeconds = null, long? FileWriteTime = null)
 {
-    public string Caption => IsBonus ? Series is null ? "Bonus content" : $"{Series} · Bonus content" : Series is not null ? $"{Series} · {(Season is null ? "Season unknown" : $"S{Season:00}")} {(Episode is null ? "Episode unknown" : $"E{Episode:00}" + (EpisodeEnd > Episode ? $"–E{EpisodeEnd:00}" : ""))}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";
+    public bool IsMusic => Kind == MusicFiles.Kind;
+    public string Caption => IsMusic ? string.Join(" · ", new[] { Artist, Series, DurationSeconds is > 0 ? MusicFiles.Duration(DurationSeconds.Value) : null }.Where(x => !string.IsNullOrWhiteSpace(x))) : IsBonus ? Series is null ? "Bonus content" : $"{Series} · Bonus content" : Series is not null ? $"{Series} · {(Season is null ? "Season unknown" : $"S{Season:00}")} {(Episode is null ? "Episode unknown" : $"E{Episode:00}" + (EpisodeEnd > Episode ? $"–E{EpisodeEnd:00}" : ""))}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";
     public string DisplayTitle => Series ?? Title;
-    public string QueueTitle => Episode is null ? Title : Caption;
-    public string EpisodeDisplayTitle => Episode is { } ep ? $"Episode {ep}" + (EpisodeEnd > ep ? $"–{EpisodeEnd}" : "") + (string.IsNullOrWhiteSpace(EpisodeTitle) ? "" : " · " + EpisodeTitle)
+    public string QueueTitle => IsMusic ? Artist is null ? Title : $"{Title} · {Artist}" : Episode is null ? Title : Caption;
+    public string EpisodeDisplayTitle => IsMusic ? Episode is { } track ? $"{track}. {Title}" : Title : Episode is { } ep ? $"Episode {ep}" + (EpisodeEnd > ep ? $"–{EpisodeEnd}" : "") + (string.IsNullOrWhiteSpace(EpisodeTitle) ? "" : " · " + EpisodeTitle)
         : IsBonus && !string.IsNullOrWhiteSpace(EpisodeTitle) ? EpisodeTitle : Title;
     public string? DetailOverview => new[] { EpisodeOverview, SeasonOverview, Overview }.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
-    public override string ToString() => Episode is not null ? Caption + " · " + Title : Title;
+    public override string ToString() => IsMusic ? QueueTitle : Episode is not null ? Caption + " · " + Title : Title;
 }
 public record SavedRoom(string Id, string Name, string Server, string Code, string? HostKey = null)
 {

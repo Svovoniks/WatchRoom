@@ -248,9 +248,10 @@ public partial class MainWindow
     private void CreateSeasonQueue()
     {
         if (playingItem is not { Series: not null, Season: not null } playing) { RefreshQueuePickers(); return; }
-        var episodes = EpisodePlayback.Episodes(items, playing).Where(item => item.Season == playing.Season).ToArray();
+        // An album's queue holds all its discs.
+        var episodes = EpisodePlayback.Episodes(items, playing).Where(item => playing.IsMusic || item.Season == playing.Season).ToArray();
         if (episodes.Length == 0) episodes = [playing];
-        var saved = new SavedQueue(Guid.NewGuid().ToString("N"), $"{playing.Series} · Season {playing.Season}", episodes.Select(item => item.Id).ToArray());
+        var saved = new SavedQueue(Guid.NewGuid().ToString("N"), playing.IsMusic ? playing.Series : $"{playing.Series} · Season {playing.Season}", episodes.Select(item => item.Id).ToArray());
         savedQueues.Add(saved); SwitchToQueue(saved);
         SetStatus($"Created {saved.Name}.");
     }
@@ -336,7 +337,7 @@ public partial class MainWindow
     // Without a queue, the queue menu lists the playing show's episodes so another one is a double-click away.
     private sealed record EpisodeEntry(MediaItem Media)
     {
-        public string QueueTitle => $"S{Media.Season} · {Media.EpisodeDisplayTitle}";
+        public string QueueTitle => Media.IsMusic ? Media.EpisodeDisplayTitle : $"S{Media.Season} · {Media.EpisodeDisplayTitle}";
     }
     private (string Id, List<MediaItem> Library)? episodeListKey;
     private MediaItem[] listedEpisodes = [];
@@ -364,7 +365,7 @@ public partial class MainWindow
         listedEpisodes = episodes;
         QueueList.SelectedIndex = Array.FindIndex(episodes, item => item.Id == current.Id) is var index and >= 0 ? index
             : Array.FindIndex(episodes, item => item.Season == current.Season && item.Episode == current.Episode);
-        QueueStatus.Text = current.Season is { } season ? $"{current.Series} · Season {season} · plays in order" : $"{current.Series} · plays in order";
+        QueueStatus.Text = current.Season is { } season && !current.IsMusic ? $"{current.Series} · Season {season} · plays in order" : $"{current.Series} · plays in order";
         PlayPlayerQueueButton.Visibility = Visibility.Collapsed;
         // Rows mark the playing episode, so redraw them when it changes.
         QueueList.Items.Refresh();

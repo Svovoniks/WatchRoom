@@ -137,6 +137,7 @@ public partial class MainWindow : Window
         var startupCandidates = startupFile is null ? null : Task.Run(() => StartupFileCandidates(startupFile, savedFolders, savedExclusions));
         InitializeComponent();
         RegisterName("LibraryScroll", LibraryScroll);
+        MixedFolderMusic.IsChecked = library.MixedFoldersListMusic;
         RoomPage.SizeChanged += (_, _) => AudioTracks.MaxHeight = SubtitleTracks.MaxHeight = QueueList.MaxHeight = Math.Clamp(RoomPage.ActualHeight - 260, 120, 360);
         // Menus are separate popup windows; close them when the bar hides, moves to fullscreen or the player closes.
         PlaybackControls.IsVisibleChanged += (_, _) => { if (!PlaybackControls.IsVisible) ClosePlayerMenusNow(); };
@@ -385,9 +386,12 @@ public partial class MainWindow : Window
         if (name == "Rooms") RefreshSavedRooms();
         if (name == "Queues") RefreshSavedItems();
         UpdateLibraryCategorySelection(name is "Library" or "Details");
+        // Music has its own sidebar entry, so the Library entry isn't selected alongside it.
+        var page = name == "Details" ? "Library" : name == "Room" ? "Rooms" : name;
+        if (page == "Library" && (name == "Details" ? selected?.IsMusic == true : libraryCategory == LibraryCatalog.Music)) page = "Music";
         foreach (var button in new[] { HomeNav, LibraryNav, QueuesNav, RoomNav, FoldersNav, SettingsNav })
-            System.Windows.Automation.AutomationProperties.SetItemStatus(button,
-                (string)button.Tag == (name == "Details" ? "Library" : name == "Room" ? "Rooms" : name) ? "Selected" : "");
+            System.Windows.Automation.AutomationProperties.SetItemStatus(button, (string)button.Tag == page ? "Selected" : "");
+        System.Windows.Automation.AutomationProperties.SetItemStatus(MusicLibraryNav, page == "Music" ? "Selected" : "");
     }
     private void Navigate(object sender, RoutedEventArgs e)
     {
@@ -397,14 +401,16 @@ public partial class MainWindow : Window
         else if (page == "Queues" && activeQueueId is not null && openQueueId != activeQueueId) { CloseQueueAddPanel(); openQueueId = activeQueueId; }
         ShowPage(page);
     }
-    private static int CategoryFor(MediaItem item) => item.Kind == "Anime" ? 3 : item.Series is not null ? 2 : 1;
-    private static string CategoryName(int category) => category switch { 1 => "Movies", 2 => "Shows", 3 => "Anime", 4 => "Unavailable", 5 => "Missing", _ => "All" };
+    private static int CategoryFor(MediaItem item) => item.IsMusic ? LibraryCatalog.Music : item.Kind == "Anime" ? 3 : item.Series is not null ? 2 : 1;
+    private static string CategoryName(int category) => category switch { 1 => "Movies", 2 => "Shows", 3 => "Anime", 4 => "Unavailable", 5 => "Missing", LibraryCatalog.Music => "Music", _ => "All" };
     private static string SeasonName(int season, IEnumerable<MediaItem>? members = null) => LibraryCatalog.SeasonName(season, members);
     private void UpdateLibraryCategorySelection(bool active)
     {
         UnavailableLibraryNav.Visibility = !GuestLibrary && items.Any(item => !item.Available && !item.IsExtra && !item.IsVirtual)
             ? Visibility.Visible : Visibility.Collapsed;
         MissingLibraryNav.Visibility = !GuestLibrary && missingTitleCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+        // A guest can't tell whether the host has music, so the category stays listed while browsing a host's library.
+        MusicLibraryNav.Visibility = GuestLibrary || folders.Any(x => x.Kind == MusicFiles.Kind) || items.Any(x => x.IsMusic) ? Visibility.Visible : Visibility.Collapsed;
         MissingLibraryCount.Text = missingTitleCount.ToString();
         System.Windows.Automation.AutomationProperties.SetName(MissingLibraryNav, $"Missing, {missingTitleCount} {(missingTitleCount == 1 ? "title" : "titles")}");
         foreach (var button in new[] { AllLibraryNav, AnimeLibraryNav, ShowsLibraryNav, MoviesLibraryNav, UnavailableLibraryNav, MissingLibraryNav })
@@ -441,14 +447,15 @@ public partial class MainWindow : Window
         var detail = Details.Visibility == Visibility.Visible ? selected : null;
         var show = detail?.Series is not null ? detail : browseSeries is null ? null : items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind));
         var category = detail is not null ? detail.Available || detail.IsVirtual ? CategoryFor(detail) : 4 : libraryCategory;
-        var crumbs = new List<LibraryBreadcrumb> { new("All", "category", Separator: "") };
-        if (category != 0) crumbs.Add(new(CategoryName(category), "category", category));
+        // Music is its own section, so its trail starts at Music rather than at All videos.
+        var crumbs = new List<LibraryBreadcrumb> { category == LibraryCatalog.Music ? new("Music", "category", category, Separator: "") : new("All", "category", Separator: "") };
+        if (category is not (0 or LibraryCatalog.Music)) crumbs.Add(new(CategoryName(category), "category", category));
         if (show?.Series is not null)
         {
             var showId = LibraryIdentity.ShowKey(show);
             crumbs.Add(new(show.Series, "show", category, showId, show.Kind));
             var season = detail is not null ? detail.Season ?? -1 : browseSeason;
-            if (season is { } number) crumbs.Add(new(SeasonName(number, items.Where(x => !x.IsExtra && LibraryIdentity.InShow(x, showId, show.Kind) && (x.Season ?? -1) == number)), "season", category, showId, show.Kind, number));
+            if (season is { } number && !show.IsMusic) crumbs.Add(new(SeasonName(number, items.Where(x => !x.IsExtra && LibraryIdentity.InShow(x, showId, show.Kind) && (x.Season ?? -1) == number)), "season", category, showId, show.Kind, number));
         }
         if (detail is not null) crumbs.Add(new(detail.Series is null ? detail.DisplayTitle : detail.EpisodeDisplayTitle, "media", category, MediaId: detail.Id));
         crumbs[^1] = crumbs[^1] with { IsCurrent = true };
@@ -585,10 +592,13 @@ public partial class MainWindow : Window
         var playableShows = items.Where(x => x.Available && x.Series is not null).Select(LibraryIdentity.ShowKey).ToHashSet();
         var wantedKeys = wanted.Keys.ToHashSet();
         var source = items.Where(x => libraryCategory == 4 ? !x.Available && !x.IsVirtual : x.Available || x.IsVirtual && (playableShows.Contains(LibraryIdentity.ShowKey(x)) || wantedKeys.Contains(LibraryIdentity.ShowKey(x)))).ToList();
+        // All lists videos; music has its own category, and an album opened from search stays browsable.
+        if (libraryCategory is 0 or 5 && browseSeries is null) source.RemoveAll(x => x.IsMusic);
         var missingOnly = libraryCategory == 5 && browseSeries is null;
         var series = browseSeries; var kind = browseKind; var season = browseSeason;
         var showTitle = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind))?.Series ?? browseSeries;
-        SearchHint.Text = browseSeries is null ? "Search your library" : browseSeason is null ? "Search seasons" : "Search episodes";
+        var album = browseKind == MusicFiles.Kind;
+        SearchHint.Text = browseSeries is null ? libraryCategory == LibraryCatalog.Music ? "Search your music" : "Search your library" : album ? "Search tracks" : browseSeason is null ? "Search seasons" : "Search episodes";
         SearchBox.ToolTip = browseSeries is null ? "Search your library (Ctrl+F)" : "Search within " + showTitle + (browseSeason is null ? "" : $" · Season {browseSeason}");
         System.Windows.Automation.AutomationProperties.SetName(SearchBox, SearchHint.Text);
         var filter = libraryCategory is 4 or 5 ? 0 : libraryCategory;
@@ -738,19 +748,19 @@ public partial class MainWindow : Window
         var restoring = restoringNavigation; restoringNavigation = true;
         selected = item; libraryCategory = CategoryFor(item);
         browseSeries = item.Series is null ? null : LibraryIdentity.ShowKey(item); browseKind = item.Series is null ? null : item.Kind;
-        browseSeason = item.Series is null ? null : item.Season ?? -1;
+        browseSeason = item.Series is null || item.IsMusic ? null : item.Season ?? -1;
         ShowPage("Details"); UpdateBreadcrumbs(); DetailTitle.Text = item.EpisodeDisplayTitle;
         restoringNavigation = restoring;
         DetailPlay.IsEnabled = DetailHost.IsEnabled = DetailQueue.IsEnabled = item.Available && File.Exists(item.Path);
         DetailAvailability.Text = DetailPlay.IsEnabled ? "" : item.IsVirtual ? PlaceholderNotice(item)
-            : "Video file unavailable. Reconnect its drive, then rescan your library.";
+            : (item.IsMusic ? "Audio" : "Video") + " file unavailable. Reconnect its drive, then rescan your library.";
         // A wanted film's own panel says when it comes out and what can be done; its play buttons have nothing to play.
         var wantedFilm = item.IsVirtual && item.Series is null && wanted.ContainsKey(item.Id);
         if (wantedFilm) DetailAvailability.Text = "";
         DetailPlay.Visibility = DetailHost.Visibility = DetailQueue.Visibility = wantedFilm ? Visibility.Collapsed : Visibility.Visible;
         DetailAvailability.Visibility = DetailAvailability.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         DetailRemove.Visibility = item.Available || item.IsVirtual ? Visibility.Collapsed : Visibility.Visible;
-        DetailWatched.Visibility = item.IsVirtual && item.Series is null ? Visibility.Collapsed : Visibility.Visible;
+        DetailWatched.Visibility = item.IsVirtual && item.Series is null || item.IsMusic ? Visibility.Collapsed : Visibility.Visible;
         DetailRemove.IsEnabled = !scanning;
         UpdateDetailPlayback(item);
         var film = item.ExtraOf is { } parent ? items.FirstOrDefault(x => x.Id == parent) : null;
@@ -768,7 +778,7 @@ public partial class MainWindow : Window
         ShowAcquireDetail(item);
         ShowDetailTracks(item);
         var overviewSource = !string.IsNullOrWhiteSpace(item.EpisodeOverview) ? item.EpisodeSource : !string.IsNullOrWhiteSpace(item.SeasonOverview) ? item.SeasonSource : item.PosterSource;
-        DetailSummary.Text = (item.DetailOverview ?? "No overview available yet.") +
+        DetailSummary.Text = item.IsMusic ? MusicSummary(item) : (item.DetailOverview ?? "No overview available yet.") +
             (item.Genres?.Length > 0 ? "\n\nGenres: " + string.Join(", ", item.Genres) : "") + (item.Cast?.Length > 0 ? "\nCast: " + string.Join(", ", item.Cast) : "") +
             (item.Rating is > 0 ? $"\nRating: {item.Rating:0.0}/10" : "") + (item.NumberingConflict is null ? "" : "\n\n" + item.NumberingConflict) + (overviewSource is null ? "" : "\n\nMetadata: " + overviewSource);
         Episodes.Visibility = Visibility.Collapsed;
@@ -830,7 +840,7 @@ public partial class MainWindow : Window
     private void EpisodeChanged(object sender, SelectionChangedEventArgs e) { if (Episodes.SelectedItem is MediaItem item) { selected = item; DetailSummary.Text = item.Caption + (item.Available ? "" : " · File unavailable"); } }
     private void AddFolder(object sender, RoutedEventArgs e)
     {
-        var picker = new OpenFolderDialog { Title = "Choose a movie, show or anime folder", Multiselect = true };
+        var picker = new OpenFolderDialog { Title = "Choose a movie, show, anime or music folder", Multiselect = true };
         if (picker.ShowDialog(this) != true) return;
         foreach (var path in picker.FolderNames.Where(path => !folders.Any(x => x.Path.Equals(path, StringComparison.OrdinalIgnoreCase))))
             folders.Add(new(path, "Mixed"));
@@ -846,6 +856,13 @@ public partial class MainWindow : Window
         if (FolderList.SelectedItem is not LibraryFolder folder) { SetStatus("Select a folder, then choose its category."); return; }
         folders[folders.IndexOf(folder)] = folder with { Kind = ((ComboBoxItem)FolderKind.SelectedItem).Content.ToString()! };
         SaveFolders(); scanDelay.Stop(); scanDelay.Start(); SetStatus("Folder category updated. Scanning your library…");
+    }
+    private void MixedFolderMusicClick(object sender, RoutedEventArgs e)
+    {
+        var on = MixedFolderMusic.IsChecked == true;
+        library.MixedFoldersListMusic = on; scanDelay.Stop(); scanDelay.Start();
+        // Turning it off drops the music now; turning it on finds it with the scan.
+        _ = Guard(async () => { await RefreshLibrary(); SetStatus(on ? "Mixed folders now list music. Scanning your library…" : "Mixed folders no longer list music."); });
     }
     private void FolderSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -883,7 +900,7 @@ public partial class MainWindow : Window
     {
         if (scanning) return; scanning = true;
         ScanButton.IsEnabled = false;
-        AddFolderButton.IsEnabled = RemoveFolderButton.IsEnabled = ChangeFolderButton.IsEnabled = FolderKind.IsEnabled = ExcludeFolderButton.IsEnabled = RestoreFolderButton.IsEnabled = false;
+        AddFolderButton.IsEnabled = RemoveFolderButton.IsEnabled = ChangeFolderButton.IsEnabled = FolderKind.IsEnabled = MixedFolderMusic.IsEnabled = ExcludeFolderButton.IsEnabled = RestoreFolderButton.IsEnabled = false;
         RescanButton.Content = "Cancel scan";
         RescanButton.ToolTip = "Stop scanning; keep videos already indexed";
         ScanProgress.Visibility = Visibility.Visible;
@@ -906,7 +923,7 @@ public partial class MainWindow : Window
         {
             scanning = false;
             ScanButton.IsEnabled = folders.Count > 0; RescanButton.IsEnabled = true;
-            AddFolderButton.IsEnabled = FolderKind.IsEnabled = ExcludeFolderButton.IsEnabled = true;
+            AddFolderButton.IsEnabled = FolderKind.IsEnabled = MixedFolderMusic.IsEnabled = ExcludeFolderButton.IsEnabled = true;
             RestoreFolderButton.IsEnabled = ExcludedFolderList.SelectedItem is string;
             RemoveFolderButton.IsEnabled = ChangeFolderButton.IsEnabled = FolderList.SelectedItem is LibraryFolder;
             RescanButton.Content = "Rescan";
@@ -1027,10 +1044,11 @@ public partial class MainWindow : Window
         if (!File.Exists(item.Path)) throw new FileNotFoundException("Movie file is unavailable. Reconnect its drive and rescan.");
         await Disconnect(preserveFullscreen: (fullscreen || pictureInPicture) && room is null); target = null; loadedMedia = null; playingItem = item;
         var generation = loadGeneration;
-        localResume = !WasWatched(item.Id) && long.TryParse(library.Setting("position:" + item.Id), out var saved) ? saved : 0;
+        localResume = !WasWatched(item.Id) && !item.IsMusic && long.TryParse(library.Setting("position:" + item.Id), out var saved) ? saved : 0;
         using var media = new Media(vlc!, item.Path, FromType.FromPath);
         ready = false; RoomHeading.Text = PlaybackTitle(item); RoomSubtitle.Text = item.Caption;
         ConnectionStatus.Text = "Local playback";
+        ShowKnownMusic();
         await PrepareVideoSurface();
         if (closing || generation != loadGeneration || room is not null) return;
         player!.Play(media);
@@ -1050,7 +1068,8 @@ public partial class MainWindow : Window
     }
     private void SavePlaybackPosition()
     {
-        if (nativeStopCount == 0 && (room is null || room.Identity?.Host == true) && playingItem is not null && player is not null && player.Time >= 0)
+        // Songs always start from the beginning, so they keep no resume position and stay out of Continue watching.
+        if (nativeStopCount == 0 && (room is null || room.Identity?.Host == true) && playingItem is { IsMusic: false } && player is not null && player.Time >= 0)
         {
             var time = player.Time; var length = player.Length;
             var saved = new List<KeyValuePair<string, string>> { KeyValuePair.Create("position:" + playingItem.Id, WasWatched(playingItem.Id) || length > 0 && time >= length - 2000 ? "0" : Math.Max(0, time).ToString()) };
@@ -1282,7 +1301,7 @@ public partial class MainWindow : Window
     private async Task ImproveEpisodeArtwork(LibraryCardView view)
     {
         // Runs for every card realized while scrolling: return before any settings reads.
-        if (view.IsRemote || !view.IsEpisode) return;
+        if (view.IsRemote || !view.IsEpisode || view.Card.Media.IsMusic) return;
         var item = view.Card.Media;
         var token = savedMetadataToken;
         var options = await Task.Run(() =>
@@ -1372,6 +1391,7 @@ public partial class MainWindow : Window
             vlcMedia.AddOption(":sub-autodetect-file=0");
             if (client != room || generation != loadGeneration) return;
             RoomHeading.Text = client.Snapshot?.Name ?? media.Title; RoomSubtitle.Text = media.Title + " · " + (client.Identity?.Host == true ? "You are hosting" : "Streaming from host");
+            ShowKnownMusic();
             await PrepareVideoSurface(openPlayer: RoomPage.Visibility == Visibility.Visible);
             if (client != room || generation != loadGeneration) return;
             var started = player!.Play(vlcMedia);
@@ -1406,9 +1426,10 @@ public partial class MainWindow : Window
     {
         UpdateSystemMediaControls();
         if (player is not null && RoomPage.Visibility == Visibility.Visible) RefreshSubtitleLift();
+        UpdateAudioPlayback();
         // The bars float over the video, so they fade when idle: always in fullscreen, and while playing in the window.
-        // Cheap managed checks run first; the native playing state is read only once the bars are idle.
-        if (!pictureInPicture && PlaybackControls.Visibility == Visibility.Visible && Environment.TickCount64 - lastPlayerInteraction > 2600 &&
+        // Music has nothing behind them to see, so they stay. Cheap managed checks run first; the native playing state is read only once the bars are idle.
+        if (!pictureInPicture && !audioPlayback && PlaybackControls.Visibility == Visibility.Visible && Environment.TickCount64 - lastPlayerInteraction > 2600 &&
             !seeking && !PlayerMenuOpen && !PlaybackControls.IsMouseOver && !RoomHeader.IsMouseOver &&
             (fullscreen || RoomPage.Visibility == Visibility.Visible && player?.IsPlaying == true))
         {
@@ -1822,6 +1843,7 @@ public partial class MainWindow : Window
         if (fullscreen && !preserveFullscreen) SetFullscreen(false);
         if (pictureInPicture && !preserveFullscreen) SetPictureInPicture(false, openPlayer: false);
         PlayerEmpty.Visibility = Visibility.Visible;
+        SetAudioPlayback(false);
         UpdateSystemMediaControls();
         RoomPlaybackNotice.Visibility = Visibility.Collapsed;
         RoomPlaybackNoticeText.Text = "";

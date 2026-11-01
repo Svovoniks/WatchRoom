@@ -43,7 +43,8 @@ public partial class MainWindow
     {
         if (EpisodeEndButton is null) return;
         var item = playingItem;
-        var visible = item is { IsExtra: false, IsVirtual: false };
+        // Music moves on with Next and the track list instead.
+        var visible = item is { IsExtra: false, IsVirtual: false, IsMusic: false };
         EpisodeEndButton.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         if (!visible) return;
         EpisodeEndButton.IsEnabled = player is not null && ready && !nextEpisodePromptOpen &&
@@ -108,8 +109,10 @@ public partial class MainWindow
         DetailWatchedIcon.SetResourceReference(TextBlock.ForegroundProperty, watched ? "Success" : "Ink");
         DetailWatched.ToolTip = watched ? "Mark as unwatched" : "Mark as watched";
         System.Windows.Automation.AutomationProperties.SetName(DetailWatched, watched ? "Mark as unwatched" : "Mark as watched");
-        var resume = !watched && long.TryParse(library.Setting("position:" + item.Id), out var position) && position >= 10000 ? position : 0;
-        DetailPlay.Content = resume > 0 ? "Resume at " + FormatTime(resume) : "Play locally";
+        // Songs start from the beginning; see SavePlaybackPosition.
+        var resume = !watched && !item.IsMusic && long.TryParse(library.Setting("position:" + item.Id), out var position) && position >= 10000 ? position : 0;
+        DetailPlay.Content = resume > 0 ? "Resume at " + FormatTime(resume) : item.IsMusic ? "Play" : "Play locally";
+        DetailHost.Content = item.IsMusic ? "Listen together" : "Watch together";
         RestartButton.Visibility = resume > 0 ? Visibility.Visible : Visibility.Collapsed;
         RestartButton.IsEnabled = DetailPlay.IsEnabled;
     }
@@ -140,7 +143,7 @@ public partial class MainWindow
         if (endedItem is not null && (room is null || room.Identity?.Host == true))
         {
             library.Setting("position:" + endedItem.Id, "0");
-            SetWatched(endedItem, true);
+            if (!endedItem.IsMusic) SetWatched(endedItem, true);
         }
         if (room?.Identity?.Host == true) SendPlayback(false, Math.Max(0, player!.Length), stopReason: "ended");
         if (ContinuesQueue(endedItem))
@@ -151,6 +154,8 @@ public partial class MainWindow
         if (endedItem is null || room is not null && (room.Identity?.Host != true || !room.IsConnected)) return;
         var next = EpisodePlayback.Next(items, items.FirstOrDefault(item => item.Id == endedItem.Id) ?? endedItem, false, item => File.Exists(item.Path), PreferredVersion(endedItem));
         if (next is null) return;
+        // An album plays on to its next track without a countdown.
+        if (endedItem.IsMusic && next.IsMusic) { await PlayFollowingEpisode(next); return; }
         nextEpisodePromptOpen = true;
         try
         {

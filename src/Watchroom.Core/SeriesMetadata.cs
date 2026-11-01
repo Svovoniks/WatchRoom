@@ -21,7 +21,8 @@ public static class SeriesMetadata
         using var requests = MetadataHttp.BeginScope(library, force || refresh is not null, options);
         using var owned = metadata is null && TmdbCredentials.Resolve(token) is not null ? new MetadataClient(token, options: options) : null;
         var tmdb = metadata ?? owned;
-        var catalog = library.All(); var catalogChanged = false;
+        // Albums are not shows: their tracks never look up show metadata.
+        var catalog = library.All().Where(x => !x.IsMusic).ToList(); var catalogChanged = false;
         foreach (var compilation in catalog.Where(x => mode != MetadataRefresh.RetryArtwork && x.Series is not null && MetadataTitles.IsUnverifiedCompilation(x)))
         {
             catalogChanged = true;
@@ -59,7 +60,7 @@ public static class SeriesMetadata
                 outstanding.Set(stage, entry, "artwork-failure", AutomaticArtwork.FailureReason(failure), failure);
             return (null, true);
         }
-        var groups = (catalogChanged ? library.All() : catalog).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Series is not null && !x.MetadataLocked && !MetadataTitles.IsUnverifiedCompilation(x) &&
+        var groups = (catalogChanged ? library.All() : catalog).Where(x => !x.IsMusic).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Series is not null && !x.MetadataLocked && !MetadataTitles.IsUnverifiedCompilation(x) &&
             (x.Matched || !MetadataMatching.HasMovieEvidence(x))).GroupBy(LibraryIdentity.ShowKey).ToArray();
         foreach (var group in groups)
         {
