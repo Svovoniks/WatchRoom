@@ -78,6 +78,7 @@ public partial class MainWindow : Window
     private readonly CancellationTokenSource lifetime = new();
     private readonly TaskCompletionSource playerRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource playerInitialized = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource firstPlayback = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private List<MediaItem> items = [];
     private MediaItem? selected;
     private MediaItem? playingItem;
@@ -128,6 +129,12 @@ public partial class MainWindow : Window
     public MainWindow(string? startupFile)
     {
         episodeArtwork = new(CaptureEpisodeFrame);
+        // The TMDB retention sweep reads every record; it runs in the background once the library has rendered.
+        library = new LibraryStore(App.DataDirectory, deferRetention: true);
+        var savedFolders = Wire.Read<List<LibraryFolder>>(library.Setting("folders") ?? "[]");
+        var savedExclusions = Wire.Read<string[]>(library.Setting("exclusions") ?? "[]");
+        // A video opened at launch is matched against the library while the window is built.
+        var startupCandidates = startupFile is null ? null : Task.Run(() => StartupFileCandidates(startupFile, savedFolders, savedExclusions));
         InitializeComponent();
         RegisterName("LibraryScroll", LibraryScroll);
         RoomPage.SizeChanged += (_, _) => AudioTracks.MaxHeight = SubtitleTracks.MaxHeight = QueueList.MaxHeight = Math.Clamp(RoomPage.ActualHeight - 260, 120, 360);
@@ -137,13 +144,11 @@ public partial class MainWindow : Window
         // Keep the initial window inside the usable desktop on smaller displays.
         Height = Math.Min(Height, SystemParameters.WorkArea.Height);
         Width = Math.Min(Width, SystemParameters.WorkArea.Width);
-        // The TMDB retention sweep reads every record; it runs in the background once the library has rendered.
-        library = new LibraryStore(App.DataDirectory, deferRetention: true);
         InitializeUpdates();
         light = library.Setting("theme") == "light"; palette = ThemePalette.Find(library.Setting("colorTheme"));
         ApplyTheme();
         if (startupFile is null) ShowPage("Home");
-        foreach (var f in Wire.Read<List<LibraryFolder>>(library.Setting("folders") ?? "[]")) folders.Add(f);
+        foreach (var f in savedFolders) folders.Add(f);
         FolderList.ItemsSource = folders; InitializePlayerChrome(); LoadAcquisitionPlugins();
         ScanButton.IsEnabled = folders.Count > 0;
         try
@@ -154,7 +159,7 @@ public partial class MainWindow : Window
         InitializeVoice();
         InitializePreferences();
         displaySpecialsWithinSeasons = MetadataOptions.Load(library).DisplaySpecialsWithinSeasons;
-        foreach (var path in Wire.Read<string[]>(library.Setting("exclusions") ?? "[]")) exclusions.Add(path);
+        foreach (var path in savedExclusions) exclusions.Add(path);
         ExcludedFolderList.ItemsSource = exclusions;
         try { savedQueues.AddRange(Wire.Read<List<SavedQueue>>(library.Setting("queues") ?? "[]")); }
         catch (System.Text.Json.JsonException) { }
@@ -181,19 +186,22 @@ public partial class MainWindow : Window
         metadataRetentionTimer.Start();
         scanDelay.Tick += async (_, _) => { scanDelay.Stop(); if (!scanning) await Guard(() => Scan(fromWatcher: true)); };
         if (startupFile is not null) ShowStartupPlayer(startupFile);
+        PlaybackDiagnostics.Record("startup-stage", new { stage = "window" });
         Loaded += async (_, _) =>
         {
+            PlaybackDiagnostics.Record("startup-stage", new { stage = "loaded" });
             SetStatus("Loading library…"); ResultCount.Text = "Loading library…";
             EmptyLibrary.Visibility = Visibility.Collapsed;
             var roots = folders.ToArray(); var excluded = exclusions.ToArray();
             var catalog = Task.Run(() => library.PruneAndLoad(roots, excluded));
             // A video opened at launch starts the player and plays alongside the library load.
             var playerStart = startupFile is null ? null : StartPlayer();
-            if (startupFile is not null) _ = Guard(() => OpenStartupFileAsync(startupFile, catalog));
+            if (startupFile is not null) _ = Guard(() => OpenStartupFileAsync(startupFile, startupCandidates!));
             await Guard(async () =>
             {
                 var loaded = await catalog;
                 if (closing) return;
+                PlaybackDiagnostics.Record("startup-stage", new { stage = "library", items = loaded.Count });
                 // Restore the saved queue before refresh persists any queue edits.
                 items = loaded;
                 var byId = loaded.ToDictionary(item => item.Id);
@@ -202,21 +210,29 @@ public partial class MainWindow : Window
                 // An opened video plays on its own, outside the saved queue.
                 if (!openedFile && int.TryParse(savedCursor, out var cursor)) queuePosition = Math.Clamp(cursor, -1, queue.Count - 1);
                 libraryLoaded = true;
-                RefreshLibraryFromItems(loaded); WatchFolders(); BackfillRuntimes();
+                RefreshLibraryFromItems(loaded); WatchFolders();
             });
             if (closing) return;
             OpenFilesReady();
-            _ = Guard(async () => { if (!closing && await Task.Run(() => library.ExpireTmdbContent(force: true)) && !closing) await RefreshLibrary(); });
+            // Background work reads files and the whole catalog; while a video opened at launch starts, it waits.
+            var housekeeping = openedFile ? Task.WhenAny(firstPlayback.Task, Task.Delay(TimeSpan.FromSeconds(10), lifetime.Token)) : Task.CompletedTask;
+            _ = Guard(async () =>
+            {
+                await housekeeping;
+                if (closing) return;
+                BackfillRuntimes();
+                if (await Task.Run(() => library.ExpireTmdbContent(force: true)) && !closing) await RefreshLibrary();
+            });
             // Background housekeeping: a failure only means stale entries stay until the next launch.
-            _ = Task.Run(() =>
+            _ = housekeeping.ContinueWith(_ =>
             {
                 try { library.RemoveStaleTrackLanguages(); }
                 catch (Exception ex) { PlaybackDiagnostics.Record("track-language-cleanup-failed", new { error = ex.GetType().Name }); }
-            });
+            }, TaskScheduler.Default);
             if (closing) return;
-            // Starting the native player loads hundreds of DLLs under the process loader lock, which
-            // stalls the UI thread's own first-frame work. Wait until the library has rendered unless
-            // playback is requested sooner.
+            // Starting the native player loads DLLs under the process loader lock, which stalls the UI
+            // thread's own first-frame work. Wait until the library has rendered unless playback is
+            // requested sooner.
             if (playerStart is null)
             {
                 await Task.WhenAny(Task.Delay(1000), playerRequested.Task);
@@ -226,25 +242,34 @@ public partial class MainWindow : Window
             await playerStart;
             if (closing) return;
             if (folders.Count == 0 && savedRooms.Count == 0 && wanted.Count == 0 && !openedFile && currentPage is "Home" or "Library") ShowPage("Welcome");
-            else if (SavedAutoArtwork) await Guard(FetchArtwork);
+            else if (SavedAutoArtwork)
+            {
+                await housekeeping;
+                if (!closing) await Guard(FetchArtwork);
+            }
         };
+    }
+    private sealed record NativePlayer(LibVLC Engine, LibVLCSharp.Shared.MediaPlayer Player);
+    private static Task<NativePlayer>? earlyPlayer;
+    // A video opened at launch starts the native player while the window is built; StartPlayer takes it from here.
+    public static void StartPlayerEarly() => earlyPlayer ??= Task.Run(CreateNativePlayer);
+    private static NativePlayer CreateNativePlayer()
+    {
+        PrefetchVlcLibraries();
+        LibVLCSharp.Shared.Core.Initialize();
+        var engine = new LibVLC("--no-video-title-show", "--no-snapshot-preview", "--no-osd", "--quiet");
+        try { return new(engine, new LibVLCSharp.Shared.MediaPlayer(engine) { EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false }); }
+        catch { engine.Dispose(); throw; }
     }
     private async Task StartPlayer()
     {
         await Guard(async () =>
         {
-            var volume = (int)Volume.Value;
-            var native = await Task.Run(() =>
-            {
-                PrefetchVlcLibraries();
-                LibVLCSharp.Shared.Core.Initialize();
-                var engine = new LibVLC("--no-video-title-show", "--no-snapshot-preview", "--no-osd", "--quiet");
-                try { return (Engine: engine, Player: new LibVLCSharp.Shared.MediaPlayer(engine) { Volume = volume, EnableHardwareDecoding = true, EnableKeyInput = false, EnableMouseInput = false }); }
-                catch { engine.Dispose(); throw; }
-            });
+            var native = await (Interlocked.Exchange(ref earlyPlayer, null) ?? Task.Run(CreateNativePlayer));
             if (closing) { native.Player.Dispose(); native.Engine.Dispose(); return; }
-            vlc = native.Engine; player = native.Player;
+            vlc = native.Engine; player = native.Player; player.Volume = (int)Volume.Value;
             Video.MediaPlayer = player;
+            PlaybackDiagnostics.Record("startup-stage", new { stage = "player" });
             player.TimeChanged += (_, e) =>
             {
                 var mono = Environment.TickCount64; playbackPosition.Observe(e.Time, mono);
@@ -261,7 +286,7 @@ public partial class MainWindow : Window
             // Each new video output starts without the subtitle lift; it comes from LibVLC's thread.
             player.Vout += (_, _) => Dispatcher.BeginInvoke(() => { if (!closing) SubtitleOutputChanged(); });
             player.ESAdded += (_, _) => TracksChanged(); player.ESDeleted += (_, _) => TracksChanged(); player.ESSelected += (_, _) => TracksChanged();
-            player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); ReportReady(); if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
+            player.Playing += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-playing", new { room = room is not null, targetPlaying = target?.Playing }); ready = true; firstPlayback.TrySetResult(); if (room is null && localResume > 0 && player is not null) { player.Time = localResume; localResume = 0; } RefreshTracks(); ReportReady(); if (playbackPause.Pending || target?.Playing == false) player?.SetPause(true); });
             player.EncounteredError += (_, _) => Dispatcher.BeginInvoke(() => { if (closing || nativeStopCount > 0 || PlayerEmpty.Visibility == Visibility.Visible) return; PlaybackDiagnostics.Record("player-error", new { state = player?.State.ToString() }); SetStatus(room?.IsPeerRecovering == true ? "Connection interrupted · Reconnecting…" : "Playback failed. Check that the file is available and the connection is active."); });
             player.Buffering += (_, e) => Dispatcher.BeginInvoke(() =>
             {
@@ -1520,6 +1545,37 @@ public partial class MainWindow : Window
         }
         if (PlaybackDiagnostics.Enabled) PlaybackDiagnostics.Record("control-request", new { command.CommandId, playing, position, revision = target?.Revision });
     }
+    // Like VLC: off, then the whole queue or show, then just this video.
+    private enum LoopMode { Off, All, One }
+    private LoopMode loopMode;
+    private void LoopClicked(object sender, RoutedEventArgs e) => ToggleLoop(sender, e);
+    // The button, the L key and the … menu row all step to the next mode.
+    private void ToggleLoop(object sender, RoutedEventArgs e)
+    {
+        if (!LoopButton.IsEnabled) { RefreshLoopButton(); SetStatus("The host controls looping."); return; }
+        loopMode = loopMode switch { LoopMode.Off => LoopMode.All, LoopMode.All => LoopMode.One, _ => LoopMode.Off };
+        RefreshLoopButton();
+        // A folded Loop row in the … menu shows the new mode too.
+        if (LoopButton.Visibility != Visibility.Visible) RefreshOverflowMenu();
+        SetStatus(loopMode switch
+        {
+            LoopMode.All => "Loop all: the queue or show starts again after the last video.",
+            LoopMode.One => "Loop one: this video replays when it ends.",
+            _ => "Loop off.",
+        });
+    }
+    private string LoopLabel => loopMode switch { LoopMode.All => "Loop all", LoopMode.One => "Loop one", _ => "Loop off" };
+    private void RefreshLoopButton()
+    {
+        // A guest's own earlier choice must neither show nor carry over if hosting passes to them; the host chooses.
+        if (room?.Identity is { Host: false } && loopMode != LoopMode.Off) { loopMode = LoopMode.Off; RefreshOverflowMenu(); }
+        // The toggle's own click flips IsChecked; the mode decides it.
+        LoopButton.IsChecked = loopMode != LoopMode.Off;
+        LoopButton.Content = loopMode == LoopMode.One ? "" : "";
+        var label = LoopLabel;
+        LoopButton.ToolTip = !LoopButton.IsEnabled ? "The host controls looping" : label + " (L)";
+        System.Windows.Automation.AutomationProperties.SetName(LoopButton, label);
+    }
     private void TogglePlayback(object sender, RoutedEventArgs e)
     {
         RequestPlayback(!WantsMediaPlayback);
@@ -1868,6 +1924,9 @@ public partial class MainWindow : Window
             : QueuePlayback.FindNext(queue, queuePosition, 1, x => RecentlyExists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
         PreviousButton.IsEnabled = ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(-1) is not null
             : QueuePlayback.FindNext(queue, queuePosition, -1, x => RecentlyExists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
+        // Looping restarts the video when it ends, which only the host decides in a room.
+        LoopButton.IsEnabled = canManageEpisodes;
+        RefreshLoopButton();
         ReturnToRoomButton.IsEnabled = ready || room is not null;
         var canManageQueue = room is null || connectedRoom && room!.Identity?.Host == true;
         QueueEditActions.Visibility = canManageQueue && QueueList.HasItems ? Visibility.Visible : Visibility.Collapsed;
@@ -2046,7 +2105,7 @@ public partial class MainWindow : Window
         if (e.Key == Key.Escape && LibraryPage.Visibility == Visibility.Visible && SearchBox.IsKeyboardFocused)
         { SearchBox.Clear(); e.Handled = true; return; }
         if (Keyboard.FocusedElement is TextBox or PasswordBox or ComboBox or ListBox or ListBoxItem || !inPlayer) return;
-        if (e.Key == Key.Space && Keyboard.FocusedElement is Button) return;
+        if (e.Key == Key.Space && (Keyboard.FocusedElement is Button || Keyboard.FocusedElement == LoopButton)) return;
         if (e.Key is Key.F or Key.F11) { Fullscreen(sender, e); e.Handled = true; }
         else if (e.Key == Key.I) { SetPictureInPicture(!pictureInPicture); e.Handled = true; }
         else if (e.Key == Key.Space) { TogglePlayback(sender, e); e.Handled = true; }
@@ -2055,6 +2114,7 @@ public partial class MainWindow : Window
         else if (e.Key == Key.S) { StopPlayback(sender, e); e.Handled = true; }
         else if (e.Key == Key.P) { PreviousQueued(sender, e); e.Handled = true; }
         else if (e.Key == Key.N) { NextQueued(sender, e); e.Handled = true; }
+        else if (e.Key == Key.L) { ToggleLoop(sender, e); e.Handled = true; }
         else if (Keyboard.FocusedElement is not Slider && e.Key is Key.Up or Key.Down) { ShowPlayerControls(); Volume.Value = Math.Clamp(Volume.Value + (e.Key == Key.Up ? 5 : -5), 0, 100); e.Handled = true; }
     }
     private void ToggleTheme(object sender, RoutedEventArgs e)

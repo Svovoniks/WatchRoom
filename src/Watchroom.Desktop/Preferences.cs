@@ -36,15 +36,26 @@ public partial class MainWindow
     private bool SavedAutoArtwork => library.Setting("artwork") != "false";
     private int SavedStreamingBufferSeconds => StreamingBufferOptions.Load(library);
 
-    private void InitializePreferences()
+    // Listing every culture takes tens of milliseconds, so it runs in the background while the window is built.
+    private static readonly Task<(LocaleChoice[] Languages, LocaleChoice[] Countries)> localeChoices = Task.Run(() =>
     {
         var cultures = CultureInfo.GetCultures(CultureTypes.AllCultures);
-        MetadataLanguage.ItemsSource = cultures.Where(c => System.Text.RegularExpressions.Regex.IsMatch(c.Name, "^[a-z]{2}(?:-[A-Z]{2})?$"))
+        var languages = cultures.Where(c => System.Text.RegularExpressions.Regex.IsMatch(c.Name, "^[a-z]{2}(?:-[A-Z]{2})?$"))
             .Select(c => new LocaleChoice(c.Name, c.EnglishName)).DistinctBy(c => c.Code).OrderBy(c => c.Name).ToArray();
-        MetadataCountry.ItemsSource = cultures.Where(c => !c.IsNeutralCulture && c.Name.Length > 0)
+        var countries = cultures.Where(c => !c.IsNeutralCulture && c.Name.Length > 0)
             .Select(c => { try { return new RegionInfo(c.Name); } catch (ArgumentException) { return null; } })
             .OfType<RegionInfo>().Where(r => r.TwoLetterISORegionName.Length == 2)
             .Select(r => new LocaleChoice(r.TwoLetterISORegionName, r.EnglishName)).DistinctBy(c => c.Code).OrderBy(c => c.Name).ToArray();
+        return (languages, countries);
+    });
+    // An explicit static constructor starts static fields such as localeChoices when the first window is created,
+    // rather than when one is first read.
+    static MainWindow() { }
+
+    private void InitializePreferences()
+    {
+        var (languages, countries) = localeChoices.GetAwaiter().GetResult();
+        MetadataLanguage.ItemsSource = languages; MetadataCountry.ItemsSource = countries;
         MetadataProviders.ItemsSource = providerChoices;
         SubtitleLanguageRules.ItemsSource = subtitleRuleDrafts;
         LoadPreferences();

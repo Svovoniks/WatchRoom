@@ -11,7 +11,10 @@ namespace Watchroom.Desktop;
 // plugin that supports its kind, and the files join the library when a scan finds them.
 public partial class MainWindow
 {
-    private sealed record PluginRow(string Name, string Detail);
+    private sealed record PluginRow(string Name, string Detail, AcquisitionPlugin Plugin)
+    {
+        public Visibility SettingsVisibility => Plugin.SettingsSchema is null ? Visibility.Collapsed : Visibility.Visible;
+    }
     private List<AcquisitionPlugin> acquisitionPlugins = [];
     private readonly HashSet<string> acquiring = new(StringComparer.OrdinalIgnoreCase);
     private static string PluginsDirectory => Environment.GetEnvironmentVariable("WATCHROOM_PLUGINS") ?? Path.Combine(App.DataDirectory, "plugins");
@@ -21,7 +24,7 @@ public partial class MainWindow
         var (plugins, problems) = ContentAcquisition.Discover(PluginsDirectory);
         acquisitionPlugins = plugins;
         AcquisitionPluginList.ItemsSource = plugins.Select(x => new PluginRow(x.Name, string.Join(" · ", x.ContentTypes.Select(ContentAcquisition.ContentTypeName)) +
-            (x.Description.Length > 0 ? " — " + x.Description : ""))).ToArray();
+            (x.Description.Length > 0 ? " — " + x.Description : ""), x)).ToArray();
         AcquisitionPluginStatus.Text = (plugins.Count == 0 ? $"No plugins yet. Put a plugin's folder, with its plugin.json, in {PluginsDirectory}." : "") +
             (problems.Count == 0 ? "" : (plugins.Count == 0 ? "\n" : "") + "Not loaded: " + string.Join("\n", problems));
         AcquisitionPluginStatus.Visibility = AcquisitionPluginStatus.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
@@ -41,6 +44,44 @@ public partial class MainWindow
             Process.Start(new ProcessStartInfo(PluginsDirectory) { UseShellExecute = true });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { SetStatus("Couldn't open the plugins folder: " + ex.Message); }
+    }
+    private void ConfigurePluginClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: PluginRow row }) return;
+        try { AcquisitionPluginSettings.Create(this, row.Plugin).ShowDialog(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException or ArgumentException)
+        { Dialogs.Alert(this, row.Name + " settings", "Couldn't load plugin settings: " + ex.Message); }
+    }
+    private string AcquisitionPreferenceKey(AcquisitionPlugin plugin, AcquisitionRequest request) => "acquisition:" + plugin.Id + ":" + request.ContentType + ":" + request.Title + ":" + request.Year + ":" + request.Season;
+    private AcquisitionOptions? AcquisitionPreferences(AcquisitionPlugin plugin, AcquisitionRequest request)
+    {
+        var json = library.Setting(AcquisitionPreferenceKey(plugin, request));
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(json)) return Wire.Read<AcquisitionOptions>(json);
+            var path = Path.Combine(plugin.Directory, "settings.json");
+            if (!File.Exists(path)) return null;
+            var settings = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path));
+            var title = settings?["titles"]?[request.Title];
+            return new(title?["title"]?.GetValue<string>() ?? request.Title, title?["url"]?.GetValue<string>(),
+                title?["resolution"]?.GetValue<int>() ?? settings?["resolution"]?.GetValue<int>(), title?["filter"]?.GetValue<string>(),
+                title?["episodeOffset"]?.GetValue<int>(), title?["season"]?.GetValue<int>());
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException or IOException or UnauthorizedAccessException or InvalidOperationException) { return null; }
+    }
+    private async Task PickAcquisition(AcquisitionRequest request, AcquisitionPlugin? initial = null)
+    {
+        var plugins = PluginsFor(request);
+        if (plugins.Length == 0) return;
+        var providerKey = "acquisition-provider:" + request.ContentType + ":" + request.Title + ":" + request.Year + ":" + request.Season;
+        initial ??= plugins.FirstOrDefault(x => x.Id == library.Setting(providerKey));
+        var dialog = new AcquisitionPicker(this, plugins, request, initial, plugin => AcquisitionPreferences(plugin, request), existing: ContentAcquisition.ExistingNames(request, items));
+        if (dialog.ShowDialog() != true || dialog.Selection is not { } choice) return;
+        if (choice.Remember && choice.Request.Options is { } options)
+        {
+            library.Setting(AcquisitionPreferenceKey(choice.Plugin, request), Wire.Serialize(options)); library.Setting(providerKey, choice.Plugin.Id);
+        }
+        await Acquire(choice.Plugin, choice.Request);
     }
 
     private AcquisitionPlugin[] PluginsFor(AcquisitionRequest request) => GuestLibrary ? [] : acquisitionPlugins.Where(x => x.Supports(request.ContentType)).ToArray();
@@ -71,6 +112,7 @@ public partial class MainWindow
     {
         var plugins = PluginsFor(request);
         if (plugins.Length == 0) { SetStatus($"No acquisition plugin gets {ContentAcquisition.ContentTypeName(request.ContentType).ToLowerInvariant()}."); return; }
+        if (plugins.Any(x => x.Interactive)) { await PickAcquisition(request); return; }
         if (plugins.Length == 1) { await Acquire(plugins[0], request); return; }
         var menu = new ContextMenu { PlacementTarget = target, Placement = PlacementMode.Bottom };
         foreach (var plugin in plugins) { var entry = new MenuItem { Header = plugin.Name, ToolTip = plugin.Description.Length > 0 ? plugin.Description : null }; entry.Click += async (_, _) => await Guard(() => Acquire(plugin, request)); menu.Items.Add(entry); }
@@ -78,6 +120,7 @@ public partial class MainWindow
     }
     private async Task Acquire(AcquisitionPlugin plugin, AcquisitionRequest request)
     {
+        if (plugin.Interactive && request.Action is null) { await PickAcquisition(request, plugin); return; }
         var key = plugin.Id + "\n" + request.Scope + "\n" + request.Name;
         if (!acquiring.Add(key)) { SetStatus($"{plugin.Name} is already working on {request.Name}."); return; }
         try

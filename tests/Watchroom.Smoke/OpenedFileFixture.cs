@@ -41,5 +41,30 @@ static class OpenedFileFixture
         check(OpenedFiles.Resolve([episode, remake], In("Downloads", "Breaking.Bad.S01E02.HDTV.mkv"), 42).Library is null,
             "an episode shared by two same-name shows is not guessed");
         check(OpenedFiles.IsVideo("clip.MKV") && !OpenedFiles.IsVideo("notes.txt"), "only video files can be opened");
+
+        // A video opened at launch is matched against only the records it could belong to, with the same result as the catalog.
+        var store = new LibraryStore(In("data"));
+        try
+        {
+            foreach (var item in library.Append(remake)) store.Save(item);
+            var catalog = store.All();
+            (string Path, long Size)[] probes = [(episode.Path.ToUpperInvariant(), 1000), (In("Downloads", "Breaking.Bad.S01E02.720p.mkv"), 1000),
+                (In("Downloads", "Breaking.Bad.S01E02.1080p.WEB-DL.mkv"), 5555), (In("Downloads", "Breaking.Bad.S01E03.mkv"), 6000),
+                (In("Downloads", "Shingeki no Kyojin - S01E03.mkv"), 8000), (In("Downloads", "Inception.2010.2160p.HEVC.mkv"), 9000),
+                (In("Downloads", "Home Video.mkv"), 4000), (In("Downloads", "Holiday 2024.mp4"), 10)];
+            var same = probes.All(probe =>
+            {
+                var full = OpenedFiles.Resolve(catalog, probe.Path, probe.Size);
+                var narrow = OpenedFiles.Resolve(store.OpenedFileCandidates(probe.Path), probe.Path, probe.Size);
+                return full.Match == narrow.Match && full.Library?.Id == narrow.Library?.Id && full.Item.Id == narrow.Item.Id;
+            });
+            check(same && store.OpenedFileCandidates(In("Downloads", "Holiday 2024.mp4")).Count == 0,
+                "a video opened at launch matches the library without reading the whole catalog");
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(root, true); } catch (IOException) { }
+        }
     }
 }

@@ -65,6 +65,19 @@ static class Program
             });
             app.Run(); return;
         }
+        if (args.FirstOrDefault() == "--acquisition-layout")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var layoutWindow = new MainWindow { Left = 0, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+            layoutWindow.Loaded += (_, _) =>
+            {
+                var count = 0;
+                try { AcquisitionLayoutChecks.Run(layoutWindow, directory, (condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); count++; }); Console.WriteLine($"{count} acquisition layout checks passed."); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { layoutWindow.Close(); app.Shutdown(); }
+            };
+            layoutWindow.Show(); app.Run(); return;
+        }
         if (args.FirstOrDefault() == "--voice-ui")
         {
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -327,6 +340,7 @@ static class Program
                 PreferenceNavigationChecks.Run(window, activeStore, Check);
                 await QueuePlaybackChecks.Run(window, activeStore, directory, Check);
                 await EpisodeEndChecks.Run(window, Check);
+                await LoopChecks.Run(window, Check);
                 await OpenFileChecks.Run(window, Check);
                 await PictureInPictureChecks.Run(window, Check);
                 await EndedSeekChecks.Run(window, Check);

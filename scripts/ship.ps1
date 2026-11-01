@@ -126,7 +126,7 @@ function Invoke-ReleaseChecks {
         $null = $smoke.Handle # keeps the exit code readable after the process ends
         Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.UpdateChecks', '-c', 'Release', '--no-build')
         Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', '--tmdb-access')
-        foreach ($check in @('--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout', '--language-detection', '--voice-processing')) {
+        foreach ($check in @('--acquisition-layout', '--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout', '--language-detection', '--voice-processing')) {
             Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build', '--', $check)
         }
         Write-Host 'Waiting for the full smoke suite...'
