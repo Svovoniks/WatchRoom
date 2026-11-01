@@ -792,7 +792,7 @@ public sealed partial class LibraryStore
         { item = item with { ExtraOf = parsed.ExtraOf, Title = parsed.Title, Kind = parsed.Kind, Series = null, ShowId = null, SeasonId = null, SeriesPath = null, Season = null, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, Year = null }; bonus = true; }
         // A clip's home season comes from its folder, so a rescan places clips indexed before seasons were recorded.
         if (bonus && parsed.IsBonus && parsed.AirsAfterSeason is not null) item = item with { AirsAfterSeason = parsed.AirsAfterSeason };
-        return LocalMetadata.Apply(item with { IsBonus = bonus, NumberingSource = parsed.NumberingSource,
+        return LocalMetadata.Apply(item with { IsBonus = bonus, BonusKind = bonus ? parsed.IsBonus ? parsed.BonusKind : previous?.BonusKind : null, NumberingSource = parsed.NumberingSource,
             SourceLibraryKind = parsed.SourceLibraryKind, IsExtra = false });
     }
 }
@@ -954,6 +954,8 @@ public static partial class FileNames
                 Kind = sourceKind == "Anime" || path.Split(System.IO.Path.DirectorySeparatorChar).Any(p => p.Equals("Anime", StringComparison.OrdinalIgnoreCase)) ? "Anime" : "Movie",
                 Series = null, SeriesPath = null, Season = null, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null,
                 SourcePart = null, SourcePartEpisode = null, SourcePartEpisodeEnd = null, NumberingOrder = "aired", NumberingConflict = null, AirsAfterSeason = null };
+        // A clip's kind follows its title: "NCOP1" is an opening, "Original Closing Sequence" an ending, "Gallery" none of these.
+        if (result.IsBonus) result = result with { BonusKind = FilenameExtras.Kind(result.EpisodeTitle) };
         return LocalMetadata.Apply(LibraryIdentity.Ensure(result with { SourceLibraryKind = sourceKind, IsExtra = IsExtra(path) && !showExtras && filmExtra is null,
             NumberingSource = result.IsBonus ? null : sourcePart is not null ? "part" : numbering?.AirDate is not null ? "date" : filenameSeason is not null ? "filename" :
                 seasonFolder.Success && number is not null && !absoluteFolder ? "season-folder" : result.AbsoluteEpisode is not null ? "absolute" : null }));
