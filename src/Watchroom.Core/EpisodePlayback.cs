@@ -15,6 +15,11 @@ public static class EpisodePlayback
         if (hasQueue || current.Series is null || current.Season is null || current.Episode is null ||
             current.NumberingConflict is not null) return null;
         var all = library as IReadOnlyCollection<MediaItem> ?? library.ToArray();
+        // An album plays its tracks in disc, number and file order, so tracks that share a number all play.
+        if (current.IsMusic)
+            return all.Where(item => LibraryIdentity.SameShow(item, current) && !item.IsExtra && !item.IsVirtual && (item.Id == current.Id || item.Available))
+                .OrderBy(item => item.Season ?? int.MaxValue).ThenBy(item => item.Episode ?? int.MaxValue).ThenBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
+                .SkipWhile(item => item.Id != current.Id).Skip(1).FirstOrDefault(canPlay);
         preferVersion = Version(all, current, preferVersion);
         var lastEpisode = current.EpisodeEnd ?? current.Episode.Value;
         var candidates = all.Where(item => LibraryIdentity.SameShow(item, current) &&

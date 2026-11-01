@@ -173,6 +173,11 @@
         "resolved": "9.0.0",
         "contentHash": "hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A=="
       },
+      "TagLibSharp": {
+        "type": "Transitive",
+        "resolved": "2.3.0",
+        "contentHash": "Qo4z6ZjnIfbR3Us1Za5M2vQ97OWZPmODvVmepxZ8XW0UIVLGdO2T63/N3b23kCcyiwuIe0TQvMEQG8wUCCD1mA=="
+      },
       "TesseractOCR": {
         "type": "Transitive",
         "resolved": "5.5.2",
@@ -221,7 +226,7 @@
           "Panlingo.LanguageIdentification.CLD3": "[0.8.1, )",
           "TesseractOCR": "[5.5.2, )",
           "VideoLAN.LibVLC.Windows": "[3.0.23.1, )",
-          "Watchroom.Core": "[0.3.77, )",
+          "Watchroom.Core": "[0.3.80, )",
           "Whisper.net": "[1.9.1, )",
           "Whisper.net.Runtime": "[1.9.1, )",
           "Whisper.net.Runtime.NoAvx": "[1.9.1, )"
@@ -235,7 +240,8 @@
           "Microsoft.Data.Sqlite": "[10.0.12, )",
           "SQLitePCLRaw.bundle_e_sqlite3": "[3.0.5, )",
           "SkiaSharp": "[2.88.9, )",
-          "SkiaSharp.NativeAssets.Linux.NoDependencies": "[2.88.9, )"
+          "SkiaSharp.NativeAssets.Linux.NoDependencies": "[2.88.9, )",
+          "TagLibSharp": "[2.3.0, )"
         }
       }
     }

@@ -20,7 +20,8 @@ public static class LibraryHome
         bool Watched(string id) => playback.TryGetValue("watched:" + id, out var value) && value == "true";
         long Position(string id) => playback.TryGetValue("position:" + id, out var value) && long.TryParse(value, out var position) ? Math.Max(0, position) : 0;
         long Played(string id) => playback.TryGetValue("played:" + id, out var value) && long.TryParse(value, out var time) ? time : 0;
-        var all = source.Where(item => !item.IsExtra && !item.IsVirtual).ToArray();
+        // Home suggests things to watch; music lives in its own library tab.
+        var all = source.Where(item => !item.IsExtra && !item.IsVirtual && !item.IsMusic).ToArray();
         var titles = LibraryCatalog.Browse(all.Where(item => item.Available));
         var groups = all.GroupBy(LibraryIdentity.ShowKey).ToDictionary(group => group.Key, group => group.ToArray());
         var continuing = new List<(HomeLibraryCard Entry, long Played)>();

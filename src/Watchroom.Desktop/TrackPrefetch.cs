@@ -139,7 +139,7 @@ public partial class MainWindow
     /// <summary>Identifies a video's untagged tracks ahead of playback, as the user looks at its page.</summary>
     private void PrefetchPageLanguages(MediaItem item)
     {
-        prefetchPage = item.Available && File.Exists(item.Path) ? item.Path : null;
+        prefetchPage = item.Available && !item.IsMusic && File.Exists(item.Path) ? item.Path : null;
         StartPrefetch();
     }
     /// <summary>Identifies the untagged tracks of the video that plays after this one: the next in the queue, or the next episode.</summary>
@@ -151,7 +151,7 @@ public partial class MainWindow
             var index = PlayingFromQueue(item) ? QueuePlayback.FindNext(queue, queuePosition, 1, QueueItemAvailable) : -1;
             var next = index >= 0 ? queue[index] : EpisodePlayback.Next(items, items.FirstOrDefault(entry => entry.Id == item.Id) ?? item, false,
                 entry => File.Exists(entry.Path), PreferredVersion(item));
-            if (next is not null && next.Path != item.Path && File.Exists(next.Path)) prefetchNext = next.Path;
+            if (next is { IsMusic: false } && next.Path != item.Path && File.Exists(next.Path)) prefetchNext = next.Path;
         }
         StartPrefetch();
     }
@@ -208,7 +208,7 @@ public partial class MainWindow
     {
         DetailTracks.Visibility = Visibility.Collapsed;
         detailTracksVersion++;
-        if (!item.Available || !File.Exists(item.Path)) return;
+        if (!item.Available || item.IsMusic || !File.Exists(item.Path)) return;
         PrefetchPageLanguages(item);
         RefreshDetailTracks();
     }
