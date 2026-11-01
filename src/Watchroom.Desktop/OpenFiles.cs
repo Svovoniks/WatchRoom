@@ -22,6 +22,7 @@ public static class OpenFileHandoff
         }).FirstOrDefault(path => path is not null && File.Exists(path));
 
     // True when this process is the data directory's running app.
+    public static bool Claimed => instance is not null;
     public static bool Claim()
     {
         instance = new Mutex(true, @"Local\" + Name, out var created);
@@ -30,45 +31,71 @@ public static class OpenFileHandoff
         instance.Dispose(); instance = null;
         return false;
     }
-
-    public static bool Forward(string path)
+    // A closing app stops taking videos at once, and gives up the data directory once it has saved where playback
+    // stopped, so a video opened while it shuts down starts its own window instead of waiting for the old process
+    // to exit. Release runs on the thread that claimed it.
+    public static void StopListening() => listening?.Cancel();
+    public static void Release()
     {
-        try
-        {
-            using var pipe = new NamedPipeClientStream(".", Name, PipeDirection.Out, PipeOptions.CurrentUserOnly);
-            pipe.Connect(5000);
-            // Explorer gave this process the foreground; pass it on so the running app can come to the front.
-            if (GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var owner)) AllowSetForegroundWindow(owner);
-            var bytes = Encoding.UTF8.GetBytes(path + "\n");
-            pipe.Write(bytes); pipe.Flush();
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or TimeoutException or UnauthorizedAccessException) { return false; }
+        StopListening();
+        if (instance is null) return;
+        try { instance.ReleaseMutex(); } catch (ApplicationException) { }
+        instance.Dispose(); instance = null;
     }
 
-    public static void Listen(Action<string> open, CancellationToken cancellation) => _ = Task.Run(async () =>
+    // Hands the path to the running app. Gives up when that app closes in the meantime, which then makes this
+    // process the running app (see Claimed), or after five seconds.
+    public static bool Forward(string path)
     {
-        while (!cancellation.IsCancellationRequested)
+        var deadline = Environment.TickCount64 + 5000;
+        while (true)
         {
             try
             {
-                await using var pipe = new NamedPipeServerStream(Name, PipeDirection.In, NamedPipeServerStream.MaxAllowedServerInstances,
-                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-                await pipe.WaitForConnectionAsync(cancellation);
-                using var reader = new StreamReader(pipe, Encoding.UTF8);
-                var buffer = new char[32768];
-                var read = await reader.ReadBlockAsync(buffer, cancellation);
-                var path = new string(buffer, 0, read).Split('\n')[0].Trim();
-                if (path.Length > 0) open(path);
+                using var pipe = new NamedPipeClientStream(".", Name, PipeDirection.Out, PipeOptions.CurrentUserOnly);
+                pipe.Connect(100);
+                // Explorer gave this process the foreground; pass it on so the running app can come to the front.
+                if (GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var owner)) AllowSetForegroundWindow(owner);
+                var bytes = Encoding.UTF8.GetBytes(path + "\n");
+                pipe.Write(bytes); pipe.Flush();
+                return true;
             }
-            catch (OperationCanceledException) { return; }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                PlaybackDiagnostics.Record("open-file-handoff-error", new { error = ex.GetType().Name });
-                await Task.Delay(500, CancellationToken.None);
-            }
+            catch (TimeoutException) { }
+            // The running app closed its end; it may be shutting down.
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Thread.Sleep(50); }
+            if (Claim() || Environment.TickCount64 >= deadline) return false;
         }
-    });
+    }
+
+    private static CancellationTokenSource? listening;
+    public static void Listen(Action<string> open, CancellationToken stop)
+    {
+        listening = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        var cancellation = listening.Token;
+        _ = Task.Run(async () =>
+        {
+            while (!cancellation.IsCancellationRequested)
+            {
+                try
+                {
+                    await using var pipe = new NamedPipeServerStream(Name, PipeDirection.In, NamedPipeServerStream.MaxAllowedServerInstances,
+                        PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                    await pipe.WaitForConnectionAsync(cancellation);
+                    using var reader = new StreamReader(pipe, Encoding.UTF8);
+                    var buffer = new char[32768];
+                    var read = await reader.ReadBlockAsync(buffer, cancellation);
+                    var path = new string(buffer, 0, read).Split('\n')[0].Trim();
+                    if (path.Length > 0) open(path);
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    PlaybackDiagnostics.Record("open-file-handoff-error", new { error = ex.GetType().Name });
+                    await Task.Delay(500, CancellationToken.None);
+                }
+            }
+        });
+    }
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetNamedPipeServerProcessId(IntPtr pipe, out int processId);

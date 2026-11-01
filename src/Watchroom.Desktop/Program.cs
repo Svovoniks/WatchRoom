@@ -18,7 +18,11 @@ public static class Program
     {
         OpenedFile = OpenFileHandoff.FileArgument(args);
         Primary = OpenFileHandoff.Claim();
-        if (!Primary && !args.Contains("--updated") && OpenedFile is not null && OpenFileHandoff.Forward(OpenedFile)) return;
+        if (!Primary && !args.Contains("--updated") && OpenedFile is not null)
+        {
+            if (OpenFileHandoff.Forward(OpenedFile)) return;
+            Primary = OpenFileHandoff.Claimed;
+        }
         Run();
     }
     [MethodImpl(MethodImplOptions.NoInlining)]

@@ -65,7 +65,13 @@ static class OpenFileChecks
                 "only an existing file argument is opened");
             check(OpenFileHandoff.Forward(copyPath) && await received.Task.WaitAsync(TimeSpan.FromSeconds(10)) == copyPath,
                 "a file opened while the app runs reaches the running window");
-            listening.Cancel();
+            // A closing app stops taking files at once, so a file opened while it shuts down opens its own window without waiting.
+            OpenFileHandoff.Release();
+            await Task.Delay(200);
+            var forwarding = Environment.TickCount64;
+            check(!OpenFileHandoff.Forward(copyPath) && OpenFileHandoff.Claimed && Environment.TickCount64 - forwarding < 2000,
+                "a file opened while the running app closes starts its own window without waiting for the old one to exit");
+            OpenFileHandoff.Release();
         }
         finally
         {

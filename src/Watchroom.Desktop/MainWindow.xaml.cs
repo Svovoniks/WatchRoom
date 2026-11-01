@@ -2256,6 +2256,7 @@ public partial class MainWindow : Window
     private async void WindowClosing(object? sender, CancelEventArgs e)
     {
         if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop();
+        OpenFileHandoff.StopListening();
         DisableSystemMediaControls();
         disconnectToast?.Invoke();
         guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); metadataRetentionTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
@@ -2266,6 +2267,8 @@ public partial class MainWindow : Window
         try { await Disconnect(); }
         finally
         {
+            // Playback position and the room session are saved; a video opened now can start its own window.
+            OpenFileHandoff.Release();
             pictureInPictureWindow?.Close();
             Video.MediaPlayer = null;
             var native = player; var engine = vlc; player = null; vlc = null;
