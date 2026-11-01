@@ -182,14 +182,15 @@ public partial class MainWindow
         BrowseWithGuestButton.Content = followGuest ? "Stop following" : "Follow " + activity?.Name;
         BrowseWithGuestButton.Visibility = activity?.View is not null ? Visibility.Visible : Visibility.Collapsed;
         if (FollowingGuest) ApplyGuestMirror();
-        else if (PosterGrid.ItemsSource == mirroredCards && !applyingGuestMirror) { PosterGrid.ItemsSource = libraryCards; FilterLibrary(); }
+        // The host's own library replaces the mirror once it is filtered; an update already running will do it.
+        else if (PosterGrid.ItemsSource == mirroredCards && !applyingGuestMirror && librarySearchCancellation is null) FilterLibrary(backgroundUpdate: true);
     }
     // Stopping keeps the guest's location, and scrolling away keeps the host's place in it, in the host's own full library.
     private void DetachGuestMirror(bool keepPlace = false)
     {
         if (applyingGuestMirror || !FollowingGuest) return;
         followGuest = false;
-        if (keepPlace && PosterGrid.ItemsSource == mirroredCards) libraryOffsetAfterFilter = LibraryScroll.VerticalOffset;
+        libraryKeepPlace = keepPlace;
         RefreshGuestMirror(room?.Snapshot?.LibraryActivity);
     }
     private void HostLibraryScrollInput(object sender, MouseWheelEventArgs e) => DetachGuestMirror(keepPlace: true);
