@@ -59,6 +59,10 @@ internal static class FilenameEpisodes
         if (!season.Success) season = Match(name, @"\b(?<s>\d{1,2})\s*(?:сезон|sezon)\s*" + Number + @"\s*сери(?:я|и|й)\b");
         if (!season.Success) season = Match(name, @"\b[сc](?<s>\d{1,2})[ -]*[еэ]" + Number + @"\b");
         if (season.Success) return Finish(name, season, int.Parse(season.Groups["s"].Value), true);
+        // "One Piece - Egghead SP4" and "OVA2" are numbered specials; a show's "Special 3" is too.
+        var special = Match(name, @"(?:^|\s|-)(?:SP|OVA|OAD)[ #-]?" + Number + @"(?=\s*(?:$|-|\())");
+        if (!special.Success && seriesContext) special = Match(name, @"(?:^|\s|-)Special[ #-]*" + Number + @"(?=\s*(?:$|-|\())");
+        if (special.Success) return Finish(name, special, 0, true);
 
         // Daily-show dates are only meaningful in a TV/anime folder, not movie names.
         if (seriesContext)

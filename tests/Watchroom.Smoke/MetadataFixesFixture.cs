@@ -118,6 +118,63 @@ static class MetadataFixesFixture
         var pilot = Path.Combine(outlaw, "Outlaw Star - Pilot Film (BDRip 1080p).mkv");
         await File.WriteAllTextAsync(Path.ChangeExtension(pilot, ".nfo"), "<episodedetails><season>0</season><episode>1</episode><title>Pilot</title></episodedetails>");
         check(FileNames.Parse(pilot) is { IsBonus: false, Season: 0, Episode: 1 }, "explicit NFO numbering promotes a pilot bonus clip to a real special");
+        await ShowFolderStrays(Path.Combine(directory, "strays"), check);
+    }
+    // Specials and disc clips kept beside a show's episodes belong to the show, not the movie shelf.
+    private static async Task ShowFolderStrays(string root, Action<bool, string> check)
+    {
+        async Task<string> At(params string[] parts) { var path = Path.Combine([root, .. parts]); Directory.CreateDirectory(Path.GetDirectoryName(path)!); await File.WriteAllTextAsync(path, "video fixture"); return path; }
+        var mixed = Path.Combine(root, "Mixed");
+        var azumanga = new[] { "Azumanga Daioh - 01 - Entrance Ceremony.mkv", "Azumanga Daioh - 02 - Kimura.mkv", "Azumanga Daioh - XX - Original Opening Sequence.mkv",
+            "Azumanga Daioh - XX - Movie Character Art Gallery.mkv", "Azumanga Daioh - XX - The Very Short Azumanga Daioh Movie.mkv" };
+        var paths = new List<string>(); foreach (var name in azumanga) paths.Add(await At("Mixed", "Azumanga Daioh", name));
+        var episode = FileNames.Parse(paths[0], "Mixed", mixed);
+        var clips = paths.Skip(2).Select(path => FileNames.Parse(path, "Mixed", mixed)).ToArray();
+        check(clips.All(clip => clip is { IsBonus: true, IsExtra: false, Kind: "Show", Season: 0, Episode: null, Series: "Azumanga Daioh" } && clip.ShowId == episode.ShowId) &&
+            clips.Select(clip => clip.EpisodeTitle).SequenceEqual(["Original Opening Sequence", "Movie Character Art Gallery", "The Very Short Azumanga Daioh Movie"]),
+            "unnumbered clips beside a show's numbered episodes are its bonus clips, titled without the show or XX placeholder");
+
+        var onePiece = new List<string>(); foreach (var name in new[] { "One Piece - 1100.mkv", "One Piece - 1101.mkv", "One Piece - Egghead SP4.mkv", "One Piece - Egghead SP11.mkv" })
+            onePiece.Add(await At("Mixed", "One Piece", name));
+        var opEpisode = FileNames.Parse(onePiece[0], "Mixed", mixed);
+        var sp4 = FileNames.Parse(onePiece[2], "Mixed", mixed); var sp11 = FileNames.Parse(onePiece[3], "Mixed", mixed);
+        check(sp4 is { IsBonus: false, Kind: "Show", Season: 0, Episode: 4, Series: "One Piece" } && sp11 is { Season: 0, Episode: 11 } &&
+            sp4.ShowId == opEpisode.ShowId && sp11.ShowId == opEpisode.ShowId, "SP-numbered files are numbered specials of the show beside them");
+        var anime = Path.Combine(root, "Anime");
+        var animeSp = FileNames.Parse(await At("Anime", "One Piece", "One Piece - Egghead SP6.mkv"), "Anime", anime);
+        await At("Anime", "One Piece", "One Piece - 1102.mkv");
+        check(animeSp is { Kind: "Anime", Season: 0, Episode: 6, Series: "One Piece", NumberingConflict: null } &&
+            FileNames.Parse(await At("Anime", "Show", "Season 1", "Show - OVA2.mkv"), "Anime", anime) is { Season: 0, Episode: 2, Series: "Show", NumberingConflict: null },
+            "SP and OVA specials join the anime folder's show, including inside a season folder");
+        await At("Shows", "Hazbin Hotel", "Season 1", "Hazbin Hotel - S01E01.mkv"); await At("Shows", "Hazbin Hotel", "Season 1", "Hazbin Hotel - S01E02.mkv");
+        var halves = Path.Combine("Anime", "One Piece", "One Piece Season 14 (Marineford) EP 459-516");
+        await At(halves, "[AnimeRG] One Piece - 491 [1080p].mkv"); await At(halves, "[AnimeRG] One Piece - 493 [1080p].mkv");
+        check(FileNames.Parse(await At("Shows", "Hazbin Hotel", "Season 1", "HAZBIN HOTEL (PILOT).mp4"), "Mixed", Path.Combine(root, "Shows")) is { IsBonus: true, Season: 0, EpisodeTitle: "PILOT" } &&
+            FileNames.Parse(await At(halves, "[AnimeRG] One Piece - 492A [1080p].mkv"), "Anime", anime) is { IsBonus: false, Season: 14 },
+            "a pilot in a season folder is a clip titled without its brackets, but half of a numbered episode keeps its season");
+
+        // A film in a folder of unrelated episodes, or beside a single numbered file, stays a film.
+        await At("Mixed", "Show - 01.mkv"); await At("Mixed", "Show - 02.mkv");
+        check(FileNames.Parse(await At("Mixed", "Inception (2010).mkv"), "Mixed", mixed) is { Kind: "Movie", Series: null, IsBonus: false } &&
+            FileNames.Parse(await At("Mixed", "Taxi", "Taxi 2 - 1080p.mkv"), "Mixed", mixed) is { Series: null } &&
+            FileNames.Parse(await At("Mixed", "Taxi", "Taxi (1998).mkv"), "Mixed", mixed) is { Kind: "Movie", Series: null, IsBonus: false } &&
+            FileNames.Parse(await At("Movies", "Azumanga Daioh", "Azumanga Daioh - XX - Original Closing Sequence.mkv"), "Movie", Path.Combine(root, "Movies")) is { Kind: "Movie", IsBonus: false },
+            "films beside unrelated or lone numbered files, and anything in a Movies folder, stay films");
+
+        // Folders listed before this change fix themselves on the next scan.
+        var store = new LibraryStore(Path.Combine(root, "db"));
+        store.Save(FileNames.Parse(paths[2], "Movie", mixed) with { Kind = "Movie", Series = null, ShowId = null, IsBonus = false });
+        store.Save(FileNames.Parse(onePiece[2], "Movie", mixed) with { Kind = "Movie", Series = null, ShowId = null, Season = null, Episode = null });
+        await store.ScanAsync([new(mixed)]);
+        var all = store.All();
+        check(all.Single(x => x.Path == paths[2]) is { IsBonus: true, Kind: "Show", Season: 0 } rescanned && rescanned.ShowId == all.Single(x => x.Path == paths[0]).ShowId &&
+            all.Single(x => x.Path == onePiece[2]) is { Season: 0, Episode: 4 } special && special.ShowId == all.Single(x => x.Path == onePiece[0]).ShowId &&
+            !LibraryCatalog.Browse(all).Any(card => card.Media.Series is null && (card.Media.Path.Contains("Azumanga") || card.Media.Path.Contains("One Piece"))),
+            "a rescan moves clips and specials stored as movies under their show");
+
+        check(MetadataTitles.Queries(FileNames.Parse(await At("Movies", "Hyakuemu - Movie.mkv"), "Movie", Path.Combine(root, "Movies"))).Contains("Hyakuemu") &&
+            !MetadataTitles.Queries(FileNames.Parse(await At("Movies", "Scary Movie (2000).mkv"), "Movie", Path.Combine(root, "Movies"))).Contains("Scary"),
+            "a film labelled '- Movie' is also searched without the label, but a title ending in Movie keeps it");
     }
     private static async Task Images(string directory, Action<bool, string> check)
     {
