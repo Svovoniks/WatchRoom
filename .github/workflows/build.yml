@@ -1,7 +1,10 @@
 name: Build and release
+# Pull requests run the checks on two runners at once. Pushes to master and release tags build the installers; they
+# skip the checks when a pull request run already passed them on the exact same tree, which is the case for every
+# merge from scripts/ship.ps1. A release is published only after the installers are built and the checks passed.
 on:
   push:
-    branches: ['**']
+    branches: [master]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -11,23 +14,68 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 jobs:
-  windows:
-    runs-on: windows-latest
-    timeout-minutes: 45
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
-      contents: write
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      checked: ${{ steps.earlier.outputs.checked }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
       - name: Resolve version
+        id: version
         shell: pwsh
         run: |
           $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
           if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") { throw 'Tag must match Version in Directory.Build.props' }
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Release tags must be vMAJOR.MINOR.PATCH' }
-          "APP_VERSION=$version" >> $env:GITHUB_ENV
+          "version=$version" >> $env:GITHUB_OUTPUT
+      # A pull request run checks the head merged into master. ship.ps1 merges only heads that contain master, so that
+      # merge has the head's own tree, and the squash commit it creates has that tree too.
+      - name: Find checks that already passed on this tree
+        id: earlier
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tree=$(git rev-parse 'HEAD^{tree}')
+          run=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" -f event=pull_request -f status=success -f per_page=100 \
+            --jq "[.workflow_runs[] | select(.head_commit.tree_id == \"$tree\") | .html_url] | first // empty")
+          if [ -n "$run" ]; then
+            echo "Tree $tree already passed every check in $run"
+            echo "checked=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No passing pull request run has tree $tree, so the checks run here."
+          fi
+
+  checks:
+    needs: plan
+    if: needs.plan.outputs.checked != 'true'
+    name: checks (${{ matrix.lane }})
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [desktop, smoke]
+    env:
+      APP_VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/cache@v4
+        with:
+          path: .nuget/packages
+          key: nuget-${{ hashFiles('**/packages.lock.json') }}
+      - uses: actions/cache@v4
+        with:
+          path: .tools/models
+          key: models-${{ hashFiles('src/Watchroom.Desktop/Watchroom.Desktop.csproj') }}
       # Voice processing libraries are built from pinned sources (see Watchroom.Desktop.csproj); reuse them while those are unchanged.
       - uses: actions/cache@v4
         with:
@@ -41,39 +89,74 @@ jobs:
           dotnet build Watchroom.slnx -c Release --no-restore -p:Version=$env:APP_VERSION
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Update safety checks
-        run: dotnet run --project tests/Watchroom.UpdateChecks -c Release
-      - name: Metadata regression checks
-        run: dotnet run --project tests/Watchroom.Smoke -c Release -- --metadata-cache
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.UpdateChecks -c Release --no-build
       - name: TMDB access and retention checks
-        run: dotnet run --project tests/Watchroom.Smoke -c Release -- --tmdb-access
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.Smoke -c Release --no-build -- --tmdb-access
       - name: Desktop regression checks
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build
+      - name: Acquisition dialog layout checks
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --acquisition-layout
       - name: Home regression checks
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --home
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --home
       - name: UI findings regression checks
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --ui-findings
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --ui-findings
       - name: Guest library layout checks
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --guest-library-layout
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --guest-library-layout
       - name: Host library browsing checks
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --host-library-browse
-      - name: Shared library transport checks
-        run: dotnet run --project tests/Watchroom.Smoke -c Release -- --shared-library
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --host-library-browse
       - name: Player layout checks
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --player-layout
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --player-layout
       - name: Track language detection checks
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --language-detection
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --language-detection
       - name: Voice processing checks
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --voice-processing
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --voice-processing
       - name: Episode thumbnail checks
-        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release -- --video-frames
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/Watchroom.DesktopChecks -c Release --no-build -- --video-frames
+      # Includes the metadata cache and shared library transport checks.
       - name: Full playback and room checks
-        run: dotnet run --project tests/Watchroom.Smoke -c Release -- artifacts/release-smoke
+        if: matrix.lane == 'smoke'
+        run: dotnet run --project tests/Watchroom.Smoke -c Release --no-build -- artifacts/release-smoke
+
+  package:
+    needs: plan
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      APP_VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/cache@v4
+        with:
+          path: .nuget/packages
+          key: nuget-${{ hashFiles('**/packages.lock.json') }}
+      - uses: actions/cache@v4
+        with:
+          path: .tools/models
+          key: models-${{ hashFiles('src/Watchroom.Desktop/Watchroom.Desktop.csproj') }}
+      - uses: actions/cache@v4
+        with:
+          path: .tools/native/*.dll
+          key: voice-native-${{ hashFiles('src/native/**', 'src/Watchroom.Desktop/Watchroom.Desktop.csproj') }}
       - name: Publish Windows app
-        if: github.event_name != 'pull_request'
         shell: pwsh
         env:
           WATCHROOM_TMDB_API_KEY: ${{ secrets.WATCHROOM_TMDB_API_KEY }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           $keyFile = Join-Path $env:RUNNER_TEMP "watchroom-tmdb-key.txt"
           if ([string]::IsNullOrWhiteSpace($env:WATCHROOM_TMDB_API_KEY)) { throw "WATCHROOM_TMDB_API_KEY repository secret is required for packaged builds." }
@@ -81,9 +164,20 @@ jobs:
           $env:WATCHROOM_TMDB_KEY_FILE = $keyFile
           dotnet publish src/Watchroom.Desktop -c Release -r win-x64 --self-contained true -o artifacts/Watchroom -p:Version=$env:APP_VERSION -p:VlcWindowsX86Enabled=false -p:VlcWindowsArm64Enabled=false -p:PublishReadyToRun=true
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ./scripts/package.ps1 -SkipPublish -Version $env:APP_VERSION
+      - name: Build installers
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/package.ps1 -SkipPublish -Version $env:APP_VERSION -Step Files
+          # The full installer compiles beside the update installers; both read the staged app folder.
+          $root = $PWD.Path
+          $installer = Start-Job { Set-Location $using:root; ./scripts/package.ps1 -SkipPublish -Version $env:APP_VERSION -Step Installer | Out-String }
           ./scripts/update-package-checks.ps1
           ./scripts/package-updates.ps1 -Version $env:APP_VERSION
+          Wait-Job $installer | Out-Null
+          Receive-Job $installer
+          if ($installer.State -ne 'Completed') { throw 'Full installer compilation failed' }
       - uses: actions/upload-artifact@v4
         with:
           name: Watchroom-windows-${{ env.APP_VERSION }}
@@ -91,12 +185,31 @@ jobs:
             artifacts/Watchroom-Setup-*-win-x64.exe
             artifacts/Watchroom-Update-*-win-x64.exe
             artifacts/Watchroom-files-*-win-x64.txt
+          if-no-files-found: error
           retention-days: 14
+
+  release:
+    needs: [plan, checks, package]
+    # Runs after skipped checks only when the plan found that they already passed on this tree.
+    if: >-
+      always() && startsWith(github.ref, 'refs/tags/') && needs.plan.result == 'success' && needs.package.result == 'success' &&
+      (needs.checks.result == 'success' || (needs.checks.result == 'skipped' && needs.plan.outputs.checked == 'true'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      APP_VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Watchroom-windows-${{ env.APP_VERSION }}
+          path: artifacts
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           $files = @("artifacts/Watchroom-Setup-$env:APP_VERSION-win-x64.exe", "artifacts/Watchroom-files-$env:APP_VERSION-win-x64.txt") +
             @(Get-ChildItem "artifacts/Watchroom-Update-*-to-$env:APP_VERSION-win-x64.exe" | ForEach-Object { $_.FullName })

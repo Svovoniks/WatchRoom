@@ -12,6 +12,7 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        if (HiddenDesktop.Relaunch(out var hiddenExitCode)) { Environment.ExitCode = hiddenExitCode; return; }
         // Voice runs on simulated devices so the checks never open the microphone; --voice-devices checks the real ones.
         if (args.FirstOrDefault() != "--voice-devices") Environment.SetEnvironmentVariable("WATCHROOM_SIMULATED_AUDIO", "1");
         if (args.FirstOrDefault() == "--video-frames")
@@ -63,6 +64,19 @@ static class Program
                 finally { app.Shutdown(); }
             });
             app.Run(); return;
+        }
+        if (args.FirstOrDefault() == "--acquisition-layout")
+        {
+            app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            var layoutWindow = new MainWindow { Left = 0, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+            layoutWindow.Loaded += (_, _) =>
+            {
+                var count = 0;
+                try { AcquisitionLayoutChecks.Run(layoutWindow, directory, (condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); count++; }); Console.WriteLine($"{count} acquisition layout checks passed."); }
+                catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
+                finally { layoutWindow.Close(); app.Shutdown(); }
+            };
+            layoutWindow.Show(); app.Run(); return;
         }
         if (args.FirstOrDefault() == "--voice-ui")
         {
@@ -327,6 +341,7 @@ static class Program
                 await QueuePlaybackChecks.Run(window, activeStore, directory, Check);
                 await EpisodeEndChecks.Run(window, Check);
                 await MusicPlaybackChecks.Run(window, Check);
+                await LoopChecks.Run(window, Check);
                 await OpenFileChecks.Run(window, Check);
                 await PictureInPictureChecks.Run(window, Check);
                 await EndedSeekChecks.Run(window, Check);

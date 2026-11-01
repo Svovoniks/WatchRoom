@@ -67,26 +67,78 @@ function Get-CheckRecordPath {
     $common = (Invoke-Native git @('-C', $Root, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
     return Join-Path $common "watchroom-checks/$Commit.json"
 }
+# Voice libraries and models are fetched or built once per checkout (see Watchroom.Desktop.csproj), and each check
+# copy is a fresh checkout. Like the CI cache, this keeps them between runs while their pinned inputs are unchanged.
+function Get-BuildCacheEntries {
+    param([string]$Checkout)
+    $common = (Invoke-Native git @('-C', $Checkout, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
+    $project = (Invoke-Native git @('-C', $Checkout, 'rev-parse', 'HEAD:src/Watchroom.Desktop/Watchroom.Desktop.csproj')).Trim()
+    $native = (Invoke-Native git @('-C', $Checkout, 'rev-parse', 'HEAD:src/native')).Trim()
+    return @(
+        [pscustomobject]@{ Path = Join-Path $Checkout '.tools/native'; Files = '*.dll'; Kind = 'native'; Cache = Join-Path $common "watchroom-build-cache/native-$native-$project" },
+        [pscustomobject]@{ Path = Join-Path $Checkout '.tools/models'; Files = '*'; Kind = 'models'; Cache = Join-Path $common "watchroom-build-cache/models-$project" })
+}
+function Restore-BuildCache {
+    param([string]$Checkout)
+    foreach ($entry in Get-BuildCacheEntries $Checkout) {
+        if (!(Test-Path -LiteralPath $entry.Cache)) { continue }
+        try {
+            New-Item -ItemType Directory -Force -Path $entry.Path | Out-Null
+            Copy-Item -Path (Join-Path $entry.Cache '*') -Destination $entry.Path -Recurse -Force
+        }
+        catch {
+            # Another run replaced the entry mid-copy; the build fetches everything again.
+            Remove-Item -LiteralPath $entry.Path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+function Save-BuildCache {
+    param([string]$Checkout)
+    foreach ($entry in Get-BuildCacheEntries $Checkout) {
+        if ((Test-Path -LiteralPath $entry.Cache) -or !(Test-Path -LiteralPath $entry.Path)) { continue }
+        $partial = "$($entry.Cache).partial-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Force -Path $partial | Out-Null
+        Copy-Item -Path (Join-Path $entry.Path $entry.Files) -Destination $partial -Recurse
+        try { Move-Item -LiteralPath $partial -Destination $entry.Cache }
+        catch { Remove-Item -LiteralPath $partial -Recurse -Force; continue } # another run saved it first
+        # Only the newest inputs are kept.
+        Get-ChildItem -LiteralPath (Split-Path -Parent $entry.Cache) -Directory -Filter "$($entry.Kind)-*" |
+            Where-Object { $_.FullName -ne $entry.Cache -and $_.Name -notlike '*.partial-*' } | Remove-Item -Recurse -Force
+    }
+}
 function Invoke-ReleaseChecks {
     param([string]$Checkout, [string]$Sdk, [string]$PackagePath)
     Push-Location $Checkout
     try {
+        Restore-BuildCache $Checkout
         Invoke-Native $Sdk @('restore', 'Watchroom.slnx', '--locked-mode', "-p:RestorePackagesPath=$PackagePath")
         Invoke-Native $Sdk @('build', 'Watchroom.slnx', '-c', 'Release', '--no-restore', "-p:RestorePackagesPath=$PackagePath")
-        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.UpdateChecks', '-c', 'Release', '--no-build')
-        foreach ($check in @('--metadata-cache', '--tmdb-access', '--shared-library')) {
-            Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', $check)
-        }
+        Save-BuildCache $Checkout
+        # The main desktop suite's input responsiveness gates are timing-sensitive, so it runs alone first.
         Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build')
-        foreach ($check in @('--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout', '--language-detection', '--voice-processing')) {
+        # The full smoke suite, the longest, then runs in the background beside the other checks. It includes the
+        # metadata cache and shared library transport checks. Some nested metadata fixtures create long SQLite backup
+        # filenames, so it gets a short directory under the temp folder.
+        $freshSmoke = Join-Path ([IO.Path]::GetTempPath()) ('wr-smoke-' + [guid]::NewGuid().ToString('N'))
+        $smokeLog = "$freshSmoke.log"
+        $smoke = Start-Process -FilePath $Sdk -ArgumentList @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', "`"$freshSmoke`"") `
+            -WorkingDirectory $Checkout -RedirectStandardOutput $smokeLog -RedirectStandardError "$smokeLog.err" -NoNewWindow -PassThru
+        $null = $smoke.Handle # keeps the exit code readable after the process ends
+        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.UpdateChecks', '-c', 'Release', '--no-build')
+        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', '--tmdb-access')
+        foreach ($check in @('--acquisition-layout', '--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout', '--language-detection', '--voice-processing')) {
             Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.DesktopChecks', '-c', 'Release', '--no-build', '--', $check)
         }
-        # Some nested metadata fixtures also create long SQLite backup filenames.
-        $freshSmoke = Join-Path ([IO.Path]::GetTempPath()) ('wr-smoke-' + [guid]::NewGuid().ToString('N'))
-        Invoke-Native $Sdk @('run', '--project', 'tests/Watchroom.Smoke', '-c', 'Release', '--no-build', '--', $freshSmoke)
+        Write-Host 'Waiting for the full smoke suite...'
+        $smoke.WaitForExit()
+        Get-Content -LiteralPath $smokeLog, "$smokeLog.err" -Tail 20 | Write-Host
+        if ($smoke.ExitCode -ne 0) { throw "The full smoke suite failed with exit code $($smoke.ExitCode). Output: $smokeLog" }
         Invoke-Native git @('diff', '--exit-code')
     }
-    finally { Pop-Location }
+    finally {
+        if ($smoke -and !$smoke.HasExited) { $smoke.Kill($true) }
+        Pop-Location
+    }
 }
 function Get-SyncTree {
     param([string]$Root, [string]$Base, [string]$Master, [string]$Local)
