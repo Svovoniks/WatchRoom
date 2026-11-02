@@ -15,8 +15,13 @@
      </Button>
      <Button x:Name="SettingsNav" Tag="Settings" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Settings"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Settings"/></StackPanel></Button>
     </StackPanel>
-    <!-- The navigation scrolls when the window is too short for it, so Settings and the player stay in view; the scroll bar sits in the rail's right padding. -->
-    <ScrollViewer Margin="0,0,-12,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+    <!-- The navigation scrolls when the window is too short for it, so Settings and the player stay in view. -->
+    <!-- The scroll bar overlays the rail's 12 DIP right padding instead of taking a column, so the buttons keep their width when it appears. -->
+    <ScrollViewer x:Name="RailScroll" Margin="0,0,-12,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+     <ScrollViewer.Template><ControlTemplate TargetType="ScrollViewer"><Grid>
+      <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" CanContentScroll="{TemplateBinding CanContentScroll}"/>
+      <ScrollBar x:Name="PART_VerticalScrollBar" HorizontalAlignment="Right" Width="12" MinWidth="0" Minimum="0" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{TemplateBinding VerticalOffset}" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
+     </Grid></ControlTemplate></ScrollViewer.Template>
      <StackPanel Margin="0,0,12,0">
        <StackPanel Orientation="Horizontal" Margin="10,0,0,22"><Image Source="Assets/BlackPearl.png" Width="26" Height="26"/><TextBlock Text="BlackPearl" FontSize="18" FontWeight="SemiBold" Margin="10,0,0,1" VerticalAlignment="Center"/></StackPanel>
        <Button x:Name="HomeNav" Tag="Home" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Home"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE80F;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Home"/></StackPanel></Button>
