@@ -57,6 +57,20 @@ static class PlayerInteractionChecks
         PumpUntil(() => !audioMenu.IsOpen); // The menu fades out before its popup closes.
         check(!audioMenu.IsOpen && audioPill.IsChecked == false && audioPill.IsHitTestVisible,
             "closing player menus shrinks the track menu into its pill, then closes it and resets its pill");
+        // Focus moves into an opened menu. A menu dismissed by a click (outside or on a track) hands it back
+        // to the player, or Space and the other shortcuts stop working.
+        // Keyboard focus only reaches the menu while the window holding the player overlay is active.
+        Window.GetWindow(overlay)?.Activate(); overlay.Focus();
+        audioMenu.IsOpen = true; PumpUntil(Settled);
+        var audioTracks = (ListBox)window.FindName("AudioTracks");
+        if (!audioTracks.IsKeyboardFocusWithin) Keyboard.Focus(audioTracks);
+        var focusedInMenu = audioMenu.Child.IsKeyboardFocusWithin;
+        audioMenu.SetCurrentValue(System.Windows.Controls.Primitives.Popup.IsOpenProperty, false);
+        PumpUntil(() => !audioMenu.IsOpen);
+        var stranded = Keyboard.FocusedElement is DependencyObject focused && audioMenu.Child.IsAncestorOf(focused);
+        // Popups take keyboard focus only while the app is in the foreground, which a background check run is not.
+        if (focusedInMenu) check(!stranded, "a track menu closed by a click gives keyboard focus back to the player, so Space still pauses");
+        else Console.WriteLine("SKIP: menu focus hand-back (the app is not in the foreground, so focus cannot enter the menu)");
         var subtitleMenu = (System.Windows.Controls.Primitives.Popup)window.FindName("SubtitleMenu");
         var queueMenu = (System.Windows.Controls.Primitives.Popup)window.FindName("PlayerQueueMenu");
         audioMenu.IsOpen = true; PumpUntil(Settled);
