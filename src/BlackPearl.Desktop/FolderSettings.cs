@@ -38,9 +38,16 @@ public partial class MainWindow
     private void RefreshFolderRows()
     {
         var chosen = (FolderList.SelectedItem as FolderRow)?.Folder.Path;
+        // Runs after every library refresh, so each folder's prefix is built once, deepest first.
+        var prefixes = folders.Select(x => (Folder: x, Prefix: Path.TrimEndingDirectorySeparator(x.Path) + Path.DirectorySeparatorChar))
+            .OrderByDescending(x => x.Prefix.Length).ToArray();
         var counts = new Dictionary<LibraryFolder, int>();
         foreach (var item in items)
-            if (!item.IsVirtual && FolderOf(item.Path) is { } owner) counts[owner] = counts.GetValueOrDefault(owner) + 1;
+        {
+            if (item.IsVirtual) continue;
+            foreach (var (folder, prefix) in prefixes)
+                if (item.Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { counts[folder] = counts.GetValueOrDefault(folder) + 1; break; }
+        }
         folderRows.Clear();
         foreach (var folder in folders)
         {
