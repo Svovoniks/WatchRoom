@@ -1,5 +1,3 @@
-using System.Net;
-using System.Net.Http.Json;
 using BlackPearl.Core;
 
 static class RecoveryFixture
@@ -123,61 +121,7 @@ static class RecoveryFixture
             "connection recovery never starts a video that was already paused");
         recovery.Clear();
         check(!recovery.ShouldPause(true, true, 100000), "successful reconnection clears the recovery hold");
-
-        var cursors = new List<string>(); var gets = 0;
-        using var handler = new Handler((request, ct) =>
-        {
-            if (request.Method != HttpMethod.Get) return Task.FromResult(Json(new { ok = true }));
-            cursors.Add(request.RequestUri!.Query);
-            return Task.FromResult(++gets switch {
-                1 or 3 => Json(new { error = "database temporarily unavailable" }, HttpStatusCode.ServiceUnavailable),
-                2 => Json(new { events = new[] { new { sequence = 1, message = new WireMessage("notice", Text: "first") } } }),
-                4 => Json(new { events = new[] { new { sequence = 2, message = new WireMessage("notice", Text: "second") } } }),
-                _ => Json(new { error = "Session removed" }, HttpStatusCode.Gone)
-            });
-        });
-        await using (var connection = new SitesRoomConnection(new HttpClient(handler) { BaseAddress = new Uri("https://test.invalid/") }))
-        {
-            using var timeout = new CancellationTokenSource(5000);
-            var first = await connection.ReadAsync(timeout.Token); var second = await connection.ReadAsync(timeout.Token);
-            check(first?.Text == "first" && second?.Text == "second" && cursors.Take(4).SequenceEqual(new[] { "?since=0", "?since=0", "?since=1", "?since=1" }), "polling recovers from 503 with same session cursor and no lost events");
-            var terminal = false;
-            try { await connection.ReadAsync(timeout.Token); } catch (IOException ex) { terminal = ex.Message.Contains("removed"); }
-            check(terminal && gets == 5, "removed session is terminal without retrying");
-        }
-        var ids = new List<string>(); var posts = 0;
-        using var postHandler = new Handler(async (request, ct) =>
-        {
-            if (request.Method == HttpMethod.Get) { await Task.Delay(Timeout.Infinite, ct); }
-            if (request.Method != HttpMethod.Post) return Json(new { ok = true });
-            ids.Add(request.Headers.GetValues("X-Watchroom-Request-Id").Single());
-            if (++posts == 1) return Json(new { error = "busy" }, HttpStatusCode.ServiceUnavailable);
-            if (posts == 2) throw new HttpRequestException("response lost after commit");
-            return Json(new { ok = true });
-        });
-        await using (var connection = new SitesRoomConnection(new HttpClient(postHandler) { BaseAddress = new Uri("https://test.invalid/") }, true))
-        {
-            await connection.SendAsync(new("playback"), CancellationToken.None);
-            check(posts == 3 && ids.Distinct().Count() == 1, "ambiguous POST retries reuse one idempotency key");
-        }
-        var legacyPosts = 0;
-        using var legacyHandler = new Handler(async (request, ct) =>
-        {
-            if (request.Method == HttpMethod.Get) await Task.Delay(Timeout.Infinite, ct);
-            if (request.Method == HttpMethod.Post) { legacyPosts++; return Json(new { error = "busy" }, HttpStatusCode.ServiceUnavailable); }
-            return Json(new { ok = true });
-        });
-        await using (var connection = new SitesRoomConnection(new HttpClient(legacyHandler) { BaseAddress = new Uri("https://test.invalid/") }))
-        {
-            try { await connection.SendAsync(new("playback"), CancellationToken.None); } catch (IOException) { }
-            check(legacyPosts == 1, "legacy servers never receive ambiguous playback retries");
-            await connection.DisposeAsync(); connection.Abort();
-            check(true, "transport cleanup tolerates repeated disposal and abort");
-        }
     }
-    static HttpResponseMessage Json(object data, HttpStatusCode status = HttpStatusCode.OK) => new(status) { Content = JsonContent.Create(data, options: Wire.Json) };
-    sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> action) : HttpMessageHandler
-    { protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) => action(request, ct); }
     sealed class ClockTime : TimeProvider
     {
         public long Utc = 100000, Tick;

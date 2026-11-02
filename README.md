@@ -17,9 +17,7 @@ In Windows **Settings → Playback**, choose audio and subtitle languages from t
 
 Library pages, posters, queue changes and start requests travel directly over WebRTC. The host's queues reach guests in chunks that stay under the room's message limit; a guest's change names the queue it was made against, so a change to a queue that has since changed is refused with a reason instead of landing on the wrong video. While a guest browses, the host sees where they are and keeps browsing their own library; **Follow** shows what the guest sees, and **Stop following** or scrolling returns to the host's own library. Browsing presence expires after connection loss, and the host can end a browsing session at any time.
 
-Room playback uses a dedicated, reliable WebRTC control channel alongside the media channel. The host owns playback revisions, readiness and queue state, and guests synchronize to the host clock. Guest commands go to the host for authorization and distribution to every participant. The room server (the VPS service in `deploy/` by default, or the older Sites worker) handles room registration, admission, signaling and discovery heartbeats; playback commands do not pass through it. Established peer playback continues if discovery becomes unavailable, but new joins require discovery. All participants must use the updated app; incompatible control channels time out with an update/rejoin message. A dropped host connection pauses guests, and the host must reopen the room before they rejoin.
-
-Run `dotnet run --project tests/BlackPearl.Smoke -c Release -- --direct-controls` from the repository root to test the actual Sites worker and native peer channels with two guests, blocked media reads, clock differences and a discovery outage (requires Node.js on PATH).
+Room playback uses a dedicated, reliable WebRTC control channel alongside the media channel. The host owns playback revisions, readiness and queue state, and guests synchronize to the host clock. Guest commands go to the host for authorization and distribution to every participant. The room server (the VPS service in `deploy/`) handles room registration, admission, signaling and discovery heartbeats; playback commands do not pass through it. Established peer playback continues if discovery becomes unavailable, but new joins require discovery. All participants must use the updated app; incompatible control channels time out with an update/rejoin message. A dropped host connection pauses guests, and the host must reopen the room before they rejoin.
 
 The app includes a default HTTPS room-service address. Its availability and public-network playback must be validated separately before release. An HTTP localhost address supports testing on this computer. See [server deployment](deploy/README.md).
 
@@ -58,15 +56,13 @@ The smoke executable validates SQLite scans, byte ranges and authorization, real
 
 Desktop checks exercise media keyboard/app commands and room permissions with generated video. They run on a separate hidden Windows desktop so their windows never appear on yours; set `BLACKPEARL_TEST_VISIBLE=1` to watch them. On an interactive Windows desktop, run `dotnet run --project tests/BlackPearl.DesktopChecks -c Release -- --system-media-controls` to also verify play, pause, and toggle through the Windows media service while the test app is minimized.
 
-## Playback diagnostics and VM retesting
+## Playback diagnostics
 
 Set `BLACKPEARL_DIAGNOSTICS` to an isolated directory before starting the app to write `diagnostics.jsonl`. Logging is off by default and disk writes run off the UI/native callback threads. Events include playback revisions, raw and briefly interpolated positions, rate-setting results, seeks and settling completion, buffering, range-read latency, clock correction, and dropped-log counts. Separate directories are required for separate app instances.
 
 The default synchronization policy retains the 1,200 ms seek threshold and ±3% rate correction. Set `BLACKPEARL_SYNC_EXPERIMENTAL=1` to test the tighter policy: interpolate between VLC time events for at most 500 ms, use bounded proportional rate correction (0.95–1.05), and seek above 600 ms of per-client error. The tighter policy met the measured H.264/AAC public-room target but caused repeated corrections on the original silent AVI; it is therefore opt-in. Seek settling waits for native timeline advancement with a two-second fallback. Room replay resets an ended native input before starting it, then waits for native readiness before applying the revision. The measured fixture target is a pair-position p95 of at most 500 ms; this is not a guarantee for arbitrary peers, codecs, displayed frames or audio.
 
-`scripts/playback-retest/prepare.py` creates isolated instrumented copies without changing playback control flow. Its test driver uses `BLACKPEARL_TEST_MEDIA` on the host. The VM matrix waits for guest readiness, records both clients' unified logs, and requests native frame snapshots at shared server times. `run-matrix.ps1` takes a credential **file path** through `-PasswordFile`; do not commit credentials. To test the experimental policy, set `BLACKPEARL_SYNC_EXPERIMENTAL=1` before launching the host and pass `-ExperimentalSync` to the matrix for the guest. `analyze.py` reports full and revision-steady distributions, client target errors, unpaired outliers, pairing coverage, native read/seek diagnostics and control assertions. Reports retain startup/transition results separately rather than discarding them.
-
-Room AVI playback selects VLC's `avformat` demuxer because its native AVI demuxer exposes coarse read-ahead time over HTTP. The updated investigation and same-machine default/experimental retests are in [AVI-INVESTIGATION.md](AVI-INVESTIGATION.md). Host-to-VM validation of this change remains pending.
+Room AVI playback selects VLC's `avformat` demuxer because its native AVI demuxer exposes coarse read-ahead time over HTTP.
 
 ## Current implementation boundaries
 
@@ -74,11 +70,8 @@ Room AVI playback selects VLC's `avformat` demuxer because its native AVI demuxe
 - External `.srt`, `.ass`, and `.ssa` sidecars matching the video filename are shared with the room. Embedded subtitles, audio tracks and fonts are delivered as part of the original file. Full HEVC/AV1/ASS/PGS compatibility still needs a representative media corpus.
 - Videos are always streamed as the original file; BlackPearl does not transcode or prepare smaller copies. Episode thumbnails are decoded with the bundled LibVLC when no episode image is available.
 - Guest library browsing defaults off for each saved room. Library browsing reveals metadata/thumbnails; video bytes remain authorized only for the selected video and subtitles. Older clients retain their existing room controls without the guest library feature.
-- HTTP room coordination retries transient network/server failures for up to 30 seconds using the existing session. Updated services deduplicate retried commands. Expired, revoked, or lost sessions still require leaving/rejoining and obtaining host approval. Host disconnect closes the room.
 - The UI has dark/light themes. The shell uses software rendering for reliable WPF/native-video composition; libVLC retains hardware decoding.
 - Windows update checks and a per-user GitHub installer are available; see [builds and updates](UPDATES.md). Publisher code-signing credentials are not configured.
-
-These boundaries distinguish this working preview from the full release described in [the design plan](design-review.md).
 
 ## Data and privacy
 

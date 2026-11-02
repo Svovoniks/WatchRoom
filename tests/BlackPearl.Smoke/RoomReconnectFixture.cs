@@ -5,24 +5,19 @@ using BlackPearl.Core;
 
 static class RoomReconnectFixture
 {
-    public static async Task Run(string directory, bool sites, Action<bool, string> check)
+    public static async Task Run(string directory, Action<bool, string> check)
     {
         Directory.CreateDirectory(directory);
         var hostStore = new LibraryStore(Path.Combine(directory, "host"));
         var guestDirectory = Path.Combine(directory, "guest");
         using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         var url = "http://localhost:" + ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
-        var start = new ProcessStartInfo(sites ? "node" : Path.GetFullPath(".tools/dotnet/dotnet.exe"))
+        var start = new ProcessStartInfo(Path.GetFullPath(".tools/dotnet/dotnet.exe"))
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        if (sites) start.ArgumentList.Add(Path.GetFullPath("sites/tests/direct-control-server.mjs"));
-        else
-        {
-            start.Environment["BLACKPEARL_DATA"] = Path.Combine(directory, "server");
-            start.ArgumentList.Add(Path.GetFullPath("artifacts/room-server/BlackPearl.Server.dll"));
-            start.ArgumentList.Add("--urls"); start.ArgumentList.Add(url);
-        }
+        start.Environment["BLACKPEARL_DATA"] = Path.Combine(directory, "server");
+        start.ArgumentList.Add(Path.GetFullPath("artifacts/room-server/BlackPearl.Server.dll"));
+        start.ArgumentList.Add("--urls"); start.ArgumentList.Add(url);
         using var server = Process.Start(start)!;
-        if (sites) url = await server.StandardOutput.ReadLineAsync() ?? throw new IOException("No fixture URL");
         var stdout = server.StandardOutput.ReadToEndAsync(); var stderr = server.StandardError.ReadToEndAsync();
         try
         {

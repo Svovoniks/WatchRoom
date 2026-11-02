@@ -155,7 +155,7 @@ public sealed partial class RoomClient : IAsyncDisposable
         using var probe = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(10) };
         using var health = await probe.GetAsync(server.TrimEnd('/') + "/health", deadline.Token);
         if ((int)health.StatusCode is >= 300 and < 400 || health.Content.Headers.ContentType?.MediaType == "text/html")
-            throw new IOException("This Site requires browser sign-in. Ask its owner to enable access for Windows clients, or use the local server.");
+            throw new IOException("This address is a web page, not a room server. Check the room server address in Settings.");
         var transport = health.IsSuccessStatusCode && health.Content.Headers.ContentType?.MediaType == "application/json"
             ? await health.Content.ReadAsStringAsync(lifetime.Token) : "";
         using (var capabilities = System.Text.Json.JsonDocument.Parse(string.IsNullOrWhiteSpace(transport) ? "{}" : transport))
@@ -170,21 +170,12 @@ public sealed partial class RoomClient : IAsyncDisposable
             if (!capabilities.RootElement.TryGetProperty("persistentRooms", out var support) || support.ValueKind != System.Text.Json.JsonValueKind.True)
                 throw new IOException("This server needs the persistent-room update. Update the room service or choose an updated server in Settings.");
         }
-        if (transport.Contains("http-poll", StringComparison.Ordinal))
-        {
-            using var capabilities = System.Text.Json.JsonDocument.Parse(transport);
-            connection = await SitesRoomConnection.OpenAsync(new Uri(server.TrimEnd('/') + "/"), first, deadline.Token,
-                capabilities.RootElement.TryGetProperty("idempotentRequests", out var dedup) && dedup.ValueKind == System.Text.Json.JsonValueKind.True);
-        }
-        else
-        {
         var socket = new ClientWebSocket();
         socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
         try { await socket.ConnectAsync(builder.Uri, deadline.Token); }
         catch { socket.Dispose(); throw; }
         connection = new WebSocketRoomConnection(socket);
         await connection.SendAsync(first, lifetime.Token);
-        }
         controlTask = ControlLoop(); sendTask = SendLoop(); readTask = ReadLoop();
         pingTask = PingLoop();
         try { await connected.Task.WaitAsync(deadline.Token); }
@@ -214,7 +205,6 @@ public sealed partial class RoomClient : IAsyncDisposable
     private void QueueDiscovery(WireMessage message)
     {
         if (!DiscoveryOnline || !outgoing.Writer.TryWrite(message)) throw new IOException("Room discovery is offline. New joins are unavailable.");
-        if (message.Type is "signal" or "reconnect") connection?.SignalingActivity();
     }
     // Existing peer playback continues while discovery is offline or congested.
     private bool TryQueueDiscovery(WireMessage message)
@@ -243,8 +233,6 @@ public sealed partial class RoomClient : IAsyncDisposable
                 if (Identity?.Host == true) Post(new("library-expire"));
                 if (tick++ % 5 == 0 && DiscoveryOnline)
                     try { QueueDiscovery(new("ping", Number: tick)); } catch (IOException ex) { DiscoveryLost(ex.Message); }
-                // Poll discovery quickly while any peer is still negotiating or recovering.
-                if (IsPeerRecovering || peers.Keys.Any(id => !negotiated.ContainsKey(id))) connection?.SignalingActivity();
                 Post(new("retry-host"));
                 Post(new("peer-health"));
                 if (Identity?.Host == false && directConnected.Task.IsCompletedSuccessfully)
@@ -458,7 +446,7 @@ public sealed partial class RoomClient : IAsyncDisposable
                     if (hostPeer is not null && hostPeer != discoveredHost) DepartPeer(hostPeer, recover: false);
                     hostPeer = discoveredHost;
                     // Once bootstrapped, only the host's direct channel can update
-                    // the room. Sites snapshots contain stale readiness/playback.
+                    // the room. Discovery snapshots contain stale readiness/playback.
                     if (!directConnected.Task.IsCompletedSuccessfully && !IsPeerRecovering)
                     { Snapshot = new(discovery.People, null, null, false, [], Name: HostRoomCoordinator.ValidName(discovery.Name) ? discovery.Name : Snapshot?.Name); Message?.Invoke(new("snapshot", Data: Wire.Serialize(Snapshot))); }
                     if (hostPeer is null) Status?.Invoke("Host offline. Waiting in the room for the host to return.");
@@ -509,7 +497,6 @@ public sealed partial class RoomClient : IAsyncDisposable
             negotiated.TryAdd(sender, 0);
             if (Identity?.Host == true) coordinator!.SetConnected(sender, true, clock.Now);
             Message?.Invoke(new("peer-connected", Sender: sender));
-            connection?.UseDiscoveryPolling();
             if (Identity?.Host == true) PublishHostState();
             return;
         }

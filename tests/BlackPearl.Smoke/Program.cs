@@ -128,7 +128,7 @@ if (args.FirstOrDefault() == "--metadata-cache")
 if (args.FirstOrDefault() == "--room-reconnect")
 {
     var checks = 0;
-    await RoomReconnectFixture.Run(Path.Combine("artifacts/room-reconnect-check", Guid.NewGuid().ToString("N")), args.Contains("--sites"), (condition, name) =>
+    await RoomReconnectFixture.Run(Path.Combine("artifacts/room-reconnect-check", Guid.NewGuid().ToString("N")), (condition, name) =>
     { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
     Console.WriteLine($"{checks} room reconnect checks passed."); return;
 }
@@ -142,14 +142,6 @@ if (args.FirstOrDefault() == "--voice")
         await VoiceFixture.RunIsolated(File.Exists(".tools/dotnet/dotnet.exe") ? Path.GetFullPath(".tools/dotnet/dotnet.exe") : "dotnet",
             Path.GetFullPath("src/BlackPearl.Server/bin/Release/net10.0/BlackPearl.Server.dll"), Path.GetFullPath(Path.Combine("artifacts", "voice-" + Guid.NewGuid().ToString("N"))), VoiceCheck);
     Console.WriteLine($"{checks} voice checks passed."); return;
-}
-
-if (args.FirstOrDefault() == "--peer-recovery")
-{
-    var checks = 0;
-    await PeerRecoveryFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/peer-recovery"), (condition, name) =>
-    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
-    Console.WriteLine($"{checks} peer recovery checks passed."); return;
 }
 
 if (args.FirstOrDefault() == "--library-snapshot")
@@ -273,14 +265,6 @@ if (args.FirstOrDefault() == "--library-search")
     await LibrarySearchFixture.Run((condition, name) =>
     { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
     Console.WriteLine($"{checks} library search checks passed."); return;
-}
-
-if (args.FirstOrDefault() == "--direct-controls")
-{
-    var checks = 0;
-    await DirectControlFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/direct-controls"), (condition, name) =>
-    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
-    Console.WriteLine($"{checks} direct control checks passed."); return;
 }
 
 if (args.FirstOrDefault() == "--ui-fixture")
