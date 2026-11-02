@@ -19,12 +19,14 @@ the placeholders.
 
 ## Installing
 
-**Settings > Plugins > Manage plugins** lists the plugins published in
-[BlackPearlPlugins](https://github.com/Svovoniks/BlackPearlPlugins), such as the
-SubsPlease, EZTV, TokyoToshokan and TheRARBG ports of Sparrow. **Install** copies a
-plugin into the plugins folder and loads it straight away. A plugin whose files
-differ from the published ones shows **Update**; updating keeps its `settings.json`.
-**Remove** deletes the plugin's folder and its settings. The repository's README
+**Settings > Plugins > Available** lists the plugins published in
+[BlackPearlPlugins](https://github.com/Svovoniks/BlackPearlPlugins) that you don't
+have yet, such as the SubsPlease, EZTV, TokyoToshokan and TheRARBG ports of Sparrow.
+**Install** copies a plugin into the plugins folder and loads it straight away; it
+then appears under **Installed**. The catalog is checked the first time the tab
+opens and again on **Reload**. An installed plugin whose files differ from the
+published ones shows **Update**; updating keeps its `settings.json`. **Remove**
+deletes the plugin's folder and its settings. The repository's README
 covers provider setup and downloader settings. Running `./install.ps1` from a
 checkout of that repository still works too.
 
@@ -43,7 +45,7 @@ Each plugin is a folder in the plugins folder:
 %LOCALAPPDATA%\BlackPearl\plugins\<plugin folder>\plugin.json
 ```
 
-**Settings > Plugins** lists the loaded plugins and any that failed to
+**Settings > Plugins > Installed** lists the loaded plugins and any that failed to
 load. **Open plugins folder** opens the folder, and **Reload** reads it again after
 you change it. The `BLACKPEARL_PLUGINS` environment variable sets a different
 plugins folder.

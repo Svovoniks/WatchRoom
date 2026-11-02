@@ -88,7 +88,7 @@ DVD order uses a unique TMDB DVD episode group. If the group is unavailable or a
 
 ## Titles without files
 
-**Add title** (end of the library toolbar, Ctrl+N, an empty library search, the empty library and welcome screens, and Settings > Folders) searches the enabled providers and adds a show or film before any of its files are in the library. Results already in the library open instead of being added again. A show needs a TMDB or TVmaze result for its episode list; Wikipedia results add films only.
+**Add title** (end of the library toolbar, Ctrl+N, an empty library search, and the empty library and welcome screens) searches the enabled providers and adds a show or film before any of its files are in the library. Results already in the library open instead of being added again. A show needs a TMDB or TVmaze result for its episode list; Wikipedia results add films only.
 
 A wanted title is stored as a setting (`wanted:<id>`) holding its provider identity, category, tracked seasons and whether new seasons are tracked automatically. Its episodes, or the film itself, are placeholders under the data folder, kept regardless of **Show missing episodes** and pruning. Cards with no file are dimmed with a dashed edge and a Missing or Upcoming badge; shows with files and aired placeholders show `N missing` or `S2 missing`. The **Missing** library category lists these titles while there are any; the status filter adds **Missing** and **Upcoming**. Placeholders never reach Home, mystery picks, queues or guests.
 

@@ -132,7 +132,7 @@ static class UiExperienceChecks
                     queues[0] = queues[0] with { MediaIds = [] }; Call("RefreshQueuePickers");
                     foreach (var page in new[] { "Folders", "Rooms", "Welcome" }) { Call("ShowPage", page); Capture(page.ToLowerInvariant() + "-" + theme, size.Item1, size.Item2); }
                     Call("ShowPage", "Settings");
-                    foreach (var section in new[] { "Profile", "Metadata", "Playback", "Appearance", "Updates" })
+                    foreach (var section in new[] { "Plugins", "Profile", "Metadata", "Playback", "Appearance", "Updates" })
                     {
                         Call("ShowPreferenceSection", section); Capture("settings-" + section.ToLowerInvariant() + "-" + theme, size.Item1, size.Item2);
                         if (section == "Metadata")

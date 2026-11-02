@@ -153,7 +153,7 @@ public partial class MainWindow : Window
         ApplyTheme();
         if (startupFile is null) ShowPage("Home");
         foreach (var f in savedFolders) folders.Add(f);
-        FolderList.ItemsSource = folders; InitializePlayerChrome(); LoadAcquisitionPlugins();
+        InitializePlayerChrome(); LoadAcquisitionPlugins();
         ScanButton.IsEnabled = folders.Count > 0;
         try
         {
@@ -164,7 +164,7 @@ public partial class MainWindow : Window
         InitializePreferences();
         displaySpecialsWithinSeasons = MetadataOptions.Load(library).DisplaySpecialsWithinSeasons;
         foreach (var path in savedExclusions) exclusions.Add(path);
-        ExcludedFolderList.ItemsSource = exclusions;
+        InitializeFolderSettings();
         try { savedQueues.AddRange(Wire.Read<List<SavedQueue>>(library.Setting("queues") ?? "[]")); }
         catch (System.Text.Json.JsonException) { }
         if (savedQueues.Count == 0 && library.Setting("queues") is null)
@@ -518,7 +518,7 @@ public partial class MainWindow : Window
     private void RefreshLibraryFromItems(List<MediaItem> refreshedItems)
     {
         room?.SetHostedLibrary(refreshedItems);
-        items = refreshedItems; RefreshPlayingItem();
+        items = refreshedItems; RefreshPlayingItem(); RefreshFolderRows();
         ReloadWanted(); CountMissingTitles();
         RefreshHome();
         UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
@@ -855,39 +855,12 @@ public partial class MainWindow : Window
         if (!closing && generation == detailPosterGeneration) DetailPoster.Source = view.Poster;
     }
     private void EpisodeChanged(object sender, SelectionChangedEventArgs e) { if (Episodes.SelectedItem is MediaItem item) { selected = item; DetailSummary.Text = item.Caption + (item.Available ? "" : " · File unavailable"); } }
-    private void AddFolder(object sender, RoutedEventArgs e)
-    {
-        var picker = new OpenFolderDialog { Title = "Choose a movie, show, anime or music folder", Multiselect = true };
-        if (picker.ShowDialog(this) != true) return;
-        foreach (var path in picker.FolderNames.Where(path => !folders.Any(x => x.Path.Equals(path, StringComparison.OrdinalIgnoreCase))))
-            folders.Add(new(path, "Mixed"));
-        SaveFolders();
-        scanDelay.Stop(); scanDelay.Start(); SetStatus("Folder added. Scanning your library…");
-    }
-    private void RemoveFolder(object sender, RoutedEventArgs e)
-    {
-        if (FolderList.SelectedItem is LibraryFolder folder) { folders.Remove(folder); SaveFolders(); scanDelay.Stop(); scanDelay.Start(); _ = Guard(async () => { await RefreshLibrary(); SetStatus("Folder removed from library."); }); }
-    }
-    private void ChangeFolderKind(object sender, RoutedEventArgs e)
-    {
-        if (FolderList.SelectedItem is not LibraryFolder folder) { SetStatus("Select a folder, then choose its category."); return; }
-        folders[folders.IndexOf(folder)] = folder with { Kind = ((ComboBoxItem)FolderKind.SelectedItem).Content.ToString()! };
-        SaveFolders(); scanDelay.Stop(); scanDelay.Start(); SetStatus("Folder category updated. Scanning your library…");
-    }
     private void MixedFolderMusicClick(object sender, RoutedEventArgs e)
     {
         var on = MixedFolderMusic.IsChecked == true;
         library.MixedFoldersListMusic = on; WatchFolders(); scanDelay.Stop(); scanDelay.Start();
         // Turning it off drops the music now; turning it on finds it with the scan.
         _ = Guard(async () => { await RefreshLibrary(); SetStatus(on ? "Mixed folders now list music. Scanning your library…" : "Mixed folders no longer list music."); });
-    }
-    private void FolderSelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (RemoveFolderButton is null || ChangeFolderButton is null) return;
-        var selectedFolder = FolderList.SelectedItem as LibraryFolder;
-        FolderEditor.Visibility = selectedFolder is null ? Visibility.Collapsed : Visibility.Visible;
-        if (selectedFolder is not null) FolderKind.SelectedItem = FolderKind.Items.OfType<ComboBoxItem>().FirstOrDefault(x => (string)x.Content == selectedFolder.Kind);
-        RemoveFolderButton.IsEnabled = ChangeFolderButton.IsEnabled = !scanning && selectedFolder is not null;
     }
     private void SaveFolders() { library.Setting("folders", Wire.Serialize(folders)); WatchFolders(); ScanButton.IsEnabled = !scanning && folders.Count > 0; }
     private void WatchFolders()
@@ -918,7 +891,7 @@ public partial class MainWindow : Window
     {
         if (scanning) return; scanning = true;
         ScanButton.IsEnabled = false;
-        AddFolderButton.IsEnabled = RemoveFolderButton.IsEnabled = ChangeFolderButton.IsEnabled = FolderKind.IsEnabled = MixedFolderMusic.IsEnabled = ExcludeFolderButton.IsEnabled = RestoreFolderButton.IsEnabled = false;
+        UpdateFolderControls();
         RescanButton.Content = "Cancel scan";
         RescanButton.ToolTip = "Stop scanning; keep files already indexed";
         ScanProgress.Visibility = Visibility.Visible;
@@ -941,9 +914,7 @@ public partial class MainWindow : Window
         {
             scanning = false;
             ScanButton.IsEnabled = folders.Count > 0; RescanButton.IsEnabled = true;
-            AddFolderButton.IsEnabled = FolderKind.IsEnabled = MixedFolderMusic.IsEnabled = ExcludeFolderButton.IsEnabled = true;
-            RestoreFolderButton.IsEnabled = ExcludedFolderList.SelectedItem is string;
-            RemoveFolderButton.IsEnabled = ChangeFolderButton.IsEnabled = FolderList.SelectedItem is LibraryFolder;
+            UpdateFolderControls();
             RescanButton.Content = "Rescan";
             RescanButton.ToolTip = "Check your folders for new videos";
             ScanProgress.Visibility = Visibility.Collapsed;

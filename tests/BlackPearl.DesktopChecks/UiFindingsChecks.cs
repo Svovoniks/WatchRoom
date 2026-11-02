@@ -145,8 +145,23 @@ static class UiFindingsChecks
 
             var folders = (ObservableCollection<LibraryFolder>)Field("folders"); folders.Clear();
             folders.Add(new(App.DataDirectory, "Anime")); Control<ListBox>("FolderList").SelectedIndex = 0;
-            Check(Control<FrameworkElement>("FolderEditor").Visibility == Visibility.Visible && (string)((ComboBoxItem)Control<ComboBox>("FolderKind").SelectedItem).Content == "Anime",
+            var kinds = Control<WrapPanel>("FolderKinds").Children.OfType<RadioButton>().ToArray();
+            Check(Control<FrameworkElement>("FolderEditor").Visibility == Visibility.Visible && kinds.Single(x => x.IsChecked == true).Tag as string == "Anime",
                 "selecting a folder reveals editing with its existing category");
+            // One click applies a category; the folder stays selected while the list is rebuilt.
+            kinds.Single(x => (string)x.Tag == "Show").IsChecked = true;
+            ((System.Windows.Threading.DispatcherTimer)Field("scanDelay")).Stop();
+            Check(folders.Single().Kind == "Show" && Control<ListBox>("FolderList").SelectedItem?.ToString()?.Contains("Shows ·") == true,
+                "choosing a category applies it at once and keeps the folder selected");
+            var exclusionList = (ObservableCollection<string>)Field("exclusions");
+            var skipped = Path.Combine(App.DataDirectory, "extras", "samples"); var elsewhere = Path.Combine(Path.GetPathRoot(App.DataDirectory)!, "BlackPearl elsewhere check");
+            exclusionList.Add(skipped); exclusionList.Add(elsewhere);
+            Check(Control<ItemsControl>("FolderExclusionList").Items.Count == 1 && Control<TextBlock>("FolderExclusionsLabel").Text.EndsWith("· 1")
+                && Control<FrameworkElement>("OtherExclusionsPanel").Visibility == Visibility.Visible,
+                "skipped subfolders sit under their folder, and others are listed apart");
+            exclusionList.Remove(skipped); exclusionList.Remove(elsewhere);
+            Check(Control<FrameworkElement>("FolderNoExclusions").Visibility == Visibility.Visible && Control<FrameworkElement>("OtherExclusionsPanel").Visibility == Visibility.Collapsed,
+                "a folder with nothing skipped says so");
             Call("ShowPage", "Folders"); Layout(); Capture("folder-selected-900");
             Control<ListBox>("FolderList").SelectedIndex = -1;
             Check(Control<FrameworkElement>("FolderEditor").Visibility == Visibility.Collapsed, "no folder selection hides category editing");

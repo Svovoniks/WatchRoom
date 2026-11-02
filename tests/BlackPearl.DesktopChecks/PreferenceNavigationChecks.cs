@@ -94,7 +94,7 @@ static class PreferenceNavigationChecks
             return false;
         }
         check(Control<FrameworkElement>("PluginPreferences").Visibility == Visibility.Visible && Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Collapsed &&
-            InSection(Control<Button>("ManagePluginsButton"), "PluginPreferences") && InSection(Control<Button>("AddFolderButton"), "FoldersPage") &&
+            InSection(Control<RadioButton>("AvailablePluginsView"), "PluginPreferences") && InSection(Control<Button>("AddFolderButton"), "FoldersPage") &&
             Control<FrameworkElement>("PreferenceFooter").Visibility == Visibility.Collapsed,
             "plugins have their own Settings section, apart from Folders and without the Save bar");
         ClickSection("Profile"); name.Text = "Folders draft";

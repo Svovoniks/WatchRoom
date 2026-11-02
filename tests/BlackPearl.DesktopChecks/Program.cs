@@ -15,6 +15,9 @@ static class Program
         if (HiddenDesktop.Relaunch(out var hiddenExitCode)) { Environment.ExitCode = hiddenExitCode; return; }
         // Voice runs on simulated devices so the checks never open the microphone; --voice-devices checks the real ones.
         if (args.FirstOrDefault() != "--voice-devices") Environment.SetEnvironmentVariable("BLACKPEARL_SIMULATED_AUDIO", "1");
+        // Settings > Plugins checks an empty local catalog, so opening the tab never reaches GitHub.
+        var emptyCatalog = Path.Combine(Path.GetTempPath(), "blackpearl-empty-catalog"); Directory.CreateDirectory(emptyCatalog);
+        Environment.SetEnvironmentVariable("BLACKPEARL_PLUGIN_CATALOG", emptyCatalog);
         if (args.FirstOrDefault() == "--video-frames")
         {
             VideoFrameChecks.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? Path.Combine("artifacts", "video-frames-" + Guid.NewGuid().ToString("N")))).GetAwaiter().GetResult(); return;
