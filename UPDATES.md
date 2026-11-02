@@ -98,7 +98,7 @@ Any new commit, including a merge of `master` into the branch, needs another
 Local work is saved in a recovery stash and under the ignored verification
 directory before synchronizing a dirty master. The script merges the worktree
 and index separately to preserve staged and unstaged edits, retains untracked
-files, and leaves unrelated `sites` contents alone. Already-shipped changes do
+files, and leaves an untracked `sites` folder alone. Already-shipped changes do
 not remain as duplicate local edits. Divergence or conflicting local work stops
 the sync without resetting commits or overwriting files. The recovery stash is
 retained, and the error explicitly distinguishes a verified public release from
@@ -149,7 +149,7 @@ rewrites a tag, overwrites a published installer, or installs the app locally.
 Use this only to recover when the scripts cannot run:
 
 1. Work on a branch in a worktree. Keep personal HTML investigations, library
-   snapshots, credentials, and `sites` changes out of commits.
+   snapshots, credentials, and the `sites` folder out of commits.
 2. Choose a version higher than the latest published stable release. Update
    `<Version>` in `Directory.Build.props` (the single source of the app version).
    Use three numeric components, such as `0.2.1`; the release tag must be exactly
@@ -174,7 +174,7 @@ Use this only to recover when the scripts cannot run:
    installer and checksums.
 8. Synchronize local `master` with `origin/master` and confirm it contains the
    published commit. Preserve unrelated staged/unstaged edits, untracked files,
-   and `sites` work. Leave the user's installed app unchanged.
+   and the `sites` folder. Leave the user's installed app unchanged.
 
 PowerShell checks (use `dotnet` instead of the workspace SDK path on other machines):
 

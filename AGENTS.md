@@ -78,9 +78,9 @@ Never move an existing version tag or overwrite an installer for a published
 version. Use a higher version for every shipped change.
 
 Keep local investigation reports, personal library snapshots, credentials,
-`artifacts/`, `.tools/`, and generated media out of pull requests. The `sites`
-submodule is an independently deployed room service; do not include it when
-releasing the desktop app. Preserve unrelated local changes.
+`artifacts/`, `.tools/`, and generated media out of pull requests. The retired
+Sites room service may remain as an untracked `sites` folder in the main
+checkout; keep it out of pull requests. Preserve unrelated local changes.
 
 Use the installed .NET SDK, or `.tools/dotnet/dotnet.exe` from the main checkout.
 Fix check failures before asking for review. Reserve manual commands for
@@ -88,7 +88,6 @@ exceptions, inspection, or recovery only.
 
 After the public release and updater feed are verified, `ship.ps1 -Merge`
 synchronizes local `master` with `origin/master`, including the published commit,
-in the checkout that owns `master`. It preserves unrelated local work and `sites`
-changes, and keeps a recovery snapshot if synchronization fails. If the release is
+in the checkout that owns `master`. It preserves unrelated local work and keeps a recovery snapshot if synchronization fails. If the release is
 verified but local synchronization failed, report exactly that. Complete the local
 synchronization before reporting the shipping workflow as finished.
