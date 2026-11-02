@@ -27,10 +27,15 @@ public partial class MainWindow
         folders.CollectionChanged += (_, _) => RefreshFolderRows();
         exclusions.CollectionChanged += (_, _) => ShowSelectedFolder();
         RefreshFolderRows();
+        // Settings first shows Folders before the rows exist.
+        if (preferenceSection == "Folders") SelectFirstFolder();
     }
     private static string FolderName(string path) => Path.GetFileName(Path.TrimEndingDirectorySeparator(path)) is { Length: > 0 } name ? name : path;
+    // A drive root such as E:\ keeps its separator when trimmed, so it isn't given a second one.
+    private static string FolderPrefix(string folder) =>
+        Path.TrimEndingDirectorySeparator(folder) is var root && Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
     private static bool Inside(string path, string folder) =>
-        path.StartsWith(Path.TrimEndingDirectorySeparator(folder) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        FolderPrefix(folder) is var prefix && path.Length > prefix.Length && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
     // The deepest library folder holding a path, so a Music folder inside a Mixed one keeps its own files.
     private LibraryFolder? FolderOf(string path) => folders.Where(x => Inside(path, x.Path)).MaxBy(x => x.Path.Length);
 
@@ -39,7 +44,7 @@ public partial class MainWindow
     {
         var chosen = (FolderList.SelectedItem as FolderRow)?.Folder.Path;
         // Runs after every library refresh, so each folder's prefix is built once, deepest first.
-        var prefixes = folders.Select(x => (Folder: x, Prefix: Path.TrimEndingDirectorySeparator(x.Path) + Path.DirectorySeparatorChar))
+        var prefixes = folders.Select(x => (Folder: x, Prefix: FolderPrefix(x.Path)))
             .OrderByDescending(x => x.Prefix.Length).ToArray();
         var counts = new Dictionary<LibraryFolder, int>();
         foreach (var item in items)
@@ -48,7 +53,7 @@ public partial class MainWindow
             foreach (var (folder, prefix) in prefixes)
                 if (item.Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { counts[folder] = counts.GetValueOrDefault(folder) + 1; break; }
         }
-        folderRows.Clear();
+        var rows = new List<FolderRow>();
         foreach (var folder in folders)
         {
             var count = counts.GetValueOrDefault(folder);
@@ -58,8 +63,12 @@ public partial class MainWindow
             var outer = folders.Where(x => x != folder && Inside(folder.Path, x.Path)).MaxBy(x => x.Path.Length);
             var location = parent is null ? "" : outer is null ? parent
                 : Path.GetRelativePath(outer.Path, parent) is "." ? FolderName(outer.Path) : Path.Combine(FolderName(outer.Path), Path.GetRelativePath(outer.Path, parent));
-            folderRows.Add(new(folder, FolderName(folder.Path), location.Length == 0 ? "" : "  " + location, $"{KindName(folder.Kind)} · {count:N0} {noun}", count));
+            rows.Add(new(folder, FolderName(folder.Path), location.Length == 0 ? "" : "  " + location, $"{KindName(folder.Kind)} · {count:N0} {noun}", count));
         }
+        // An unchanged list keeps its items, so a refresh doesn't take keyboard focus out of it.
+        if (rows.SequenceEqual(folderRows)) { ShowSelectedFolder(); return; }
+        folderRows.Clear();
+        foreach (var row in rows) folderRows.Add(row);
         FolderList.SelectedItem = folderRows.FirstOrDefault(x => x.Folder.Path.Equals(chosen, StringComparison.OrdinalIgnoreCase));
         ShowSelectedFolder();
     }

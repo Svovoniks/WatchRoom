@@ -29,16 +29,18 @@ public partial class MainWindow
     {
         var (plugins, problems) = ContentAcquisition.Discover(PluginsDirectory);
         acquisitionPlugins = plugins;
+        // Comparing files against the catalog reads them, so each plugin's state is worked out once per refresh.
+        var states = pluginCatalog?.Plugins.ToDictionary(x => x, x => pluginCatalog.State(x, PluginsDirectory)) ?? [];
         AcquisitionPluginList.ItemsSource = plugins.Select(plugin =>
         {
             var published = pluginCatalog?.Plugins.FirstOrDefault(x => x.Folder.Equals(Path.GetFileName(plugin.Directory), StringComparison.OrdinalIgnoreCase));
             return new PluginRow(plugin.Name, plugin.Description, TypeNames(plugin.ContentTypes), plugin, published,
-                published is not null && pluginCatalog!.State(published, PluginsDirectory) == CatalogPluginState.UpdateAvailable);
+                published is not null && states[published] == CatalogPluginState.UpdateAvailable);
         }).ToArray();
         AcquisitionPluginStatus.Text = (plugins.Count == 0 ? "No plugins installed yet. Choose Available to install published ones." : "") +
             (problems.Count == 0 ? "" : (plugins.Count == 0 ? "\n" : "") + "Not loaded: " + string.Join("\n", problems));
         AcquisitionPluginStatus.Visibility = AcquisitionPluginStatus.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-        CatalogPluginList.ItemsSource = pluginCatalog?.Plugins.Where(x => pluginCatalog.State(x, PluginsDirectory) == CatalogPluginState.NotInstalled)
+        CatalogPluginList.ItemsSource = pluginCatalog?.Plugins.Where(x => states[x] == CatalogPluginState.NotInstalled)
             .Select(x => new CatalogRow(x.Name, x.Description, TypeNames(x.ContentTypes), x)).ToArray() ?? [];
         var available = CatalogPluginList.Items.Count;
         CatalogEmpty.Text = pluginCatalog is null || available > 0 ? "" : pluginCatalog.Plugins.Count == 0 ? "BlackPearlPlugins has no plugins yet." : "You have every published plugin.";

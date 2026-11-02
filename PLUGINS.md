@@ -75,7 +75,7 @@ plugins folder.
 | `timeoutSeconds` | Optional, 5–3600, default 120. BlackPearl stops the plugin after this time. Long downloads should be handed to a downloader instead of waited for. |
 | `interactive` | Optional, default false. Opens BlackPearl's provider/title/release picker. The plugin must support the interactive actions below. |
 | `settingsSchema` | Optional path relative to the plugin folder. A JSON array of settings fields; BlackPearl displays a Settings button and preserves other fields when saving `settings.json`. |
-| `requires` | Optional. Folder names, beside this one in the plugins folder, that the plugin needs. **Manage plugins** installs them with it. |
+| `requires` | Optional. Folder names, beside this one in the plugins folder, that the plugin needs. Installing from **Settings > Plugins** installs them with it. |
 
 ## Interactive plugins
 

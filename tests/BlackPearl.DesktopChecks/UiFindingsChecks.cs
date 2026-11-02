@@ -160,6 +160,12 @@ static class UiFindingsChecks
                 && Control<FrameworkElement>("OtherExclusionsPanel").Visibility == Visibility.Visible,
                 "skipped subfolders sit under their folder, and others are listed apart");
             exclusionList.Remove(skipped); exclusionList.Remove(elsewhere);
+            // A drive root keeps its separator, so it must not gain a second one before matching paths inside it.
+            var inside = typeof(MainWindow).GetMethod("Inside", BindingFlags.Static | BindingFlags.NonPublic)!;
+            bool Inside(string path, string folder) => (bool)inside.Invoke(null, [path, folder])!;
+            Check(Inside(@"E:\Movies\Film.mkv", @"E:\") && Inside(@"E:\Movies\Film.mkv", @"E:\Movies") && Inside(@"E:\Movies\Film.mkv", @"E:\Movies\")
+                && !Inside(@"E:\Movies", @"E:\Movies") && !Inside(@"E:\Movies2\Film.mkv", @"E:\Movies") && !Inside(@"F:\Movies\Film.mkv", @"E:\"),
+                "folders match the paths inside them, including drive roots");
             Check(Control<FrameworkElement>("FolderNoExclusions").Visibility == Visibility.Visible && Control<FrameworkElement>("OtherExclusionsPanel").Visibility == Visibility.Collapsed,
                 "a folder with nothing skipped says so");
             Call("ShowPage", "Folders"); Layout(); Capture("folder-selected-900");
