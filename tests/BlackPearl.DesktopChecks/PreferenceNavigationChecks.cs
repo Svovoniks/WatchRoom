@@ -85,6 +85,18 @@ static class PreferenceNavigationChecks
             Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Visible && Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Collapsed &&
             Control<FrameworkElement>("PreferenceFooter").Visibility == Visibility.Collapsed,
             "Folders opens as a Settings section without the Save bar and has no sidebar entry");
+        ClickSection("Plugins");
+        // The logical tree holds the section's content before its template is applied.
+        bool InSection(DependencyObject? element, string section)
+        {
+            for (; element is not null; element = LogicalTreeHelper.GetParent(element))
+                if (element is FrameworkElement { Name: var found } && found == section) return true;
+            return false;
+        }
+        check(Control<FrameworkElement>("PluginPreferences").Visibility == Visibility.Visible && Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Collapsed &&
+            InSection(Control<Button>("ManagePluginsButton"), "PluginPreferences") && InSection(Control<Button>("AddFolderButton"), "FoldersPage") &&
+            Control<FrameworkElement>("PreferenceFooter").Visibility == Visibility.Collapsed,
+            "plugins have their own Settings section, apart from Folders and without the Save bar");
         ClickSection("Profile"); name.Text = "Folders draft";
         Answer("Keep editing", () => Call("ShowPage", "Folders"));
         check(Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Visible && Control<FrameworkElement>("PreferenceFooter").Visibility == Visibility.Visible &&

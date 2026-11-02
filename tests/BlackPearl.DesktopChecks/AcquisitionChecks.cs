@@ -7,7 +7,7 @@ using System.Windows.Controls;
 using BlackPearl.Core;
 using BlackPearl.Desktop;
 
-// Acquisition plugins in the app: the Folders page lists them, and missing episodes, seasons and films offer Acquire
+// Acquisition plugins in the app: Settings > Plugins lists them, and missing episodes, seasons and films offer Acquire
 // when a plugin gets their kind, handing the plugin what to get and where it belongs.
 static class AcquisitionChecks
 {
@@ -38,7 +38,7 @@ static class AcquisitionChecks
         var folder = new LibraryFolder(shows, "Show"); folders.Insert(0, folder);
         Call("LoadAcquisitionPlugins");
         var list = (ItemsControl)window.FindName("AcquisitionPluginList");
-        check(list.Items.Count == 1 && list.Items[0]!.ToString()!.Contains("Show getter"), "the Folders page lists installed acquisition plugins");
+        check(list.Items.Count == 1 && list.Items[0]!.ToString()!.Contains("Show getter"), "Settings > Plugins lists installed acquisition plugins");
 
         var show = WantedTitles.Add(store, directory, WantedTitles.FromMatch(new(9201, "tv", "Acquire Check Show", "2022", null, "", "Show"), "Show", [1], false, null),
             [Season(1, -200, -193, 30)]);
@@ -322,6 +322,6 @@ static class AcquisitionChecks
         check((catalogDialog.FindName("Install_catalog_anime") as Button)?.Content as string == "Update" && ((TextBlock)catalogDialog.FindName("CatalogStatus")).Text.Contains("1 update available"),
             "a changed installed plugin offers Update");
         catalogDialog.Close();
-        check(((Button)window.FindName("ManagePluginsButton")).IsEnabled, "the Folders page offers Manage plugins");
+        check(((Button)window.FindName("ManagePluginsButton")).IsEnabled, "Settings > Plugins offers Manage plugins");
     }
 }

@@ -338,8 +338,8 @@ public partial class MainWindow : Window
     }
     private void ShowPage(string name)
     {
-        // Folders is a section of Settings; links to it open Settings there.
-        var section = name == "Folders" ? name : null;
+        // Folders and Plugins are sections of Settings; links to them open Settings there.
+        var section = name is "Folders" or "Plugins" ? name : null;
         if (section is not null) name = "Settings";
         if (!ConfirmPageNavigation(name) || section is not null && currentPage == "Settings" && section != preferenceSection && !ConfirmPreferenceNavigation()) return;
         if (section is not null) ShowPreferenceSection(section);

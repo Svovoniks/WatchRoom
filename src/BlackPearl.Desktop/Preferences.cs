@@ -192,10 +192,10 @@ public partial class MainWindow
     private void ShowPreferenceSection(string section)
     {
         preferenceSection = section;
-        foreach (var panel in new FrameworkElement[] { FoldersPage, ProfilePreferences, MetadataPreferences, PlaybackPreferences, VoicePreferences, AppearancePreferences, UpdatePreferences })
+        foreach (var panel in new FrameworkElement[] { FoldersPage, PluginPreferences, ProfilePreferences, MetadataPreferences, PlaybackPreferences, VoicePreferences, AppearancePreferences, UpdatePreferences })
             panel.Visibility = (string)panel.Tag == section ? Visibility.Visible : Visibility.Collapsed;
-        // Folder changes apply straight away, so the Folders section has nothing to save.
-        PreferenceFooter.Visibility = section == "Folders" ? Visibility.Collapsed : Visibility.Visible;
+        // Folder and plugin changes apply straight away, so those sections have nothing to save.
+        PreferenceFooter.Visibility = section is "Folders" or "Plugins" ? Visibility.Collapsed : Visibility.Visible;
         foreach (Button button in PreferenceSections.Children)
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, (string)button.Tag == section ? "Selected" : "");
     }
