@@ -201,5 +201,6 @@ static class AcquisitionPluginsFixture
         check(new AcquisitionChoice("x", "A Good Girls Guide to Murder S01E01 480p x264 RUBiK").EpisodeCode == "S01E01" && new AcquisitionChoice("y", "Show.3x07.720p").EpisodeCode == "S03E07"
             && new AcquisitionChoice("z", "Show S02E01 1080p", Episode: "S02E01").EpisodeCode == "S02E01" && new AcquisitionChoice("w", "Movie 2021 1080p x265").EpisodeCode is null,
             "every release shows the episode its name gives, requested or not");
+        PluginCatalogFixture.Run(directory, check);
     }
 }
