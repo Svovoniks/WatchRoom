@@ -19,7 +19,7 @@ the placeholders.
 
 ## Installing
 
-**Folders > Acquisition plugins > Manage plugins** lists the plugins published in
+**Settings > Folders > Acquisition plugins > Manage plugins** lists the plugins published in
 [BlackPearlPlugins](https://github.com/Svovoniks/BlackPearlPlugins), such as the
 SubsPlease, EZTV, TokyoToshokan and TheRARBG ports of Sparrow. **Install** copies a
 plugin into the plugins folder and loads it straight away. A plugin whose files
@@ -43,7 +43,7 @@ Each plugin is a folder in the plugins folder:
 %LOCALAPPDATA%\BlackPearl\plugins\<plugin folder>\plugin.json
 ```
 
-**Folders > Acquisition plugins** lists the loaded plugins and any that failed to
+**Settings > Folders > Acquisition plugins** lists the loaded plugins and any that failed to
 load. **Open plugins folder** opens the folder, and **Reload** reads it again after
 you change it. The `BLACKPEARL_PLUGINS` environment variable sets a different
 plugins folder.

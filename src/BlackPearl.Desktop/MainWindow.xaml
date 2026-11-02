@@ -41,7 +41,6 @@
        <Button x:Name="MusicLibraryNav" Tag="6" Click="LibraryCategoryClick" Style="{StaticResource Navigation}" Visibility="Collapsed" AutomationProperties.Name="Music"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8D6;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Music"/></StackPanel></Button>
        <Button x:Name="QueuesNav" Tag="Queues" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Queues"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8FD;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Queues"/></StackPanel></Button>
        <Button x:Name="RoomNav" Tag="Rooms" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Watch rooms"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE716;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Watch rooms"/></StackPanel></Button>
-       <Button x:Name="FoldersNav" Tag="Folders" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Folders"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Folders"/></StackPanel></Button>
      </StackPanel>
     </ScrollViewer>
    </DockPanel>
@@ -379,56 +378,6 @@
     </StackPanel>
    </ScrollViewer>
 
-   <!-- Folders -->
-   <ScrollViewer x:Name="FoldersPage" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-    <Grid MaxWidth="860" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" HorizontalAlignment="Left"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><StackPanel Margin="0,0,16,0">
-     <DockPanel Margin="0,0,0,20"><Button x:Name="AddFolderButton" DockPanel.Dock="Right" Content="Add folder" Style="{StaticResource Primary}" ContentTemplate="{StaticResource AddContent}" Click="AddFolder" VerticalAlignment="Center" Margin="12,0,0,0" ToolTip="Includes subfolders. Select an added folder to change its category."/><StackPanel><TextBlock Text="Folders" Style="{StaticResource PageHeading}"/><TextBlock Text="BlackPearl scans these folders and their subfolders. Your files stay where they are." Style="{StaticResource MutedText}" Margin="0,4,0,0"/></StackPanel></DockPanel>
-     <Border Style="{StaticResource Card}"><DockPanel><Button DockPanel.Dock="Right" Content="Add title" ContentTemplate="{StaticResource AddContent}" Click="AddTitleClick" VerticalAlignment="Center" Margin="12,0,0,0"/><StackPanel><TextBlock Text="Add titles without files" Style="{StaticResource FieldLabel}"/><TextBlock Text="Add a show or film you don't have yet. It shows as Missing and fills in when a scan finds its files in these folders." Style="{StaticResource MutedText}" Margin="0,2,0,0"/></StackPanel></DockPanel></Border>
-     <!-- Programs that fetch missing and upcoming videos into these folders; each is a folder with plugin.json in the plugins folder. -->
-     <Border Style="{StaticResource Card}">
-      <StackPanel>
-       <DockPanel><WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center"><Button x:Name="ManagePluginsButton" Content="Manage plugins" Style="{StaticResource Primary}" Click="ManagePluginsClick" Margin="12,0,0,0" ToolTip="Install, update or remove plugins published in BlackPearlPlugins"/><Button Content="Open plugins folder" Click="OpenPluginsFolder" Margin="8,0,0,0"/><Button Content="Reload" ContentTemplate="{StaticResource RefreshContent}" Click="ReloadPluginsClick" Margin="8,0,0,0"/></WrapPanel><StackPanel><TextBlock Text="Acquisition plugins" Style="{StaticResource FieldLabel}"/><TextBlock Text="Plugins get missing and upcoming episodes, seasons and films for you. Right-click one, or open it, and choose Acquire. Plugins are told where each video belongs and which folders hold anime, shows and movies." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,2,0,0"/></StackPanel></DockPanel>
-       <ItemsControl x:Name="AcquisitionPluginList" Margin="0,12,0,0" AutomationProperties.Name="Acquisition plugins" Focusable="False">
-        <ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="2,4"><Button DockPanel.Dock="Right" Content="Settings" Click="ConfigurePluginClick" Visibility="{Binding SettingsVisibility}" Margin="12,0,0,0" VerticalAlignment="Center"/><Border DockPanel.Dock="Left" Width="34" Height="34" CornerRadius="8" Background="{DynamicResource Elevated}" Margin="0,0,12,0" VerticalAlignment="Center"><TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding Name}" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Foreground="{DynamicResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel></DockPanel></DataTemplate></ItemsControl.ItemTemplate>
-       </ItemsControl>
-       <TextBlock x:Name="AcquisitionPluginStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
-      </StackPanel>
-     </Border>     <Border Style="{StaticResource Card}">
-      <StackPanel>
-       <TextBlock Text="Library folders" Style="{StaticResource FieldLabel}" Margin="0,0,0,10"/>
-       <Grid>
-        <ListBox x:Name="FolderList" SelectionChanged="FolderSelectionChanged" MinHeight="110" MaxHeight="260" Background="Transparent" BorderThickness="0" Padding="0" AutomationProperties.Name="Library folders" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-         <ListBox.ItemTemplate><DataTemplate><DockPanel Margin="2,2"><Border DockPanel.Dock="Left" Width="34" Height="34" CornerRadius="8" Background="{DynamicResource Elevated}" Margin="0,0,12,0" VerticalAlignment="Center"><TextBlock Text="&#xE8B7;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding Path}" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Text="{Binding Kind}" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,3,0,0"/></StackPanel></DockPanel></DataTemplate></ListBox.ItemTemplate>
-        </ListBox>
-        <TextBlock Text="No folders yet. Add a folder to discover your videos." HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Items.Count, ElementName=FolderList}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
-       </Grid>
-       <StackPanel x:Name="FolderEditor" Visibility="Collapsed" Margin="0,14,0,0">
-        <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="0,14,0,0">
-         <WrapPanel><StackPanel Margin="0,0,12,0"><TextBlock Text="Category" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="FolderKind" Width="160" Margin="0,6,0,8" AutomationProperties.Name="Folder category" SelectedIndex="0"><ComboBoxItem Content="Mixed"/><ComboBoxItem Content="Movie"/><ComboBoxItem Content="Show"/><ComboBoxItem Content="Anime"/><ComboBoxItem Content="Music"/></ComboBox></StackPanel>
-          <Button x:Name="ChangeFolderButton" Content="Apply category" Click="ChangeFolderKind" IsEnabled="False" VerticalAlignment="Bottom"/>
-          <Button x:Name="RemoveFolderButton" Content="Remove folder" Style="{StaticResource QuietButton}" Click="RemoveFolder" IsEnabled="False" VerticalAlignment="Bottom"/>
-         </WrapPanel>
-        </Border>
-       </StackPanel>
-       <CheckBox x:Name="MixedFolderMusic" Margin="0,14,0,0" Click="MixedFolderMusicClick" AutomationProperties.Name="Mixed folders also list music"><StackPanel><TextBlock Text="Mixed folders also list music"/><TextBlock Text="Audio files in Mixed folders appear in Music. Off keeps soundtracks and other audio saved beside videos out of your library." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,2,0,0"/></StackPanel></CheckBox>
-      </StackPanel>
-     </Border>
-     <Border Style="{StaticResource Card}">
-      <StackPanel>
-       <DockPanel><WrapPanel DockPanel.Dock="Right"><Button x:Name="ScanButton" Content="Scan library" ContentTemplate="{StaticResource RefreshContent}" Click="ScanClick" Margin="8,0,0,0"/><Button x:Name="CancelScanButton" Content="Cancel scan" Click="CancelScan" Visibility="Collapsed" Margin="8,0,0,0"/></WrapPanel><StackPanel VerticalAlignment="Center"><TextBlock Text="Scanning" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="ScanStatus" Margin="0,2,0,0" AutomationProperties.LiveSetting="Polite"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock></StackPanel></DockPanel>
-      </StackPanel>
-     </Border>
-     <Border Style="{StaticResource Card}">
-      <StackPanel>
-       <TextBlock Text="Excluded folders" Style="{StaticResource FieldLabel}"/>
-       <TextBlock Text="Subfolders listed here are skipped during scans." Style="{StaticResource MutedText}" Margin="0,2,0,10"/>
-       <Grid><ListBox x:Name="ExcludedFolderList" MinHeight="56" MaxHeight="180" SelectionChanged="ExcludedSelectionChanged" AutomationProperties.Name="Excluded folders" Background="{DynamicResource Canvas}"/><TextBlock Text="No exclusions. All subfolders are included." HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Items.Count, ElementName=ExcludedFolderList}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></Grid>
-       <WrapPanel Margin="0,12,0,-8"><Button x:Name="ExcludeFolderButton" Content="Exclude folder" Click="ExcludeFolder"/><Button x:Name="RestoreFolderButton" Content="Remove exclusion" Style="{StaticResource QuietButton}" Click="RestoreFolder" IsEnabled="False"/></WrapPanel>
-      </StackPanel>
-     </Border>
-    </StackPanel></Grid>
-   </ScrollViewer>
-
    <!-- Queues: a gallery of queue covers. Opening one shows its videos, with library search beside them while adding. -->
    <Grid x:Name="QueuesPage" Visibility="Collapsed">
     <Grid.Resources>
@@ -581,6 +530,7 @@
     <StackPanel><TextBlock Text="Settings" Style="{StaticResource PageHeading}" Margin="0,0,0,16"/>
      <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="3" HorizontalAlignment="Left" Margin="0,0,0,20">
       <WrapPanel x:Name="PreferenceSections">
+       <Button Content="Folders" Tag="Folders" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
        <Button Content="Profile" Tag="Profile" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
        <Button Content="Metadata" Tag="Metadata" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
        <Button Content="Playback" Tag="Playback" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
@@ -591,7 +541,55 @@
      </Border>
     </StackPanel>
     <Grid Grid.Row="1">
-     <ScrollViewer x:Name="ProfilePreferences" Tag="Profile" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="760" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
+     <ScrollViewer x:Name="FoldersPage" Tag="Folders" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+      <Grid MaxWidth="860" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" HorizontalAlignment="Left"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><StackPanel Margin="0,0,16,0">
+       <DockPanel Margin="0,0,0,16"><Button x:Name="AddFolderButton" DockPanel.Dock="Right" Content="Add folder" Style="{StaticResource Primary}" ContentTemplate="{StaticResource AddContent}" Click="AddFolder" VerticalAlignment="Center" Margin="12,0,0,0" ToolTip="Includes subfolders. Select an added folder to change its category."/><TextBlock Text="BlackPearl scans these folders and their subfolders. Your files stay where they are." Style="{StaticResource MutedText}" TextWrapping="Wrap" VerticalAlignment="Center"/></DockPanel>
+       <Border Style="{StaticResource Card}"><DockPanel><Button DockPanel.Dock="Right" Content="Add title" ContentTemplate="{StaticResource AddContent}" Click="AddTitleClick" VerticalAlignment="Center" Margin="12,0,0,0"/><StackPanel><TextBlock Text="Add titles without files" Style="{StaticResource FieldLabel}"/><TextBlock Text="Add a show or film you don't have yet. It shows as Missing and fills in when a scan finds its files in these folders." Style="{StaticResource MutedText}" Margin="0,2,0,0"/></StackPanel></DockPanel></Border>
+       <!-- Programs that fetch missing and upcoming videos into these folders; each is a folder with plugin.json in the plugins folder. -->
+       <Border Style="{StaticResource Card}">
+        <StackPanel>
+         <DockPanel><WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center"><Button x:Name="ManagePluginsButton" Content="Manage plugins" Style="{StaticResource Primary}" Click="ManagePluginsClick" Margin="12,0,0,0" ToolTip="Install, update or remove plugins published in BlackPearlPlugins"/><Button Content="Open plugins folder" Click="OpenPluginsFolder" Margin="8,0,0,0"/><Button Content="Reload" ContentTemplate="{StaticResource RefreshContent}" Click="ReloadPluginsClick" Margin="8,0,0,0"/></WrapPanel><StackPanel><TextBlock Text="Acquisition plugins" Style="{StaticResource FieldLabel}"/><TextBlock Text="Plugins get missing and upcoming episodes, seasons and films for you. Right-click one, or open it, and choose Acquire. Plugins are told where each video belongs and which folders hold anime, shows and movies." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,2,0,0"/></StackPanel></DockPanel>
+         <ItemsControl x:Name="AcquisitionPluginList" Margin="0,12,0,0" AutomationProperties.Name="Acquisition plugins" Focusable="False">
+          <ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="2,4"><Button DockPanel.Dock="Right" Content="Settings" Click="ConfigurePluginClick" Visibility="{Binding SettingsVisibility}" Margin="12,0,0,0" VerticalAlignment="Center"/><Border DockPanel.Dock="Left" Width="34" Height="34" CornerRadius="8" Background="{DynamicResource Elevated}" Margin="0,0,12,0" VerticalAlignment="Center"><TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding Name}" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Text="{Binding Detail}" Foreground="{DynamicResource Muted}" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel></DockPanel></DataTemplate></ItemsControl.ItemTemplate>
+         </ItemsControl>
+         <TextBlock x:Name="AcquisitionPluginStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+        </StackPanel>
+       </Border>     <Border Style="{StaticResource Card}">
+        <StackPanel>
+         <TextBlock Text="Library folders" Style="{StaticResource FieldLabel}" Margin="0,0,0,10"/>
+         <Grid>
+          <ListBox x:Name="FolderList" SelectionChanged="FolderSelectionChanged" MinHeight="110" MaxHeight="260" Background="Transparent" BorderThickness="0" Padding="0" AutomationProperties.Name="Library folders" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+           <ListBox.ItemTemplate><DataTemplate><DockPanel Margin="2,2"><Border DockPanel.Dock="Left" Width="34" Height="34" CornerRadius="8" Background="{DynamicResource Elevated}" Margin="0,0,12,0" VerticalAlignment="Center"><TextBlock Text="&#xE8B7;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding Path}" TextWrapping="Wrap" FontWeight="SemiBold"/><TextBlock Text="{Binding Kind}" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,3,0,0"/></StackPanel></DockPanel></DataTemplate></ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock Text="No folders yet. Add a folder to discover your videos." HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Items.Count, ElementName=FolderList}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+         </Grid>
+         <StackPanel x:Name="FolderEditor" Visibility="Collapsed" Margin="0,14,0,0">
+          <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="0,14,0,0">
+           <WrapPanel><StackPanel Margin="0,0,12,0"><TextBlock Text="Category" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="FolderKind" Width="160" Margin="0,6,0,8" AutomationProperties.Name="Folder category" SelectedIndex="0"><ComboBoxItem Content="Mixed"/><ComboBoxItem Content="Movie"/><ComboBoxItem Content="Show"/><ComboBoxItem Content="Anime"/><ComboBoxItem Content="Music"/></ComboBox></StackPanel>
+            <Button x:Name="ChangeFolderButton" Content="Apply category" Click="ChangeFolderKind" IsEnabled="False" VerticalAlignment="Bottom"/>
+            <Button x:Name="RemoveFolderButton" Content="Remove folder" Style="{StaticResource QuietButton}" Click="RemoveFolder" IsEnabled="False" VerticalAlignment="Bottom"/>
+           </WrapPanel>
+          </Border>
+         </StackPanel>
+         <CheckBox x:Name="MixedFolderMusic" Margin="0,14,0,0" Click="MixedFolderMusicClick" AutomationProperties.Name="Mixed folders also list music"><StackPanel><TextBlock Text="Mixed folders also list music"/><TextBlock Text="Audio files in Mixed folders appear in Music. Off keeps soundtracks and other audio saved beside videos out of your library." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,2,0,0"/></StackPanel></CheckBox>
+        </StackPanel>
+       </Border>
+       <Border Style="{StaticResource Card}">
+        <StackPanel>
+         <DockPanel><WrapPanel DockPanel.Dock="Right"><Button x:Name="ScanButton" Content="Scan library" ContentTemplate="{StaticResource RefreshContent}" Click="ScanClick" Margin="8,0,0,0"/><Button x:Name="CancelScanButton" Content="Cancel scan" Click="CancelScan" Visibility="Collapsed" Margin="8,0,0,0"/></WrapPanel><StackPanel VerticalAlignment="Center"><TextBlock Text="Scanning" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="ScanStatus" Margin="0,2,0,0" AutomationProperties.LiveSetting="Polite"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock></StackPanel></DockPanel>
+        </StackPanel>
+       </Border>
+       <Border Style="{StaticResource Card}">
+        <StackPanel>
+         <TextBlock Text="Excluded folders" Style="{StaticResource FieldLabel}"/>
+         <TextBlock Text="Subfolders listed here are skipped during scans." Style="{StaticResource MutedText}" Margin="0,2,0,10"/>
+         <Grid><ListBox x:Name="ExcludedFolderList" MinHeight="56" MaxHeight="180" SelectionChanged="ExcludedSelectionChanged" AutomationProperties.Name="Excluded folders" Background="{DynamicResource Canvas}"/><TextBlock Text="No exclusions. All subfolders are included." HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Items.Count, ElementName=ExcludedFolderList}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></Grid>
+         <WrapPanel Margin="0,12,0,-8"><Button x:Name="ExcludeFolderButton" Content="Exclude folder" Click="ExcludeFolder"/><Button x:Name="RestoreFolderButton" Content="Remove exclusion" Style="{StaticResource QuietButton}" Click="RestoreFolder" IsEnabled="False"/></WrapPanel>
+        </StackPanel>
+       </Border>
+      </StackPanel></Grid>
+     </ScrollViewer>
+     <ScrollViewer x:Name="ProfilePreferences" Tag="Profile" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="760" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
       <Border Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Your display name" Style="{StaticResource FieldLabel}"/><TextBox x:Name="DisplayNameBox" AutomationProperties.Name="Your display name" MaxLength="40"/>
        <TextBlock x:Name="DisplayNameError" Style="{StaticResource FieldError}"/>
@@ -766,7 +764,7 @@
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
     </Grid>
-    <Border Grid.Row="2" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Background="{DynamicResource Canvas}" Padding="0,12,0,0" Margin="0,4,0,0">
+    <Border x:Name="PreferenceFooter" Grid.Row="2" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Background="{DynamicResource Canvas}" Padding="0,12,0,0" Margin="0,4,0,0">
      <DockPanel><WrapPanel DockPanel.Dock="Right"><Button x:Name="CancelPreferencesButton" Content="Cancel" Style="{StaticResource QuietButton}" Click="CancelPreferences" IsEnabled="False" Margin="0,0,8,0"/><Button x:Name="SavePreferencesButton" Content="Save changes" Click="SaveSettings" Style="{StaticResource Primary}" IsEnabled="False" Margin="0"/></WrapPanel><TextBlock x:Name="PreferencesStatus" Style="{StaticResource MutedText}" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" Margin="0,0,16,0"/></DockPanel>
     </Border>
    </Grid>

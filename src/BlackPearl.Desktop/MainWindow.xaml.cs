@@ -338,7 +338,11 @@ public partial class MainWindow : Window
     }
     private void ShowPage(string name)
     {
-        if (!ConfirmPageNavigation(name)) return;
+        // Folders is a section of Settings; links to it open Settings there.
+        var section = name == "Folders" ? name : null;
+        if (section is not null) name = "Settings";
+        if (!ConfirmPageNavigation(name) || section is not null && currentPage == "Settings" && section != preferenceSection && !ConfirmPreferenceNavigation()) return;
+        if (section is not null) ShowPreferenceSection(section);
         if (name == "Home" && ready) SavePlaybackPosition();
         if (name == "Home" && currentPage != "Home") homeSeed = Random.Shared.Next();
         if (GuestLibrary && currentPage is "Home" or "Library" or "Details" && name is not ("Home" or "Library" or "Details")) ReleaseHostLibrary();
@@ -376,7 +380,6 @@ public partial class MainWindow : Window
         HomePage.Visibility = name == "Home" ? Visibility.Visible : Visibility.Collapsed;
         LibraryPage.Visibility = name == "Library" ? Visibility.Visible : Visibility.Collapsed;
         Details.Visibility = name == "Details" ? Visibility.Visible : Visibility.Collapsed;
-        FoldersPage.Visibility = name == "Folders" ? Visibility.Visible : Visibility.Collapsed;
         RoomsPage.Visibility = name == "Rooms" ? Visibility.Visible : Visibility.Collapsed;
         QueuesPage.Visibility = name == "Queues" ? Visibility.Visible : Visibility.Collapsed;
         SettingsPage.Visibility = name == "Settings" ? Visibility.Visible : Visibility.Collapsed;
@@ -392,7 +395,7 @@ public partial class MainWindow : Window
         // Music has its own sidebar entry, so the Library entry isn't selected alongside it.
         var page = name == "Details" ? "Library" : name == "Room" ? "Rooms" : name;
         if (page == "Library" && (name == "Details" ? selected?.IsMusic == true : libraryCategory == LibraryCatalog.Music)) page = "Music";
-        foreach (var button in new[] { HomeNav, LibraryNav, QueuesNav, RoomNav, FoldersNav, SettingsNav })
+        foreach (var button in new[] { HomeNav, LibraryNav, QueuesNav, RoomNav, SettingsNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, (string)button.Tag == page ? "Selected" : "");
         System.Windows.Automation.AutomationProperties.SetItemStatus(MusicLibraryNav, page == "Music" ? "Selected" : "");
     }

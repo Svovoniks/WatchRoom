@@ -111,7 +111,7 @@ static class UiFindingsChecks
             Check(!Control<TextBlock>("StatusText").Text.Contains("queue"), "page-scoped queue error clears on navigation");
             typeof(MainWindow).GetField("scanning", flags)!.SetValue(window, true);
             Control<TextBlock>("ScanStatus").Text = "Scanning test fixtures";
-            Call("ShowPage", "Folders");
+            Call("ShowPage", "Queues"); Call("ShowPage", "Folders");
             Check(Control<TextBlock>("StatusText").Text == "Scanning test fixtures", "ongoing scan feedback survives navigation");
             typeof(MainWindow).GetField("scanning", flags)!.SetValue(window, false);
             // The status bar's indeterminate progress uses the app's ProgressBar template; show one for real.
@@ -294,7 +294,7 @@ static class UiFindingsChecks
             Call("ToggleTheme", window, new RoutedEventArgs()); Call("ShowPreferenceSection", "Playback");
             foreach (var size in new[] { (900, 600), (1280, 810) }) { Layout(size.Item1, size.Item2); Capture("playback-light-" + size.Item1); }
             Call("ShowPage", "Welcome"); Layout(); Capture("welcome-900");
-            Check(Control<FrameworkElement>("WelcomePage").Visibility == Visibility.Visible && Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Collapsed,
+            Check(Control<FrameworkElement>("WelcomePage").Visibility == Visibility.Visible && Control<FrameworkElement>("SettingsPage").Visibility == Visibility.Collapsed,
                 "welcome provides a separate first-run choice before folder management");
             Console.WriteLine($"{checks} UI findings checks passed.");
         }
