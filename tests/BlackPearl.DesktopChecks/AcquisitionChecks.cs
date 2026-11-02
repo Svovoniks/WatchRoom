@@ -298,7 +298,7 @@ static class AcquisitionChecks
         check(!unchanged.IsOpen && kept.RootElement.GetProperty("downloader").GetString() == "aria2" && kept.RootElement.GetProperty("baseUrl").ValueKind == JsonValueKind.Number,
             "saving unchanged settings keeps an unlisted choice and a value's stored JSON type");
 
-        // Get plugins lists the published catalog (a local checkout here) and installs a plugin with its support folder.
+        // Manage plugins lists the published catalog (a local checkout here) and installs a plugin with its support folder.
         var catalogSource = Path.Combine(directory, "catalog-source", "plugins");
         Directory.CreateDirectory(Path.Combine(catalogSource, "catalog-runtime")); Directory.CreateDirectory(Path.Combine(catalogSource, "catalog-anime"));
         File.WriteAllText(Path.Combine(catalogSource, "catalog-runtime", "get.cmd"), "@echo off\r\necho {\"success\": true, \"message\": \"Queued\"}\r\n");
@@ -310,18 +310,18 @@ static class AcquisitionChecks
         Pump(() => catalogList.Children.Count > 0);
         var install = catalogDialog.FindName("Install_catalog_anime") as Button;
         check(catalogList.Children.Count == 1 && install is { IsEnabled: true } && ((TextBlock)catalogDialog.FindName("CatalogStatus")).Text.StartsWith("1 plugin"),
-            "Get plugins lists the catalog's plugins with an Install button");
+            "Manage plugins lists the catalog's plugins with an Install button");
         install!.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
         Pump(() => reloads > 0 && catalogDialog.FindName("Remove_catalog_anime") is Button);
         check(reloads == 1 && File.Exists(Path.Combine(catalogInstalled, "catalog-runtime", "get.cmd")) && ContentAcquisition.Discover(catalogInstalled).Plugins.Single().Name == "Catalog anime"
             && catalogDialog.FindName("Install_catalog_anime") is null && catalogDialog.FindName("Remove_catalog_anime") is Button,
-            "installing from Get plugins copies the plugin with its support folder, reloads plugins and offers Remove");
+            "installing from Manage plugins copies the plugin with its support folder, reloads plugins and offers Remove");
         File.WriteAllText(Path.Combine(catalogInstalled, "catalog-runtime", "get.cmd"), "@echo off");
         ((Button)catalogDialog.FindName("CatalogRefresh")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
         Pump(() => catalogDialog.FindName("Install_catalog_anime") is Button);
         check((catalogDialog.FindName("Install_catalog_anime") as Button)?.Content as string == "Update" && ((TextBlock)catalogDialog.FindName("CatalogStatus")).Text.Contains("1 update available"),
             "a changed installed plugin offers Update");
         catalogDialog.Close();
-        check(((Button)window.FindName("GetPluginsButton")).IsEnabled, "the Folders page offers Get plugins");
+        check(((Button)window.FindName("ManagePluginsButton")).IsEnabled, "the Folders page offers Manage plugins");
     }
 }

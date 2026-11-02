@@ -25,7 +25,7 @@ public partial class MainWindow
         acquisitionPlugins = plugins;
         AcquisitionPluginList.ItemsSource = plugins.Select(x => new PluginRow(x.Name, string.Join(" · ", x.ContentTypes.Select(ContentAcquisition.ContentTypeName)) +
             (x.Description.Length > 0 ? " — " + x.Description : ""), x)).ToArray();
-        AcquisitionPluginStatus.Text = (plugins.Count == 0 ? $"No plugins yet. Choose Get plugins to install published ones, or put a plugin's folder, with its plugin.json, in {PluginsDirectory}." : "") +
+        AcquisitionPluginStatus.Text = (plugins.Count == 0 ? $"No plugins yet. Choose Manage plugins to install published ones, or put a plugin's folder, with its plugin.json, in {PluginsDirectory}." : "") +
             (problems.Count == 0 ? "" : (plugins.Count == 0 ? "\n" : "") + "Not loaded: " + string.Join("\n", problems));
         AcquisitionPluginStatus.Visibility = AcquisitionPluginStatus.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -41,7 +41,7 @@ public partial class MainWindow
         ShowAcquireSeason();
     }
     // The catalog installs into the plugins folder; the app reloads after each install, update or removal.
-    private void GetPluginsClick(object sender, RoutedEventArgs e) =>
+    private void ManagePluginsClick(object sender, RoutedEventArgs e) =>
         PluginCatalogDialog.Create(this, PluginsDirectory, RefreshAcquisitionPlugins, AppEnvironment.Get("PLUGIN_CATALOG")).ShowDialog();
     private void OpenPluginsFolder(object sender, RoutedEventArgs e)
     {

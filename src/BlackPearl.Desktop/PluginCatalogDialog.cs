@@ -9,7 +9,7 @@ using BlackPearl.Core;
 
 namespace BlackPearl.Desktop;
 
-// Get plugins: lists the plugins published in the BlackPearlPlugins repository and installs, updates or removes them
+// Manage plugins: lists the plugins published in the BlackPearlPlugins repository and installs, updates or removes them
 // in the plugins folder. changed runs after each change so the app reloads its plugins.
 internal static class PluginCatalogDialog
 {
@@ -17,7 +17,7 @@ internal static class PluginCatalogDialog
 
     internal static InAppDialog Create(Window owner, string pluginsDirectory, Action changed, string? source = null)
     {
-        var dialog = new InAppDialog { Owner = owner, Title = "Get plugins", Width = 620, Height = 560 };
+        var dialog = new InAppDialog { Owner = owner, Title = "Manage plugins", Width = 620, Height = 560 };
         NameScope.SetNameScope(dialog, new NameScope());
         var root = new DockPanel();
         var intro = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) };
