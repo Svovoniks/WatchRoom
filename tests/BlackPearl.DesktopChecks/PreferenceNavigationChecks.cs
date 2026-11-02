@@ -78,6 +78,30 @@ static class PreferenceNavigationChecks
             "credential-only drafts prompt and discard without writing the vault");
         name.Text = originalName; Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text = "";
         check((bool)Call("TrySavePreferences")!, "navigation fixtures restore the original settings");
+
+        // Folders lives in Settings: links to it open that section, which applies changes at once and has no Save bar.
+        Call("ShowPage", "Rooms"); Call("ShowPage", "Folders");
+        check(window.FindName("FoldersNav") is null && (string)Field("currentPage") == "Settings" &&
+            Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Visible && Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Collapsed &&
+            Control<FrameworkElement>("PreferenceFooter").Visibility == Visibility.Collapsed,
+            "Folders opens as a Settings section without the Save bar and has no sidebar entry");
+        ClickSection("Plugins");
+        // The logical tree holds the section's content before its template is applied.
+        bool InSection(DependencyObject? element, string section)
+        {
+            for (; element is not null; element = LogicalTreeHelper.GetParent(element))
+                if (element is FrameworkElement { Name: var found } && found == section) return true;
+            return false;
+        }
+        check(Control<FrameworkElement>("PluginPreferences").Visibility == Visibility.Visible && Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Collapsed &&
+            InSection(Control<RadioButton>("AvailablePluginsView"), "PluginPreferences") && InSection(Control<Button>("AddFolderButton"), "FoldersPage") &&
+            Control<FrameworkElement>("PreferenceFooter").Visibility == Visibility.Collapsed,
+            "plugins have their own Settings section, apart from Folders and without the Save bar");
+        ClickSection("Profile"); name.Text = "Folders draft";
+        Answer("Keep editing", () => Call("ShowPage", "Folders"));
+        check(Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Visible && Control<FrameworkElement>("PreferenceFooter").Visibility == Visibility.Visible &&
+            name.Text == "Folders draft", "opening Folders from Settings asks about unsaved changes first");
+        Call("LoadPreferences");
         Call("ShowPage", "Queues");
         check((string)Field("currentPage") == "Queues", "saved settings allow navigation without a prompt");
     }

@@ -7,7 +7,7 @@ using System.Windows.Controls;
 using BlackPearl.Core;
 using BlackPearl.Desktop;
 
-// Acquisition plugins in the app: the Folders page lists them, and missing episodes, seasons and films offer Acquire
+// Acquisition plugins in the app: Settings > Plugins lists them, and missing episodes, seasons and films offer Acquire
 // when a plugin gets their kind, handing the plugin what to get and where it belongs.
 static class AcquisitionChecks
 {
@@ -38,7 +38,7 @@ static class AcquisitionChecks
         var folder = new LibraryFolder(shows, "Show"); folders.Insert(0, folder);
         Call("LoadAcquisitionPlugins");
         var list = (ItemsControl)window.FindName("AcquisitionPluginList");
-        check(list.Items.Count == 1 && list.Items[0]!.ToString()!.Contains("Show getter"), "the Folders page lists installed acquisition plugins");
+        check(list.Items.Count == 1 && list.Items[0]!.ToString()!.Contains("Show getter"), "Settings > Plugins lists installed acquisition plugins");
 
         var show = WantedTitles.Add(store, directory, WantedTitles.FromMatch(new(9201, "tv", "Acquire Check Show", "2022", null, "", "Show"), "Show", [1], false, null),
             [Season(1, -200, -193, 30)]);
@@ -297,5 +297,70 @@ static class AcquisitionChecks
         using var kept = JsonDocument.Parse(File.ReadAllText(settingsPath));
         check(!unchanged.IsOpen && kept.RootElement.GetProperty("downloader").GetString() == "aria2" && kept.RootElement.GetProperty("baseUrl").ValueKind == JsonValueKind.Number,
             "saving unchanged settings keeps an unlisted choice and a value's stored JSON type");
+
+        CatalogChecks(window, directory, check);
+    }
+
+    private static void CatalogChecks(MainWindow window, string directory, Action<bool, string> check)
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        object? Call(string method, params object?[] args) => typeof(MainWindow).GetMethods(flags).Single(m => m.Name == method && m.GetParameters().Length == args.Length).Invoke(window, args);
+        void Until(Func<bool> done)
+        {
+            for (var until = DateTime.UtcNow.AddSeconds(15); !done() && DateTime.UtcNow < until;)
+            {
+                var frame = new System.Windows.Threading.DispatcherFrame();
+                window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () => frame.Continue = false);
+                System.Windows.Threading.Dispatcher.PushFrame(frame); Thread.Sleep(5);
+            }
+        }
+        // Settings > Plugins lists the published catalog (a local checkout here) under Available, installs a plugin with its
+        // support folder, offers Update when an installed file changes, and removes the plugin with its unused support folder.
+        var catalogSource = Path.Combine(directory, "catalog-source", "plugins");
+        Directory.CreateDirectory(Path.Combine(catalogSource, "catalog-runtime")); Directory.CreateDirectory(Path.Combine(catalogSource, "catalog-anime"));
+        File.WriteAllText(Path.Combine(catalogSource, "catalog-runtime", "get.cmd"), "@echo off\r\necho {\"success\": true, \"message\": \"Queued\"}\r\n");
+        File.WriteAllText(Path.Combine(catalogSource, "catalog-anime", "plugin.json"), """{ "name": "Catalog anime", "description": "From the catalog", "contentTypes": ["anime"], "command": "../catalog-runtime/get.cmd" }""");
+        typeof(MainWindow).GetField("pluginCatalogSource", flags)!.SetValue(window, Path.GetDirectoryName(catalogSource));
+        var pluginsDirectory = (string)typeof(MainWindow).GetProperty("PluginsDirectory", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+        bool PluginsBusy() => (bool)typeof(MainWindow).GetField("pluginsBusy", flags)!.GetValue(window)!;
+        T Named<T>(string name) => (T)window.FindName(name);
+        object? Row(string name) => Named<ItemsControl>("AcquisitionPluginList").Items.Cast<object>().FirstOrDefault(x => x.ToString()!.Contains(name));
+        bool Updatable(object? row) => (bool)row!.GetType().GetProperty("Update")!.GetValue(row)!;
+        Call("ShowPage", "Plugins");
+        var available = Named<ItemsControl>("CatalogPluginList");
+        Until(() => !PluginsBusy());
+        Call("CatalogRefreshClick", null, new RoutedEventArgs());
+        Until(() => !PluginsBusy() && available.Items.Count > 0);
+        check(Named<FrameworkElement>("PluginPreferences").Visibility == Visibility.Visible && available.Items.Count == 1 && available.Items[0]!.ToString()!.Contains("Catalog anime")
+            && Named<RadioButton>("AvailablePluginsView").Content as string == "Available · 1", "Settings > Plugins lists the catalog's plugins under Available");
+        Named<RadioButton>("AvailablePluginsView").IsChecked = true;
+        check(Named<FrameworkElement>("AvailablePluginsPanel").Visibility == Visibility.Visible && Named<FrameworkElement>("InstalledPluginsPanel").Visibility == Visibility.Collapsed,
+            "Available and Installed show one list at a time");
+        Call("InstallCatalogPluginClick", new Button { DataContext = available.Items[0] }, new RoutedEventArgs());
+        Until(() => !PluginsBusy() && Row("Catalog anime") is not null);
+        check(File.Exists(Path.Combine(pluginsDirectory, "catalog-runtime", "get.cmd")) && Row("Catalog anime") is { } fresh && !Updatable(fresh) && available.Items.Count == 0
+            && Named<RadioButton>("AvailablePluginsView").Content as string == "Available · 0",
+            "installing from Available copies the plugin with its support folder and lists it under Installed");
+        File.WriteAllText(Path.Combine(pluginsDirectory, "catalog-runtime", "get.cmd"), "@echo off");
+        Call("CatalogRefreshClick", null, new RoutedEventArgs());
+        Until(() => !PluginsBusy() && Updatable(Row("Catalog anime")));
+        check(Updatable(Row("Catalog anime")) && Named<TextBlock>("CatalogStatus").Text.StartsWith("1 update available"), "a changed installed plugin offers Update");
+        Call("UpdatePluginClick", new Button { DataContext = Row("Catalog anime") }, new RoutedEventArgs());
+        Until(() => !PluginsBusy() && !Updatable(Row("Catalog anime")));
+        check(!Updatable(Row("Catalog anime")) && File.ReadAllText(Path.Combine(pluginsDirectory, "catalog-runtime", "get.cmd")).Contains("Queued"), "Update restores the published files");
+        var confirmed = false;
+        var answer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
+        answer.Tick += (_, _) =>
+        {
+            if (InAppDialog.Open.FirstOrDefault(d => d.Title == "Remove Catalog anime") is not { } dialog) return;
+            answer.Stop(); confirmed = true;
+            ((StackPanel)dialog.Content).Children.OfType<WrapPanel>().Single().Children.OfType<Button>().Single(b => (string)b.Content == "Remove").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        };
+        answer.Start();
+        try { Call("RemovePluginClick", new Button { DataContext = Row("Catalog anime") }, new RoutedEventArgs()); }
+        finally { answer.Stop(); }
+        Until(() => !PluginsBusy() && Row("Catalog anime") is null);
+        check(confirmed && Row("Catalog anime") is null && !Directory.Exists(Path.Combine(pluginsDirectory, "catalog-anime")) && !Directory.Exists(Path.Combine(pluginsDirectory, "catalog-runtime"))
+            && available.Items.Count == 1, "Remove asks first, then deletes the plugin with its unused support folder and offers it under Available again");
     }
 }

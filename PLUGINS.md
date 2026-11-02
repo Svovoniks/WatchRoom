@@ -19,10 +19,25 @@ the placeholders.
 
 ## Installing
 
-SubsPlease, EZTV, TokyoToshokan and TheRARBG are available as Sparrow provider
-ports in [BlackPearlPlugins](https://github.com/Svovoniks/BlackPearlPlugins). Run
-`./install.ps1` from a checkout of that repository, then Reload. Its README covers
-provider setup and downloader settings.
+**Settings > Plugins > Available** lists the plugins published in
+[BlackPearlPlugins](https://github.com/Svovoniks/BlackPearlPlugins) that you don't
+have yet, such as the SubsPlease, EZTV, TokyoToshokan and TheRARBG ports of Sparrow.
+**Install** copies a plugin into the plugins folder and loads it straight away; it
+then appears under **Installed**. The catalog is checked the first time the tab
+opens and again on **Reload**. An installed plugin whose files differ from the
+published ones shows **Update**; updating keeps its `settings.json`. **Remove**
+deletes the plugin's folder and its settings. The repository's README
+covers provider setup and downloader settings. Running `./install.ps1` from a
+checkout of that repository still works too.
+
+The catalog is the repository's `plugins` folder: each subfolder with a
+`plugin.json` is offered, and folders without one are support folders. A plugin
+installs with the support folders its `command`, `arguments` or `settingsSchema`
+reach with `../<folder>/`, and any it names in an optional `requires` array of
+folder names. A support folder is removed with the last installed plugin that uses
+it. The catalog never ships `settings.json`. Set `BLACKPEARL_PLUGIN_CATALOG` to a
+local checkout, a `.zip` source archive or another `https://` archive URL to try
+plugins before publishing them.
 
 Each plugin is a folder in the plugins folder:
 
@@ -30,7 +45,7 @@ Each plugin is a folder in the plugins folder:
 %LOCALAPPDATA%\BlackPearl\plugins\<plugin folder>\plugin.json
 ```
 
-**Folders > Acquisition plugins** lists the loaded plugins and any that failed to
+**Settings > Plugins > Installed** lists the loaded plugins and any that failed to
 load. **Open plugins folder** opens the folder, and **Reload** reads it again after
 you change it. The `BLACKPEARL_PLUGINS` environment variable sets a different
 plugins folder.
@@ -60,6 +75,7 @@ plugins folder.
 | `timeoutSeconds` | Optional, 5–3600, default 120. BlackPearl stops the plugin after this time. Long downloads should be handed to a downloader instead of waited for. |
 | `interactive` | Optional, default false. Opens BlackPearl's provider/title/release picker. The plugin must support the interactive actions below. |
 | `settingsSchema` | Optional path relative to the plugin folder. A JSON array of settings fields; BlackPearl displays a Settings button and preserves other fields when saving `settings.json`. |
+| `requires` | Optional. Folder names, beside this one in the plugins folder, that the plugin needs. Installing from **Settings > Plugins** installs them with it. |
 
 ## Interactive plugins
 

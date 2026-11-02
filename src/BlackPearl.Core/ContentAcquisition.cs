@@ -15,7 +15,7 @@ public record AcquisitionPlugin(string Id, string Name, string Description, stri
     public bool Supports(string contentType) => ContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase);
 }
 public record AcquisitionManifest(string? Id = null, string? Name = null, string? Description = null, string[]? ContentTypes = null,
-    string? Command = null, string[]? Arguments = null, int? TimeoutSeconds = null, bool Interactive = false, string? SettingsSchema = null);
+    string? Command = null, string[]? Arguments = null, int? TimeoutSeconds = null, bool Interactive = false, string? SettingsSchema = null, string[]? Requires = null);
 public record AcquisitionSetting(string Key, string Label, string Type = "text", string[]? Choices = null, string? Default = null, string? Help = null);
 public record AcquisitionOptions(string? Query = null, string? SourceUrl = null, int? Resolution = null, string? Filter = null, int? EpisodeOffset = null, int? ProviderSeason = null);
 // Assignable: a release of the right title with no episode number, such as a season pack or an OVA. It is never
@@ -171,7 +171,7 @@ public static class ContentAcquisition
     public static string ContentType(string kind) => kind switch { "Anime" => "anime", "Movie" => "movie", _ => "show" };
     public static string LibraryKind(string kind) => kind is "Anime" or "Movie" or "Show" ? kind.ToLowerInvariant() : "mixed";
     public static string ContentTypeName(string type) => type switch { "anime" => "Anime", "movie" => "Movies", _ => "Shows" };
-    private static string? NormalizeType(string type) => type.Trim().ToLowerInvariant() switch
+    internal static string? NormalizeType(string type) => type.Trim().ToLowerInvariant() switch
     {
         "anime" => "anime", "show" or "shows" or "tv" or "series" => "show", "movie" or "movies" or "film" or "films" => "movie", _ => null
     };

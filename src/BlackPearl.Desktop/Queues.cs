@@ -697,23 +697,4 @@ public partial class MainWindow
         }
         button.ContextMenu = menu; menu.IsOpen = true; e.Handled = true;
     }
-    private void ExcludedSelectionChanged(object sender, SelectionChangedEventArgs e) { if (RestoreFolderButton is not null) RestoreFolderButton.IsEnabled = !scanning && ExcludedFolderList.SelectedItem is string; }
-    private void ExcludeFolder(object sender, RoutedEventArgs e)
-    {
-        if (scanning) return;
-        var picker = new Microsoft.Win32.OpenFolderDialog { Title = "Exclude folders from the library", Multiselect = true };
-        if (picker.ShowDialog(this) != true) return;
-        foreach (var path in picker.FolderNames.Where(path => !exclusions.Contains(path, StringComparer.OrdinalIgnoreCase))) exclusions.Add(path);
-        SaveExclusions();
-    }
-    private void RestoreFolder(object sender, RoutedEventArgs e)
-    {
-        if (scanning || ExcludedFolderList.SelectedItem is not string path) return;
-        exclusions.Remove(path); SaveExclusions();
-    }
-    private void SaveExclusions()
-    {
-        library.Setting("exclusions", Wire.Serialize(exclusions)); scanDelay.Stop(); scanDelay.Start();
-        _ = Guard(async () => { await RefreshLibrary(); SetStatus("Folder exclusions updated."); });
-    }
 }

@@ -111,7 +111,7 @@ static class UiFindingsChecks
             Check(!Control<TextBlock>("StatusText").Text.Contains("queue"), "page-scoped queue error clears on navigation");
             typeof(MainWindow).GetField("scanning", flags)!.SetValue(window, true);
             Control<TextBlock>("ScanStatus").Text = "Scanning test fixtures";
-            Call("ShowPage", "Folders");
+            Call("ShowPage", "Queues"); Call("ShowPage", "Folders");
             Check(Control<TextBlock>("StatusText").Text == "Scanning test fixtures", "ongoing scan feedback survives navigation");
             typeof(MainWindow).GetField("scanning", flags)!.SetValue(window, false);
             // The status bar's indeterminate progress uses the app's ProgressBar template; show one for real.
@@ -145,8 +145,29 @@ static class UiFindingsChecks
 
             var folders = (ObservableCollection<LibraryFolder>)Field("folders"); folders.Clear();
             folders.Add(new(App.DataDirectory, "Anime")); Control<ListBox>("FolderList").SelectedIndex = 0;
-            Check(Control<FrameworkElement>("FolderEditor").Visibility == Visibility.Visible && (string)((ComboBoxItem)Control<ComboBox>("FolderKind").SelectedItem).Content == "Anime",
+            var kinds = Control<WrapPanel>("FolderKinds").Children.OfType<RadioButton>().ToArray();
+            Check(Control<FrameworkElement>("FolderEditor").Visibility == Visibility.Visible && kinds.Single(x => x.IsChecked == true).Tag as string == "Anime",
                 "selecting a folder reveals editing with its existing category");
+            // One click applies a category; the folder stays selected while the list is rebuilt.
+            kinds.Single(x => (string)x.Tag == "Show").IsChecked = true;
+            ((System.Windows.Threading.DispatcherTimer)Field("scanDelay")).Stop();
+            Check(folders.Single().Kind == "Show" && Control<ListBox>("FolderList").SelectedItem?.ToString()?.Contains("Shows ·") == true,
+                "choosing a category applies it at once and keeps the folder selected");
+            var exclusionList = (ObservableCollection<string>)Field("exclusions");
+            var skipped = Path.Combine(App.DataDirectory, "extras", "samples"); var elsewhere = Path.Combine(Path.GetPathRoot(App.DataDirectory)!, "BlackPearl elsewhere check");
+            exclusionList.Add(skipped); exclusionList.Add(elsewhere);
+            Check(Control<ItemsControl>("FolderExclusionList").Items.Count == 1 && Control<TextBlock>("FolderExclusionsLabel").Text.EndsWith("· 1")
+                && Control<FrameworkElement>("OtherExclusionsPanel").Visibility == Visibility.Visible,
+                "skipped subfolders sit under their folder, and others are listed apart");
+            exclusionList.Remove(skipped); exclusionList.Remove(elsewhere);
+            // A drive root keeps its separator, so it must not gain a second one before matching paths inside it.
+            var inside = typeof(MainWindow).GetMethod("Inside", BindingFlags.Static | BindingFlags.NonPublic)!;
+            bool Inside(string path, string folder) => (bool)inside.Invoke(null, [path, folder])!;
+            Check(Inside(@"E:\Movies\Film.mkv", @"E:\") && Inside(@"E:\Movies\Film.mkv", @"E:\Movies") && Inside(@"E:\Movies\Film.mkv", @"E:\Movies\")
+                && !Inside(@"E:\Movies", @"E:\Movies") && !Inside(@"E:\Movies2\Film.mkv", @"E:\Movies") && !Inside(@"F:\Movies\Film.mkv", @"E:\"),
+                "folders match the paths inside them, including drive roots");
+            Check(Control<FrameworkElement>("FolderNoExclusions").Visibility == Visibility.Visible && Control<FrameworkElement>("OtherExclusionsPanel").Visibility == Visibility.Collapsed,
+                "a folder with nothing skipped says so");
             Call("ShowPage", "Folders"); Layout(); Capture("folder-selected-900");
             Control<ListBox>("FolderList").SelectedIndex = -1;
             Check(Control<FrameworkElement>("FolderEditor").Visibility == Visibility.Collapsed, "no folder selection hides category editing");
@@ -294,7 +315,7 @@ static class UiFindingsChecks
             Call("ToggleTheme", window, new RoutedEventArgs()); Call("ShowPreferenceSection", "Playback");
             foreach (var size in new[] { (900, 600), (1280, 810) }) { Layout(size.Item1, size.Item2); Capture("playback-light-" + size.Item1); }
             Call("ShowPage", "Welcome"); Layout(); Capture("welcome-900");
-            Check(Control<FrameworkElement>("WelcomePage").Visibility == Visibility.Visible && Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Collapsed,
+            Check(Control<FrameworkElement>("WelcomePage").Visibility == Visibility.Visible && Control<FrameworkElement>("SettingsPage").Visibility == Visibility.Collapsed,
                 "welcome provides a separate first-run choice before folder management");
             Console.WriteLine($"{checks} UI findings checks passed.");
         }

@@ -76,7 +76,7 @@ public partial class MainWindow
         // The voice volume is heard as it moves, whether or not it is saved afterwards.
         VoiceVolumeSlider.ValueChanged += (sender, e) => { PreviewVoiceVolume(e.NewValue); PreferencesChanged(sender, new RoutedEventArgs()); };
         preferencesReady = true;
-        ShowPreferenceSection("Profile");
+        ShowPreferenceSection("Folders");
     }
     private void LoadPreferences()
     {
@@ -192,8 +192,12 @@ public partial class MainWindow
     private void ShowPreferenceSection(string section)
     {
         preferenceSection = section;
-        foreach (var panel in new[] { ProfilePreferences, MetadataPreferences, PlaybackPreferences, VoicePreferences, AppearancePreferences, UpdatePreferences })
+        foreach (var panel in new FrameworkElement[] { FoldersPage, PluginPreferences, ProfilePreferences, MetadataPreferences, PlaybackPreferences, VoicePreferences, AppearancePreferences, UpdatePreferences })
             panel.Visibility = (string)panel.Tag == section ? Visibility.Visible : Visibility.Collapsed;
+        // Folder and plugin changes apply straight away, so those sections have nothing to save.
+        PreferenceFooter.Visibility = section is "Folders" or "Plugins" ? Visibility.Collapsed : Visibility.Visible;
+        if (section == "Folders") SelectFirstFolder();
+        if (section == "Plugins") ShowPluginsSection();
         foreach (Button button in PreferenceSections.Children)
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, (string)button.Tag == section ? "Selected" : "");
     }

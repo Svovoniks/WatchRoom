@@ -11,31 +11,9 @@ namespace BlackPearl.Desktop;
 // plugin that supports its kind, and the files join the library when a scan finds them.
 public partial class MainWindow
 {
-    private sealed record PluginRow(string Name, string Detail, AcquisitionPlugin Plugin)
-    {
-        public Visibility SettingsVisibility => Plugin.SettingsSchema is null ? Visibility.Collapsed : Visibility.Visible;
-    }
     private List<AcquisitionPlugin> acquisitionPlugins = [];
     private readonly HashSet<string> acquiring = new(StringComparer.OrdinalIgnoreCase);
-    private static string PluginsDirectory => AppEnvironment.Get("PLUGINS") ?? Path.Combine(App.DataDirectory, "plugins");
 
-    private void LoadAcquisitionPlugins()
-    {
-        var (plugins, problems) = ContentAcquisition.Discover(PluginsDirectory);
-        acquisitionPlugins = plugins;
-        AcquisitionPluginList.ItemsSource = plugins.Select(x => new PluginRow(x.Name, string.Join(" · ", x.ContentTypes.Select(ContentAcquisition.ContentTypeName)) +
-            (x.Description.Length > 0 ? " — " + x.Description : ""), x)).ToArray();
-        AcquisitionPluginStatus.Text = (plugins.Count == 0 ? $"No plugins yet. Put a plugin's folder, with its plugin.json, in {PluginsDirectory}." : "") +
-            (problems.Count == 0 ? "" : (plugins.Count == 0 ? "\n" : "") + "Not loaded: " + string.Join("\n", problems));
-        AcquisitionPluginStatus.Visibility = AcquisitionPluginStatus.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-    }
-    private void ReloadPluginsClick(object sender, RoutedEventArgs e)
-    {
-        LoadAcquisitionPlugins();
-        SetStatus($"{acquisitionPlugins.Count} acquisition {(acquisitionPlugins.Count == 1 ? "plugin" : "plugins")} loaded.");
-        if (selected is not null && currentPage == "Details") ShowAcquireDetail(selected);
-        ShowAcquireSeason();
-    }
     private void OpenPluginsFolder(object sender, RoutedEventArgs e)
     {
         try
