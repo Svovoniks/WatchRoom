@@ -26,7 +26,16 @@ have yet, such as the SubsPlease, EZTV, TokyoToshokan and TheRARBG ports of Spar
 then appears under **Installed**. The catalog is checked the first time the tab
 opens and again on **Reload**. An installed plugin whose files differ from the
 published ones shows **Update**; updating keeps its `settings.json`. **Remove**
-deletes the plugin's folder and its settings. The repository's README
+deletes the plugin's folder and its settings.
+
+Plugins whose `plugin.json` names the same `group`, such as the four Sparrow ports
+(`"group": "Sparrow"`), appear together in one card under that name. The card has
+one **Update** that updates all of its plugins, in place of a button on each, and
+**Available** offers **Install all** for the ones you don't have yet. Settings and
+**Remove** stay per plugin. Plugins that share a support folder should name the
+same group: updating one of them updates the shared files for all of them.
+
+The repository's README
 covers provider setup and downloader settings. Running `./install.ps1` from a
 checkout of that repository still works too.
 
@@ -76,6 +85,7 @@ plugins folder.
 | `interactive` | Optional, default false. Opens BlackPearl's provider/title/release picker. The plugin must support the interactive actions below. |
 | `settingsSchema` | Optional path relative to the plugin folder. A JSON array of settings fields; BlackPearl displays a Settings button and preserves other fields when saving `settings.json`. |
 | `requires` | Optional. Folder names, beside this one in the plugins folder, that the plugin needs. Installing from **Settings > Plugins** installs them with it. |
+| `group` | Optional. The family the plugin belongs to, such as `Sparrow`. **Settings > Plugins** shows plugins with the same group (ignoring case) together and updates them as one. Give every plugin that shares a support folder the same group. |
 
 ## Interactive plugins
 

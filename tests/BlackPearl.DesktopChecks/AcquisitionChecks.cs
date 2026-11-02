@@ -38,7 +38,7 @@ static class AcquisitionChecks
         var folder = new LibraryFolder(shows, "Show"); folders.Insert(0, folder);
         Call("LoadAcquisitionPlugins");
         var list = (ItemsControl)window.FindName("AcquisitionPluginList");
-        check(list.Items.Count == 1 && list.Items[0]!.ToString()!.Contains("Show getter"), "Settings > Plugins lists installed acquisition plugins");
+        check(PluginRows(list) is [var only] && only.ToString()!.Contains("Show getter"), "Settings > Plugins lists installed acquisition plugins");
 
         var show = WantedTitles.Add(store, directory, WantedTitles.FromMatch(new(9201, "tv", "Acquire Check Show", "2022", null, "", "Show"), "Show", [1], false, null),
             [Season(1, -200, -193, 30)]);
@@ -324,21 +324,21 @@ static class AcquisitionChecks
         var pluginsDirectory = (string)typeof(MainWindow).GetProperty("PluginsDirectory", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
         bool PluginsBusy() => (bool)typeof(MainWindow).GetField("pluginsBusy", flags)!.GetValue(window)!;
         T Named<T>(string name) => (T)window.FindName(name);
-        object? Row(string name) => Named<ItemsControl>("AcquisitionPluginList").Items.Cast<object>().FirstOrDefault(x => x.ToString()!.Contains(name));
+        object? Row(string name) => PluginRows(Named<ItemsControl>("AcquisitionPluginList")).FirstOrDefault(x => x.ToString()!.Contains(name));
         bool Updatable(object? row) => (bool)row!.GetType().GetProperty("Update")!.GetValue(row)!;
         Call("ShowPage", "Plugins");
         var available = Named<ItemsControl>("CatalogPluginList");
         Until(() => !PluginsBusy());
         Call("CatalogRefreshClick", null, new RoutedEventArgs());
-        Until(() => !PluginsBusy() && available.Items.Count > 0);
-        check(Named<FrameworkElement>("PluginPreferences").Visibility == Visibility.Visible && available.Items.Count == 1 && available.Items[0]!.ToString()!.Contains("Catalog anime")
+        Until(() => !PluginsBusy() && PluginRows(available).Length > 0);
+        check(Named<FrameworkElement>("PluginPreferences").Visibility == Visibility.Visible && PluginRows(available) is [var offered] && offered.ToString()!.Contains("Catalog anime")
             && Named<RadioButton>("AvailablePluginsView").Content as string == "Available · 1", "Settings > Plugins lists the catalog's plugins under Available");
         Named<RadioButton>("AvailablePluginsView").IsChecked = true;
         check(Named<FrameworkElement>("AvailablePluginsPanel").Visibility == Visibility.Visible && Named<FrameworkElement>("InstalledPluginsPanel").Visibility == Visibility.Collapsed,
             "Available and Installed show one list at a time");
-        Call("InstallCatalogPluginClick", new Button { DataContext = available.Items[0] }, new RoutedEventArgs());
+        Call("InstallCatalogPluginClick", new Button { DataContext = PluginRows(available)[0] }, new RoutedEventArgs());
         Until(() => !PluginsBusy() && Row("Catalog anime") is not null);
-        check(File.Exists(Path.Combine(pluginsDirectory, "catalog-runtime", "get.cmd")) && Row("Catalog anime") is { } fresh && !Updatable(fresh) && available.Items.Count == 0
+        check(File.Exists(Path.Combine(pluginsDirectory, "catalog-runtime", "get.cmd")) && Row("Catalog anime") is { } fresh && !Updatable(fresh) && PluginRows(available).Length == 0
             && Named<RadioButton>("AvailablePluginsView").Content as string == "Available · 0",
             "installing from Available copies the plugin with its support folder and lists it under Installed");
         File.WriteAllText(Path.Combine(pluginsDirectory, "catalog-runtime", "get.cmd"), "@echo off");
@@ -361,6 +361,41 @@ static class AcquisitionChecks
         finally { answer.Stop(); }
         Until(() => !PluginsBusy() && Row("Catalog anime") is null);
         check(confirmed && Row("Catalog anime") is null && !Directory.Exists(Path.Combine(pluginsDirectory, "catalog-anime")) && !Directory.Exists(Path.Combine(pluginsDirectory, "catalog-runtime"))
-            && available.Items.Count == 1, "Remove asks first, then deletes the plugin with its unused support folder and offers it under Available again");
+            && PluginRows(available).Length == 1, "Remove asks first, then deletes the plugin with its unused support folder and offers it under Available again");
+
+        // Plugins whose plugin.json names the same group are shown together: Available offers them under the group's name,
+        // and Installed shows them in one card whose single Update updates them all, in place of an Update button on each.
+        Directory.CreateDirectory(Path.Combine(catalogSource, "catalog-shows"));
+        File.WriteAllText(Path.Combine(catalogSource, "catalog-shows", "plugin.json"), """{ "name": "Catalog shows", "description": "Also from the catalog", "contentTypes": ["show"], "command": "../catalog-runtime/get.cmd", "group": "Catalog" }""");
+        File.WriteAllText(Path.Combine(catalogSource, "catalog-anime", "plugin.json"), """{ "name": "Catalog anime", "description": "From the catalog", "contentTypes": ["anime"], "command": "../catalog-runtime/get.cmd", "group": "Catalog" }""");
+        object Prop(object item, string name) => item.GetType().GetProperty(name)!.GetValue(item)!;
+        Call("CatalogRefreshClick", null, new RoutedEventArgs());
+        Until(() => !PluginsBusy() && PluginRows(available).Length == 2);
+        check(available.Items.Count == 1 && Prop(available.Items[0]!, "Title") as string == "Catalog" && (Visibility)Prop(available.Items[0]!, "InstallAllVisibility") == Visibility.Visible,
+            "Available shows plugins that name the same group together, with Install all");
+        Call("InstallCatalogGroupClick", new Button { DataContext = available.Items[0] }, new RoutedEventArgs());
+        Until(() => !PluginsBusy() && Row("Catalog anime") is not null && Row("Catalog shows") is not null);
+        var installed = Named<ItemsControl>("AcquisitionPluginList");
+        object Group() => installed.Items.Cast<object>().Single(x => Prop(x, "Title") as string == "Catalog");
+        check(PluginRows(available).Length == 0 && ((Array)Prop(Group(), "Plugins")).Length == 2 && Named<TextBlock>("CatalogStatus").Text.Contains("Catalog anime and Catalog shows"),
+            "Install all installs the group, and Installed shows its plugins together under the group's name");
+        File.WriteAllText(Path.Combine(pluginsDirectory, "catalog-runtime", "get.cmd"), "@echo off");
+        Call("CatalogRefreshClick", null, new RoutedEventArgs());
+        Until(() => !PluginsBusy() && (bool)Prop(Group(), "Update"));
+        check((bool)Prop(Group(), "Update") && Updatable(Row("Catalog anime")) && Updatable(Row("Catalog shows"))
+            && (Visibility)Prop(Row("Catalog anime")!, "UpdateVisibility") == Visibility.Collapsed && Named<TextBlock>("CatalogStatus").Text.StartsWith("1 update available"),
+            "a changed shared file offers one Update for the group, counted once, instead of one on each plugin");
+        Call("UpdatePluginGroupClick", new Button { DataContext = Group() }, new RoutedEventArgs());
+        Until(() => !PluginsBusy() && !(bool)Prop(Group(), "Update"));
+        check(!Updatable(Row("Catalog anime")) && !Updatable(Row("Catalog shows")) && File.ReadAllText(Path.Combine(pluginsDirectory, "catalog-runtime", "get.cmd")).Contains("Queued")
+            && Named<TextBlock>("CatalogStatus").Text == "Updated Catalog: Catalog anime and Catalog shows.", "the group's Update updates every plugin in it and names them");
+        File.WriteAllText(Path.Combine(pluginsDirectory, "catalog-anime", "plugin.json"), """{ "name": "Catalog anime", "description": "From the catalog", "contentTypes": ["anime"], "command": "../catalog-runtime/get.cmd" }""");
+        Call("CatalogRefreshClick", null, new RoutedEventArgs());
+        Until(() => !PluginsBusy() && (bool)Prop(Group(), "Update"));
+        check(((Array)Prop(Group(), "Plugins")).Length == 2 && Updatable(Row("Catalog anime")), "an installed copy from before the group field joins its published group, whose Update brings it up to date");
     }
+
+    // The plugin cards in a Settings > Plugins list, through the groups that hold them.
+    private static object[] PluginRows(ItemsControl list) =>
+        list.Items.Cast<object>().SelectMany(x => ((System.Collections.IEnumerable)x.GetType().GetProperty("Plugins")!.GetValue(x)!).Cast<object>()).ToArray();
 }

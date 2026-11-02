@@ -622,7 +622,8 @@
       </StackPanel>
      </ScrollViewer>
      <!-- Plugins: programs that get missing and upcoming videos. Installed lists those in the plugins folder; Available lists the
-          BlackPearlPlugins catalog. Installing, updating and removing apply at once. -->
+          BlackPearlPlugins catalog. Plugins that share program files sit together in a group card that updates as a whole.
+          Installing, updating and removing apply at once. -->
      <ScrollViewer x:Name="PluginPreferences" Tag="Plugins" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
       <StackPanel MaxWidth="860" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" HorizontalAlignment="Left" Margin="0,0,0,12">
        <DockPanel Margin="0,0,16,12">
@@ -637,13 +638,25 @@
          </StackPanel>
         </Border>
        </DockPanel>
-       <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,16,12">Plugins get missing and upcoming episodes, seasons and films for you: right-click one, or open it, and choose Acquire. Plugins run programs on this computer and download from the sites they name.</TextBlock>
        <TextBlock x:Name="CatalogStatus" TextWrapping="Wrap" Margin="0,0,16,12" AutomationProperties.LiveSetting="Polite"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
        <StackPanel x:Name="InstalledPluginsPanel">
-        <ItemsControl x:Name="AcquisitionPluginList" Margin="0,0,4,0" AutomationProperties.Name="Installed plugins" Focusable="False">
-         <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2" VerticalAlignment="Top"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        <ItemsControl x:Name="AcquisitionPluginList" AutomationProperties.Name="Installed plugins" Focusable="False">
          <ItemsControl.ItemTemplate><DataTemplate>
-          <Border Padding="16,14" Margin="0,0,12,12" AutomationProperties.Name="{Binding Spoken}"><Border.Style><Style TargetType="Border" BasedOn="{StaticResource Card}"><Style.Triggers><DataTrigger Binding="{Binding Update}" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Accent}"/></DataTrigger></Style.Triggers></Style></Border.Style>
+          <Border AutomationProperties.Name="{Binding Spoken}"><Border.Style><Style TargetType="Border"><Setter Property="Margin" Value="0"/><Style.Triggers><DataTrigger Binding="{Binding Grouped}" Value="True"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="16,14,4,2"/><Setter Property="Margin" Value="0,0,16,12"/></DataTrigger><DataTrigger Binding="{Binding Update}" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Accent}"/></DataTrigger></Style.Triggers></Style></Border.Style>
+           <DockPanel>
+            <DockPanel DockPanel.Dock="Top" Visibility="{Binding HeaderVisibility}" Margin="0,0,12,14">
+             <Border DockPanel.Dock="Left" Width="30" Height="30" CornerRadius="8" Background="{DynamicResource Elevated}" Margin="0,0,10,0" VerticalAlignment="Top"><TextBlock Text="&#xE7B8;" Style="{StaticResource Icon}" FontSize="13" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+             <Button DockPanel.Dock="Right" Content="Update" Style="{StaticResource Primary}" Visibility="{Binding UpdateVisibility}" Click="UpdatePluginGroupClick" Margin="12,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="{Binding Title, StringFormat=Update {0}}" ToolTip="Update every plugin in this group"/>
+             <Border DockPanel.Dock="Right" Visibility="{Binding UpdateVisibility}" Background="{DynamicResource AccentSoft}" CornerRadius="10" Padding="8,2" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock Text="Update available" FontSize="11"/></Border>
+             <StackPanel VerticalAlignment="Center">
+              <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis"/>
+              <TextBlock Text="{Binding Summary}" Style="{StaticResource MutedText}" FontSize="12.5"/>
+             </StackPanel>
+            </DockPanel>
+            <ItemsControl ItemsSource="{Binding Plugins}" Margin="0,0,4,0" Focusable="False">
+             <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2" VerticalAlignment="Top"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+             <ItemsControl.ItemTemplate><DataTemplate>
+          <Border Padding="16,14" Margin="0,0,12,12" AutomationProperties.Name="{Binding Spoken}"><Border.Style><Style TargetType="Border" BasedOn="{StaticResource Card}"><Style.Triggers><DataTrigger Binding="{Binding Grouped}" Value="True"><Setter Property="Background" Value="{DynamicResource Canvas}"/></DataTrigger><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding Update}" Value="True"/><Condition Binding="{Binding Grouped}" Value="False"/></MultiDataTrigger.Conditions><Setter Property="BorderBrush" Value="{DynamicResource Accent}"/></MultiDataTrigger></Style.Triggers></Style></Border.Style>
            <DockPanel>
             <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0" LastChildFill="False">
              <Button Content="Update" Style="{StaticResource Primary}" Visibility="{Binding UpdateVisibility}" Click="UpdatePluginClick" Margin="0,0,8,0" AutomationProperties.Name="{Binding Name, StringFormat=Update {0}}"/>
@@ -660,14 +673,30 @@
            </DockPanel>
           </Border>
          </DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
+           </DockPanel>
+          </Border>
+         </DataTemplate></ItemsControl.ItemTemplate>
         </ItemsControl>
         <TextBlock x:Name="AcquisitionPluginStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,16,0" AutomationProperties.LiveSetting="Polite"/>
        </StackPanel>
        <StackPanel x:Name="AvailablePluginsPanel" Visibility="Collapsed">
-        <ItemsControl x:Name="CatalogPluginList" Margin="0,0,4,0" AutomationProperties.Name="Available plugins" Focusable="False">
-         <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2" VerticalAlignment="Top"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        <ItemsControl x:Name="CatalogPluginList" AutomationProperties.Name="Available plugins" Focusable="False">
          <ItemsControl.ItemTemplate><DataTemplate>
-          <Border Style="{StaticResource Card}" Padding="16,14" Margin="0,0,12,12" AutomationProperties.Name="{Binding Name}">
+          <Border AutomationProperties.Name="{Binding Spoken}"><Border.Style><Style TargetType="Border"><Setter Property="Margin" Value="0"/><Style.Triggers><DataTrigger Binding="{Binding Grouped}" Value="True"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="16,14,4,2"/><Setter Property="Margin" Value="0,0,16,12"/></DataTrigger></Style.Triggers></Style></Border.Style>
+           <DockPanel>
+            <DockPanel DockPanel.Dock="Top" Visibility="{Binding HeaderVisibility}" Margin="0,0,12,14">
+             <Border DockPanel.Dock="Left" Width="30" Height="30" CornerRadius="8" Background="{DynamicResource Elevated}" Margin="0,0,10,0" VerticalAlignment="Top"><TextBlock Text="&#xE7B8;" Style="{StaticResource Icon}" FontSize="13" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+             <Button DockPanel.Dock="Right" Content="Install all" Style="{StaticResource Primary}" Visibility="{Binding InstallAllVisibility}" Click="InstallCatalogGroupClick" Margin="12,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="{Binding Title, StringFormat=Install all of {0}}"/>
+             <StackPanel VerticalAlignment="Center">
+              <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis"/>
+              <TextBlock Text="{Binding Summary}" Style="{StaticResource MutedText}" FontSize="12.5"/>
+             </StackPanel>
+            </DockPanel>
+            <ItemsControl ItemsSource="{Binding Plugins}" Margin="0,0,4,0" Focusable="False">
+             <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2" VerticalAlignment="Top"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+             <ItemsControl.ItemTemplate><DataTemplate>
+          <Border Padding="16,14" Margin="0,0,12,12" AutomationProperties.Name="{Binding Name}"><Border.Style><Style TargetType="Border" BasedOn="{StaticResource Card}"><Style.Triggers><DataTrigger Binding="{Binding DataContext.Grouped, RelativeSource={RelativeSource AncestorType=ItemsControl}}" Value="True"><Setter Property="Background" Value="{DynamicResource Canvas}"/></DataTrigger></Style.Triggers></Style></Border.Style>
            <DockPanel>
             <Button DockPanel.Dock="Bottom" HorizontalAlignment="Left" Content="Install" Style="{StaticResource Primary}" Click="InstallCatalogPluginClick" Margin="0,12,0,0" AutomationProperties.Name="{Binding Name, StringFormat=Install {0}}"/>
             <DockPanel DockPanel.Dock="Top">
@@ -676,6 +705,10 @@
             </DockPanel>
             <TextBlock DockPanel.Dock="Top" Text="{Binding Types}" Foreground="{DynamicResource Accent}" FontSize="12" Margin="0,8,0,0"/>
             <TextBlock Text="{Binding Description}" Style="{StaticResource MutedText}" FontSize="12.5" TextWrapping="Wrap" Margin="0,4,0,0"/>
+           </DockPanel>
+          </Border>
+         </DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
            </DockPanel>
           </Border>
          </DataTemplate></ItemsControl.ItemTemplate>
