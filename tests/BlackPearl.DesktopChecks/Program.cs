@@ -436,10 +436,33 @@ static class Program
         var menu = (FrameworkElement)window.FindName("LibraryCategories");
         Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Collapsed, "Library button collapses its category menu");
         Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Visible, "Library button expands its category menu");
+        await CheckShortRail(window, check);
         Navigate(1); await Wait(() => cards.Count == 750 && cards.All(x => x.Card.Media.Kind == "Movie"));
         Call("Select", animeMovie);
         check(Crumbs(true).Select(x => x.Label).SequenceEqual(["All", "Unavailable", "Navigation Anime Film"]), "unavailable film details link back to the unavailable tab");
         ClickCrumb(Crumbs(true).First()); await Wait(() => cards.Count == 752);
+    }
+
+    // A window too short for the sidebar scrolls its navigation; Settings stays in view and the buttons keep their width.
+    private static async Task CheckShortRail(MainWindow window, Action<bool, string> check)
+    {
+        var rail = (FrameworkElement)window.FindName("Rail");
+        var scroll = (System.Windows.Controls.ScrollViewer)window.FindName("RailScroll");
+        var home = (FrameworkElement)window.FindName("HomeNav");
+        var settings = (FrameworkElement)window.FindName("SettingsNav");
+        var (height, minimum, state) = (window.Height, window.MinHeight, window.WindowState);
+        window.WindowState = WindowState.Normal; window.Height = 2000;
+        await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+        var width = home.ActualWidth;
+        // Well below the minimum height, so the navigation overflows whichever categories are listed.
+        window.MinHeight = 400; window.Height = 400; scroll.ScrollToBottom();
+        await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+        var bottom = settings.TranslatePoint(new Point(0, settings.ActualHeight), rail).Y;
+        check(scroll.ScrollableHeight > 0 && settings.IsVisible && bottom <= rail.ActualHeight,
+            $"a short window scrolls the sidebar and keeps Settings in view (scrollable {scroll.ScrollableHeight:0.#}, Settings bottom {bottom:0.#} of {rail.ActualHeight:0.#})");
+        check(home.ActualWidth == width, $"sidebar buttons keep their width when its scroll bar appears ({width:0.#} -> {home.ActualWidth:0.#})");
+        scroll.ScrollToTop(); window.MinHeight = minimum; window.Height = height; window.WindowState = state;
+        await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
     }
 
     private static async Task CheckSearchLayout(MainWindow window, Action<bool, string> check)
