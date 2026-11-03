@@ -152,7 +152,7 @@ public partial class MainWindow
         var item = title is null ? null : HeroArtworkItem(live is not null, session);
         if (item is null) { if (RoomHero.DataContext is not null) RoomHero.DataContext = roomHeroArtwork = null; return; }
         if (roomHeroArtwork?.Card.Media.Id == item.Id && RoomHero.DataContext == roomHeroArtwork) return;
-        roomHeroArtwork = new(item.Series is null ? new LibraryCard(item.DisplayTitle, item.Caption, item.Poster, item, "movie")
+        roomHeroArtwork = new(item.Series is null ? new LibraryCard(item.ShownTitle, item.Caption, item.Poster, item, "movie")
             : new LibraryCard(item.Series + " · " + item.EpisodeDisplayTitle, item.Caption, LibraryCatalog.EpisodeArtwork(item), item, "episode", item.Season));
         RoomHero.DataContext = roomHeroArtwork; _ = roomHeroArtwork.LoadPosterAsync();
     }

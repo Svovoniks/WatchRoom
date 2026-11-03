@@ -21,6 +21,11 @@ public static class AutomaticArtwork
         using var requests = MetadataHttp.BeginScope(library, force || refresh is not null, options);
         using var ownedTmdb = metadata is null && TmdbCredentials.Resolve(token) is not null ? new MetadataClient(token, options: options) : null;
         var tmdb = metadata ?? ownedTmdb;
+        // Text fetched in another language or country is fetched again, once; responses already cached for the new locale are reused.
+        // It waits while TMDB is chosen but unavailable, so a build without a key does not move TMDB titles to another provider.
+        var relocalize = mode == MetadataRefresh.FillMissing && Relocalizes(library, options, tmdb is not null);
+        if (relocalize) mode = MetadataRefresh.RefreshText;
+        var followRefresh = relocalize ? MetadataRefresh.RefreshText : refresh;
         PlaybackDiagnostics.Record("metadata-fetch-start", new { Mode = mode.ToString(), Providers = options.ProviderOrder, TmdbAvailable = tmdb is not null });
         // Music keeps the names and artwork of its own files; film and show providers know nothing of albums.
         var catalog = library.All().Where(x => !x.IsMusic).ToList(); var localChanged = false;
@@ -56,7 +61,10 @@ public static class AutomaticArtwork
         }
         var groups = snapshot.Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && !x.MetadataLocked).GroupBy(x => numberedGroups.GetValueOrDefault(x.Id) ?? LibraryIdentity.ShowKey(x), StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(group => group.First().Series is not null).ToArray();
-        int fetched = 0, overviews = 0, missing = 0, failed = 0, artworkFailed = 0, deferred = 0; string? error = null;
+        int fetched = 0, overviews = 0, missing = 0, failed = 0, artworkFailed = 0, deferred = 0; string? error = null; var superseded = false;
+        // An automatic fetch stops once the saved locale changes, and its follow-up uses the new one. A refresh someone asked
+        // for runs to the end; either way, a locale counts as fetched only if it stayed chosen.
+        var automatic = !force && refresh is null;
         var issues = new List<object>();
         foreach (var group in groups)
         {
@@ -66,6 +74,7 @@ public static class AutomaticArtwork
             if (mode == MetadataRefresh.FillMissing && group.All(x => x.MetadataKind is not null && x.ArtworkFetchedAt > 0 &&
                 !string.IsNullOrWhiteSpace(x.Overview) && (ArtworkCache.IsUsable(x.SeriesPoster) || ArtworkCache.IsUsable(x.Poster)) &&
                 (options.RefreshDays <= 0 || x.ArtworkFetchedAt >= Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds))) continue;
+            if (automatic && MetadataOptions.LocaleChanged(library, options)) { superseded = true; break; }
             var ids = group.Select(x => x.Id).ToHashSet();
             var entries = library.ByIds(ids).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && !x.MetadataLocked).ToArray();
             if (entries.Length == 0 || entries.Select(LibraryIdentity.ShowKey).Distinct().Count() != 1 &&
@@ -105,7 +114,7 @@ public static class AutomaticArtwork
             try
             {
                 string? poster = null, source = null, overview = null;
-                var resolved = await ResolveAsync(http, tmdb, MetadataTitles.WithSplitIdentity(item, CurrentSiblings(item)), options, directory, ct, entries);
+                var resolved = await ResolveAsync(http, tmdb, MetadataTitles.WithSplitIdentity(item, CurrentSiblings(item)), relocalize ? KnownProviders(item, options) : options, directory, ct, entries);
                 attemptUnmatched = resolved is null;
                 var currentEntries = library.ByIds(ids).ToDictionary(x => x.Id);
                 if (entries.Any(x => !currentEntries.TryGetValue(x.Id, out var current) || !SameFetchIdentity(x, current)))
@@ -154,13 +163,15 @@ public static class AutomaticArtwork
                 {
                     entries = entries.Select(entry =>
                     {
-                        var updated = entry.Matched && provider != entry.MetadataProvider ? entry : MetadataClassification.Apply(entry, kind, type, type == "tv" ? title : null);
+                        var applies = !(entry.Matched && provider != entry.MetadataProvider);
+                        var updated = applies ? MetadataClassification.Apply(entry, kind, type, type == "tv" ? title : null) : entry;
                         if (numberedSeries && MetadataTitles.NumberedMoviePart(entry) is { } part)
                             updated = updated with { Season = LibraryIdentity.Locked(entry, "Season") ? entry.Season : 1,
                                 Episode = LibraryIdentity.Locked(entry, "Episode") ? entry.Episode : part,
                                 SeriesPath = Path.GetDirectoryName(entry.Path), NumberingSource = "filename" };
                         if (year is not null && !LibraryIdentity.Locked(entry, "Year")) updated = updated with { Year = year };
                         if (LibraryIdentity.Locked(entry, "Title")) updated = updated with { Title = entry.Title, Series = type == "tv" ? entry.Series ?? entry.Title : null };
+                        else if (applies) updated = updated with { ProviderTitle = type == "movie" && !string.IsNullOrWhiteSpace(title) ? title : null };
                         return TmdbRetention.Record(entry, LibraryIdentity.WithProvider(updated, provider, id, !entry.Matched || entry.MetadataProvider == provider), provider,
                             TmdbRetention.TitleFields.Concat(new[] { "season", "episode", "seriesPath", "numberingSource" }).ToArray());
                     }).ToArray();
@@ -210,8 +221,13 @@ public static class AutomaticArtwork
             MetadataFetchPolicy.Record(library, "title", library.ByIds(ids), options, token, attemptFailed, attemptUnmatched);
         }
         if (mode != MetadataRefresh.RetryArtwork) library.GroupShowsByProvider();
-        var seriesReport = await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, refresh);
-        if (mode != MetadataRefresh.RetryArtwork) await WantedTitles.RefreshAsync(library, directory, token, progress, ct, refresh is MetadataRefresh.RefreshText, metadata: tmdb, client: http);
+        var seriesReport = superseded ? MetadataOptions.LocaleStopped : await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, followRefresh,
+            automatic ? () => superseded = true : null);
+        if (!superseded && mode != MetadataRefresh.RetryArtwork) await WantedTitles.RefreshAsync(library, directory, token, progress, ct, followRefresh is MetadataRefresh.RefreshText, metadata: tmdb, client: http);
+        // A refresh counts for its locale only if that locale stayed chosen throughout and TMDB, when chosen, could be asked.
+        if (mode is MetadataRefresh.RefreshText or MetadataRefresh.ReplaceArtwork && !superseded && !MetadataOptions.LocaleChanged(library, options) &&
+            (tmdb is not null || !options.ProviderOrder.Contains("tmdb")))
+            MetadataOptions.RecordFetchedLocale(library, options);
         var unresolved = outstanding.Snapshot();
         var summary = $"Posters: {fetched} added · Overviews: {overviews} added · {missing} incomplete/unmatched · {failed} provider failures · {artworkFailed} artwork failures · {deferred} titles deferred. Outstanding issues: {unresolved.Length}." + (error is null ? "" : " " + error) + " " + seriesReport;
         Directory.CreateDirectory(directory);
@@ -220,9 +236,17 @@ public static class AutomaticArtwork
         PlaybackDiagnostics.Record("metadata-fetch-complete", new { Summary = summary });
         return summary + (tmdb is null && options.ProviderOrder.Contains("tmdb") ? " TMDB is unavailable without a token; movie coverage is limited to Wikipedia." : "");
     }
+    internal static bool Relocalizes(LibraryStore library, MetadataOptions options, bool tmdbAvailable) =>
+        MetadataOptions.FetchedLocale(library) != options.Locale && (tmdbAvailable || !options.ProviderOrder.Contains("tmdb"));
+    // A language refresh asks only the providers a title already has an ID with, so a provider that fails keeps its match rather than handing it to the next.
+    private static MetadataOptions KnownProviders(MediaItem item, MetadataOptions options)
+    {
+        var known = options.ProviderOrder.Where(provider => new[] { item.MetadataProvider }.Concat(item.ProviderIds?.Keys.AsEnumerable() ?? []).Any(id => string.Equals(id?.Split(':')[0], provider, StringComparison.OrdinalIgnoreCase))).ToArray();
+        return known.Length == 0 ? options : options with { Providers = known };
+    }
     private static MediaItem ResetIdentity(MediaItem item) => item with
     {
-        ProviderIds = [], MetadataProvider = null, MetadataId = null,
+        ProviderIds = [], MetadataProvider = null, MetadataId = null, ProviderTitle = null,
         Overview = LibraryIdentity.Locked(item, "Overview") ? item.Overview : null,
         Poster = LibraryIdentity.Locked(item, "Poster") || item.PosterSource == "Local artwork" ? item.Poster : null,
         SeriesPoster = LibraryIdentity.Locked(item, "Poster") || item.PosterSource == "Local artwork" ? item.SeriesPoster : null,

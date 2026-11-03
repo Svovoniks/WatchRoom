@@ -64,7 +64,7 @@ public sealed partial class LibraryStore
                 var ids = new Dictionary<string, string>(item.ProviderIds ?? []); ids.Remove("wikipedia");
                 Save(item with { Series = parsed.Series, Title = parsed.Title, Kind = parsed.Kind, SeriesPath = parsed.SeriesPath,
                     Season = parsed.Season, Episode = parsed.Episode, EpisodeEnd = parsed.EpisodeEnd, ShowId = parsed.ShowId,
-                    MetadataKind = null, MetadataType = null, MetadataProvider = null, MetadataId = null,
+                    MetadataKind = null, MetadataType = null, MetadataProvider = null, MetadataId = null, ProviderTitle = null,
                     ProviderIds = ids, MetadataFetchedAt = 0, ArtworkFetchedAt = 0, PosterSource = null });
             }
             CleanHierarchy(); Setting("wikipedia-numbered-episode-repair", "1");
@@ -104,7 +104,7 @@ public sealed partial class LibraryStore
                 }
             }
             var updated = item with { Title = wrongSourceYear ? parsed.Title : item.Title, Year = parsed.Year ?? item.Year,
-                MetadataProvider = null, MetadataId = null, MetadataKind = null, MetadataType = null, ProviderIds = [],
+                MetadataProvider = null, MetadataId = null, MetadataKind = null, MetadataType = null, ProviderIds = [], ProviderTitle = null,
                 Overview = LibraryIdentity.Locked(item, "Overview") ? item.Overview : null,
                 Poster = LibraryIdentity.Locked(item, "Poster") || item.PosterSource == "Local artwork" ? item.Poster : parsed.Poster,
                 PosterSource = LibraryIdentity.Locked(item, "Poster") || item.PosterSource == "Local artwork" ? item.PosterSource : null,
@@ -149,7 +149,7 @@ public sealed partial class LibraryStore
                     updated = MetadataClassification.Apply(item, parsed.Kind, "movie") with
                     {
                         Title = parsed.Title, Year = parsed.Year ?? item.Year, SeriesPath = null,
-                        MetadataKind = null, MetadataType = null, MetadataProvider = null, MetadataId = null, ProviderIds = [],
+                        MetadataKind = null, MetadataType = null, MetadataProvider = null, MetadataId = null, ProviderIds = [], ProviderTitle = null,
                         Poster = item.PosterSource == "Local artwork" || LibraryIdentity.Locked(item, "Poster") ? item.Poster : parsed.Poster,
                         PosterSource = item.PosterSource == "Local artwork" || LibraryIdentity.Locked(item, "Poster") ? item.PosterSource : null,
                         Overview = LibraryIdentity.Locked(item, "Overview") ? item.Overview : null,

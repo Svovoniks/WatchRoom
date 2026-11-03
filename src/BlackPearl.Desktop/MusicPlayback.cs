@@ -80,7 +80,7 @@ public partial class MainWindow
                 if (Meta(MetadataType.ArtworkURL) is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsFile) artwork = uri.LocalPath;
             }
         }
-        title ??= room?.Snapshot?.Media?.Title ?? playingItem?.Title ?? "Now playing";
+        title ??= room?.Snapshot?.Media?.Title ?? playingItem?.ShownName ?? "Now playing";
         if (AudioTitle.Text != title) AudioTitle.Text = title;
         AudioArtist.Text = artist ?? "";
         AudioArtist.Visibility = artist is null ? Visibility.Collapsed : Visibility.Visible;

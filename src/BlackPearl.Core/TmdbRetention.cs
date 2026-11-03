@@ -10,7 +10,7 @@ public record TmdbField(string Value, string Original, long FetchedAt);
 public static class TmdbRetention
 {
     public static readonly TimeSpan MaximumAge = TimeSpan.FromDays(175);
-    internal static readonly string[] TitleFields = ["title", "series", "kind", "year", "overview", "originalTitle", "genres", "cast", "rating", "metadataKind", "metadataType", "metadataProvider", "metadataId"];
+    internal static readonly string[] TitleFields = ["title", "providerTitle", "series", "kind", "year", "overview", "originalTitle", "genres", "cast", "rating", "metadataKind", "metadataType", "metadataProvider", "metadataId"];
     internal static readonly string[] EpisodeFields = ["season", "episode", "episodeEnd", "absoluteEpisode", "absoluteEpisodeEnd", "seasonTitle", "seasonOverview", "episodeTitle", "episodeOverview", "airDate", "runtimeMinutes", "seasonSource", "episodeSource", "numberingSource", "numberingOrder", "airsBeforeSeason", "airsBeforeEpisode", "airsAfterSeason"];
     internal static readonly string[] PosterFields = ["poster", "seriesPoster", "posterSource", "seasonPoster", "episodePoster", "episodePosterQualityPath"];
 
