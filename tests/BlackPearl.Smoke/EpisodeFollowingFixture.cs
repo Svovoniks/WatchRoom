@@ -114,6 +114,8 @@ static class EpisodeFollowingFixture
         check(engine.DueCountdowns().Length == 0, "nothing downloads before the countdown ends");
         now = now.AddMinutes(6);
         check(engine.DueCountdowns().SequenceEqual([new FollowEpisodeRef("show-frieren", 2, 3)]), "an ended countdown is due, even for a check that has stopped running");
+        check(engine.Pause(engine.WithToken(week.Ready!.Token)) == 1 && engine.DueCountdowns().Length == 0 && engine.Knows(week.Ready!.Token) &&
+            FollowStore.Show(store, "show-frieren")!.Episodes.Single(x => x.Episode == 3) is { Status: FollowStatus.Pending, StartAt: 0 }, "Review pauses a countdown: the episode waits for the user");
         check(engine.Skip(engine.WithToken(week.Ready!.Token)) == 1 && engine.DueCountdowns().Length == 0 && FollowStore.Show(store, "show-frieren")!.Episodes.Single(x => x.Episode == 3).Status == FollowStatus.Skipped,
             "Skip stops a countdown");
 
@@ -179,6 +181,19 @@ static class EpisodeFollowingFixture
         FollowStore.Follow(store, store.All().First(x => x.Id == "guide-1"), "sparrow", null, null, DateOnly.FromDateTime(now.UtcDateTime));
         await tvmaze.CheckAsync(CancellationToken.None);
         check(FollowStore.Show(store, "show-guide") is { Problem: null, Episodes: [{ Season: 2, Episode: 1 }] }, "files matched with another provider fit when their numbers are in its list");
+
+        // A download cut off before the plugin answers waits for the user again, and so does one a killed process left starting.
+        var guideToken = EpisodeFollowing.NewToken();
+        FollowStore.Update(store, "show-guide", x => x with { Episodes = [x.Episodes[0] with { Status = FollowStatus.Pending, Releases = [new("guide-1", "Guide.S02E01.1080p-GRP")], Token = guideToken }] });
+        var cut = new EpisodeFollowing(store, [sparrow], (_, _) => Task.FromResult<FollowSource?>(null),
+            (_, request, _) => request.Action == "acquire" ? throw new OperationCanceledException() : Task.FromResult(new AcquisitionResult(false, "unused")), () => now);
+        var stopped = false;
+        try { await cut.ApproveAsync(cut.WithToken(guideToken), CancellationToken.None); } catch (OperationCanceledException) { stopped = true; }
+        check(stopped && FollowStore.Show(store, "show-guide")!.Episodes[0] is { Status: FollowStatus.Pending, StartAt: 0, Message: { } note } && note.Contains("interrupted") && cut.Knows(guideToken),
+            "a download interrupted before it started waits for the user again");
+        FollowStore.Update(store, "show-guide", x => x with { Episodes = [x.Episodes[0] with { Status = FollowStatus.Downloading, UpdatedAt = now.AddHours(-2).ToUnixTimeMilliseconds() }] });
+        await tvmaze.CheckAsync(CancellationToken.None);
+        check(FollowStore.Show(store, "show-guide")!.Episodes[0].Status == FollowStatus.Pending, "a download left starting by a process that ended waits for the user again after an hour");
 
         // Requests for several episodes, one, or none (the setup's source check).
         var items = store.All(); var folders = new[] { new LibraryFolder(anime, "Anime") };

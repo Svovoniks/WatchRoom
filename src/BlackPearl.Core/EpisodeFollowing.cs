@@ -240,7 +240,10 @@ public sealed class EpisodeFollowing
                     listing = source.Seasons.Where(s => s.Number > 0).SelectMany(s => s.Episodes.Select(e => new FollowListing(s.Number, e.Number, e.AirDate))).ToArray();
                     provider = source.Provider; listedAt = Now;
                 }
+                // With no list at all it's asked again at every check, so fixing the show's match takes effect at once; an
+                // older list is kept and asked for again after the usual wait.
                 else if (listing is null) problem = "BlackPearl doesn't know this show's episodes yet. Match it with TMDB or TVmaze using Find artwork / fix match.";
+                else listedAt = Now;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or IOException or JsonException or InvalidDataException or InvalidOperationException or TaskCanceledException or KeyNotFoundException)
             { problem = "Couldn't read the show's episode list: " + ex.Message; }
@@ -259,7 +262,8 @@ public sealed class EpisodeFollowing
         {
             var result = tracked.Select(e =>
             {
-                if (FollowStatus.Settled(e.Status) || e.Status == FollowStatus.Downloading) return e;
+                if (e.Status == FollowStatus.Downloading) return Now - e.UpdatedAt > (long)InterruptedAfter.TotalMilliseconds ? Interrupted(e) : e;
+                if (FollowStatus.Settled(e.Status)) return e;
                 if (OnDisk(e) || e.Status is FollowStatus.Sent or FollowStatus.Stalled && InFolder(e))
                     return e with { Status = FollowStatus.Arrived, Token = null, UpdatedAt = Now, Message = null };
                 if (e.Status == FollowStatus.Sent && Now - e.SentAt > (long)StallAfter.TotalMilliseconds)
@@ -426,18 +430,46 @@ public sealed class EpisodeFollowing
                 var taken = e with { Status = FollowStatus.Downloading, StartAt = 0, UpdatedAt = Now }; claimed.Add(taken); return taken;
             }).ToArray() });
             if (show is null || claimed.Count == 0) continue;
-            foreach (var season in claimed.GroupBy(e => e.Season))
+            var finished = new HashSet<(int, int)>();
+            try
             {
-                var batch = season.ToArray();
-                var (success, message, target) = await Acquire(show, batch, items, folders, ct);
-                outcomes.Add(new(show.Title, batch.Length == 1 ? $"{show.Title} {batch[0].Code}" : $"{show.Title} S{season.Key:00} · {batch.Length} episodes", success, message));
-                FollowStore.Update(library, show.Key, x => x with { Episodes = x.Episodes.Select(e =>
-                    e.Status != FollowStatus.Downloading || !batch.Any(b => b.Season == e.Season && b.Episode == e.Episode) ? e
-                    : success ? e with { Status = FollowStatus.Sent, SentAt = Now, Target = target, Token = null, Message = message, UpdatedAt = Now }
-                    : e with { Status = FollowStatus.Failed, Token = null, Message = message, UpdatedAt = Now }).ToArray() });
+                foreach (var season in claimed.GroupBy(e => e.Season))
+                {
+                    var batch = season.ToArray();
+                    var (success, message, target) = await Acquire(show, batch, items, folders, ct);
+                    outcomes.Add(new(show.Title, batch.Length == 1 ? $"{show.Title} {batch[0].Code}" : $"{show.Title} S{season.Key:00} · {batch.Length} episodes", success, message));
+                    FollowStore.Update(library, show.Key, x => x with { Episodes = x.Episodes.Select(e =>
+                        e.Status != FollowStatus.Downloading || !batch.Any(b => b.Season == e.Season && b.Episode == e.Episode) ? e
+                        : success ? e with { Status = FollowStatus.Sent, SentAt = Now, Target = target, Token = null, Message = message, UpdatedAt = Now }
+                        : e with { Status = FollowStatus.Failed, Token = null, Message = message, UpdatedAt = Now }).ToArray() });
+                    foreach (var b in batch) finished.Add((b.Season, b.Episode));
+                }
+            }
+            finally
+            {
+                // A download stopped before the plugin answered (the app closed, a time limit) waits for the user again.
+                var unfinished = claimed.Where(e => !finished.Contains((e.Season, e.Episode))).ToArray();
+                if (unfinished.Length > 0) FollowStore.Update(library, show.Key, x => x with { Episodes = x.Episodes.Select(e =>
+                    e.Status == FollowStatus.Downloading && unfinished.Any(u => u.Season == e.Season && u.Episode == e.Episode) ? Interrupted(e) : e).ToArray() });
             }
         }
         return outcomes.ToArray();
+    }
+    private FollowEpisode Interrupted(FollowEpisode e) =>
+        e with { Status = FollowStatus.Pending, StartAt = 0, Message = "The download was interrupted before it started. Choose Download again.", UpdatedAt = Now };
+    // A download still starting after this long was cut off by a process that ended without cleaning up.
+    public static readonly TimeSpan InterruptedAfter = TimeSpan.FromHours(1);
+    // Review: the countdown of these episodes stops, and they wait for the user.
+    public int Pause(IEnumerable<FollowEpisodeRef> episodes)
+    {
+        var count = 0;
+        foreach (var show in episodes.GroupBy(x => x.Show))
+            FollowStore.Update(library, show.Key, x => x with { Episodes = x.Episodes.Select(e =>
+            {
+                if (e.Status != FollowStatus.Pending || e.StartAt == 0 || !show.Any(r => r.Season == e.Season && r.Episode == e.Episode)) return e;
+                count++; return e with { StartAt = 0, UpdatedAt = Now };
+            }).ToArray() });
+        return count;
     }
     private async Task<(bool Success, string Message, string? Target)> Acquire(FollowedShow show, FollowEpisode[] batch, List<MediaItem> items, LibraryFolder[] folders, CancellationToken ct)
     {

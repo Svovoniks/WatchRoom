@@ -200,15 +200,18 @@ internal static class BackgroundFollow
         DesktopIcon.Sync(engine);
         if (result.Ready is { StartAt: > 0 } countdown) await Countdown(engine, countdown, ct);
     }
-    // Waits out a countdown, then downloads whatever the user didn't skip or download already.
+    // Waits out a countdown, then downloads whatever the user didn't skip, download or pause with Review meanwhile.
     internal static async Task Countdown(EpisodeFollowing engine, FollowNotice notice, CancellationToken ct)
     {
-        while (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() < notice.StartAt)
+        while (true)
         {
-            if (engine.WithToken(notice.Token).Length == 0) return;
+            var counting = engine.Pending().Where(x => x.Episode.Token == notice.Token && x.Episode.StartAt > 0).ToArray();
+            if (counting.Length == 0) return;
+            if (counting.All(x => x.Episode.StartAt <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())) break;
             await Task.Delay(TimeSpan.FromSeconds(5), ct);
         }
-        await Approve(engine, engine.WithToken(notice.Token), ct, notice.Token);
+        var mine = engine.WithToken(notice.Token).ToHashSet();
+        await Approve(engine, engine.DueCountdowns().Where(mine.Contains).ToArray(), ct, notice.Token);
     }
     internal static async Task Approve(EpisodeFollowing engine, FollowEpisodeRef[] episodes, CancellationToken ct, string? token = null)
     {
@@ -226,7 +229,19 @@ internal static class BackgroundFollow
         var parsed = FollowNotifications.ParseLink(FollowSystem.Scheme, link);
         if (parsed is null) return true;
         var (action, token) = parsed.Value;
-        if (action == "open") return false;
+        if (action == "open")
+        {
+            // Review stops the notification's countdown, so its episodes wait for the user's choice in the app, which
+            // starts its own diagnostics.
+            if (token is not null)
+                try
+                {
+                    var engine = Engine(Library());
+                    if (engine.Pause(engine.WithToken(token)) > 0) { FollowSystem.Remove(token); DesktopIcon.Sync(engine); }
+                }
+                catch (Exception ex) { Fail("review", ex); }
+            return false;
+        }
         Start();
         try
         {

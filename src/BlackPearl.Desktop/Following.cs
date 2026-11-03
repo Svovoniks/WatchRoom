@@ -281,7 +281,7 @@ public partial class MainWindow
         AutomationProperties.SetName(minutes, "Countdown before downloading");
         var modeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
         modeRow.Children.Add(frame); modeRow.Children.Add(minutes); main.Children.Add(modeRow);
-        main.Children.Add(Line(settings.Countdown ? "The notification counts down; Skip or Review there stops the download." : "Notifications wait for you: nothing downloads until you choose Download."));
+        main.Children.Add(Line(settings.Countdown ? "The notification counts down. Skip stops the download; Review pauses it so you can choose here." : "Notifications wait for you: nothing downloads until you choose Download."));
         var icon = new CheckBox { IsChecked = settings.DesktopIcon, IsEnabled = settings.Enabled, Margin = new Thickness(0, 14, 0, 0),
             Content = "Put an icon on the desktop when new episodes are ready" };
         icon.Click += (_, _) =>
