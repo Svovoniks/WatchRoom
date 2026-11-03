@@ -90,9 +90,26 @@ static class FollowingChecks
         Logical<RadioButton>(content.Content).First(x => (string)x.Content == "Ask me first").IsChecked = true;
         Until(() => !FollowStore.Settings(store).Countdown);
 
-        // Skip from the list.
+        // The desktop icon: on for the waiting episode, opening this app with the episode's download link.
+        var desktop = Environment.GetEnvironmentVariable("BLACKPEARL_DESKTOP")!;
+        string[] Icons() => Directory.GetFiles(desktop, "*.lnk");
+        var iconBox = Logical<CheckBox>(content.Content).First(x => (x.Content as string)?.Contains("icon on the desktop") == true);
+        check(iconBox.IsChecked == false && Icons().Length == 0, "the desktop icon is off by default");
+        iconBox.IsChecked = true; iconBox.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        Until(() => Icons().Length == 1);
+        check(FollowStore.Settings(store).DesktopIcon && Icons() is [var icon] && Path.GetFileName(icon).StartsWith("1 new episode - BlackPearl"),
+            "with the option on, a waiting episode puts an icon on the desktop that says how many are waiting");
+        dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
+        dynamic link = shell.CreateShortcut(Icons()[0]);
+        string target = link.TargetPath, arguments = link.Arguments, tip = link.Description;
+        check(string.Equals(target, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase) && arguments.Contains("--data-dir") && arguments.Contains(":desktop?token=") &&
+            tip == "Download Follow Check Show S01E02", "opening the icon starts BlackPearl with a link that downloads the episodes it lists");
+        System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link); System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);
+
+        // Skip from the list: nothing waits any more, so the icon goes away.
         ButtonNamed("Skip").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-        Until(() => FollowStore.Show(store, "show-follow-check")!.Episodes[0].Status == FollowStatus.Skipped);
+        Until(() => FollowStore.Show(store, "show-follow-check")!.Episodes[0].Status == FollowStatus.Skipped && Icons().Length == 0);
+        check(Icons().Length == 0, "the icon goes away once its episodes are skipped or downloaded");
         texts = Texts();
         check(FollowStore.Show(store, "show-follow-check")!.Episodes[0].Status == FollowStatus.Skipped && !texts.Contains("Ready to download") && texts.Contains("Recent") &&
             texts.Contains("Skipped") && Logical<Button>(content.Content).Any(x => x.Content as string == "Look again"), "Skip moves the episode to Recent, where it can be looked for again");

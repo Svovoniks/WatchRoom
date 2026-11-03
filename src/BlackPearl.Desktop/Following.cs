@@ -145,7 +145,7 @@ public partial class MainWindow
         if (!Dialogs.Confirm(this, "Stop auto-downloading?", $"BlackPearl stops looking for new episodes of {show.Title}. Files already downloaded stay where they are.", "Stop auto-downloading")) return;
         foreach (var token in show.Episodes.Select(x => x.Token).Distinct()) FollowSystem.Remove(token);
         FollowStore.Remove(library, show.Key);
-        ShowFollowButton(); RenderDownloads(force: true);
+        SyncDesktopIcon(); ShowFollowButton(); RenderDownloads(force: true);
         SetStatus($"Stopped auto-downloading {show.Title}.");
     }
     private async Task SetFollowEnabled(bool enabled)
@@ -157,8 +157,10 @@ public partial class MainWindow
             followNotificationProblem = FollowSystem.NotificationProblem();
         }
         else { followRegistrationProblem = null; await Task.Run(FollowSystem.Unregister); }
-        RenderDownloads(force: true);
+        SyncDesktopIcon(); RenderDownloads(force: true);
     }
+    // The desktop icon follows what waits for the user; it's written off the UI thread.
+    private void SyncDesktopIcon() { var engine = FollowEngine(); _ = Task.Run(() => DesktopIcon.Sync(engine)); }
 
     // Checks the followed shows now, as the hourly check would, and starts a countdown in this process when there is one.
     private async Task RunFollowCheck(bool manual)
@@ -170,7 +172,7 @@ public partial class MainWindow
             var engine = FollowEngine();
             var result = await Task.Run(() => engine.CheckAsync(lifetime.Token));
             if (closing) return;
-            FollowSystem.Show(result.Ready); FollowSystem.Show(result.Attention);
+            FollowSystem.Show(result.Ready); FollowSystem.Show(result.Attention); SyncDesktopIcon();
             if (result.Ready is { } ready) InAppDialog.Toast(this, ready.Heading + "\n" + string.Join("\n", ready.Lines) + "\n" + ready.Footer, TimeSpan.FromSeconds(10));
             else if (manual) SetStatus(result.Summary + ".");
             if (result.Ready is { StartAt: > 0 } countdown) _ = Countdown(engine, countdown);
@@ -200,13 +202,13 @@ public partial class MainWindow
         }
         // A plugin that finished downloading leaves files for the next scan.
         if (outcomes.Any(x => x.Success)) { scanDelay.Stop(); scanDelay.Start(); }
-        RenderDownloads(force: true);
+        SyncDesktopIcon(); RenderDownloads(force: true);
     }
     private void SkipEpisodes(FollowEpisodeRef[] episodes, string[] tokens)
     {
         FollowEngine().Skip(episodes);
         foreach (var token in tokens) FollowSystem.Remove(token);
-        RenderDownloads(force: true);
+        SyncDesktopIcon(); RenderDownloads(force: true);
     }
 
     // Settings > Downloads. Rebuilt only when what it shows changed, so the refresh that picks up the background check's
@@ -280,6 +282,16 @@ public partial class MainWindow
         var modeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
         modeRow.Children.Add(frame); modeRow.Children.Add(minutes); main.Children.Add(modeRow);
         main.Children.Add(Line(settings.Countdown ? "The notification counts down; Skip or Review there stops the download." : "Notifications wait for you: nothing downloads until you choose Download."));
+        var icon = new CheckBox { IsChecked = settings.DesktopIcon, IsEnabled = settings.Enabled, Margin = new Thickness(0, 14, 0, 0),
+            Content = "Put an icon on the desktop when new episodes are ready" };
+        icon.Click += (_, _) =>
+        {
+            FollowStore.SaveSettings(library, FollowStore.Settings(library) with { DesktopIcon = icon.IsChecked == true });
+            SyncDesktopIcon(); RenderDownloads(force: true);
+        };
+        main.Children.Add(icon);
+        var iconHint = Line("Opening the icon downloads the episodes it lists. It goes away once they're downloaded or skipped.");
+        iconHint.Margin = new Thickness(28, 2, 0, 0); main.Children.Add(iconHint);
         void SaveMode() => FollowStore.SaveSettings(library, FollowStore.Settings(library) with { Countdown = countdown.IsChecked == true,
             CountdownMinutes = FollowSettings.CountdownChoices[Math.Max(0, minutes.SelectedIndex)] });
         ask.Checked += (_, _) => { SaveMode(); RenderDownloads(force: true); };

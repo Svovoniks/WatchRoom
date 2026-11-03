@@ -13,7 +13,8 @@ namespace BlackPearl.Core;
 // search). Found releases wait for the user's OK, or download after a countdown when the user chose that, and only the
 // release IDs the user was shown are downloaded. The same checks run in the open app and, while it is closed, in the
 // background check Windows starts every hour (see PLUGINS.md and README.md).
-public record FollowSettings(bool Enabled = false, bool Countdown = false, int CountdownMinutes = 5)
+// DesktopIcon: while episodes wait for the user, an icon on the desktop that downloads them when opened.
+public record FollowSettings(bool Enabled = false, bool Countdown = false, int CountdownMinutes = 5, bool DesktopIcon = false)
 {
     public static readonly int[] CountdownChoices = [2, 5, 15];
     public int Minutes => CountdownChoices.Contains(CountdownMinutes) ? CountdownMinutes : 5;
@@ -140,6 +141,7 @@ public sealed class EpisodeFollowing
     {
         this.library = library; this.plugins = plugins; this.seasons = seasons; this.run = run ?? ContentAcquisition.RunAsync; this.clock = clock ?? (() => DateTimeOffset.UtcNow);
     }
+    public LibraryStore Library => library;
     private long Now => clock().ToUnixTimeMilliseconds();
     private DateOnly Today => DateOnly.FromDateTime(clock().UtcDateTime);
     public static string NewToken() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
@@ -492,7 +494,7 @@ public static class FollowNotifications
     public static (string Action, string? Token)? ParseLink(string scheme, string? link)
     {
         if (link is null || !link.StartsWith(scheme + ":", StringComparison.OrdinalIgnoreCase)) return null;
-        var match = Regex.Match(link[(scheme.Length + 1)..], @"^/*(approve|skip|open)/?(?:\?token=([0-9a-f]{32}))?/?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        var match = Regex.Match(link[(scheme.Length + 1)..], @"^/*(approve|skip|open|desktop)/?(?:\?token=([0-9a-f]{32}))?/?$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         if (!match.Success) return null;
         var token = match.Groups[2].Success ? match.Groups[2].Value.ToLowerInvariant() : null;
         var action = match.Groups[1].Value.ToLowerInvariant();

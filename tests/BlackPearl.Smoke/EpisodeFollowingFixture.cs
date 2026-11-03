@@ -179,7 +179,8 @@ static class EpisodeFollowingFixture
         var token = EpisodeFollowing.NewToken();
         check(FollowNotifications.ParseLink("blackpearl-downloads", "blackpearl-downloads:approve?token=" + token) == ("approve", token) &&
             FollowNotifications.ParseLink("blackpearl-downloads", "BLACKPEARL-DOWNLOADS:skip?token=" + token) == ("skip", token) &&
-            FollowNotifications.ParseLink("blackpearl-downloads", "blackpearl-downloads:open") == ("open", null), "notification links say what to do and for which token");
+            FollowNotifications.ParseLink("blackpearl-downloads", "blackpearl-downloads:open") == ("open", null) &&
+            FollowNotifications.ParseLink("blackpearl-downloads", "blackpearl-downloads:desktop?token=" + token) == ("desktop", token), "notification and desktop icon links say what to do and for which token");
         check(new[] { "blackpearl-downloads:approve", "blackpearl-downloads:approve?token=xyz", "blackpearl-downloads:approve?token=" + token + "&then=other", "other:approve?token=" + token,
             "blackpearl-downloads:delete?token=" + token, "blackpearl-downloads-1234abcd:approve?token=" + token }.All(x => FollowNotifications.ParseLink("blackpearl-downloads", x) is null),
             "links without a valid token, with extra parts, or of another scheme are ignored");

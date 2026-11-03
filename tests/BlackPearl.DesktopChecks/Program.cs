@@ -19,6 +19,9 @@ static class Program
         var emptyCatalog = Path.Combine(Path.GetTempPath(), "blackpearl-empty-catalog"); Directory.CreateDirectory(emptyCatalog);
         Environment.SetEnvironmentVariable("BLACKPEARL_PLUGIN_CATALOG", emptyCatalog);
         // Auto-download never registers a task, link or notification identity with Windows during the checks; the probe does, on its own scratch library.
+        // Its desktop icon goes to a scratch folder, never the real desktop.
+        var desktop = Path.Combine(Path.GetTempPath(), "blackpearl-check-desktop-" + Guid.NewGuid().ToString("N")[..8]); Directory.CreateDirectory(desktop);
+        Environment.SetEnvironmentVariable("BLACKPEARL_DESKTOP", desktop);
         if (args.FirstOrDefault() == "--follow-system-probe") { FollowSystemProbe.Run(args[1]); return; }
         Environment.SetEnvironmentVariable("BLACKPEARL_FOLLOW_SYSTEM", "off");
         if (args.FirstOrDefault() == "--video-frames")

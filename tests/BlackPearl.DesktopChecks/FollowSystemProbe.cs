@@ -70,10 +70,28 @@ static class FollowSystemProbe
             Check(Wait(() => Episode()?.Status == FollowStatus.Sent, 60), "the notification's Download link sends the episode to the plugin");
             Check(File.ReadAllLines(Path.Combine(plugin, "log.txt")).Last() == "acquire probe-release-2", "only the release the user was shown is downloaded");
             Check(Wait(() => ToastNotificationManager.History.GetHistory(FollowSystem.AppId).All(x => x.Tag != token), 10), "the answered notification goes away");
+
+            // With the desktop icon on, the next episode also puts an icon on the (real) desktop; opening it downloads it.
+            // The task runs without this process's environment, so its icon goes to the real desktop under the scratch library's name.
+            FollowStore.SaveSettings(store, new FollowSettings(Enabled: true, DesktopIcon: true));
+            FollowStore.Update(store, "show-probe", x => x with { Listing = [.. x.Listing!, new(1, 3, today.ToString("yyyy-MM-dd"))], ListedAt = Wire.Now });
+            Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "schtasks.exe"), $"/Run /TN \"{FollowSystem.TaskName}\"") { UseShellExecute = false, CreateNoWindow = true })!.WaitForExit();
+            FollowEpisode? Third() => FollowStore.Show(new LibraryStore(data, deferRetention: true), "show-probe")?.Episodes.FirstOrDefault(x => x.Episode == 3);
+            Check(Wait(() => Third()?.Status == FollowStatus.Pending, 120), "the next scheduled check finds the next episode");
+            var icon = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), DesktopIcon.Name(1));
+            Check(Wait(() => File.Exists(icon), 20), "a desktop icon says an episode is waiting");
+            var third = Third()!.Token!;
+            Process.Start(new ProcessStartInfo(icon) { UseShellExecute = true });
+            Check(Wait(() => Third()?.Status == FollowStatus.Sent, 60), "opening the desktop icon sends the episode to the plugin");
+            Check(File.ReadAllLines(Path.Combine(plugin, "log.txt")).Last() == "acquire probe-release-3", "the icon downloads only the release it stood for");
+            Check(Wait(() => !File.Exists(icon), 20), "the icon goes away once its episodes are downloaded");
+            Check(Wait(() => ToastNotificationManager.History.GetHistory(FollowSystem.AppId).All(x => x.Tag != third), 10), "the episode's notification goes away too");
         }
         finally
         {
             foreach (var toast in ToastNotificationManager.History.GetHistory(FollowSystem.AppId)) FollowSystem.Remove(toast.Tag);
+            foreach (var count in Enumerable.Range(1, 5))
+                try { File.Delete(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), DesktopIcon.Name(count))); } catch (IOException) { }
             FollowSystem.Unregister();
             Console.WriteLine(FollowSystem.TaskCommand() is null && Registry.CurrentUser.OpenSubKey(@"Software\Classes\" + FollowSystem.Scheme) is null
                 ? "PASS: the task, link and identity are removed again" : "FAIL: registration left behind");

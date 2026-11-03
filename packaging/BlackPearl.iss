@@ -140,6 +140,10 @@ Filename: "{app}\BlackPearl.exe"; Description: "Open BlackPearl"; Flags: nowait 
 [UninstallRun]
 ; Auto-download's hourly check, if it was ever turned on.
 Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""BlackPearl episode check"" /F"; Flags: runhidden; RunOnceId: "RemoveEpisodeCheck"
+[UninstallDelete]
+; Auto-download's desktop icon, if episodes were waiting.
+Type: files; Name: "{userdesktop}\* new episode - BlackPearl.lnk"
+Type: files; Name: "{userdesktop}\* new episodes - BlackPearl.lnk"
 #endif
 
 [Code]

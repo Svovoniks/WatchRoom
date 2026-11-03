@@ -28,7 +28,8 @@ internal static class FollowSystem
     public static bool Off => AppEnvironment.Get("FOLLOW_SYSTEM") is { } value && value.Equals("off", StringComparison.OrdinalIgnoreCase);
     // The program the task and links start: this one, or the app a probe registers for.
     internal static string? ExeOverride { get; set; }
-    private static string Exe => ExeOverride ?? Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "BlackPearl.exe");
+    internal static string Exe => ExeOverride ?? Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "BlackPearl.exe");
+    internal static string DataArgument => $"--data-dir \"{Folder(Program.DataDirectory)}\"";
     private static string Icon => Path.Combine(AppContext.BaseDirectory, "Assets", "BlackPearl.png");
     private static string SchemeKey => @"Software\Classes\" + Scheme;
     private static string IdentityKey => @"Software\Classes\AppUserModelId\" + AppId;
@@ -196,6 +197,7 @@ internal static class BackgroundFollow
         var result = await engine.CheckAsync(ct);
         PlaybackDiagnostics.Record("follow-check", new { result.Summary });
         FollowSystem.Show(result.Ready); FollowSystem.Show(result.Attention);
+        DesktopIcon.Sync(engine);
         if (result.Ready is { StartAt: > 0 } countdown) await Countdown(engine, countdown, ct);
     }
     // Waits out a countdown, then downloads whatever the user didn't skip or download already.
@@ -214,6 +216,7 @@ internal static class BackgroundFollow
         var outcomes = await engine.ApproveAsync(episodes, ct);
         FollowSystem.Remove(token);
         FollowSystem.Show(EpisodeFollowing.OutcomeNotice(outcomes));
+        DesktopIcon.Sync(engine);
     }
 
     // A notification button: Download and Skip run here; Review returns false so the app opens at Settings > Downloads.
@@ -229,9 +232,28 @@ internal static class BackgroundFollow
         {
             var library = Library();
             var engine = Engine(library);
+            if (action == "desktop")
+            {
+                // The desktop icon: exactly the episodes it listed that still wait for the user.
+                var waiting = engine.Pending().Select(x => new FollowEpisodeRef(x.Show.Key, x.Episode.Season, x.Episode.Episode)).ToHashSet();
+                var listed = DesktopIcon.Episodes(library, token!).Where(waiting.Contains).ToArray();
+                if (listed.Length == 0)
+                {
+                    FollowSystem.Show(new FollowNotice("outcome", EpisodeFollowing.NewToken(), "Nothing to download", ["These episodes were already downloaded or skipped."], null, 0, []));
+                    DesktopIcon.Sync(engine);
+                    return true;
+                }
+                var notices = engine.Pending().Where(x => listed.Contains(new(x.Show.Key, x.Episode.Season, x.Episode.Episode))).Select(x => x.Episode.Token).OfType<string>().Distinct().ToArray();
+                using var lifetime = new CancellationTokenSource(TimeSpan.FromMinutes(30));
+                Approve(engine, listed, lifetime.Token).GetAwaiter().GetResult();
+                // Their notifications go away once nothing they list still waits.
+                foreach (var notice in notices.Where(x => engine.WithToken(x).Length == 0)) FollowSystem.Remove(notice);
+                PlaybackDiagnostics.FlushAsync().Wait(TimeSpan.FromSeconds(2));
+                return true;
+            }
             var episodes = engine.WithToken(token!);
             if (episodes.Length == 0) { FollowSystem.Remove(token); return true; }
-            if (action == "skip") { engine.Skip(episodes); FollowSystem.Remove(token); }
+            if (action == "skip") { engine.Skip(episodes); FollowSystem.Remove(token); DesktopIcon.Sync(engine); }
             else
             {
                 using var lifetime = new CancellationTokenSource(TimeSpan.FromMinutes(30));
