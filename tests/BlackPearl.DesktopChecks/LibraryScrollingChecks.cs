@@ -62,6 +62,24 @@ static class LibraryScrollingChecks
         scroll.ScrollToTop(); await Flush();
         check(grid.ItemContainerGenerator.ContainerFromIndex(0) is FrameworkElement first && ReferenceEquals(first.DataContext, grid.Items[0]),
             "scrolling back restores the first card with the correct binding");
+
+        // A metadata refresh renames and re-sorts cards, moving visible ones offscreen and back.
+        var cards = (System.Collections.ObjectModel.ObservableCollection<LibraryCardView>)grid.ItemsSource;
+        var order = cards.ToArray();
+        string? moveError = null;
+        try
+        {
+            cards.Move(1, cards.Count - 1); await Flush();
+            cards.Move(cards.Count - 1, 0); await Flush();
+            cards.Move(2, 5); cards.Move(cards.Count - 2, 3); await Flush();
+        }
+        catch (Exception ex) { moveError = ex.GetType().Name + ": " + ex.Message; }
+        bool Consistent() => panel.Children.Count == Containers().Count &&
+            Containers().All(pair => ReferenceEquals(pair.Value.DataContext, grid.Items[pair.Key]) && panel.Children.Contains(pair.Value));
+        check(moveError is null && Consistent(), $"moving visible library cards keeps the grid's cards in step with the library{(moveError is null ? "" : $" ({moveError})")}");
+        try { for (var index = 0; index < order.Length; index++) { var at = cards.IndexOf(order[index]); if (at != index) cards.Move(at, index); } await Flush(); }
+        catch (Exception ex) { moveError = ex.GetType().Name + ": " + ex.Message; }
+        check(moveError is null && Consistent() && cards.SequenceEqual(order), "restoring the card order lays out cleanly");
     }
 
     internal static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
