@@ -253,6 +253,7 @@ public partial class MainWindow
             _ = Guard(async () => { await FetchArtwork(); await RefreshLibrary(); });
         SaveVoicePreferences();
         preferencesBaseline = PreferenceSnapshot();
+        preferencesAutoSave.Stop(); // Normalising the key's text above restarts the pause, with nothing left to apply.
         MetadataKeyStatus.Text = savedMetadataToken.Length > 0 ? "Personal key saved securely." : TmdbCredentials.DefaultStatus;
         return true;
     }

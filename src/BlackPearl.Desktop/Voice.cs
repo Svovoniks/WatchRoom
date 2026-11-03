@@ -530,7 +530,7 @@ public partial class MainWindow
         VoiceProcessingPicker.SelectedValue = saved.Processing;
         VoicePushToTalk.IsChecked = saved.PushToTalk; VoiceAlwaysOn.IsChecked = saved.AlwaysOn;
         VoiceDucking.IsChecked = saved.Ducking; VoiceAutoJoin.IsChecked = saved.AutoJoin; VoiceVolumeSlider.Value = saved.Volume;
-        // Cancel restores the saved microphone; the level meter follows it.
+        // Reloading or discarding settings restores the saved microphone; the level meter follows it.
         if (VoicePreferences.IsVisible) _ = Guard(RestartVoiceTest);
     }
     private sealed record VoiceProcessingChoice(VoiceAudio.Processing Id, string Name);
