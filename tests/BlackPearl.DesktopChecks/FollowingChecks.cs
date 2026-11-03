@@ -101,7 +101,8 @@ static class FollowingChecks
             "with the option on, a waiting episode puts an icon on the desktop that says how many are waiting");
         dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
         dynamic link = shell.CreateShortcut(Icons()[0]);
-        string target = link.TargetPath, arguments = link.Arguments, tip = link.Description;
+        string target = link.TargetPath, arguments = link.Arguments, tip = link.Description, picture = link.IconLocation;
+        check(picture.EndsWith(Path.Combine("Assets", "NewEpisodes.ico") + ",0", StringComparison.OrdinalIgnoreCase) && File.Exists(picture[..^2]), "the desktop icon has its own new-episodes picture");
         check(string.Equals(target, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase) && arguments.Contains("--data-dir") && arguments.Contains(":desktop?token=") &&
             tip == "Download Follow Check Show S01E02", "opening the icon starts BlackPearl with a link that downloads the episodes it lists");
         System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link); System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);

@@ -65,7 +65,9 @@ internal static class DesktopIcon
             try
             {
                 link.TargetPath = exe; link.Arguments = arguments; link.WorkingDirectory = Path.GetDirectoryName(exe);
-                link.IconLocation = exe + ",0"; link.Description = description; link.Save();
+                // Its own picture, the pearl with a download badge, beside the app; the app's icon if that file is missing.
+                var icon = Path.Combine(Path.GetDirectoryName(exe)!, "Assets", "NewEpisodes.ico");
+                link.IconLocation = (File.Exists(icon) ? icon : exe) + ",0"; link.Description = description; link.Save();
             }
             finally { Marshal.FinalReleaseComObject(link); }
         }
