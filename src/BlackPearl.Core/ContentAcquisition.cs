@@ -21,7 +21,7 @@ public record AcquisitionManifest(string? Id = null, string? Name = null, string
 public record AcquisitionSetting(string Key, string Label, string Type = "text", string[]? Choices = null, string? Default = null, string? Help = null);
 public record AcquisitionOptions(string? Query = null, string? SourceUrl = null, int? Resolution = null, string? Filter = null, int? EpisodeOffset = null, int? ProviderSeason = null);
 // Assignable: a release of the right title with no episode number, such as a season pack or an OVA. It is never
-// ticked automatically, but the user may tick it on its own to download it for the request.
+// ticked automatically, but the user may tick it, alone or with other releases, to download it for the request.
 public record AcquisitionChoice(string Id, string Title, string Detail = "", bool Matches = false, string? Episode = null, int? Resolution = null, string? SuggestedFilter = null, bool Assignable = false)
 {
     // The episode the release provides: the requested one it matches, or else the one its name gives, such as S01E01.

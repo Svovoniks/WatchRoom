@@ -203,7 +203,7 @@ static class AcquisitionChecks
         ((Button)packPicker.FindName("AcquireSelectMatches")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
         check(packResults.SelectedItems.Cast<AcquisitionChoice>().Select(x => x.Id).SequenceEqual(["e1"]), "Select best matches never ticks a season pack or special");
         packResults.SelectedItems.Add(packResults.Items.Cast<AcquisitionChoice>().Single(x => x.Id == "ova"));
-        check(!packDownload.IsEnabled, "a season pack or special cannot be downloaded together with other releases");
+        check(packDownload.IsEnabled && (string)packDownload.Content == "Download 2 releases", "a season pack or special can be downloaded together with episode releases");
         packResults.SelectedItems.Clear(); packResults.SelectedItems.Add(packResults.Items.Cast<AcquisitionChoice>().Single(x => x.Id == "ova"));
         check(packDownload.IsEnabled, "a season pack or special ticked on its own can be downloaded");
         packPicker.Close();
