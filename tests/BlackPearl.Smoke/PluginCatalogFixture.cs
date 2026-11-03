@@ -17,9 +17,9 @@ static class PluginCatalogFixture
             Entry("plugins/runtime/run.ps1", "'runtime v1'");
             Entry("plugins/runtime/lib/helpers.ps1", "'helpers'");
             Entry("plugins/runtime/settings.schema.json", "[]");
-            Entry("plugins/alpha/plugin.json", """{ "name": "Alpha", "description": "Gets anime", "contentTypes": ["anime"], "command": "../runtime/run.ps1", "settingsSchema": "../runtime/settings.schema.json" }""");
+            Entry("plugins/alpha/plugin.json", """{ "name": "Alpha", "description": "Gets anime", "contentTypes": ["anime"], "command": "../runtime/run.ps1", "settingsSchema": "../runtime/settings.schema.json", "group": " Pack " }""");
             Entry("plugins/alpha/settings.json", """{ "shipped": true }""");
-            Entry("plugins/beta/plugin.json", """{ "id": "beta-id", "name": "Beta", "contentTypes": ["movie", "tv"], "command": "beta.cmd", "requires": ["runtime"] }""");
+            Entry("plugins/beta/plugin.json", """{ "id": "beta-id", "name": "Beta", "contentTypes": ["movie", "tv"], "command": "beta.cmd", "requires": ["runtime"], "group": "pack" }""");
             Entry("plugins/beta/beta.cmd", "@echo off");
             Entry("plugins/orphan/plugin.json", """{ "name": "Orphan", "contentTypes": ["show"], "command": "../absent/run.ps1" }""");
             Entry("plugins/broken/plugin.json", "{ nope");
@@ -36,10 +36,15 @@ static class PluginCatalogFixture
         check(alpha.Folders.SequenceEqual(["alpha", "runtime"]) && betaPlugin.Folders.SequenceEqual(["beta", "runtime"]),
             "a plugin brings the support folders its command or settings reach with ../, and those it requires");
         check(catalog.State(alpha, plugins) == CatalogPluginState.NotInstalled, "a plugin not in the plugins folder is not installed");
+        check(catalog.Plugins[0].Group == "Pack" && PluginCatalog.Group(catalog.Plugins, x => x.Group) is [{ Name: "Pack", Members: [{ Name: "Alpha" }, { Name: "Beta" }] }],
+            "plugins whose plugin.json names the same group, ignoring case and spaces, form one group");
+        var grouped = PluginCatalog.Group(["solo", "z1", "a1", "z2"], x => x switch { "z1" or "z2" => "Zeta", "a1" => "Alpha", _ => null });
+        check(grouped is [{ Name: "Alpha", Members: ["a1"] }, { Name: "Zeta", Members: ["z1", "z2"] }, { Name: null, Members: ["solo"] }],
+            "groups come by name, even with one plugin, and plugins that name no group follow them unnamed");
 
         catalog.Install(alpha, plugins);
         check(catalog.State(alpha, plugins) == CatalogPluginState.Installed && File.ReadAllText(Path.Combine(plugins, "runtime", "lib", "helpers.ps1")) == "'helpers'"
-            && ContentAcquisition.Discover(plugins).Plugins.Single() is { Id: "alpha", Name: "Alpha" },
+            && ContentAcquisition.Discover(plugins).Plugins.Single() is { Id: "alpha", Name: "Alpha", Group: "Pack" },
             "installing copies the plugin and its support folders, nested files included, and the app loads it");
         check(!File.Exists(Path.Combine(plugins, "alpha", "settings.json")) && !File.Exists(Path.Combine(plugins, "escape.txt")) && !File.Exists(Path.Combine(directory, "escape.txt")),
             "the catalog never ships settings.json and never writes outside the plugin's folders");

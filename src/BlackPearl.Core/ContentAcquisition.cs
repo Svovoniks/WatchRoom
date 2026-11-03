@@ -9,13 +9,15 @@ namespace BlackPearl.Core;
 // A program that fetches missing or upcoming videos. Each plugin is a folder in the plugins folder holding plugin.json;
 // BlackPearl runs its command with a request on standard input saying what to get and where it belongs, and the files
 // join the library on the next scan. See PLUGINS.md.
+// Group: the plugin family its plugin.json names, such as Sparrow; Settings shows a family together and updates it as a whole.
 public record AcquisitionPlugin(string Id, string Name, string Description, string[] ContentTypes, string Command, string[] Arguments,
-    string Directory, int TimeoutSeconds, bool Interactive = false, string? SettingsSchema = null)
+    string Directory, int TimeoutSeconds, bool Interactive = false, string? SettingsSchema = null, string? Group = null)
 {
     public bool Supports(string contentType) => ContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase);
 }
 public record AcquisitionManifest(string? Id = null, string? Name = null, string? Description = null, string[]? ContentTypes = null,
-    string? Command = null, string[]? Arguments = null, int? TimeoutSeconds = null, bool Interactive = false, string? SettingsSchema = null, string[]? Requires = null);
+    string? Command = null, string[]? Arguments = null, int? TimeoutSeconds = null, bool Interactive = false, string? SettingsSchema = null, string[]? Requires = null,
+    string? Group = null);
 public record AcquisitionSetting(string Key, string Label, string Type = "text", string[]? Choices = null, string? Default = null, string? Help = null);
 public record AcquisitionOptions(string? Query = null, string? SourceUrl = null, int? Resolution = null, string? Filter = null, int? EpisodeOffset = null, int? ProviderSeason = null);
 // Assignable: a release of the right title with no episode number, such as a season pack or an OVA. It is never
@@ -177,6 +179,8 @@ public static class ContentAcquisition
     };
 
     // Every plugin folder with a readable manifest, and a line for each one that couldn't be used.
+    // A plugin.json group, trimmed; blank means none.
+    public static string? GroupName(string? group) => string.IsNullOrWhiteSpace(group) ? null : group.Trim();
     public static (List<AcquisitionPlugin> Plugins, List<string> Problems) Discover(string directory)
     {
         var plugins = new List<AcquisitionPlugin>(); var problems = new List<string>();
@@ -199,7 +203,8 @@ public static class ContentAcquisition
                 var id = string.IsNullOrWhiteSpace(manifest.Id) ? name : manifest.Id.Trim();
                 if (plugins.Any(x => x.Id.Equals(id, StringComparison.OrdinalIgnoreCase))) { problems.Add($"{name}: another plugin already has the id {id}."); continue; }
                 plugins.Add(new(id, string.IsNullOrWhiteSpace(manifest.Name) ? name : manifest.Name.Trim(), manifest.Description?.Trim() ?? "",
-                    types.OfType<string>().Distinct().ToArray(), manifest.Command.Trim(), manifest.Arguments ?? [], folder, Math.Clamp(manifest.TimeoutSeconds ?? 120, 5, 3600), manifest.Interactive, manifest.SettingsSchema));
+                    types.OfType<string>().Distinct().ToArray(), manifest.Command.Trim(), manifest.Arguments ?? [], folder, Math.Clamp(manifest.TimeoutSeconds ?? 120, 5, 3600), manifest.Interactive, manifest.SettingsSchema,
+                    GroupName(manifest.Group)));
             }
             catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
             { problems.Add($"{name}: plugin.json can't be read: {ex.Message}"); }

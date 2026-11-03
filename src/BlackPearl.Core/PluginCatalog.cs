@@ -6,8 +6,11 @@ namespace BlackPearl.Core;
 
 // A plugin the catalog offers. Folders lists the folders it installs: its own first, then the support folders it uses,
 // such as a shared runtime its plugin.json reaches with ../runtime/.
-public record CatalogPlugin(string Folder, string Id, string Name, string Description, string[] ContentTypes, string[] Folders);
+// Group: the plugin family its plugin.json names, if any.
+public record CatalogPlugin(string Folder, string Id, string Name, string Description, string[] ContentTypes, string[] Folders, string? Group = null);
 public enum CatalogPluginState { NotInstalled, Installed, UpdateAvailable }
+// Plugins whose plugin.json names the same group. A null Name holds the plugins that name none.
+public sealed record PluginGroup<T>(string? Name, IReadOnlyList<T> Members);
 
 // The acquisition plugins published in the BlackPearlPlugins repository. Its plugins folder holds one folder per
 // plugin, the same layout as the local plugins folder, so installing copies folders across. Each folder with a
@@ -41,7 +44,8 @@ public sealed partial class PluginCatalog
                 var needed = Requirements(manifest).ToArray();
                 if (needed.FirstOrDefault(x => !folders.ContainsKey(x)) is { } absent) { problems.Add($"{folder}: needs {absent}, which the catalog doesn't have."); continue; }
                 plugins.Add(new(folder, string.IsNullOrWhiteSpace(manifest.Id) ? folder : manifest.Id.Trim(), string.IsNullOrWhiteSpace(manifest.Name) ? folder : manifest.Name.Trim(),
-                    manifest.Description?.Trim() ?? "", types.OfType<string>().Distinct().ToArray(), [folder, .. needed.Where(x => !x.Equals(folder, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase)]));
+                    manifest.Description?.Trim() ?? "", types.OfType<string>().Distinct().ToArray(), [folder, .. needed.Where(x => !x.Equals(folder, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase)],
+                    ContentAcquisition.GroupName(manifest.Group)));
             }
             catch (Exception ex) when (ex is JsonException or InvalidDataException) { problems.Add($"{folder}: plugin.json can't be read: {ex.Message}"); }
         }
@@ -57,6 +61,18 @@ public sealed partial class PluginCatalog
             if (path is not null && SiblingPath().Match(path.Trim()) is { Success: true } match && ValidFolder(match.Groups[1].Value)) yield return match.Groups[1].Value;
     }
     [GeneratedRegex(@"^\.\.[\\/]([^\\/]+)[\\/]")] private static partial Regex SiblingPath();
+
+    // Plugins that name the same group in plugin.json (ignoring case), such as the Sparrow ports that share one runtime,
+    // are shown and updated together. Groups come first by name, members in their given order, then one unnamed group
+    // of the plugins that name none. A group's name is spelled as its first member spells it.
+    public static IReadOnlyList<PluginGroup<T>> Group<T>(IReadOnlyList<T> items, Func<T, string?> group)
+    {
+        var named = items.Where(x => group(x) is not null).GroupBy(x => group(x)!, StringComparer.OrdinalIgnoreCase)
+            .Select(x => new PluginGroup<T>(group(x.First()), x.ToArray())).OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var alone = items.Where(x => group(x) is null).ToArray();
+        if (alone.Length > 0) named.Add(new(null, alone));
+        return named;
+    }
     private static bool ValidFolder(string name) => name.Length > 0 && name is not ("." or "..") && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && name.Trim() == name && !name.EndsWith('.');
 
     // A GitHub source archive: one top folder holding the repository, whose plugins folder is read.
