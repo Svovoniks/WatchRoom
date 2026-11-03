@@ -19,6 +19,9 @@ static class EndedSeekChecks
         var path = Path.Combine(directory, "Ended seek.avi");
         VideoFixture.Write(path, 20);
         var item = new MediaItem("ended-seek", path, "Ended seek", "Movie");
+        var earlierPath = Path.Combine(directory, "Earlier.avi");
+        VideoFixture.Write(earlierPath, 20);
+        var earlier = new MediaItem("ended-seek-earlier", earlierPath, "Earlier", "Movie");
         var queue = Field<List<MediaItem>>("queue"); var previousQueue = queue.ToArray(); var previousPosition = Field<int>("queuePosition");
         var timeline = (Slider)window.FindName("Timeline");
         try
@@ -30,6 +33,11 @@ static class EndedSeekChecks
             player.Time = Math.Max(0, player.Length - 400);
             for (var i = 0; i < 60 && player.State != VLCState.Ended; i++) await Task.Delay(100);
             check(player.State == VLCState.Ended, "the fixture video reaches its end");
+            var previous = (Button)window.FindName("PreviousButton");
+            Call("UpdateSessionControls");
+            check(previous.IsEnabled && (string)previous.ToolTip == "Back to the start (P)" &&
+                System.Windows.Automation.AutomationProperties.GetName(previous) == "Back to the start",
+                "after the video ends, Previous offers to return to its start");
 
             Set("seeking", true); timeline.Value = 5000; Call("CommitSeek");
             Call("PlaybackTickCore");
@@ -39,14 +47,22 @@ static class EndedSeekChecks
             await Task.Delay(300);
             check(player.IsPlaying && player.Time is > 4500 and < 9000, $"Play after the end starts from the chosen position ({player.Time} ms)");
 
-            var previous = (Button)window.FindName("PreviousButton");
             Call("UpdateSessionControls");
             check(previous.IsEnabled && (string)previous.ToolTip == "Back to the start (P)", "past the first seconds, Previous offers to return to the start even without a previous video");
             previous.RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
             for (var i = 0; i < 30 && player.Time > 3000; i++) await Task.Delay(100);
             check(player.Time < 3000, $"Previous returns to the start of the video ({player.Time} ms)");
             Call("UpdateSessionControls");
-            check(!previous.IsEnabled && (string)previous.ToolTip == "Previous video (P)", "near the start, Previous steps back and is disabled with nothing before");
+            check(!previous.IsEnabled && (string)previous.ToolTip == "Previous video (P)" &&
+                System.Windows.Automation.AutomationProperties.GetName(previous) == "Previous video",
+                "near the start, Previous steps back and is disabled with nothing before");
+
+            // In a queue, a press near the start plays the video before.
+            queue.Clear(); queue.AddRange([earlier, item]); Set("queuePosition", 1); Call("PublishQueue");
+            check(previous.IsEnabled && (string)previous.ToolTip == "Previous video (P)", "near the start of a queued video, Previous offers the video before");
+            previous.RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
+            for (var i = 0; i < 50 && Field<MediaItem>("playingItem")?.Id != earlier.Id; i++) await Task.Delay(100);
+            check(Field<MediaItem>("playingItem")?.Id == earlier.Id && Field<int>("queuePosition") == 0, "pressed near the start, Previous plays the queue's video before");
         }
         finally
         {

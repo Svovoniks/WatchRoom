@@ -1677,7 +1677,9 @@ public partial class MainWindow : Window
     private void MovePlayback(long offset) { if (player is null || player.Length <= 0) return; SeekPlayback(Math.Clamp(PlaybackPosition() + offset, 0, player.Length)); }
     private void SeekPlayback(long position) { if (room is null) SeekLocal(position); else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true); }
     // Like most players, Previous first returns to the start of the video; pressed again near the start, it steps back.
-    private bool PreviousRestarts() => CanSeek() && (player!.State == VLCState.Ended && endedSeek is null || PlaybackPosition() > 3000);
+    // A room must be connected and settled, as for Play and the timeline.
+    private bool PreviousRestarts() => CanSeek() && (room is null || room.IsConnected && !room.IsPeerRecovering) &&
+        (player!.State == VLCState.Ended && endedSeek is null || PlaybackPosition() > 3000);
     private async void StopPlayback(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (player is null || nativeStopCount > 0) return;
@@ -1861,6 +1863,8 @@ public partial class MainWindow : Window
     private async void PreviousQueued(object sender, RoutedEventArgs e) => await Guard(() =>
     {
         if (!PreviousRestarts()) return PlayQueueStep(-1);
+        // Returning to the start of a finished episode cancels its up-next countdown, so Play replays it.
+        if (upNextChoice is not null) EndUpNext(false);
         SeekPlayback(0); return Task.CompletedTask;
     });
     private async Task PlayQueueStep(int direction)
@@ -1961,7 +1965,8 @@ public partial class MainWindow : Window
         // Previous and Next stay in the bar; they are disabled when there is nothing to step to.
         NextButton.ToolTip = ShowingEpisodeList ? "Next episode (N)" : HasPlaybackQueue ? "Next in queue (N)" : "Next video (N)";
         var restarts = PreviousRestarts();
-        PreviousButton.ToolTip = restarts ? "Back to the start (P)" : ShowingEpisodeList ? "Previous episode (P)" : "Previous video (P)";
+        var previousName = restarts ? "Back to the start" : ShowingEpisodeList ? "Previous episode" : "Previous video";
+        PreviousButton.ToolTip = previousName + " (P)"; System.Windows.Automation.AutomationProperties.SetName(PreviousButton, previousName);
         RefreshEpisodeEndAction();
         var canManageEpisodes = room is null || connectedRoom && room!.Identity?.Host == true;
         NextButton.IsEnabled = ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(1) is not null

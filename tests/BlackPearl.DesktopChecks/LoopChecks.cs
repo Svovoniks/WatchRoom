@@ -102,7 +102,12 @@ static class LoopChecks
             for (var i = 0; i < 30 && card.Visibility != Visibility.Visible; i++) await Task.Delay(100);
             check(card.Visibility == Visibility.Visible && upNext.Text == $"Season 1 · {second.EpisodeDisplayTitle}" && !ended.IsCompleted,
                 "Loop all still offers the next episode in the middle of a show");
-            Call("EndUpNext", false); await ended;
+            // Previous during the countdown returns to the start of the finished episode and cancels the countdown.
+            Call("PreviousQueued", window, new RoutedEventArgs(Button.ClickEvent));
+            check(await Task.WhenAny(ended, Task.Delay(3000)) == ended && card.Visibility != Visibility.Visible && Field<MediaItem>("playingItem").Id == first.Id,
+                "Previous during the up-next countdown cancels it and stays on the episode");
+            Call("RequestPlayback", true);
+            check(await Restarted(first), "Play after Previous replays the episode from its start");
 
             // After the last episode, Loop all offers the first regular episode, not the special.
             await (Task)Call("PlayLocalItem", second)!;
