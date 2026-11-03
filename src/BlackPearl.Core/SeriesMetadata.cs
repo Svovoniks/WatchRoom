@@ -14,7 +14,8 @@ public static class SeriesMetadata
     private static async Task<JsonDocument> Json(HttpClient http, string url, CancellationToken ct) => JsonDocument.Parse(await MetadataHttp.GetString(http, url, ct));
 
     public static async Task<string> FetchAsync(LibraryStore library, string directory, string? token, IProgress<string>? progress,
-        CancellationToken ct, HttpClient http, bool force = false, MetadataClient? metadata = null, MetadataRefresh? refresh = null)
+        CancellationToken ct, HttpClient http, bool force = false, MetadataClient? metadata = null, MetadataRefresh? refresh = null,
+        Action? stopOnLocaleChange = null)
     {
         var options = MetadataOptions.Load(library); var mode = refresh ?? (force ? MetadataRefresh.RefreshText : MetadataRefresh.FillMissing);
         using var issueScope = MetadataIssues.Begin(library); var outstanding = issueScope.State;
@@ -45,7 +46,7 @@ public static class SeriesMetadata
                 (DateOnly.TryParse(x.AirDate, out var date) && date > DateOnly.FromDateTime(DateTime.UtcNow) ? !options.ImportUpcoming : !options.ImportMissing))).Select(x => x.Id).ToArray();
             library.RemoveVirtual(stale); catalogChanged |= stale.Length > 0;
         }
-        int seasons = 0, episodes = 0, failed = 0, unmatched = 0, incomplete = 0, artworkFailed = 0, deferred = 0;
+        int seasons = 0, episodes = 0, failed = 0, unmatched = 0, incomplete = 0, artworkFailed = 0, deferred = 0; var stopped = false;
         var failedImages = new Dictionary<string, Exception>();
         async Task<(string? Path, bool Failed)> Artwork(MediaItem entry, string stage, string image, Func<Task<string?>> fetch)
         {
@@ -70,6 +71,8 @@ public static class SeriesMetadata
                 (!force && refresh is null || x.Episode is null || !string.IsNullOrWhiteSpace(x.EpisodeTitle)) &&
                 (x.SeasonPoster is null || ArtworkCache.IsUsable(x.SeasonPoster)) &&
                 (x.EpisodePoster is null || ArtworkCache.IsUsable(x.EpisodePoster)))) continue;
+            // An automatic fetch stops once the saved locale changes; the caller then leaves the locale unrecorded.
+            if (stopOnLocaleChange is not null && MetadataOptions.LocaleChanged(library, options)) { stopOnLocaleChange(); stopped = true; break; }
             var entries = group.ToArray(); var item = entries[0];
             if (!force && refresh is null && !rechecking && MetadataFetchPolicy.Deferred(library, "episodes", entries, options, token))
             { deferred++; MetadataDiagnostics.Record("metadata-fetch-deferred", new { Stage = "episodes", item.Title, RetryAt = MetadataFetchPolicy.RetryAt(library, "episodes", item.Id) }); continue; }
@@ -240,7 +243,9 @@ public static class SeriesMetadata
                 MetadataFetchPolicy.Record(library, "episodes", library.ByIds(ids), options, token, attemptFailed && !matched || groupArtworkFailed, !matched);
             }
         }
-        if (recheck) library.Setting(MissingChecked, missingState);
+        // Placeholders count as redone only when every show was reached.
+        if (recheck && !stopped) library.Setting(MissingChecked, missingState);
+        if (stopped) return MetadataOptions.LocaleStopped;
         return $"Seasons: {seasons} · Episodes: {episodes} · {unmatched} shows need matching · {incomplete} shows missing episode metadata · {failed} metadata failures · {artworkFailed} artwork failures · {deferred} shows deferred.";
     }
     internal static async Task<MetadataSeason[]> TvmazeSeasons(HttpClient http, int id, CancellationToken ct)

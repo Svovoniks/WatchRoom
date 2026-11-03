@@ -54,6 +54,14 @@ if (args.FirstOrDefault() == "--metadata-fixes")
     Console.WriteLine($"{checks} metadata fix checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--metadata-language")
+{
+    var checks = 0;
+    await MetadataLanguageFixture.Run(Path.GetFullPath("artifacts/metadata-language-" + Guid.NewGuid().ToString("N")), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} metadata language checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--filename-schemas")
 {
     var checks = 0;
@@ -378,6 +386,7 @@ int passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
 await MetadataDiagnosticsFixture.Run(Path.Combine(root, "metadata-diagnostics"), Check);
 await MetadataFixesFixture.Run(Path.Combine(root, "metadata-fixes"), Check);
+await MetadataLanguageFixture.Run(Path.Combine(root, "metadata-language"), Check);
 TrackLanguageFixture.Run(Check);
 EpisodePlaybackFixture.Run(Check);
 OpenedFileFixture.Run(Check);

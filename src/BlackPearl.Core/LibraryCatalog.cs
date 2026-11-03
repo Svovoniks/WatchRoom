@@ -89,7 +89,7 @@ public static class LibraryCatalog
                 var clips = item.Series is null ? filmExtras[item.Id].Count() : 0;
                 var status = TitleStatus(g.ToArray());
                 if (item.IsMusic) return AlbumCard(g.ToArray(), item, cancellation);
-                return new LibraryCard(item.DisplayTitle, item.Series is null ? item.Caption + (clips > 0 ? $" · {clips} {(clips == 1 ? "extra" : "extras")}" : "") +
+                return new LibraryCard(item.ShownTitle, item.Series is null ? item.Caption + (clips > 0 ? $" · {clips} {(clips == 1 ? "extra" : "extras")}" : "") +
                     (item.IsVirtual ? " · " + status + (status == "Upcoming" && DateOnly.TryParse(item.AirDate, out var release) ? " · " + release.ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture) : "") : item.Available ? "" : " · Unavailable") :
                     (item.Year is null ? "" : item.Year + " · ") + $"{seasons} {(seasons == 1 ? "season" : "seasons")} · {LibraryIdentity.EpisodeCount(g)} episodes" +
                     (g.Any(x => x.IsVirtual) ? $" · {g.Count(x => x.IsVirtual)} missing/upcoming" : "") + (g.Any(x => x.Available) || g.All(x => x.IsVirtual) ? "" : " · Unavailable"),

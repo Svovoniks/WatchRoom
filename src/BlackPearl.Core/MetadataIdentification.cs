@@ -115,6 +115,7 @@ public static class MetadataIdentification
         var result = classified with
         {
             Title = LibraryIdentity.Locked(item, "Title") ? item.Title : match.Title,
+            ProviderTitle = match.Type == "movie" && !LibraryIdentity.Locked(item, "Title") ? match.Title : null,
             Series = LibraryIdentity.Locked(item, "Title") && match.Type == "tv" ? item.Series ?? item.Title : classified.Series,
             Kind = LibraryIdentity.Locked(item, "Kind") ? item.Kind : classified.Kind,
             Poster = LibraryIdentity.Locked(item, "Poster") ? item.Poster : poster ?? (keepArtwork ? item.Poster : null),

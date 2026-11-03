@@ -100,7 +100,7 @@ public partial class MainWindow
         public Func<MediaItem, LibraryCardView>? Artwork { get; init; }
         public bool IsCurrent { get; init; }
         public string Number => (Index + 1).ToString("00");
-        public string Title => Media is null ? "Video no longer in library" : Media.Episode is null ? Media.Title : Media.EpisodeDisplayTitle;
+        public string Title => Media is null ? "Video no longer in library" : Media.Episode is null ? Media.ShownName : Media.EpisodeDisplayTitle;
         public string Caption => Media is null ? "Remove this entry or add the video again." : Media.Caption;
         public string Problem => Media is null ? "Removed" : Media.IsVirtual ? "Missing" : Media.Available ? "" : "Unavailable";
         public bool HasProblem => Problem.Length > 0;

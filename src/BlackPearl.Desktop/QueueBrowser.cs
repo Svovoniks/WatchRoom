@@ -31,7 +31,7 @@ public partial class MainWindow
     // Episode stills, or a movie's poster, with the item's watch progress.
     private LibraryCardView QueueStill(MediaItem item)
     {
-        var view = QueueArtwork("still:" + item.Id, item, () => new LibraryCard(item.DisplayTitle, item.Caption,
+        var view = QueueArtwork("still:" + item.Id, item, () => new LibraryCard(item.ShownTitle, item.Caption,
             item.Series is null ? new[] { item.Poster, item.SeriesPoster }.FirstOrDefault(ArtworkCache.IsUsable) : LibraryCatalog.EpisodeArtwork(item),
             item, item.Series is null ? "movie" : "episode"));
         UpdateCardPlayback(view);
@@ -48,7 +48,7 @@ public partial class MainWindow
             if (!shows.Add(LibraryIdentity.ShowKey(item))) continue;
             var poster = (item.Series is null ? new[] { item.Poster, item.SeriesPoster } : new[] { item.SeriesPoster, item.SeasonPoster, item.Poster })
                 .FirstOrDefault(ArtworkCache.IsUsable);
-            if (poster is not null) covers.Add(QueueArtwork("cover:" + poster, item, () => new LibraryCard(item.DisplayTitle, "", poster, item, "movie")));
+            if (poster is not null) covers.Add(QueueArtwork("cover:" + poster, item, () => new LibraryCard(item.ShownTitle, "", poster, item, "movie")));
         }
         return covers;
     }
@@ -200,7 +200,7 @@ public partial class MainWindow
             cancellation.ThrowIfCancellationRequested();
             if (filter switch { 1 => item.Kind != "Movie", 2 => item.Kind != "Show", 3 => item.Kind != "Anime", 4 => !item.IsMusic, _ => false }) return false;
             if (terms.Length == 0) return true;
-            var text = $"{item.Series} {item.Title} {item.EpisodeTitle} {item.Artist} {item.Year} {Path.GetFileNameWithoutExtension(item.Path)}" +
+            var text = $"{item.Series} {item.Title} {item.ProviderTitle} {item.EpisodeTitle} {item.Artist} {item.Year} {Path.GetFileNameWithoutExtension(item.Path)}" +
                 (item.Episode is { } episode ? $" S{item.Season}E{episode} S{item.Season:00}E{episode:00}" : "");
             return terms.All(term => text.Contains(term, StringComparison.OrdinalIgnoreCase));
         }
@@ -217,11 +217,11 @@ public partial class MainWindow
             rows.AddRange(episodes.Select(item => new QueueAddRow(item.EpisodeDisplayTitle, item.RuntimeMinutes is int minutes and > 0 ? $"{minutes} min" : item.Caption)
                 { Media = item, Group = [item], Artwork = artwork }));
         }
-        var movies = matches.Where(item => item.Series is null && item.ExtraOf is null).OrderBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase).ThenBy(item => item.Year).ToArray();
+        var movies = matches.Where(item => item.Series is null && item.ExtraOf is null).OrderBy(item => item.ShownName, StringComparer.CurrentCultureIgnoreCase).ThenBy(item => item.Year).ToArray();
         if (movies.Length > 0)
         {
             rows.Add(new QueueAddRow("Movies and other videos", VideoCount(movies.Length)) { IsGroup = true });
-            rows.AddRange(movies.Select(item => new QueueAddRow(item.Title, item.Caption + (item.RuntimeMinutes is int minutes and > 0 ? $" · {minutes} min" : ""))
+            rows.AddRange(movies.Select(item => new QueueAddRow(item.ShownName, item.Caption + (item.RuntimeMinutes is int minutes and > 0 ? $" · {minutes} min" : ""))
                 { Media = item, Group = [item], Artwork = artwork }));
         }
         return rows.ToArray();
