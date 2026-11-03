@@ -169,6 +169,17 @@ static class EpisodeFollowingFixture
         await engine.CheckAsync(CancellationToken.None);
         check(FollowStore.Show(store, "show-odd") is { Episodes.Length: 0, Problem: { } problem } && problem.Contains("numbered differently"), "files numbered unlike the provider's list never look new");
 
+        // Files matched with TMDB and a TVmaze list with the same numbers: they fit, and the next season's episode is new.
+        var guide = Path.Combine(anime, "Guide"); Directory.CreateDirectory(guide);
+        foreach (var n in new[] { 1, 2, 3 })
+            store.Save(new MediaItem("guide-" + n, Path.Combine(guide, $"Guide S01E0{n}.mkv"), "Guide", "Anime", 2024, "Guide", 1, n, ShowId: "show-guide", SeriesPath: guide, MetadataProvider: "tmdb", MetadataId: 3));
+        var tvmaze = new EpisodeFollowing(store, [sparrow], (_, _) => Task.FromResult<FollowSource?>(new("tvmaze", 3,
+            [new(1, null, null, null, null, Enumerable.Range(1, 3).Select(n => new MetadataEpisode(n, null, null, null, Day(-400), 60)).ToArray()),
+             new(2, null, null, null, null, [new(1, null, null, null, Day(23), 60)])])), Run, () => now);
+        FollowStore.Follow(store, store.All().First(x => x.Id == "guide-1"), "sparrow", null, null, DateOnly.FromDateTime(now.UtcDateTime));
+        await tvmaze.CheckAsync(CancellationToken.None);
+        check(FollowStore.Show(store, "show-guide") is { Problem: null, Episodes: [{ Season: 2, Episode: 1 }] }, "files matched with another provider fit when their numbers are in its list");
+
         // Requests for several episodes, one, or none (the setup's source check).
         var items = store.All(); var folders = new[] { new LibraryFolder(anime, "Anime") };
         check(ContentAcquisition.ForEpisodes(member, 2, [new(2, 5, null, null, false), new(2, 4, null, null, false)], items, folders) is { Scope: "season", Name: "Frieren S02" } several &&

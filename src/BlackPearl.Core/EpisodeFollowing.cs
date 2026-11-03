@@ -165,7 +165,9 @@ public sealed class EpisodeFollowing
         var key = LibraryIdentity.ShowKey(member);
         var members = library.All().Where(x => x.Series is not null && LibraryIdentity.ShowKey(x) == key).Prepend(member).ToArray();
         var wanted = library.Wanted(key);
-        foreach (var provider in options.ProviderOrder.Where(p => p is "tmdb" or "tvmaze").Distinct())
+        // The provider the show's files were matched with comes first: its numbering is the one they follow.
+        var matched = members.Where(x => !x.IsVirtual).Select(x => x.MetadataProvider).FirstOrDefault(x => x is "tmdb" or "tvmaze");
+        foreach (var provider in options.ProviderOrder.Prepend(matched).OfType<string>().Where(p => p is "tmdb" or "tvmaze").Distinct())
         {
             var id = members.Select(x => LibraryIdentity.ProviderId(x, provider)).Append(wanted is null ? null : wanted.Provider == provider ? wanted.ProviderId.ToString(CultureInfo.InvariantCulture)
                 : wanted.ProviderIds?.GetValueOrDefault(provider)).Select(x => int.TryParse(x, out var n) && n > 0 ? n : 0).FirstOrDefault(x => x > 0);
@@ -244,7 +246,8 @@ public sealed class EpisodeFollowing
             { problem = "Couldn't read the show's episode list: " + ex.Message; }
         }
         listing ??= [];
-        var disk = SeriesMetadata.OnDisk(files, listing.Select(x => (x.Season, x.Episode)), provider ?? "");
+        // Files matched with another provider still fit when their season and episode numbers are in this list.
+        var disk = SeriesMetadata.OnDisk(files, listing.Select(x => (x.Season, x.Episode)), provider ?? "", sameProvider: false);
         bool OnDisk(FollowEpisode e) => disk.Physical.Contains((e.Season, e.Episode)) || disk.Unread.Contains(e.Episode);
         if (listing.Length > 0 && !disk.Fits)
             problem ??= $"Your files of this show are numbered differently from {(provider == "tvmaze" ? "TVmaze" : "TMDB")}, so BlackPearl can't tell which episodes are new.";

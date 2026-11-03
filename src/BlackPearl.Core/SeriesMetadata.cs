@@ -286,13 +286,14 @@ public static class SeriesMetadata
         public bool Has(int season, int episode, string? airDate = null, string? title = null) =>
             Physical.Contains((season, episode)) || Unread.Contains(episode) || Aired.Contains((airDate, title));
     }
-    internal static EpisodesOnDisk OnDisk(IReadOnlyCollection<MediaItem> files, IEnumerable<(int Season, int Episode)> listing, string provider)
+    // sameProvider: placeholders also distrust files matched with another provider; auto-download judges by the numbers alone.
+    internal static EpisodesOnDisk OnDisk(IReadOnlyCollection<MediaItem> files, IEnumerable<(int Season, int Episode)> listing, string provider, bool sameProvider = true)
     {
         var physical = files.SelectMany(x => LibraryIdentity.EpisodeNumbers(x).Select(n => (x.Season, Number: n))).ToHashSet();
         var listed = listing.Select(x => ((int?)x.Season, x.Episode)).ToHashSet();
         var regular = files.Where(x => x.Season is not 0).ToArray();
         var misfits = regular.Count(x => x.Episode is null || LibraryIdentity.EpisodeNumbers(x).Any(n => !listed.Contains((x.Season, n))));
-        var fits = !files.Any(x => x.MetadataProvider is { } other && other != provider) && misfits <= Math.Max(1, regular.Length / 20);
+        var fits = (!sameProvider || !files.Any(x => x.MetadataProvider is { } other && other != provider)) && misfits <= Math.Max(1, regular.Length / 20);
         // A file whose number the scan couldn't read, such as "One Piece - 492A", still holds the episode its name gives,
         // and a provider listing one episode in two seasons has it once the file of either is here.
         var unread = files.Where(x => x.Episode is null).SelectMany(x => Regex.Matches(Path.GetFileNameWithoutExtension(x.Path), @"(?<![\d.])\d{2,4}(?=[ab]?(?![\d.p]))")
