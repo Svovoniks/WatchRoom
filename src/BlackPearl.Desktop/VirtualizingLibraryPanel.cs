@@ -78,10 +78,15 @@ public sealed class VirtualizingLibraryPanel : VirtualizingPanel, IScrollInfo
     }
     protected override void OnItemsChanged(object sender, ItemsChangedEventArgs args)
     {
-        // The generator has already discarded containers for removed/replaced items.
-        if (args.Action is System.Collections.Specialized.NotifyCollectionChangedAction.Remove or
+        // The generator has already discarded containers for removed, replaced and moved items. A moved item's container
+        // sits where the item used to be, so it is removed at the old position; the new position may be offscreen.
+        if (args.ItemUICount > 0 && args.Action is System.Collections.Specialized.NotifyCollectionChangedAction.Remove or
             System.Collections.Specialized.NotifyCollectionChangedAction.Replace or System.Collections.Specialized.NotifyCollectionChangedAction.Move)
-            RemoveInternalChildRange(args.Position.Index, args.ItemUICount);
+        {
+            var position = args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Move ? args.OldPosition : args.Position;
+            var child = position.Index + (position.Offset > 0 ? 1 : 0);
+            if (child < InternalChildren.Count) RemoveInternalChildRange(child, Math.Min(args.ItemUICount, InternalChildren.Count - child));
+        }
         InvalidateMeasure();
     }
     protected override void BringIndexIntoView(int index)
