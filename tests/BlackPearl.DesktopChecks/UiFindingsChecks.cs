@@ -323,7 +323,19 @@ static class UiFindingsChecks
                 Call("ShowPreferenceSection", section); Layout(size.Item1, size.Item2);
                 if (section == "Playback") { Control<ScrollViewer>("PlaybackPreferences").ScrollToHome(); Layout(size.Item1, size.Item2); Capture("playback-" + size.Item1); }
                 if (section == "Metadata") { Control<ScrollViewer>("MetadataPreferences").ScrollToHome(); Layout(size.Item1, size.Item2); Capture("metadata-" + size.Item1); }
-                if (section == "Voice") { Control<Slider>("VoiceVolumeSlider").BringIntoView(); Layout(size.Item1, size.Item2); Capture("voice-" + size.Item1); }
+                if (section == "Voice")
+                {
+                    var volume = Control<Slider>("VoiceVolumeSlider"); volume.BringIntoView(); Layout(size.Item1, size.Item2); Capture("voice-" + size.Item1);
+                    var track = (System.Windows.Controls.Primitives.Track)volume.Template.FindName("PART_Track", volume);
+                    var valueAt = typeof(SliderFollow).GetMethod("ValueAt", BindingFlags.NonPublic | BindingFlags.Static)!;
+                    double At(double fraction) => (double)valueAt.Invoke(null, [volume, track, new Point(track.Thumb.ActualWidth / 2 + fraction * (track.ActualWidth - track.Thumb.ActualWidth), track.ActualHeight / 2)])!;
+                    var original = volume.Value;
+                    // Pointer moves arrive faster than layout while dragging, so each value must not depend on where the knob was last drawn.
+                    var follows = new[] { 0.5, 0.8, 0.825, 0.3, 1, 0 }.Select(f => { var v = At(f); volume.Value = v; return v; }).ToArray();
+                    Check(follows.SequenceEqual(new double[] { 100, 160, 165, 60, 200, 0 }), $"the voice volume knob goes to the point pressed or dragged to at {size}: {string.Join(", ", follows)}");
+                    Check(At(-0.2) == 0 && At(1.3) == 200, "dragging past either end of the voice volume slider stops at that end");
+                    volume.Value = original;
+                }
             }
             Call("ToggleTheme", window, new RoutedEventArgs()); Call("ShowPreferenceSection", "Playback");
             foreach (var size in new[] { (900, 600), (1280, 810) }) { Layout(size.Item1, size.Item2); Capture("playback-light-" + size.Item1); }

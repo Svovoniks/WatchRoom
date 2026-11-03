@@ -42,12 +42,24 @@ public static class SliderFollow
     }
     private static bool Follow(Slider slider, MouseEventArgs e)
     {
-        if (slider.Template?.FindName("PART_Track", slider) is not Track track || track.ActualWidth <= 0 && track.ActualHeight <= 0) return false;
-        var value = track.ValueFromPoint(e.GetPosition(track));
-        if (double.IsNaN(value)) return false;
+        if (slider.Template?.FindName("PART_Track", slider) is not Track track || ValueAt(slider, track, e.GetPosition(track)) is not { } value) return false;
+        slider.Value = value;
+        return true;
+    }
+    // The value under a point on the track, worked out from the track's size alone. Track.ValueFromPoint measures from where the
+    // knob was last laid out, so several pointer moves between layout passes would add up and throw the knob to an end.
+    internal static double? ValueAt(Slider slider, Track track, Point point)
+    {
+        var horizontal = track.Orientation == Orientation.Horizontal;
+        var knob = track.Thumb is { } thumb ? horizontal ? thumb.ActualWidth : thumb.ActualHeight : 0;
+        var length = (horizontal ? track.ActualWidth : track.ActualHeight) - knob;
+        if (length <= 0) return null;
+        var fraction = Math.Clamp(((horizontal ? point.X : point.Y) - knob / 2) / length, 0, 1);
+        if (!horizontal) fraction = 1 - fraction; // Upright sliders grow from the bottom.
+        if (track.IsDirectionReversed) fraction = 1 - fraction;
+        var value = slider.Minimum + fraction * (slider.Maximum - slider.Minimum);
         if (slider.IsSnapToTickEnabled && slider.TickFrequency > 0)
             value = slider.Minimum + Math.Round((value - slider.Minimum) / slider.TickFrequency) * slider.TickFrequency;
-        slider.Value = Math.Clamp(value, slider.Minimum, slider.Maximum);
-        return true;
+        return Math.Clamp(value, slider.Minimum, slider.Maximum);
     }
 }
