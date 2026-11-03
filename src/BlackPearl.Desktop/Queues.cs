@@ -633,17 +633,23 @@ public partial class MainWindow
             guestButton.ContextMenu = guestMenu; guestMenu.IsOpen = true; e.Handled = true; return;
         }
         if (sender is not Button button || button.Tag is not LibraryCard card) return;
-        var videos = LibraryCatalog.CardItems(items, card, displaySpecialsWithinSeasons, PreferredVersion(card.Media)).ToArray();
         var menu = new ContextMenu { PlacementTarget = button };
+        // A card that is part of a selection of several acts for the whole selection.
+        if (button.DataContext is LibraryCardView view && view.IsSelected && selectedCards.Count > 1)
+        {
+            foreach (var entry in SelectionMenuItems(includeBarActions: true)) menu.Items.Add(entry);
+            button.ContextMenu = menu; menu.IsOpen = true; e.Handled = true; return;
+        }
+        var videos = LibraryCatalog.CardItems(items, card, displaySpecialsWithinSeasons, PreferredVersion(card.Media)).ToArray();
         var open = new MenuItem { Header = card.Level is "series" or "season" ? "Open" : "Details" }; open.Click += (_, _) => SelectMovie(button, new RoutedEventArgs()); menu.Items.Add(open);
         var play = new MenuItem { Header = card.Level is "series" or "season" ? "Play all" : "Play", IsEnabled = room?.Identity?.Host != false && videos.Any(x => x.Available && File.Exists(x.Path)) };
-        play.Click += (_, _) =>
-        {
-            if (!CanEditQueue()) return;
-            queue.Clear(); queuePosition = -1; activeQueueId = null; foreach (var video in videos.Where(x => x.Available && File.Exists(x.Path))) queue.Add(video);
-            PublishQueue(); RefreshQueuePickers(); NextQueued(button, new RoutedEventArgs());
-        };
+        play.Click += (_, _) => PlayCardVideos(videos, button);
         menu.Items.Add(play); menu.Items.Add(QueueMenu(videos));
+        if (button.DataContext is LibraryCardView selectable && PosterGrid.ItemsSource == libraryCards)
+        {
+            var select = new MenuItem { Header = selectable.IsSelected ? "Deselect" : "Select", InputGestureText = "Ctrl+Click" };
+            select.Click += (_, _) => ToggleCardSelection(selectable); menu.Items.Add(select);
+        }
         if (AcquireMenu(card) is { } acquire) menu.Items.Add(acquire);
         var unavailable = UnavailableCardItems(card).ToArray();
         if (unavailable.Length > 0)

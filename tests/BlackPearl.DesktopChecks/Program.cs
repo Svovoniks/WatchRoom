@@ -358,6 +358,7 @@ static class Program
                 await CheckBackNavigation(window, Check);
                 PlayerInteractionChecks.Run(window, Check);
                 UnavailableLibraryChecks.Run(window, activeStore, directory, Check);
+                CardSelectionChecks.Run(window, activeStore, directory, Check);
                 WantedLibraryChecks.Run(window, activeStore, directory, Check);
                 AcquisitionChecks.Run(window, activeStore, directory, Check);
                 FollowingChecks.Run(window, activeStore, directory, Check);

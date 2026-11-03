@@ -116,7 +116,7 @@ public partial class MainWindow
         RestartButton.Visibility = resume > 0 ? Visibility.Visible : Visibility.Collapsed;
         RestartButton.IsEnabled = DetailPlay.IsEnabled;
     }
-    private void MarkWatched(MediaItem item, string level, int? season, bool watched)
+    private void MarkWatched(MediaItem item, string level, int? season, bool watched, bool refresh = true)
     {
         // Clearing a logical episode also clears watched versions that cover it.
         var affected = level is "series" or "season"
@@ -131,8 +131,10 @@ public partial class MainWindow
         foreach (var id in marked) watchedState[id] = watched;
         foreach (var card in libraryCards.Where(card => card.Card.Media.Id == item.Id || LibraryIdentity.SameShow(card.Card.Media, item)))
             UpdateCardPlayback(card);
+        if (!refresh) return;
         SetStatus(watched ? "Marked as watched." : "Marked as unwatched.");
         RefreshHome();
+        if (CardsSelected) SyncCardSelection();
     }
 
     private async Task PlaybackEnded(MediaItem? endedItem, RoomClient? endedRoom, int generation)
