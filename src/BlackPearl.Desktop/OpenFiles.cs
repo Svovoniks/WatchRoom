@@ -13,6 +13,8 @@ namespace BlackPearl.Desktop;
 public static class OpenFileHandoff
 {
     private static Mutex? instance;
+    // Sent instead of a path to ask the running app to open Settings > Downloads (a notification's Review button).
+    public const string DownloadsRequest = "blackpearl:downloads";
     // Keeps its name from when the app was called Watchroom, so a running Watchroom and a newly started BlackPearl
     // still recognize each other on the same library.
     private static string Name => "Watchroom-" + LibraryIdentity.Hash(Path.GetFullPath(Program.DataDirectory).ToUpperInvariant());

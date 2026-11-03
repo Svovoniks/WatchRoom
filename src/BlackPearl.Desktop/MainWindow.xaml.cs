@@ -162,6 +162,7 @@ public partial class MainWindow : Window
         catch (Win32Exception) { SetStatus("Could not read the saved TMDB token. Enter it again in Settings."); }
         InitializeVoice();
         InitializePreferences();
+        InitializeFollowing();
         displaySpecialsWithinSeasons = MetadataOptions.Load(library).DisplaySpecialsWithinSeasons;
         foreach (var path in savedExclusions) exclusions.Add(path);
         InitializeFolderSettings();
@@ -338,8 +339,8 @@ public partial class MainWindow : Window
     }
     private void ShowPage(string name)
     {
-        // Folders and Plugins are sections of Settings; links to them open Settings there.
-        var section = name is "Folders" or "Plugins" ? name : null;
+        // Folders, Plugins and Downloads are sections of Settings; links to them open Settings there.
+        var section = name is "Folders" or "Plugins" or "Downloads" ? name : null;
         if (section is not null) name = "Settings";
         if (!ConfirmPageNavigation(name) || section is not null && currentPage == "Settings" && section != preferenceSection && !ConfirmPreferenceNavigation()) return;
         if (section is not null) ShowPreferenceSection(section);
@@ -2267,7 +2268,7 @@ public partial class MainWindow : Window
         OpenFileHandoff.StopListening();
         DisableSystemMediaControls();
         disconnectToast?.Invoke();
-        guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); metadataRetentionTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
+        guestBrowseTimer.Stop(); libraryUpdateTimer.Stop(); updateTimer.Stop(); metadataRetentionTimer.Stop(); downloadsRefresh.Stop(); followTimer.Stop(); library.MediaSaved -= QueueLibraryUpdate;
         library.Setting("volume", ((int)Volume.Value).ToString());
         await Task.Yield(); // Let WPF finish the first Closing event before calling Close again.
         foreach (var watcher in watchers) watcher.Dispose();

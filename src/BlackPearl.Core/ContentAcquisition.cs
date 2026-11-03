@@ -277,6 +277,33 @@ public static class ContentAcquisition
         return new(RequestVersion, "season", ContentType(member.Kind), $"{Safe(member.Series)} S{season:00}", member.Series, first.OriginalTitle ?? member.OriginalTitle, first.Year ?? member.Year,
             show, System.IO.Directory.Exists(show), show, ExistingDirectory(seasonFolder), season, missing.Select(Episode).ToArray(), Ids(first), Libraries(folders));
     }
+    // Episodes of one season that auto-download asks for: one episode is an episode request, several a season request
+    // listing only them. With no episodes it is a season request that only finds the show's releases, as the
+    // auto-download setup does. Null when there's no library folder to put them in.
+    public static AcquisitionRequest? ForEpisodes(MediaItem member, int season, IReadOnlyList<AcquisitionEpisode> episodes, IEnumerable<MediaItem> library, IReadOnlyList<LibraryFolder> folders)
+    {
+        if (member.Series is null) return null;
+        var (show, seasonFolder) = Folders(member, season, library, folders);
+        if (show is null || seasonFolder is null) return null;
+        if (episodes is [var only])
+            return new(RequestVersion, "episode", ContentType(member.Kind), $"{Safe(member.Series)} S{season:00}E{only.Episode:00}", member.Series, member.OriginalTitle, member.Year,
+                seasonFolder, System.IO.Directory.Exists(seasonFolder), show, seasonFolder, season, [only], Ids(member), Libraries(folders));
+        return new(RequestVersion, "season", ContentType(member.Kind), $"{Safe(member.Series)} S{season:00}", member.Series, member.OriginalTitle, member.Year,
+            show, System.IO.Directory.Exists(show), show, ExistingDirectory(seasonFolder), season, episodes.OrderBy(x => x.Episode).ToArray(), Ids(member), Libraries(folders));
+    }
+    // Where the picker's Remember saves a plugin's options for a title's season, and which plugin it last used.
+    public static string PreferenceKey(string pluginId, AcquisitionRequest request) => "acquisition:" + pluginId + ":" + request.ContentType + ":" + request.Title + ":" + request.Year + ":" + request.Season;
+    public static string ProviderKey(AcquisitionRequest request) => "acquisition-provider:" + request.ContentType + ":" + request.Title + ":" + request.Year + ":" + request.Season;
+    // The provider title that is clearly this show or film: its name with the year, then its name alone when only one
+    // title has it, then the only title found.
+    public static AcquisitionChoice? BestTitle(IReadOnlyList<AcquisitionChoice> titles, IEnumerable<string?> names, int? year)
+    {
+        static string Key(string? text) => new((text ?? "").Normalize(NormalizationForm.FormD).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+        var keys = names.Where(x => !string.IsNullOrWhiteSpace(x)).Select(Key).ToHashSet();
+        var dated = year is { } y ? keys.Select(x => x + y).ToHashSet() : [];
+        var named = titles.Where(x => keys.Contains(Key(x.Title))).ToArray();
+        return titles.FirstOrDefault(x => dated.Contains(Key(x.Title))) ?? (named.Length == 1 ? named[0] : null) ?? (titles.Count == 1 ? titles[0] : null);
+    }
     // A film added before its file; it belongs in the library folder for films of its kind.
     public static AcquisitionRequest? ForMovie(MediaItem film, IReadOnlyList<LibraryFolder> folders)
     {

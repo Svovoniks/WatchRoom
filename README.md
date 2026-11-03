@@ -37,6 +37,8 @@ A folder with the **Music** category lists audio files (MP3, FLAC, M4A, AAC, Ogg
 
 Acquisition plugins can get missing and upcoming episodes, seasons and films. **Acquire** hands a plugin that supports the title's type (anime, show or movie) the video's name, the folder where it belongs and the library folders with their categories. **Settings > Plugins** installs, updates and removes published plugins from [BlackPearlPlugins](https://github.com/Svovoniks/BlackPearlPlugins). See [acquisition plugins](PLUGINS.md).
 
+**Auto-download new episodes** on a show's page follows it: BlackPearl finds each new episode once it airs, using the show's interactive acquisition plugin, and asks before downloading. Following a show opens the Acquire picker once to choose and check where its releases come from, and offers to get the episodes of the latest season that are already out. **Settings > Downloads** turns the hourly check on or off, chooses between **Ask me first** (the default) and **Download after a countdown** of 2, 5 or 15 minutes, and lists the episodes waiting for you, the followed shows and recent downloads. The check also runs while BlackPearl is closed, from a Task Scheduler task for your Windows account, and Windows notifications offer **Download**, **Review** and **Skip**. Only the releases shown in the notification are downloaded. Works on Windows 10 (1809 or later) and Windows 11.
+
 ## Build and test
 
 Requires the .NET 10 SDK on Windows x64. This workspace has a local SDK in `.tools/dotnet`.
@@ -75,7 +77,7 @@ Room AVI playback selects VLC's `avformat` demuxer because its native AVI demuxe
 
 ## Data and privacy
 
-Library/settings: `%LOCALAPPDATA%/BlackPearl`, or `BLACKPEARL_DATA` when set. On Windows, **Save changes** stores the TMDB key in Windows Credential Manager; clearing it and saving removes it. Poster searches send titles to TVmaze/Wikipedia, or TMDB when configured; movie files stay on the host. Disable automatic artwork in Settings to stop these lookups. The loopback media bridge uses an unguessable per-session path and serves authorized media IDs. Room signaling uses HTTPS/WebSockets; media uses WebRTC encryption, with TURN relay fallback when configured.
+Library/settings: `%LOCALAPPDATA%/BlackPearl`, or `BLACKPEARL_DATA` when set. On Windows, **Save changes** stores the TMDB key in Windows Credential Manager; clearing it and saving removes it. Poster searches send titles to TVmaze/Wikipedia, or TMDB when configured; movie files stay on the host. Disable automatic artwork in Settings to stop these lookups. While auto-download is on, a Task Scheduler task named **BlackPearl episode check** runs `BlackPearl.exe --check-episodes` every hour for your account. Each run reads the followed shows' episode lists from TMDB or TVmaze and asks their acquisition plugin for releases. Turning auto-download off or uninstalling removes the task. The loopback media bridge uses an unguessable per-session path and serves authorized media IDs. Room signaling uses HTTPS/WebSockets; media uses WebRTC encryption, with TURN relay fallback when configured.
 
 Room codes expire after six hours. Relay bandwidth and host upload increase with each viewer. A public server and a tested relay are necessary for dependable internet use.
 

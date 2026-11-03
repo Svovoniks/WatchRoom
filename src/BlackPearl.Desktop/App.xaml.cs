@@ -57,8 +57,12 @@ public partial class App : Application
         }
         // A video opened at launch starts in the player; the library loads behind it.
         var window = new MainWindow(openedFile); MainWindow = window;
-        if (primary) OpenFileHandoff.Listen(path => window.Dispatcher.BeginInvoke(() => window.OpenFile(path)), handoff.Token);
+        if (primary) OpenFileHandoff.Listen(path => window.Dispatcher.BeginInvoke(() =>
+        {
+            if (path == OpenFileHandoff.DownloadsRequest) window.ShowDownloads(); else window.OpenFile(path);
+        }), handoff.Token);
         window.Show();
+        if (Program.OpenDownloads) window.ShowDownloads();
     }
     public static bool SoftwareRendering { get; } = AppEnvironment.Get("RENDER") is { } mode
         ? !mode.Equals("hardware", StringComparison.OrdinalIgnoreCase)
