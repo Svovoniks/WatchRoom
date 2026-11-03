@@ -458,7 +458,8 @@ public sealed class EpisodeFollowing
     private FollowEpisode Interrupted(FollowEpisode e) =>
         e with { Status = FollowStatus.Pending, StartAt = 0, Message = "The download was interrupted before it started. Choose Download again.", UpdatedAt = Now };
     // A download still starting after this long was cut off by a process that ended without cleaning up.
-    public static readonly TimeSpan InterruptedAfter = TimeSpan.FromHours(1);
+    // Longer than a plugin may run (timeoutSeconds is at most an hour), so a slow download is never cut off.
+    public static readonly TimeSpan InterruptedAfter = TimeSpan.FromHours(2);
     // Review: the countdown of these episodes stops, and they wait for the user.
     public int Pause(IEnumerable<FollowEpisodeRef> episodes)
     {

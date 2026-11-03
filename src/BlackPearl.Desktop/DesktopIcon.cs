@@ -66,8 +66,9 @@ internal static class DesktopIcon
             {
                 link.TargetPath = exe; link.Arguments = arguments; link.WorkingDirectory = Path.GetDirectoryName(exe);
                 // Its own picture, the pearl with a download badge, beside the app; the app's icon if that file is missing.
-                var icon = Path.Combine(Path.GetDirectoryName(exe)!, "Assets", "NewEpisodes.ico");
-                link.IconLocation = (File.Exists(icon) ? icon : exe) + ",0"; link.Description = description; link.Save();
+                // Beside the exe the shortcut starts, or else beside this program's files (a host such as dotnet.exe runs it).
+                var icon = new[] { Path.GetDirectoryName(exe)!, AppContext.BaseDirectory }.Select(x => Path.Combine(x, "Assets", "NewEpisodes.ico")).FirstOrDefault(File.Exists);
+                link.IconLocation = (icon ?? exe) + ",0"; link.Description = description; link.Save();
             }
             finally { Marshal.FinalReleaseComObject(link); }
         }

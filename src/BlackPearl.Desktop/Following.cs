@@ -335,7 +335,7 @@ public partial class MainWindow
             foreach (var item in pending)
             {
                 var release = item.Episode.Releases?.FirstOrDefault()?.Title ?? "";
-                var detail = release + (item.Episode.StartAt > 0 ? $" · downloads at {When(item.Episode.StartAt)}" : "");
+                var detail = release + (item.Episode.StartAt > 0 ? $" · downloads at {When(item.Episode.StartAt)}" : "") + (item.Episode.Message is { } note ? " · " + note : "");
                 ready.Children.Add(Row($"{item.Show.Title} {item.Episode.Code}", detail, buttons =>
                 {
                     Action(buttons, "Download", () => ApproveEpisodes([Ref(item)], Tokens([item])), primary: true, tip: "Download " + release);

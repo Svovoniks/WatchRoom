@@ -191,9 +191,9 @@ static class EpisodeFollowingFixture
         try { await cut.ApproveAsync(cut.WithToken(guideToken), CancellationToken.None); } catch (OperationCanceledException) { stopped = true; }
         check(stopped && FollowStore.Show(store, "show-guide")!.Episodes[0] is { Status: FollowStatus.Pending, StartAt: 0, Message: { } note } && note.Contains("interrupted") && cut.Knows(guideToken),
             "a download interrupted before it started waits for the user again");
-        FollowStore.Update(store, "show-guide", x => x with { Episodes = [x.Episodes[0] with { Status = FollowStatus.Downloading, UpdatedAt = now.AddHours(-2).ToUnixTimeMilliseconds() }] });
+        FollowStore.Update(store, "show-guide", x => x with { Episodes = [x.Episodes[0] with { Status = FollowStatus.Downloading, UpdatedAt = now.AddHours(-3).ToUnixTimeMilliseconds() }] });
         await tvmaze.CheckAsync(CancellationToken.None);
-        check(FollowStore.Show(store, "show-guide")!.Episodes[0].Status == FollowStatus.Pending, "a download left starting by a process that ended waits for the user again after an hour");
+        check(FollowStore.Show(store, "show-guide")!.Episodes[0].Status == FollowStatus.Pending, "a download left starting by a process that ended waits for the user again after two hours");
 
         // Requests for several episodes, one, or none (the setup's source check).
         var items = store.All(); var folders = new[] { new LibraryFolder(anime, "Anime") };
