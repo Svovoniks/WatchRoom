@@ -3,6 +3,8 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Threading;
 using BlackPearl.Core;
 
 namespace BlackPearl.Desktop;
@@ -26,9 +28,11 @@ public partial class MainWindow
         }
     }
     private readonly ObservableCollection<ProviderChoice> providerChoices = [];
-    private bool loadingPreferences, preferencesReady;
+    private bool loadingPreferences, preferencesReady, applyingPreferences;
     private string preferencesBaseline = "";
     private string preferenceSection = "";
+    // Settings apply as they change. Typing waits for a pause, so a half-typed value isn't applied or flagged at every keystroke.
+    private readonly DispatcherTimer preferencesAutoSave = new() { Interval = TimeSpan.FromMilliseconds(700) };
     private bool HasUnsavedPreferences => preferencesReady &&
         (PreferenceSnapshot() != preferencesBaseline || MetadataToken.Password != savedMetadataToken);
     // Saving Settings stores the address shown, so earlier defaults also move to the current one: the retired Sites service,
@@ -73,8 +77,9 @@ public partial class MainWindow
         foreach (var box in new[] { VoicePushToTalk, VoiceAlwaysOn, VoiceDucking, VoiceAutoJoin })
         { box.Checked += PreferencesChanged; box.Unchecked += PreferencesChanged; }
         VoiceInputPicker.SelectionChanged += PreferencesChanged; VoiceOutputPicker.SelectionChanged += PreferencesChanged; VoiceProcessingPicker.SelectionChanged += PreferencesChanged;
-        // The voice volume is heard as it moves, whether or not it is saved afterwards.
+        // The voice volume is heard as it moves, before the pause that saves it.
         VoiceVolumeSlider.ValueChanged += (sender, e) => { PreviewVoiceVolume(e.NewValue); PreferencesChanged(sender, new RoutedEventArgs()); };
+        preferencesAutoSave.Tick += (_, _) => ApplyPreferences();
         preferencesReady = true;
         ShowPreferenceSection("Folders");
     }
@@ -104,8 +109,7 @@ public partial class MainWindow
             GroupShows.IsChecked = options.GroupShowsByProvider;
             MetadataRefreshDays.IsEnabled = RefreshLess.IsEnabled = RefreshMore.IsEnabled = NeverRefresh.IsChecked != true;
             preferencesBaseline = PreferenceSnapshot();
-            SavePreferencesButton.IsEnabled = CancelPreferencesButton.IsEnabled = false;
-            PreferencesStatus.Text = "Changes apply when you save.";
+            preferencesAutoSave.Stop();
             ClearPreferenceErrors();
             MetadataKeyStatus.Text = savedMetadataToken.Length > 0 ? "Personal key saved securely." : TmdbCredentials.DefaultStatus;
         }
@@ -131,12 +135,12 @@ public partial class MainWindow
     {
         if (!preferencesReady || loadingPreferences) return;
         MetadataRefreshDays.IsEnabled = RefreshLess.IsEnabled = RefreshMore.IsEnabled = NeverRefresh.IsChecked != true;
-        var dirty = HasUnsavedPreferences;
-        SavePreferencesButton.IsEnabled = CancelPreferencesButton.IsEnabled = dirty;
-        PreferencesStatus.Text = dirty ? "Unsaved changes · Save or cancel when ready." : "Changes apply when you save.";
         ClearPreferenceErrors();
         ValidateRefreshDays();
         ValidateStreamingBuffer();
+        // Switches, pickers and buttons apply at once; typed text and slider moves apply after a pause.
+        preferencesAutoSave.Stop();
+        if (sender is ButtonBase or Selector) ApplyPreferences(); else if (HasUnsavedPreferences) preferencesAutoSave.Start();
         // The microphone test follows the chosen microphone and processing before they are saved.
         if (sender == VoiceInputPicker || sender == VoiceProcessingPicker) _ = Guard(RestartVoiceTest);
     }
@@ -171,16 +175,23 @@ public partial class MainWindow
     {
         for (var i = 0; i < providerChoices.Count; i++) providerChoices[i].SetPosition(i, providerChoices.Count);
     }
-    private void CancelPreferences(object sender, RoutedEventArgs e) => LoadPreferences();
+    // Applies changes that are still waiting for a pause in typing. Invalid values stay unapplied and show their error.
+    private void ApplyPreferences()
+    {
+        preferencesAutoSave.Stop();
+        // Saving can update controls, such as the voice device pickers, whose change events would save again.
+        if (applyingPreferences || !HasUnsavedPreferences) return;
+        applyingPreferences = true;
+        try { SavePreferences(reveal: false); } finally { applyingPreferences = false; }
+    }
+    // Leaving Settings applies what is pending, and asks only when a change is invalid and so can't be applied.
     private bool ConfirmPreferenceNavigation()
     {
-        if (!HasUnsavedPreferences) return true;
-        switch (Dialogs.ConfirmUnsavedSettings(this))
-        {
-            case MessageBoxResult.Yes: return TrySavePreferences();
-            case MessageBoxResult.No: LoadPreferences(); return true;
-            default: return false;
-        }
+        preferencesAutoSave.Stop();
+        if (!HasUnsavedPreferences || SavePreferences(reveal: false)) return true;
+        if (Dialogs.ConfirmUnsavedSettings(this) == MessageBoxResult.No) { LoadPreferences(); return true; }
+        SavePreferences(reveal: true); // Opens and focuses the field that needs fixing.
+        return false;
     }
     private bool ConfirmPageNavigation(string name) => name == currentPage || currentPage != "Settings" || ConfirmPreferenceNavigation();
     private void PreferenceSectionClicked(object sender, RoutedEventArgs e)
@@ -194,8 +205,6 @@ public partial class MainWindow
         preferenceSection = section;
         foreach (var panel in new FrameworkElement[] { FoldersPage, PluginPreferences, DownloadsPreferences, ProfilePreferences, MetadataPreferences, PlaybackPreferences, VoicePreferences, AppearancePreferences, UpdatePreferences })
             panel.Visibility = (string)panel.Tag == section ? Visibility.Visible : Visibility.Collapsed;
-        // Folder, plugin and download changes apply straight away, so those sections have nothing to save.
-        PreferenceFooter.Visibility = section is "Folders" or "Plugins" or "Downloads" ? Visibility.Collapsed : Visibility.Visible;
         if (section == "Folders") SelectFirstFolder();
         if (section == "Plugins") ShowPluginsSection();
         if (section == "Downloads") ShowDownloadsSection(); else downloadsRefresh.Stop();
@@ -207,23 +216,28 @@ public partial class MainWindow
         DisplayNameError.Text = ServerError.Text = RefreshDaysError.Text = LocaleError.Text = TrackPreferencesError.Text = StreamingBufferError.Text = "";
         MetadataKeyStatus.Text = "";
     }
-    private bool TrySavePreferences()
+    private bool TrySavePreferences() => SavePreferences(reveal: true);
+    // Saves every setting shown once all are valid. With reveal, an invalid field's section opens and the field is focused;
+    // otherwise only its error shows, so applying a change never moves the page or the caret.
+    private bool SavePreferences(bool reveal)
     {
+        void ShowPreferenceSection(string section) { if (reveal) this.ShowPreferenceSection(section); }
+        void Focus(UIElement element) { if (reveal) { (element as FrameworkElement)?.BringIntoView(); element.Focus(); } }
         ClearPreferenceErrors();
         if (string.IsNullOrWhiteSpace(DisplayNameBox.Text))
-        { DisplayNameError.Text = "Enter a display name."; ShowPreferenceSection("Profile"); DisplayNameBox.Focus(); return false; }
+        { DisplayNameError.Text = "Enter a display name."; ShowPreferenceSection("Profile"); Focus(DisplayNameBox); return false; }
         try { RoomAddress.ValidateServer(ServerBox.Text); }
-        catch (ArgumentException ex) { ServerError.Text = ex.Message; ShowPreferenceSection("Profile"); ServerBox.Focus(); return false; }
+        catch (ArgumentException ex) { ServerError.Text = ex.Message; ShowPreferenceSection("Profile"); Focus(ServerBox); return false; }
         if (!ValidateRefreshDays())
-        { ShowPreferenceSection("Metadata"); MetadataRefreshDays.BringIntoView(); MetadataRefreshDays.Focus(); return false; }
+        { ShowPreferenceSection("Metadata"); Focus(MetadataRefreshDays); return false; }
         if (MetadataLanguage.SelectedValue is not string language || MetadataCountry.SelectedValue is not string country)
-        { LocaleError.Text = "Choose a language and country."; ShowPreferenceSection("Metadata"); MetadataLanguage.BringIntoView(); MetadataLanguage.Focus(); return false; }
+        { LocaleError.Text = "Choose a language and country."; ShowPreferenceSection("Metadata"); Focus(MetadataLanguage); return false; }
         if (!TryReadTrackPreferences(out var audio, out var subtitles, out var subtitleRules))
-        { ShowPreferenceSection("Playback"); PreferredAudioLanguages.BringIntoView(); return false; }
+        { ShowPreferenceSection("Playback"); Focus(PreferredAudioLanguages); return false; }
         if (!ValidateStreamingBuffer())
-        { ShowPreferenceSection("Playback"); StreamingBufferSeconds.BringIntoView(); StreamingBufferSeconds.Focus(); return false; }
+        { ShowPreferenceSection("Playback"); Focus(StreamingBufferSeconds); return false; }
         if (!SaveMetadataToken())
-        { ShowPreferenceSection("Metadata"); MetadataToken.BringIntoView(); MetadataToken.Focus(); return false; }
+        { ShowPreferenceSection("Metadata"); Focus(MetadataToken); return false; }
         PersistTrackPreferences(audio, subtitles, subtitleRules);
         library.Setting(StreamingBufferOptions.SettingKey, int.Parse(StreamingBufferSeconds.Text, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture));
         var days = NeverRefresh.IsChecked == true ? 0 : int.Parse(MetadataRefreshDays.Text, CultureInfo.InvariantCulture);
@@ -239,12 +253,9 @@ public partial class MainWindow
             _ = Guard(async () => { await FetchArtwork(); await RefreshLibrary(); });
         SaveVoicePreferences();
         preferencesBaseline = PreferenceSnapshot();
-        SavePreferencesButton.IsEnabled = CancelPreferencesButton.IsEnabled = false;
-        PreferencesStatus.Text = "Settings saved.";
         MetadataKeyStatus.Text = savedMetadataToken.Length > 0 ? "Personal key saved securely." : TmdbCredentials.DefaultStatus;
         return true;
     }
-    private void SaveSettings(object sender, RoutedEventArgs e) => TrySavePreferences();
     private void JoinFromWelcome(object sender, RoutedEventArgs e)
     {
         ShowPage("Rooms"); JoinClick(sender, e);

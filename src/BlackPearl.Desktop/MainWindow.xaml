@@ -544,7 +544,7 @@
      <!-- A skipped subfolder with its button to scan it again. -->
      <DataTemplate x:Key="ExclusionRow"><Border BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="8" Padding="10,1,1,1" Margin="0,0,0,6"><DockPanel><Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="10" Width="30" Height="30" MinHeight="30" Click="RestoreFolder" ToolTip="Scan this subfolder again" AutomationProperties.Name="{Binding Name, StringFormat=Stop skipping {0}}"/><TextBlock Text="{Binding Name}" ToolTip="{Binding Path}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></DockPanel></Border></DataTemplate>
     </Grid.Resources>
-    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
     <StackPanel><TextBlock Text="Settings" Style="{StaticResource PageHeading}" Margin="0,0,0,16"/>
      <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="3" HorizontalAlignment="Left" Margin="0,0,0,20">
       <WrapPanel x:Name="PreferenceSections">
@@ -905,9 +905,6 @@
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
     </Grid>
-    <Border x:Name="PreferenceFooter" Grid.Row="2" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Background="{DynamicResource Canvas}" Padding="0,12,0,0" Margin="0,4,0,0">
-     <DockPanel><WrapPanel DockPanel.Dock="Right"><Button x:Name="CancelPreferencesButton" Content="Cancel" Style="{StaticResource QuietButton}" Click="CancelPreferences" IsEnabled="False" Margin="0,0,8,0"/><Button x:Name="SavePreferencesButton" Content="Save changes" Click="SaveSettings" Style="{StaticResource Primary}" IsEnabled="False" Margin="0"/></WrapPanel><TextBlock x:Name="PreferencesStatus" Style="{StaticResource MutedText}" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" Margin="0,0,16,0"/></DockPanel>
-    </Border>
    </Grid>
 
    <!-- Saved watch rooms -->

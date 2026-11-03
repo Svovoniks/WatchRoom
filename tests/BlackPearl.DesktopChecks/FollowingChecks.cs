@@ -73,8 +73,7 @@ static class FollowingChecks
         window.ShowDownloads();
         Until(() => content.Content is not null);
         var page = (FrameworkElement)window.FindName("DownloadsPreferences");
-        check(page.Visibility == Visibility.Visible && ((FrameworkElement)window.FindName("PreferenceFooter")).Visibility == Visibility.Collapsed,
-            "a notification's Review opens Settings > Downloads, which applies changes at once");
+        check(page.Visibility == Visibility.Visible, "a notification's Review opens Settings > Downloads");
         var texts = Texts();
         check(texts.Contains("Ready to download") && texts.Contains("Follow Check Show S01E02") && texts.Contains("Follow.Check.Show.S01E02.1080p-GRP"),
             "Downloads lists the episode waiting for the user with the release it would download");

@@ -70,7 +70,8 @@ public partial class MainWindow
         {
             audio = TrackLanguages.Parse(PreferredAudioLanguages.Text);
             subtitles = TrackLanguages.Parse(PreferredSubtitleLanguages.Text, true);
-            rules = TrackLanguages.ParseSubtitleRules(subtitleRuleDrafts.Select(rule =>
+            // A rule just added and not filled in yet waits rather than being reported as invalid.
+            rules = TrackLanguages.ParseSubtitleRules(subtitleRuleDrafts.Where(rule => !string.IsNullOrWhiteSpace(rule.AudioLanguage) || !string.IsNullOrWhiteSpace(rule.SubtitleLanguages)).Select(rule =>
                 new KeyValuePair<string, string>(rule.AudioLanguage, rule.SubtitleLanguages)));
             return true;
         }

@@ -23,8 +23,14 @@ static class StreamingBufferChecks
         input.Text = "12";
         check((bool)Call("TrySavePreferences")! && StreamingBufferOptions.Load(new LibraryStore(directory)) == 12,
             "saved streaming buffer survives a new library settings reader");
-        input.Text = "40"; Call("CancelPreferences", window, new RoutedEventArgs());
-        check(input.Text == "12", "canceling a draft buffer change restores the saved setting");
+        input.Text = "40";
+        check(StreamingBufferOptions.Load(store) == 12, "a typed buffer waits for a pause before applying");
+        Call("ApplyPreferences");
+        check(StreamingBufferOptions.Load(store) == 40, "a typed buffer applies after the pause");
+        input.Text = "99"; Call("ApplyPreferences");
+        check(StreamingBufferOptions.Load(store) == 40 && error.Text.Length > 0, "an invalid typed buffer shows its error and keeps the applied value");
+        input.Text = "12"; Call("ApplyPreferences");
+        check(input.Text == "12" && StreamingBufferOptions.Load(store) == 12, "correcting the buffer applies it");
         store.Setting(StreamingBufferOptions.SettingKey, "corrupt"); Call("LoadPreferences");
         check(input.Text == "30", "corrupt saved streaming buffer falls back to the default");
         input.Text = "30"; Call("TrySavePreferences");

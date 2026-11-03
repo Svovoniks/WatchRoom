@@ -421,7 +421,7 @@ public partial class MainWindow
         if (voice is { } session) session.Mixer.Volume = volume / 100f;
         VoiceCardVolumeText.Text = volume + "%";
     }
-    // Moving the slider in Settings is heard at once; Save keeps it and Cancel puts the saved value back.
+    // Moving the slider in Settings is heard at once and saved once it rests.
     private void PreviewVoiceVolume(double value)
     {
         if (voice is { } session) session.Mixer.Volume = (float)(Math.Clamp(value, 0, 200) / 100);

@@ -32,21 +32,20 @@ public static class Dialogs
         actions.Children.Add(cancel); actions.Children.Add(confirm); panel.Children.Add(actions); win.Content = panel;
         return win.ShowDialog() == true;
     }
+    // Settings apply as they change, so this asks only about a change that can't be applied yet.
     public static MessageBoxResult ConfirmUnsavedSettings(Window owner)
     {
         var result = MessageBoxResult.Cancel;
         var win = new InAppDialog { Owner = owner, Title = "Unsaved settings", Width = 500 };
         var panel = new StackPanel();
-        panel.Children.Add(new TextBlock { Text = "You have unsaved changes. Save them before switching tabs?", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) });
+        panel.Children.Add(new TextBlock { Text = "A setting you changed isn't valid, so it hasn't been applied. Fix it, or discard the change and continue?", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 20) });
         var actions = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-        var cancel = new Button { Content = "Keep editing", IsCancel = true };
+        var cancel = new Button { Content = "Keep editing", IsCancel = true, IsDefault = true };
         var discard = new Button { Content = "Discard changes" };
-        var save = new Button { Content = "Save changes", IsDefault = true };
-        save.SetResourceReference(FrameworkElement.StyleProperty, "Primary");
+        cancel.SetResourceReference(FrameworkElement.StyleProperty, "Primary");
         cancel.Click += (_, _) => win.DialogResult = false;
         discard.Click += (_, _) => { result = MessageBoxResult.No; win.DialogResult = true; };
-        save.Click += (_, _) => { result = MessageBoxResult.Yes; win.DialogResult = true; };
-        actions.Children.Add(cancel); actions.Children.Add(discard); actions.Children.Add(save); panel.Children.Add(actions);
+        actions.Children.Add(discard); actions.Children.Add(cancel); panel.Children.Add(actions);
         win.Content = panel;
         win.ShowDialog();
         return result;
