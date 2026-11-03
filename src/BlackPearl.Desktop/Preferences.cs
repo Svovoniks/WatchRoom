@@ -33,6 +33,8 @@ public partial class MainWindow
     private string preferenceSection = "";
     // Settings apply as they change. Typing waits for a pause, so a half-typed value isn't applied or flagged at every keystroke.
     private readonly DispatcherTimer preferencesAutoSave = new() { Interval = TimeSpan.FromMilliseconds(700) };
+    // Choosing a language and then a country, or stepping through the list, starts one metadata refresh, not one per choice.
+    private readonly DispatcherTimer metadataLocaleRefresh = new() { Interval = TimeSpan.FromMilliseconds(1500) };
     private bool HasUnsavedPreferences => preferencesReady &&
         (PreferenceSnapshot() != preferencesBaseline || MetadataToken.Password != savedMetadataToken);
     // Saving Settings stores the address shown, so earlier defaults also move to the current one: the retired Sites service,
@@ -80,6 +82,11 @@ public partial class MainWindow
         // The voice volume is heard as it moves, before the pause that saves it.
         VoiceVolumeSlider.ValueChanged += (sender, e) => { PreviewVoiceVolume(e.NewValue); PreferencesChanged(sender, new RoutedEventArgs()); };
         preferencesAutoSave.Tick += (_, _) => ApplyPreferences();
+        metadataLocaleRefresh.Tick += (_, _) =>
+        {
+            metadataLocaleRefresh.Stop();
+            _ = Guard(async () => { await FetchArtwork(lifetime.Token, followUp: true); await RefreshLibrary(); });
+        };
         preferencesReady = true;
         ShowPreferenceSection("Folders");
     }
@@ -248,10 +255,12 @@ public partial class MainWindow
         displaySpecialsWithinSeasons = DisplaySpecials.IsChecked == true;
         library.Setting("name", DisplayNameBox.Text.Trim()); library.Setting("server", ServerBox.Text.Trim().TrimEnd('/'));
         library.Setting("artwork", AutoArtwork.IsChecked == true ? "true" : "false");
-        // Missing and upcoming episodes, and titles and plots in a new language or country, follow their settings now rather than at the next scan.
-        if (SavedAutoArtwork && (before.ImportMissing != (ImportMissing.IsChecked == true) || before.ImportUpcoming != (ImportUpcoming.IsChecked == true) ||
-            before.Language != language || before.Country != country))
+        // Missing and upcoming episodes follow their settings now rather than at the next scan.
+        if (SavedAutoArtwork && (before.ImportMissing != (ImportMissing.IsChecked == true) || before.ImportUpcoming != (ImportUpcoming.IsChecked == true)))
             _ = Guard(async () => { await FetchArtwork(); await RefreshLibrary(); });
+        // So do titles and plots in a new language or country, after a pause for further changes. A fetch already running
+        // stops at its next title, and this one follows it.
+        if (SavedAutoArtwork && (before.Language != language || before.Country != country)) { metadataLocaleRefresh.Stop(); metadataLocaleRefresh.Start(); }
         SaveVoicePreferences();
         preferencesBaseline = PreferenceSnapshot();
         preferencesAutoSave.Stop(); // Normalising the key's text above restarts the pause, with nothing left to apply.

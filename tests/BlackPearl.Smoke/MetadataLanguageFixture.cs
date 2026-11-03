@@ -78,24 +78,47 @@ static class MetadataLanguageFixture
         using (var tmdb = new MetadataClient("fixture", handler, both))
             await AutomaticArtwork.FetchAsync(drifted, directory, "fixture", null, default, http, metadata: tmdb);
         check(drifted.ByIds(["matrix"]).Single() is { MetadataProvider: "tmdb", MetadataId: 603, ProviderTitle: "Матрица" }, "a title moved off TMDB returns to it in a language refresh with TMDB available");
+
+        // Choosing a country after the language while the refresh runs: the running fetch stops, and only the final locale is recorded.
+        var changing = new LibraryStore(Path.Combine(directory, "changing-db")); russian.Save(changing);
+        changing.Save(english603); changing.Save(english603 with { Id = "drive", Path = Path.Combine(directory, "Movies", "Drive (2011).mkv"), Title = "Drive", Year = 2011, MetadataId = 604, ProviderIds = new() { ["tmdb"] = "604" } });
+        var russia = russian with { Country = "RU" };
+        handler.Requests.Clear(); handler.OnTmdb = () => { russia.Save(changing); handler.OnTmdb = null; };
+        using (var tmdb = new MetadataClient("fixture", handler, russian))
+            await AutomaticArtwork.FetchAsync(changing, directory, "fixture", null, default, http, metadata: tmdb);
+        var asked = new[] { "/movie/603", "/movie/604" }.Count(id => handler.Requests.Any(x => x.AbsolutePath.EndsWith(id)));
+        check(asked == 1 && MetadataOptions.FetchedLocale(changing) == english.Locale, "a fetch stops when the locale changes under it and does not record the old one");
+        handler.Requests.Clear();
+        using (var tmdb = new MetadataClient("fixture", handler, russia))
+            await AutomaticArtwork.FetchAsync(changing, directory, "fixture", null, default, http, metadata: tmdb);
+        check(handler.Requests.Any(x => x.AbsolutePath.EndsWith("/movie/603")) && handler.Requests.Any(x => x.AbsolutePath.EndsWith("/movie/604")) &&
+            MetadataOptions.FetchedLocale(changing) == russia.Locale && changing.ByIds(["drive"]).Single().ProviderTitle == "Драйв", "the next fetch refreshes every title in the final locale and records it");
+
+        check(WikipediaMetadata.Title("Тачки (мультфильм)") == "Тачки" && WikipediaMetadata.Title("Шрэк (мультфильм, 2001)") == "Шрэк" &&
+            WikipediaMetadata.Title("Шерлок (телефильм)") == "Шерлок" && WikipediaMetadata.Title("Drive (2011 film)") == "Drive" &&
+            WikipediaMetadata.Title("Матрица (фильм)") == "Матрица" && WikipediaMetadata.Title("Солярис") == "Солярис", "Wikipedia film disambiguations, animated and TV films included, are not shown in titles");
     }
 
     private sealed class LanguageHandler : HttpMessageHandler
     {
         public List<Uri> Requests { get; } = [];
         public bool TmdbDown;
+        public Action? OnTmdb;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var uri = request.RequestUri!; Requests.Add(uri);
             if (uri.Host == "image.tmdb.org") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(ArtworkFixture.Png) });
             if (TmdbDown && uri.Host == "api.themoviedb.org") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
             if (uri.Host.EndsWith("wikipedia.org")) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"query":{"pages":[]}}""", Encoding.UTF8, "application/json") });
+            if (uri.Host == "api.themoviedb.org") OnTmdb?.Invoke();
             var ru = uri.Query.Contains("language=ru-RU");
+            var drive = uri.AbsolutePath.EndsWith("/movie/604");
             var movie = $$"""{"id":603,"title":"{{(ru ? "Матрица" : "The Matrix")}}","original_title":"The Matrix","release_date":"1999-03-31","poster_path":"/matrix.jpg","overview":"{{(ru ? "Хакер узнаёт правду." : "A hacker learns the truth.")}}","genre_ids":[28],"genres":[{"id":28,"name":"Action"}],"runtime":136}""";
             var json = uri.AbsolutePath switch
             {
                 var p when p.EndsWith("/search/movie") => "{\"results\":[" + movie + "]}",
                 var p when p.EndsWith("/movie/603") => movie,
+                var p when drive => $$"""{"id":604,"title":"{{(ru ? "Драйв" : "Drive")}}","original_title":"Drive","release_date":"2011-09-15","poster_path":"/drive.jpg","overview":"{{(ru ? "Водитель." : "A driver.")}}","genres":[{"id":18,"name":"Drama"}],"runtime":100}""",
                 var p when p.EndsWith("/tv/333/season/1") => $$"""{"name":"Season 1","episodes":[{"episode_number":1,"name":"{{(ru ? "Пилот" : "Pilot")}}","overview":"","air_date":"2016-01-01"}]}""",
                 var p when p.EndsWith("/tv/333") => $$"""{"id":333,"name":"{{(ru ? "Сова" : "Owl")}}","original_name":"Owl","first_air_date":"2016-01-01","overview":"{{(ru ? "Описание" : "A show about an owl.")}}","genres":[{"id":18}],"seasons":[{"season_number":1}],"number_of_seasons":1,"number_of_episodes":1}""",
                 _ => """{"results":[],"tv_results":[],"movie_results":[]}"""

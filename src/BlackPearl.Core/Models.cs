@@ -39,6 +39,7 @@ public record MediaItem(string Id, string Path, string Title, string Kind, int? 
     public int BonusOrder => BonusKind switch { "special" => 0, "opening" => 1, "ending" => 2, "trailer" => 3, _ => 4 };
     public string DisplayTitle => Series ?? Title;
     // What people see: a film shows its provider name unless its title was corrected by hand or comes from an NFO file.
+    // Locking a title's whole metadata freezes the provider name it already has, so MetadataLocked alone does not hide it.
     public string ShownName => Series is null && !IsMusic && !string.IsNullOrWhiteSpace(ProviderTitle) &&
         !(LockedFields ?? []).Concat(LocalMetadataFields ?? []).Contains("Title", StringComparer.OrdinalIgnoreCase) ? ProviderTitle : Title;
     public string ShownTitle => Series ?? ShownName;

@@ -120,7 +120,7 @@ public partial class MainWindow : Window
     private int? browseSeason;
     private int libraryCategory;
     private IReadOnlyList<LibraryBreadcrumb> breadcrumbItems = [];
-    private bool artworkBusy, artworkRerun;
+    private bool artworkBusy, artworkRerun, artworkFollowUp;
     private string savedMetadataToken = "";
     private bool displaySpecialsWithinSeasons;
     private ScrollViewer LibraryScroll
@@ -959,10 +959,16 @@ public partial class MainWindow : Window
         MetadataKeyStatus.Text = MetadataToken.Password != savedMetadataToken ? "" : savedMetadataToken.Length > 0 ? "Personal key saved securely." : TmdbCredentials.DefaultStatus;
     }
     private Task FetchArtwork() => FetchArtwork(lifetime.Token);
-    private async Task FetchArtwork(CancellationToken cancellation, bool force = false, MetadataRefresh? refresh = null)
+    private async Task FetchArtwork(CancellationToken cancellation, bool force = false, MetadataRefresh? refresh = null, bool followUp = false)
     {
-        // A forced refresh requested mid-fetch (such as a numbering change) runs next.
-        if (artworkBusy) { if (force) { artworkRerun = true; SetStatus("Metadata will refresh when the current fetch finishes."); } return; }
+        // A forced refresh requested mid-fetch (such as a numbering change) runs next. A follow-up (such as for a new
+        // metadata language) runs unforced once the current fetch finishes, so the usual retry deferrals still apply.
+        if (artworkBusy)
+        {
+            if (force) { artworkRerun = true; SetStatus("Metadata will refresh when the current fetch finishes."); }
+            else if (followUp) artworkFollowUp = true;
+            return;
+        }
         artworkBusy = true;
         var token = savedMetadataToken;
         var progress = new Progress<string>(SetStatus);
@@ -978,7 +984,8 @@ public partial class MainWindow : Window
         finally
         {
             ApplyLibraryUpdates(); artworkBusy = false;
-            if (artworkRerun && !closing) { artworkRerun = false; _ = Guard(async () => { await FetchArtwork(lifetime.Token, true); await RefreshLibrary(); }); }
+            if (artworkRerun && !closing) { artworkRerun = artworkFollowUp = false; _ = Guard(async () => { await FetchArtwork(lifetime.Token, true); await RefreshLibrary(); }); }
+            else if (artworkFollowUp && !closing) { artworkFollowUp = false; _ = Guard(async () => { await FetchArtwork(lifetime.Token, followUp: true); await RefreshLibrary(); }); }
         }
     }
     private async void MatchClick(object sender, RoutedEventArgs e) => await Guard(async () =>

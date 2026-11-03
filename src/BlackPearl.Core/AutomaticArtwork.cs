@@ -61,11 +61,12 @@ public static class AutomaticArtwork
         }
         var groups = snapshot.Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && !x.MetadataLocked).GroupBy(x => numberedGroups.GetValueOrDefault(x.Id) ?? LibraryIdentity.ShowKey(x), StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(group => group.First().Series is not null).ToArray();
-        int fetched = 0, overviews = 0, missing = 0, failed = 0, artworkFailed = 0, deferred = 0; string? error = null;
+        int fetched = 0, overviews = 0, missing = 0, failed = 0, artworkFailed = 0, deferred = 0; string? error = null; var superseded = false;
         var issues = new List<object>();
         foreach (var group in groups)
         {
             ct.ThrowIfCancellationRequested();
+            if (MetadataOptions.LocaleChanged(library, options)) { superseded = true; break; }
             // Complete cached groups need neither provider lookups nor another
             // full-library read for each title during startup.
             if (mode == MetadataRefresh.FillMissing && group.All(x => x.MetadataKind is not null && x.ArtworkFetchedAt > 0 &&
@@ -217,9 +218,12 @@ public static class AutomaticArtwork
             MetadataFetchPolicy.Record(library, "title", library.ByIds(ids), options, token, attemptFailed, attemptUnmatched);
         }
         if (mode != MetadataRefresh.RetryArtwork) library.GroupShowsByProvider();
-        var seriesReport = await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, followRefresh);
-        if (mode != MetadataRefresh.RetryArtwork) await WantedTitles.RefreshAsync(library, directory, token, progress, ct, followRefresh is MetadataRefresh.RefreshText, metadata: tmdb, client: http);
-        if (mode is MetadataRefresh.RefreshText or MetadataRefresh.ReplaceArtwork) MetadataOptions.RecordFetchedLocale(library, options);
+        var seriesReport = superseded ? "Stopped: the metadata language or country changed." : await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, followRefresh);
+        if (!superseded && mode != MetadataRefresh.RetryArtwork) await WantedTitles.RefreshAsync(library, directory, token, progress, ct, followRefresh is MetadataRefresh.RefreshText, metadata: tmdb, client: http);
+        // A refresh counts for its locale only if that locale stayed chosen throughout and TMDB, when chosen, could be asked.
+        if (mode is MetadataRefresh.RefreshText or MetadataRefresh.ReplaceArtwork && !superseded && !MetadataOptions.LocaleChanged(library, options) &&
+            (tmdb is not null || !options.ProviderOrder.Contains("tmdb")))
+            MetadataOptions.RecordFetchedLocale(library, options);
         var unresolved = outstanding.Snapshot();
         var summary = $"Posters: {fetched} added · Overviews: {overviews} added · {missing} incomplete/unmatched · {failed} provider failures · {artworkFailed} artwork failures · {deferred} titles deferred. Outstanding issues: {unresolved.Length}." + (error is null ? "" : " " + error) + " " + seriesReport;
         Directory.CreateDirectory(directory);

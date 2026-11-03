@@ -65,6 +65,7 @@ public static class SeriesMetadata
         foreach (var group in groups)
         {
             ct.ThrowIfCancellationRequested();
+            if (MetadataOptions.LocaleChanged(library, options)) break;
             if (mode == MetadataRefresh.FillMissing && !rechecking && group.All(x => x.MetadataFetchedAt > 0 &&
                 (options.RefreshDays <= 0 || x.MetadataFetchedAt > Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds) &&
                 (!force && refresh is null || x.Episode is null || !string.IsNullOrWhiteSpace(x.EpisodeTitle)) &&

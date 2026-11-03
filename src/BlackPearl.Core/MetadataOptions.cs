@@ -10,6 +10,8 @@ public record MetadataOptions(string[]? Providers = null, string Language = "en-
     private const string FetchedLocaleKey = "metadata-fetched-locale";
     public static string FetchedLocale(LibraryStore library) => library.Setting(FetchedLocaleKey) ?? new MetadataOptions().Locale;
     internal static void RecordFetchedLocale(LibraryStore library, MetadataOptions options) => library.Setting(FetchedLocaleKey, options.Locale);
+    // A fetch stops once the saved language or country differs from the one it started with; the next fetch uses the new one.
+    internal static bool LocaleChanged(LibraryStore library, MetadataOptions options) => Load(library).Locale != options.Locale;
     public static MetadataOptions Load(LibraryStore library)
     {
         try { return library.Setting("metadata-options") is { } json ? Wire.Read<MetadataOptions>(json) : new(); }

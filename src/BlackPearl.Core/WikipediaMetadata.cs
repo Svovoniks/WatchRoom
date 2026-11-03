@@ -12,7 +12,8 @@ internal static class WikipediaMetadata
     private static string Provider(string language) => language == "en" ? "wikipedia" : "wikipedia:" + language;
     private static string Edition(string? provider) => provider == "wikipedia:ru" ? "ru" : "en";
     private static string? Text(JsonElement page, string key) => page.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
-    private static string Title(string title) => Regex.Replace(title, @"\s*\([^)]*\b(?:film|фильм)[^)]*\)\s*$", "", RegexOptions.IgnoreCase);
+    // Disambiguation such as "(film)", "(2001 film)", "(TV film)", "(мультфильм)" or "(телефильм, 2010)" is not part of the title.
+    internal static string Title(string title) => Regex.Replace(title, @"\s*\([^)]*(?:film|фильм)[^)]*\)\s*$", "", RegexOptions.IgnoreCase);
     private static bool Russian(string title) => Regex.IsMatch(title, @"\p{IsCyrillic}");
     private static string Api(string language) => $"https://{language}.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&redirects=1&prop=pageimages%7Ccategories%7Cextracts%7Clanglinks%7Cpageprops&exintro=1&explaintext=1&exlimit=max&piprop=thumbnail&pithumbsize=500&pilicense=any&cllimit=50&lllang={(language == "ru" ? "en" : "ru")}&lllimit=20&";
     private static async Task<JsonDocument> Get(HttpClient http, string language, string query, CancellationToken ct)
