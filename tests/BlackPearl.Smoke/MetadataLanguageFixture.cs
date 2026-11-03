@@ -102,13 +102,15 @@ static class MetadataLanguageFixture
         using (var tmdb = new MetadataClient("fixture", handler, russian))
             await SeriesMetadata.FetchAsync(shows, directory, "fixture", null, default, http, metadata: tmdb, stopOnLocaleChange: () => stopped = true);
         check(stopped && handler.Requests.Count(x => x.AbsolutePath.Contains("/season/")) == 1, "the episode phase stops at the next show once the locale changes, and says so");
+        check(shows.Setting("missing-episodes-checked") is null, "a stopped episode phase does not count missing-episode placeholders as redone for every show");
         var asked2 = new LibraryStore(Path.Combine(directory, "shows-asked-db")); russian.Save(asked2);
         foreach (var entry in shows.All()) asked2.Save(entry with { MetadataFetchedAt = 0, EpisodeTitle = null, TmdbFields = null });
         handler.Requests.Clear();
         handler.OnTmdb = () => { if (handler.Requests.Any(x => x.AbsolutePath.Contains("/season/"))) { russia.Save(asked2); handler.OnTmdb = null; } };
         using (var tmdb = new MetadataClient("fixture", handler, russian))
             await SeriesMetadata.FetchAsync(asked2, directory, "fixture", null, default, http, metadata: tmdb);
-        check(handler.Requests.Count(x => x.AbsolutePath.Contains("/season/")) == 2, "a fetch nobody asked to stop keeps going through every show");
+        check(handler.Requests.Count(x => x.AbsolutePath.Contains("/season/")) == 2 && asked2.Setting("missing-episodes-checked") is not null,
+            "a fetch nobody asked to stop keeps going through every show and records its placeholder check");
 
         // A full automatic fetch passes that stop through: a locale change in the episode phase leaves the remaining shows and the locale for the follow-up.
         var full = new LibraryStore(Path.Combine(directory, "shows-full-db")); russian.Save(full);

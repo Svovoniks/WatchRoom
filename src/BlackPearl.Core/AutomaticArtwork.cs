@@ -221,7 +221,7 @@ public static class AutomaticArtwork
             MetadataFetchPolicy.Record(library, "title", library.ByIds(ids), options, token, attemptFailed, attemptUnmatched);
         }
         if (mode != MetadataRefresh.RetryArtwork) library.GroupShowsByProvider();
-        var seriesReport = superseded ? "Stopped: the metadata language or country changed." : await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, followRefresh,
+        var seriesReport = superseded ? MetadataOptions.LocaleStopped : await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, followRefresh,
             automatic ? () => superseded = true : null);
         if (!superseded && mode != MetadataRefresh.RetryArtwork) await WantedTitles.RefreshAsync(library, directory, token, progress, ct, followRefresh is MetadataRefresh.RefreshText, metadata: tmdb, client: http);
         // A refresh counts for its locale only if that locale stayed chosen throughout and TMDB, when chosen, could be asked.
