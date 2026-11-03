@@ -260,24 +260,12 @@ public static class SeriesMetadata
         if (library.Wanted(LibraryIdentity.ShowKey(show)) is { } tracked) { WantedTitles.Reconcile(library, directory, tracked, tracked.Provider == provider ? seasons : null); return; }
         var existing = library.InShow(show).ToArray();
         var files = existing.Where(x => !x.IsVirtual && !x.IsExtra && !x.IsBonus).ToArray();
-        var physical = files.SelectMany(x => LibraryIdentity.EpisodeNumbers(x).Select(n => (x.Season, Number: n))).ToHashSet();
-        var listed = seasons.SelectMany(s => s.Episodes.Select(e => ((int?)s.Number, e.Number))).ToHashSet();
-        // Files numbered another way than this provider's list (another provider's seasons, numbers running on across
-        // seasons, a wrong match) can't tell what is missing, so a show only gets placeholders when at most one file, or 5% of them, doesn't fit.
-        var regular = files.Where(x => x.Season is not 0).ToArray();
-        var misfits = regular.Count(x => x.Episode is null || LibraryIdentity.EpisodeNumbers(x).Any(n => !listed.Contains((x.Season, n))));
-        var fits = !files.Any(x => x.MetadataProvider is { } other && other != provider) && misfits <= Math.Max(1, regular.Length / 20);
-        // A file whose number the scan couldn't read, such as "One Piece - 492A", still holds the episode its name gives,
-        // and a provider listing one episode in two seasons has it once the file of either is here.
-        var unread = files.Where(x => x.Episode is null).SelectMany(x => Regex.Matches(Path.GetFileNameWithoutExtension(x.Path), @"(?<![\d.])\d{2,4}(?=[ab]?(?![\d.p]))")
-            .Select(m => int.Parse(m.Value))).ToHashSet();
-        var aired = files.Where(x => x.AirDate is not null && !string.IsNullOrWhiteSpace(x.EpisodeTitle)).Select(x => (x.AirDate, x.EpisodeTitle)).ToHashSet();
+        var disk = OnDisk(files, seasons.SelectMany(s => s.Episodes.Select(e => (s.Number, e.Number))), provider);
         var wanted = new HashSet<string>();
         // Specials are left out: providers list promos, shorts and featurettes there that few libraries keep.
-        foreach (var season in seasons.Where(s => fits && s.Number > 0)) foreach (var episode in season.Episodes)
+        foreach (var season in seasons.Where(s => disk.Fits && s.Number > 0)) foreach (var episode in season.Episodes)
         {
-            if (physical.Contains(((int?)season.Number, episode.Number)) || unread.Contains(episode.Number) || aired.Contains((episode.AirDate, episode.Title)) ||
-                !DateOnly.TryParse(episode.AirDate, out var date)) continue;
+            if (disk.Has(season.Number, episode.Number, episode.AirDate, episode.Title) || !DateOnly.TryParse(episode.AirDate, out var date)) continue;
             var upcoming = date > DateOnly.FromDateTime(DateTime.UtcNow);
             if (upcoming ? !options.ImportUpcoming : !options.ImportMissing) continue;
             var key = "missing-" + LibraryIdentity.Hash($"{LibraryIdentity.ShowKey(show)}:{season.Number}:{episode.Number}"); wanted.Add(key);
@@ -288,5 +276,29 @@ public static class SeriesMetadata
             library.Save(TmdbRetention.Record(show, placeholder, provider, TmdbRetention.EpisodeFields));
         }
         library.RemoveVirtual(existing.Where(x => x.IsVirtual && !wanted.Contains(x.Id)).Select(x => x.Id));
+    }
+
+    // Which of a provider's episodes a show's files hold. Files numbered another way than this provider's list (another
+    // provider's seasons, numbers running on across seasons, a wrong match) can't tell what is missing, so the list only
+    // fits when at most one file, or 5% of them, doesn't fit it.
+    internal sealed record EpisodesOnDisk(bool Fits, HashSet<(int? Season, int Number)> Physical, HashSet<int> Unread, HashSet<(string? AirDate, string? EpisodeTitle)> Aired)
+    {
+        public bool Has(int season, int episode, string? airDate = null, string? title = null) =>
+            Physical.Contains((season, episode)) || Unread.Contains(episode) || Aired.Contains((airDate, title));
+    }
+    // sameProvider: placeholders also distrust files matched with another provider; auto-download judges by the numbers alone.
+    internal static EpisodesOnDisk OnDisk(IReadOnlyCollection<MediaItem> files, IEnumerable<(int Season, int Episode)> listing, string provider, bool sameProvider = true)
+    {
+        var physical = files.SelectMany(x => LibraryIdentity.EpisodeNumbers(x).Select(n => (x.Season, Number: n))).ToHashSet();
+        var listed = listing.Select(x => ((int?)x.Season, x.Episode)).ToHashSet();
+        var regular = files.Where(x => x.Season is not 0).ToArray();
+        var misfits = regular.Count(x => x.Episode is null || LibraryIdentity.EpisodeNumbers(x).Any(n => !listed.Contains((x.Season, n))));
+        var fits = (!sameProvider || !files.Any(x => x.MetadataProvider is { } other && other != provider)) && misfits <= Math.Max(1, regular.Length / 20);
+        // A file whose number the scan couldn't read, such as "One Piece - 492A", still holds the episode its name gives,
+        // and a provider listing one episode in two seasons has it once the file of either is here.
+        var unread = files.Where(x => x.Episode is null).SelectMany(x => Regex.Matches(Path.GetFileNameWithoutExtension(x.Path), @"(?<![\d.])\d{2,4}(?=[ab]?(?![\d.p]))")
+            .Select(m => int.Parse(m.Value))).ToHashSet();
+        var aired = files.Where(x => x.AirDate is not null && !string.IsNullOrWhiteSpace(x.EpisodeTitle)).Select(x => (x.AirDate, x.EpisodeTitle)).ToHashSet();
+        return new(fits, physical, unread, aired);
     }
 }

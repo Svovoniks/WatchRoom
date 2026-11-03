@@ -30,7 +30,7 @@ public partial class MainWindow
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidDataException or ArgumentException)
         { Dialogs.Alert(this, row.Name + " settings", "Couldn't load plugin settings: " + ex.Message); }
     }
-    private string AcquisitionPreferenceKey(AcquisitionPlugin plugin, AcquisitionRequest request) => "acquisition:" + plugin.Id + ":" + request.ContentType + ":" + request.Title + ":" + request.Year + ":" + request.Season;
+    private static string AcquisitionPreferenceKey(AcquisitionPlugin plugin, AcquisitionRequest request) => ContentAcquisition.PreferenceKey(plugin.Id, request);
     private AcquisitionOptions? AcquisitionPreferences(AcquisitionPlugin plugin, AcquisitionRequest request)
     {
         var json = library.Setting(AcquisitionPreferenceKey(plugin, request));
@@ -51,7 +51,7 @@ public partial class MainWindow
     {
         var plugins = PluginsFor(request);
         if (plugins.Length == 0) return;
-        var providerKey = "acquisition-provider:" + request.ContentType + ":" + request.Title + ":" + request.Year + ":" + request.Season;
+        var providerKey = ContentAcquisition.ProviderKey(request);
         initial ??= plugins.FirstOrDefault(x => x.Id == library.Setting(providerKey));
         var dialog = new AcquisitionPicker(this, plugins, request, initial, plugin => AcquisitionPreferences(plugin, request), existing: ContentAcquisition.ExistingNames(request, items));
         if (dialog.ShowDialog() != true || dialog.Selection is not { } choice) return;
@@ -144,6 +144,7 @@ public partial class MainWindow
             AcquireSeasonButton.Content = $"Acquire season · {count} {(count == 1 ? "episode" : "episodes")}";
             AcquireSeasonButton.ToolTip = (plugins.Length == 1 ? $"Ask {plugins[0].Name} to get" : "Ask an acquisition plugin to get") + $" the missing and upcoming episodes of {request.Name}";
         }
+        ShowFollowButton();
     }
     private async void AcquireSeasonClick(object sender, RoutedEventArgs e) => await Guard(async () =>
     {

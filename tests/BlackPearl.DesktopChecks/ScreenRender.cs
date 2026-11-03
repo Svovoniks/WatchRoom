@@ -85,7 +85,7 @@ static class ScreenRender
             if (wanted.FirstOrDefault(x => x.IsMovie) is { } wantedFilm && store.Get(wantedFilm.Id) is { } placeholder) { Call("Select", placeholder); await Capture($"{theme}-wanted-film"); }
             foreach (var page in new[] { "Queues", "Rooms", "Folders", "Room" }) { Call("ShowPage", page); await Capture($"{theme}-{page.ToLowerInvariant()}"); }
             Call("ShowPage", "Settings");
-            foreach (var section in new[] { "Profile", "Metadata", "Playback", "Appearance", "Updates" })
+            foreach (var section in new[] { "Downloads", "Profile", "Metadata", "Playback", "Appearance", "Updates" })
             { Call("ShowPreferenceSection", section); await Capture($"{theme}-settings-{section.ToLowerInvariant()}"); }
         }
         Set("light", false); Call("ApplyTheme");

@@ -24,6 +24,8 @@ AppVersion={#AppVersion}
 DefaultDirName={localappdata}\Programs\BlackPearl
 DefaultGroupName=BlackPearl
 PrivilegesRequired=lowest
+; Windows 10 version 1809 or later, which the app is built for.
+MinVersion=10.0.17763
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputFolder}
@@ -130,8 +132,18 @@ Root: HKCU; Subkey: "Software\BlackPearl\Capabilities\FileAssociations"; ValueTy
 Root: HKCU; Subkey: "Software\Classes\.ogv\OpenWithProgids"; ValueType: string; ValueName: "BlackPearl.Video"; ValueData: ""; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Classes\Applications\BlackPearl.exe\SupportedTypes"; ValueType: string; ValueName: ".ogv"; ValueData: ""
 Root: HKCU; Subkey: "Software\BlackPearl\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ogv"; ValueData: "BlackPearl.Video"
+; Auto-download registers these itself when it's turned on (see FollowSystem.cs); uninstalling removes them.
+Root: HKCU; Subkey: "Software\Classes\blackpearl-downloads"; ValueType: none; Flags: uninsdeletekey dontcreatekey
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\Svovoniks.BlackPearl.Downloads"; ValueType: none; Flags: uninsdeletekey dontcreatekey
 [Run]
 Filename: "{app}\BlackPearl.exe"; Description: "Open BlackPearl"; Flags: nowait postinstall skipifsilent
+[UninstallRun]
+; Auto-download's hourly check, if it was ever turned on.
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""BlackPearl episode check"" /F"; Flags: runhidden; RunOnceId: "RemoveEpisodeCheck"
+[UninstallDelete]
+; Auto-download's desktop icon, if episodes were waiting.
+Type: files; Name: "{userdesktop}\* new episode - BlackPearl.lnk"
+Type: files; Name: "{userdesktop}\* new episodes - BlackPearl.lnk"
 #endif
 
 [Code]

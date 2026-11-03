@@ -40,7 +40,7 @@ public partial class MainWindow
     private PluginCatalog? pluginCatalog;
     private string? pluginCatalogSource = AppEnvironment.Get("PLUGIN_CATALOG");
     private bool pluginsBusy, pluginViewChosen;
-    private static string PluginsDirectory => AppEnvironment.Get("PLUGINS") ?? Path.Combine(App.DataDirectory, "plugins");
+    private static string PluginsDirectory => Program.PluginsDirectory;
     private static string TypeNames(IEnumerable<string> types) => string.Join(" · ", types.Select(ContentAcquisition.ContentTypeName));
 
     private void LoadAcquisitionPlugins()

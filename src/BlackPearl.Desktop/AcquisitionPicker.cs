@@ -39,6 +39,9 @@ internal sealed class AcquisitionPicker : InAppDialog
     // Opening searches, picks the provider title that matches and ticks the best release of each episode; the
     // download still waits for the user. Checks turn this off to walk through each step.
     private readonly bool automatic;
+    // Auto-download setup: the user finds the show's releases to check the source is right, and the main button saves
+    // the options for auto-download instead of downloading anything.
+    private readonly bool setup;
     private string? pickedTitle;
     private int generation;
     private const double SidebarWidth = 250;
@@ -47,10 +50,10 @@ internal sealed class AcquisitionPicker : InAppDialog
 
     internal AcquisitionPicker(Window owner, AcquisitionPlugin[] plugins, AcquisitionRequest request, AcquisitionPlugin? initial,
         Func<AcquisitionPlugin, AcquisitionOptions?> saved,
-        Func<AcquisitionPlugin, AcquisitionRequest, CancellationToken, Task<AcquisitionResult>>? run = null, bool automatic = true, string[]? existing = null)
+        Func<AcquisitionPlugin, AcquisitionRequest, CancellationToken, Task<AcquisitionResult>>? run = null, bool automatic = true, string[]? existing = null, bool setup = false)
     {
-        Owner = owner; Title = "Acquire · " + request.Name; Width = 880; Height = 640;
-        this.request = request; this.saved = saved; this.run = run ?? ContentAcquisition.RunAsync; this.automatic = automatic; this.existing = existing ?? [];
+        Owner = owner; Title = (setup ? "Auto-download · " + request.Title : "Acquire · " + request.Name); Width = 880; Height = 640;
+        this.request = request; this.saved = saved; this.run = run ?? ContentAcquisition.RunAsync; this.automatic = automatic; this.existing = existing ?? []; this.setup = setup;
         NameScope.SetNameScope(this, new NameScope());
         var movie = request.Scope == "movie";
         var root = new DockPanel();
@@ -79,6 +82,11 @@ internal sealed class AcquisitionPicker : InAppDialog
         download = new Button { Content = "Download", IsEnabled = false, MinWidth = 150 }; download.SetResourceReference(StyleProperty, "Primary"); download.Margin = new Thickness(8, 0, 0, 0); buttons.Children.Add(download);
         remember = new CheckBox { Content = "Remember these options for " + request.Title, IsChecked = true, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0) };
         footer.Children.Add(remember);
+        if (setup)
+        {
+            remember.Visibility = Visibility.Collapsed;
+            footer.Children.Add(Muted("New episodes are found with these options. Nothing downloads until you say so.", 12.5));
+        }
 
         var body = new Grid { Margin = new Thickness(0, 18, 0, 0) }; root.Children.Add(body);
         body.ColumnDefinitions.Add(new()); body.ColumnDefinitions.Add(new() { Width = new GridLength(SidebarWidth + 22) });
@@ -309,7 +317,7 @@ internal sealed class AcquisitionPicker : InAppDialog
         var packs = selected.Length - episodes.Length;
         var unmatched = episodes.Any(x => !x.Matches);
         var repeated = episodes.Select(x => x.Episode).Distinct().Count() != episodes.Length;
-        download.IsEnabled = pending is null && (!plugin.Interactive || fresh && !shows && selected.Length > 0 && !unmatched && !repeated);
+        download.IsEnabled = pending is null && (setup ? plugin.Interactive && fresh && !shows : !plugin.Interactive || fresh && !shows && selected.Length > 0 && !unmatched && !repeated);
         selectMatches.IsEnabled = fresh && !shows;
         template.IsEnabled = fresh && !shows && selected.FirstOrDefault()?.SuggestedFilter is { Length: > 0 };
         if (fresh && !shows && selected.Length == 0 && Picks().Length > 0) status.Text = request.Scope == "movie" ? "Tick a release, or use Select best match." : "Tick releases, or use Select best matches to take the best one of each episode.";
@@ -318,6 +326,11 @@ internal sealed class AcquisitionPicker : InAppDialog
             : repeated ? "Choose one release per episode, or use Select best matches."
             : $"{Count(selected.Length, "release")} ticked" + (packs == 0 ? "" : packs == 1 ? ", including a season pack or special with no episode number" : $", including {packs} season packs or specials with no episode number") + ". Nothing downloads until you choose Download" + (pickedTitle is null ? "." : "; Search to choose a different title.");
         download.Content = !plugin.Interactive ? "Acquire with " + plugin.Name : selected.Length == 0 || shows ? "Download" : "Download " + Count(selected.Length, "release");
+        if (setup)
+        {
+            download.Content = "Use for auto-download";
+            if (fresh && !shows) status.Text = pickedTitle is null ? "If these are releases of " + request.Title + ", choose Use for auto-download." : $"Releases of {pickedTitle}. If that's the right show, choose Use for auto-download; Search to choose another title.";
+        }
         RefreshList();
     }
     private async Task Browse(string action, AcquisitionChoice? title = null)
@@ -363,7 +376,7 @@ internal sealed class AcquisitionPicker : InAppDialog
                 if (shows && results.Items.Count > 0) results.SelectedIndex = 0;
                 if (picking && shows && fresh && results.Items.Count > 1) status.Text = "Several titles could be this one. Click the right one to see its releases.";
                 // In the automatic flow every list of releases arrives with the best release of each episode ticked.
-                if (automatic && fresh && !shows) foreach (var pick in Picks()) results.SelectedItems.Add(pick);
+                if (automatic && !setup && fresh && !shows) foreach (var pick in Picks()) results.SelectedItems.Add(pick);
             }
         }
         catch (OperationCanceledException) { }
@@ -380,17 +393,11 @@ internal sealed class AcquisitionPicker : InAppDialog
     }
     // The provider title that is clearly this show or film: its name with the year, then its name alone when only one
     // title has it, then the only title found.
-    private AcquisitionChoice? BestTitle(AcquisitionChoice[] titles)
-    {
-        static string Key(string? text) => new((text ?? "").Normalize(System.Text.NormalizationForm.FormD).Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-        var names = new[] { request.Title, request.OriginalTitle, query.Text }.Where(x => !string.IsNullOrWhiteSpace(x)).Select(Key).ToHashSet();
-        var dated = request.Year is { } year ? names.Select(x => x + year).ToHashSet() : [];
-        var named = titles.Where(x => names.Contains(Key(x.Title))).ToArray();
-        return titles.FirstOrDefault(x => dated.Contains(Key(x.Title))) ?? (named.Length == 1 ? named[0] : null) ?? (titles.Length == 1 ? titles[0] : null);
-    }
+    private AcquisitionChoice? BestTitle(AcquisitionChoice[] titles) => ContentAcquisition.BestTitle(titles, [request.Title, request.OriginalTitle, query.Text], request.Year);
     private void Confirm()
     {
         if (!download.IsEnabled) return;
+        if (setup) { Selection = (Plugin, request with { Options = Options() }, true); DialogResult = true; return; }
         if (!Plugin.Interactive) { Selection = (Plugin, request, false); DialogResult = true; return; }
         Selection = (Plugin, request with { Action = "acquire", Options = Options(), SelectedReleases = results.SelectedItems.Cast<AcquisitionChoice>().Select(x => x.Id).ToArray() }, remember.IsChecked == true);
         DialogResult = true;

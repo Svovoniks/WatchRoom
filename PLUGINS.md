@@ -130,6 +130,29 @@ requests omit `action`, `options` and `selectedReleases` (or send null); existin
 command-only plugins retain their direct acquisition behavior.
 
 BlackPearl saves opted-in choices by plugin, title, year, content type and season.
+
+### Auto-download
+
+Following a show (**Auto-download new episodes** on its page) uses the same protocol
+without the picker. Following first opens the picker in a setup mode: you find the
+show's releases to check the source, and **Use for auto-download** saves the options
+for that season without downloading anything. Each check, in the app or in the
+hourly background check, then asks for one season's newly aired episodes:
+
+- `releases` with the season's saved `options` (its `sourceUrl` included). A season
+  without saved options sends `search` with the setup's title, quality and filter.
+  If that returns `stage: "shows"`, BlackPearl lists `releases` for the title that
+  clearly matches the show, and saves those options for the season.
+- From the releases, it takes the best `matches` release of each episode, as
+  **Select best matches** would. Releases with `assignable: true` (season packs) are
+  never picked automatically. Give `episode` as `SxxEyy`, or as the episode number.
+- Nothing is downloaded until the user approves the notification, or its countdown
+  ends. Then BlackPearl sends `acquire` with the same options and exactly the
+  release IDs it showed, one request per season.
+
+A plugin's `search` and `releases` may therefore run without a window open, every
+hour while an episode is being looked for. They must stay read-only and finish within
+`timeoutSeconds`.
 It cancels pending searches on edits or close and ignores stale responses.
 
 ### Settings form

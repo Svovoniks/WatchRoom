@@ -18,6 +18,12 @@ static class Program
         // Settings > Plugins checks an empty local catalog, so opening the tab never reaches GitHub.
         var emptyCatalog = Path.Combine(Path.GetTempPath(), "blackpearl-empty-catalog"); Directory.CreateDirectory(emptyCatalog);
         Environment.SetEnvironmentVariable("BLACKPEARL_PLUGIN_CATALOG", emptyCatalog);
+        // Auto-download never registers a task, link or notification identity with Windows during the checks; the probe does, on its own scratch library.
+        // Its desktop icon goes to a scratch folder, never the real desktop.
+        var desktop = Path.Combine(Path.GetTempPath(), "blackpearl-check-desktop-" + Guid.NewGuid().ToString("N")[..8]); Directory.CreateDirectory(desktop);
+        Environment.SetEnvironmentVariable("BLACKPEARL_DESKTOP", desktop);
+        if (args.FirstOrDefault() == "--follow-system-probe") { FollowSystemProbe.Run(args[1]); return; }
+        Environment.SetEnvironmentVariable("BLACKPEARL_FOLLOW_SYSTEM", "off");
         if (args.FirstOrDefault() == "--video-frames")
         {
             VideoFrameChecks.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? Path.Combine("artifacts", "video-frames-" + Guid.NewGuid().ToString("N")))).GetAwaiter().GetResult(); return;
@@ -354,6 +360,7 @@ static class Program
                 UnavailableLibraryChecks.Run(window, activeStore, directory, Check);
                 WantedLibraryChecks.Run(window, activeStore, directory, Check);
                 AcquisitionChecks.Run(window, activeStore, directory, Check);
+                FollowingChecks.Run(window, activeStore, directory, Check);
                 await PlayerShutdownChecks.Run(window, Check);
                 await RoomRecoveryChecks.Run(window, directory, Check);
                 await GuestRecoveryChecks.Run(window, directory, Check);

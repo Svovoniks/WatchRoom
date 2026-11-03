@@ -284,7 +284,11 @@
      <Grid Margin="-8,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ItemsControl x:Name="LibraryBreadcrumbs" Button.Click="BreadcrumbClick" Style="{StaticResource LibraryBreadcrumbs}" AutomationProperties.Name="Library location"/><TextBlock Grid.Column="1" x:Name="ResultCount" Width="100" TextAlignment="Right" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="12,0,8,0"/></Grid>
      <Expander x:Name="SeasonInformation" Foreground="{DynamicResource Muted}" Header="Season details" Visibility="Collapsed" Margin="-6,0,0,10"><TextBlock x:Name="SeasonSummary" Style="{StaticResource MutedText}" Margin="0,8,0,8" MaxWidth="760" HorizontalAlignment="Left"/></Expander>
      <!-- Asks an acquisition plugin for the missing and upcoming episodes of the season being browsed. -->
-     <Button x:Name="AcquireSeasonButton" Content="Acquire season" ContentTemplate="{StaticResource DownloadContent}" Click="AcquireSeasonClick" Visibility="Collapsed" HorizontalAlignment="Left" Margin="0,0,0,12" ToolTip="Ask an acquisition plugin to get this season's missing episodes" AutomationProperties.Name="Acquire season"/>
+     <WrapPanel>
+      <Button x:Name="AcquireSeasonButton" Content="Acquire season" ContentTemplate="{StaticResource DownloadContent}" Click="AcquireSeasonClick" Visibility="Collapsed" HorizontalAlignment="Left" Margin="0,0,10,12" ToolTip="Ask an acquisition plugin to get this season's missing episodes" AutomationProperties.Name="Acquire season"/>
+      <!-- Auto-download: finds the new episodes of the show being browsed as they air, and downloads them after the user's OK. -->
+      <Button x:Name="FollowShowButton" Click="FollowShowClick" Visibility="Collapsed" HorizontalAlignment="Left" Margin="0,0,0,12" AutomationProperties.Name="Auto-download new episodes"><StackPanel Orientation="Horizontal"><TextBlock x:Name="FollowShowIcon" Text="&#xE896;" Style="{StaticResource Icon}" FontSize="13" Margin="0,0,9,0"/><TextBlock x:Name="FollowShowText" Text="Auto-download new episodes" VerticalAlignment="Center"/></StackPanel></Button>
+     </WrapPanel>
      <!-- What a wanted show has and still needs, while browsing it. -->
      <ContentControl x:Name="WantedLibraryPanel" Visibility="Collapsed" Focusable="False" Margin="0,0,0,14"/>
     </StackPanel>
@@ -546,6 +550,7 @@
       <WrapPanel x:Name="PreferenceSections">
        <Button Content="Folders" Tag="Folders" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
        <Button Content="Plugins" Tag="Plugins" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
+       <Button Content="Downloads" Tag="Downloads" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
        <Button Content="Profile" Tag="Profile" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
        <Button Content="Metadata" Tag="Metadata" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
        <Button Content="Playback" Tag="Playback" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
@@ -884,6 +889,10 @@
        <WrapPanel x:Name="ThemeChoices" Margin="0,14,0,-10" AutomationProperties.Name="Color theme"/>
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
+     <!-- Downloads: auto-download of new episodes. Built in Following.cs; changes apply at once. -->
+     <ScrollViewer x:Name="DownloadsPreferences" Tag="Downloads" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+      <ContentControl x:Name="DownloadsContent" Focusable="False" MaxWidth="860" HorizontalAlignment="Left" Margin="0,0,16,12"/>
+     </ScrollViewer>
      <ScrollViewer x:Name="UpdatePreferences" Tag="Updates" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,18,12">
       <Border Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="App updates" Style="{StaticResource CardTitle}" Margin="0,0,0,6"/><CheckBox x:Name="AutoCheckUpdates" Content="Automatically check for updates" Checked="AutoUpdatesChanged" Unchecked="AutoUpdatesChanged"/><TextBlock Text="Checks at startup and every six hours. Updates install only when you click Update. Update preferences save immediately." Style="{StaticResource Hint}" Margin="0,4,0,0"/><Button x:Name="CheckUpdatesButton" Content="Check for updates" ContentTemplate="{StaticResource RefreshContent}" Click="CheckUpdatesClick" HorizontalAlignment="Left" Margin="0,14,0,8"/><TextBlock x:Name="UpdateStatus" Style="{StaticResource MutedText}" AutomationProperties.LiveSetting="Polite"/>
