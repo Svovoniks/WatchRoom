@@ -14,7 +14,8 @@ public static class SeriesMetadata
     private static async Task<JsonDocument> Json(HttpClient http, string url, CancellationToken ct) => JsonDocument.Parse(await MetadataHttp.GetString(http, url, ct));
 
     public static async Task<string> FetchAsync(LibraryStore library, string directory, string? token, IProgress<string>? progress,
-        CancellationToken ct, HttpClient http, bool force = false, MetadataClient? metadata = null, MetadataRefresh? refresh = null)
+        CancellationToken ct, HttpClient http, bool force = false, MetadataClient? metadata = null, MetadataRefresh? refresh = null,
+        Action? stopOnLocaleChange = null)
     {
         var options = MetadataOptions.Load(library); var mode = refresh ?? (force ? MetadataRefresh.RefreshText : MetadataRefresh.FillMissing);
         using var issueScope = MetadataIssues.Begin(library); var outstanding = issueScope.State;
@@ -65,12 +66,13 @@ public static class SeriesMetadata
         foreach (var group in groups)
         {
             ct.ThrowIfCancellationRequested();
-            if (MetadataOptions.LocaleChanged(library, options)) break;
             if (mode == MetadataRefresh.FillMissing && !rechecking && group.All(x => x.MetadataFetchedAt > 0 &&
                 (options.RefreshDays <= 0 || x.MetadataFetchedAt > Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds) &&
                 (!force && refresh is null || x.Episode is null || !string.IsNullOrWhiteSpace(x.EpisodeTitle)) &&
                 (x.SeasonPoster is null || ArtworkCache.IsUsable(x.SeasonPoster)) &&
                 (x.EpisodePoster is null || ArtworkCache.IsUsable(x.EpisodePoster)))) continue;
+            // An automatic fetch stops once the saved locale changes; the caller then leaves the locale unrecorded.
+            if (stopOnLocaleChange is not null && MetadataOptions.LocaleChanged(library, options)) { stopOnLocaleChange(); break; }
             var entries = group.ToArray(); var item = entries[0];
             if (!force && refresh is null && !rechecking && MetadataFetchPolicy.Deferred(library, "episodes", entries, options, token))
             { deferred++; MetadataDiagnostics.Record("metadata-fetch-deferred", new { Stage = "episodes", item.Title, RetryAt = MetadataFetchPolicy.RetryAt(library, "episodes", item.Id) }); continue; }

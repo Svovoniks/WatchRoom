@@ -94,6 +94,32 @@ static class MetadataLanguageFixture
         check(handler.Requests.Any(x => x.AbsolutePath.EndsWith("/movie/603")) && handler.Requests.Any(x => x.AbsolutePath.EndsWith("/movie/604")) &&
             MetadataOptions.FetchedLocale(changing) == russia.Locale && changing.ByIds(["drive"]).Single().ProviderTitle == "Драйв", "the next fetch refreshes every title in the final locale and records it");
 
+        // The episode phase reports its stop, so switching the locale away and back during it does not count the refresh as complete.
+        var shows = new LibraryStore(Path.Combine(directory, "shows-db")); russian.Save(shows);
+        shows.Save(episode); shows.Save(episode with { Id = "lynx", Path = Path.Combine(directory, "Shows", "Lynx", "Lynx S01E01.mkv"), Title = "Lynx", Series = "Lynx", ShowId = "lynx-show", MetadataId = 334, ProviderIds = new() { ["tmdb"] = "334" } });
+        var stopped = false; handler.Requests.Clear();
+        handler.OnTmdb = () => { if (handler.Requests.Any(x => x.AbsolutePath.Contains("/season/"))) { russia.Save(shows); handler.OnTmdb = null; } };
+        using (var tmdb = new MetadataClient("fixture", handler, russian))
+            await SeriesMetadata.FetchAsync(shows, directory, "fixture", null, default, http, metadata: tmdb, stopOnLocaleChange: () => stopped = true);
+        check(stopped && handler.Requests.Count(x => x.AbsolutePath.Contains("/season/")) == 1, "the episode phase stops at the next show once the locale changes, and says so");
+        var asked2 = new LibraryStore(Path.Combine(directory, "shows-asked-db")); russian.Save(asked2);
+        foreach (var entry in shows.All()) asked2.Save(entry with { MetadataFetchedAt = 0, EpisodeTitle = null, TmdbFields = null });
+        handler.Requests.Clear();
+        handler.OnTmdb = () => { if (handler.Requests.Any(x => x.AbsolutePath.Contains("/season/"))) { russia.Save(asked2); handler.OnTmdb = null; } };
+        using (var tmdb = new MetadataClient("fixture", handler, russian))
+            await SeriesMetadata.FetchAsync(asked2, directory, "fixture", null, default, http, metadata: tmdb);
+        check(handler.Requests.Count(x => x.AbsolutePath.Contains("/season/")) == 2, "a fetch nobody asked to stop keeps going through every show");
+
+        // A full automatic fetch passes that stop through: a locale change in the episode phase leaves the remaining shows and the locale for the follow-up.
+        var full = new LibraryStore(Path.Combine(directory, "shows-full-db")); russian.Save(full);
+        foreach (var entry in asked2.All()) full.Save(entry with { MetadataFetchedAt = 0, EpisodeTitle = null, ArtworkFetchedAt = 0, TmdbFields = null });
+        handler.Requests.Clear();
+        handler.OnTmdb = () => { if (handler.Requests.Any(x => x.AbsolutePath.Contains("/season/"))) { russia.Save(full); handler.OnTmdb = null; } };
+        using (var tmdb = new MetadataClient("fixture", handler, russian))
+            await AutomaticArtwork.FetchAsync(full, directory, "fixture", null, default, http, metadata: tmdb);
+        check(handler.Requests.Count(x => x.AbsolutePath.Contains("/season/")) == 1 && MetadataOptions.FetchedLocale(full) == english.Locale,
+            "an automatic fetch stops its episode phase on a locale change and leaves the locale unrecorded");
+
         check(WikipediaMetadata.Title("Тачки (мультфильм)") == "Тачки" && WikipediaMetadata.Title("Шрэк (мультфильм, 2001)") == "Шрэк" &&
             WikipediaMetadata.Title("Шерлок (телефильм)") == "Шерлок" && WikipediaMetadata.Title("Drive (2011 film)") == "Drive" &&
             WikipediaMetadata.Title("Матрица (фильм)") == "Матрица" && WikipediaMetadata.Title("Солярис") == "Солярис", "Wikipedia film disambiguations, animated and TV films included, are not shown in titles");
@@ -119,6 +145,8 @@ static class MetadataLanguageFixture
                 var p when p.EndsWith("/search/movie") => "{\"results\":[" + movie + "]}",
                 var p when p.EndsWith("/movie/603") => movie,
                 var p when drive => $$"""{"id":604,"title":"{{(ru ? "Драйв" : "Drive")}}","original_title":"Drive","release_date":"2011-09-15","poster_path":"/drive.jpg","overview":"{{(ru ? "Водитель." : "A driver.")}}","genres":[{"id":18,"name":"Drama"}],"runtime":100}""",
+                var p when p.EndsWith("/tv/334/season/1") => $$"""{"name":"Season 1","episodes":[{"episode_number":1,"name":"{{(ru ? "Начало" : "Start")}}","overview":"","air_date":"2017-01-01"}]}""",
+                var p when p.EndsWith("/tv/334") => $$"""{"id":334,"name":"{{(ru ? "Рысь" : "Lynx")}}","original_name":"Lynx","first_air_date":"2017-01-01","overview":"","genres":[{"id":18}],"seasons":[{"season_number":1}],"number_of_seasons":1,"number_of_episodes":1}""",
                 var p when p.EndsWith("/tv/333/season/1") => $$"""{"name":"Season 1","episodes":[{"episode_number":1,"name":"{{(ru ? "Пилот" : "Pilot")}}","overview":"","air_date":"2016-01-01"}]}""",
                 var p when p.EndsWith("/tv/333") => $$"""{"id":333,"name":"{{(ru ? "Сова" : "Owl")}}","original_name":"Owl","first_air_date":"2016-01-01","overview":"{{(ru ? "Описание" : "A show about an owl.")}}","genres":[{"id":18}],"seasons":[{"season_number":1}],"number_of_seasons":1,"number_of_episodes":1}""",
                 _ => """{"results":[],"tv_results":[],"movie_results":[]}"""

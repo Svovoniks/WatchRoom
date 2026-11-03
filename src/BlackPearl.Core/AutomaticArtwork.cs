@@ -62,16 +62,19 @@ public static class AutomaticArtwork
         var groups = snapshot.Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && !x.MetadataLocked).GroupBy(x => numberedGroups.GetValueOrDefault(x.Id) ?? LibraryIdentity.ShowKey(x), StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(group => group.First().Series is not null).ToArray();
         int fetched = 0, overviews = 0, missing = 0, failed = 0, artworkFailed = 0, deferred = 0; string? error = null; var superseded = false;
+        // An automatic fetch stops once the saved locale changes, and its follow-up uses the new one. A refresh someone asked
+        // for runs to the end; either way, a locale counts as fetched only if it stayed chosen.
+        var automatic = !force && refresh is null;
         var issues = new List<object>();
         foreach (var group in groups)
         {
             ct.ThrowIfCancellationRequested();
-            if (MetadataOptions.LocaleChanged(library, options)) { superseded = true; break; }
             // Complete cached groups need neither provider lookups nor another
             // full-library read for each title during startup.
             if (mode == MetadataRefresh.FillMissing && group.All(x => x.MetadataKind is not null && x.ArtworkFetchedAt > 0 &&
                 !string.IsNullOrWhiteSpace(x.Overview) && (ArtworkCache.IsUsable(x.SeriesPoster) || ArtworkCache.IsUsable(x.Poster)) &&
                 (options.RefreshDays <= 0 || x.ArtworkFetchedAt >= Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds))) continue;
+            if (automatic && MetadataOptions.LocaleChanged(library, options)) { superseded = true; break; }
             var ids = group.Select(x => x.Id).ToHashSet();
             var entries = library.ByIds(ids).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && !x.MetadataLocked).ToArray();
             if (entries.Length == 0 || entries.Select(LibraryIdentity.ShowKey).Distinct().Count() != 1 &&
@@ -218,7 +221,8 @@ public static class AutomaticArtwork
             MetadataFetchPolicy.Record(library, "title", library.ByIds(ids), options, token, attemptFailed, attemptUnmatched);
         }
         if (mode != MetadataRefresh.RetryArtwork) library.GroupShowsByProvider();
-        var seriesReport = superseded ? "Stopped: the metadata language or country changed." : await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, followRefresh);
+        var seriesReport = superseded ? "Stopped: the metadata language or country changed." : await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, followRefresh,
+            automatic ? () => superseded = true : null);
         if (!superseded && mode != MetadataRefresh.RetryArtwork) await WantedTitles.RefreshAsync(library, directory, token, progress, ct, followRefresh is MetadataRefresh.RefreshText, metadata: tmdb, client: http);
         // A refresh counts for its locale only if that locale stayed chosen throughout and TMDB, when chosen, could be asked.
         if (mode is MetadataRefresh.RefreshText or MetadataRefresh.ReplaceArtwork && !superseded && !MetadataOptions.LocaleChanged(library, options) &&
