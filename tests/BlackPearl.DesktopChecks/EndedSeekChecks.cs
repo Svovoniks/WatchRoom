@@ -38,6 +38,15 @@ static class EndedSeekChecks
             for (var i = 0; i < 50 && !(player.IsPlaying && player.Time > 0); i++) await Task.Delay(100);
             await Task.Delay(300);
             check(player.IsPlaying && player.Time is > 4500 and < 9000, $"Play after the end starts from the chosen position ({player.Time} ms)");
+
+            var previous = (Button)window.FindName("PreviousButton");
+            Call("UpdateSessionControls");
+            check(previous.IsEnabled && (string)previous.ToolTip == "Back to the start (P)", "past the first seconds, Previous offers to return to the start even without a previous video");
+            previous.RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
+            for (var i = 0; i < 30 && player.Time > 3000; i++) await Task.Delay(100);
+            check(player.Time < 3000, $"Previous returns to the start of the video ({player.Time} ms)");
+            Call("UpdateSessionControls");
+            check(!previous.IsEnabled && (string)previous.ToolTip == "Previous video (P)", "near the start, Previous steps back and is disabled with nothing before");
         }
         finally
         {

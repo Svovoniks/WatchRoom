@@ -1673,7 +1673,11 @@ public partial class MainWindow : Window
         Timeline.Value = e.Key switch { Key.Home => 0, Key.End => Timeline.Maximum, Key.Left => Math.Max(0, Timeline.Value - 5000), _ => Math.Min(Timeline.Maximum, Timeline.Value + 5000) };
     }
     private void SeekKeyFinished(object sender, KeyEventArgs e) { if (e.Key is Key.Left or Key.Right or Key.Home or Key.End) { CommitSeek(); e.Handled = true; } }
-    private void MovePlayback(long offset) { if (player is null || player.Length <= 0) return; var position = Math.Clamp((room is null ? endedSeek ?? player.Time : playbackIntent.Position(target, player.Time, room.ServerNowMs)) + offset, 0, player.Length); if (room is null) SeekLocal(position); else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true); }
+    private long PlaybackPosition() => room is null ? endedSeek ?? player!.Time : playbackIntent.Position(target, player!.Time, room.ServerNowMs);
+    private void MovePlayback(long offset) { if (player is null || player.Length <= 0) return; SeekPlayback(Math.Clamp(PlaybackPosition() + offset, 0, player.Length)); }
+    private void SeekPlayback(long position) { if (room is null) SeekLocal(position); else SendPlayback(playbackIntent.Playing(target, player!.IsPlaying), position, seek: true); }
+    // Like most players, Previous first returns to the start of the video; pressed again near the start, it steps back.
+    private bool PreviousRestarts() => CanSeek() && (player!.State == VLCState.Ended && endedSeek is null || PlaybackPosition() > 3000);
     private async void StopPlayback(object sender, RoutedEventArgs e) => await Guard(async () =>
     {
         if (player is null || nativeStopCount > 0) return;
@@ -1854,7 +1858,11 @@ public partial class MainWindow : Window
     {
         return PlayQueueStep(1);
     });
-    private async void PreviousQueued(object sender, RoutedEventArgs e) => await Guard(() => PlayQueueStep(-1));
+    private async void PreviousQueued(object sender, RoutedEventArgs e) => await Guard(() =>
+    {
+        if (!PreviousRestarts()) return PlayQueueStep(-1);
+        SeekPlayback(0); return Task.CompletedTask;
+    });
     private async Task PlayQueueStep(int direction)
     {
         if (ShowingEpisodeList)
@@ -1952,13 +1960,14 @@ public partial class MainWindow : Window
         Timeline.IsEnabled = canControl && player?.Length > 0;
         // Previous and Next stay in the bar; they are disabled when there is nothing to step to.
         NextButton.ToolTip = ShowingEpisodeList ? "Next episode (N)" : HasPlaybackQueue ? "Next in queue (N)" : "Next video (N)";
-        PreviousButton.ToolTip = ShowingEpisodeList ? "Previous episode (P)" : "Previous video (P)";
+        var restarts = PreviousRestarts();
+        PreviousButton.ToolTip = restarts ? "Back to the start (P)" : ShowingEpisodeList ? "Previous episode (P)" : "Previous video (P)";
         RefreshEpisodeEndAction();
         var canManageEpisodes = room is null || connectedRoom && room!.Identity?.Host == true;
         NextButton.IsEnabled = ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(1) is not null
             : QueuePlayback.FindNext(queue, queuePosition, 1, x => RecentlyExists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
-        PreviousButton.IsEnabled = ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(-1) is not null
-            : QueuePlayback.FindNext(queue, queuePosition, -1, x => RecentlyExists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true);
+        PreviousButton.IsEnabled = restarts || (ShowingEpisodeList ? canManageEpisodes && AdjacentEpisode(-1) is not null
+            : QueuePlayback.FindNext(queue, queuePosition, -1, x => RecentlyExists(x.Path)) >= 0 && (room is null || connectedRoom && room!.Identity?.Host == true));
         // Looping restarts the video when it ends, which only the host decides in a room.
         LoopButton.IsEnabled = canManageEpisodes;
         RefreshLoopButton();
