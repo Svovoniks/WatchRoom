@@ -343,6 +343,7 @@ public partial class MainWindow : Window
         var section = name is "Folders" or "Plugins" or "Downloads" ? name : null;
         if (section is not null) name = "Settings";
         if (!ConfirmPageNavigation(name) || section is not null && currentPage == "Settings" && section != preferenceSection && !ConfirmPreferenceNavigation()) return;
+        if (name != "Library") ClearCardSelection();
         if (section is not null) ShowPreferenceSection(section);
         if (name == "Home" && ready) SavePlaybackPosition();
         if (name == "Home" && currentPage != "Home") homeSeed = Random.Shared.Next();
@@ -442,6 +443,7 @@ public partial class MainWindow : Window
         }
         if (currentPage != "Library" || libraryCategory != category || browseSeries != series || browseKind != kind || browseSeason != season || SearchBox.Text.Length > 0 || LibraryStatusFilter.SelectedIndex != 0) RememberLocation();
         var restoring = restoringNavigation; restoringNavigation = true;
+        if (libraryCategory != category || browseSeries != series || browseKind != kind || browseSeason != season) ClearCardSelection();
         libraryCategory = category; browseSeries = series; browseKind = kind; browseSeason = season;
         ShowPage("Library"); SearchBox.Clear(); LibraryStatusFilter.SelectedIndex = 0;
         restoringNavigation = restoring;
@@ -699,6 +701,7 @@ public partial class MainWindow : Window
             }
             cancellation.ThrowIfCancellationRequested();
             if (initialBatch is not null) libraryCards.AddBatch(initialBatch);
+            SyncCardSelection();
             ResultCount.Text = $"{cards.Count} {(cards.Count == 1 ? "item" : "items")}";
             NoResults.Visibility = items.Count > 0 && cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
             ShowFindTitle(query, cards.Count == 0 && series is null);
@@ -2134,6 +2137,7 @@ public partial class MainWindow : Window
         }
         if (e.Key == Key.N && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen && !GuestLibrary && InAppDialog.Open.Count == 0 && !inPlayer)
         { AddTitleClick(sender, e); e.Handled = true; return; }
+        if (!inPlayer && CardSelectionKey(e)) { e.Handled = true; return; }
         if (e.Key == Key.Escape && LibraryPage.Visibility == Visibility.Visible && SearchBox.IsKeyboardFocused)
         { SearchBox.Clear(); e.Handled = true; return; }
         if (Keyboard.FocusedElement is TextBox or PasswordBox or ComboBox or ListBox or ListBoxItem || !inPlayer) return;

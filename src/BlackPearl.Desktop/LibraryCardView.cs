@@ -30,6 +30,9 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     public Func<Task<string?>>? RemoteArtworkLoader { get; set; }
     public bool IsGuestHovered { get; private set; }
     public void SetGuestHovered(bool value) { if (IsGuestHovered != value) { IsGuestHovered = value; Changed(nameof(IsGuestHovered)); } }
+    // Picked for an action on several cards at once; see CardSelection.
+    public bool IsSelected { get; private set; }
+    public void SetSelected(bool value) { if (IsSelected != value) { IsSelected = value; Changed(nameof(IsSelected)); } }
     private (long Length, long Modified) posterVersion;
     public static (long Length, long Modified) Version(string? path)
     {
