@@ -857,8 +857,8 @@
        <TextBlock Text="Listening" Style="{StaticResource CardTitle}"/>
        <TextBlock Text="Voice volume" Style="{StaticResource FieldLabel}"/>
        <Grid MaxWidth="460" HorizontalAlignment="Left" MinWidth="320" Margin="0,6,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/></Grid.ColumnDefinitions>
-        <Slider x:Name="VoiceVolumeSlider" Minimum="0" Maximum="200" SmallChange="5" LargeChange="10" IsSnapToTickEnabled="True" TickFrequency="5" AutomationProperties.Name="Voice volume" VerticalAlignment="Center"/>
-        <TextBlock Grid.Column="1" Text="{Binding Value, ElementName=VoiceVolumeSlider, StringFormat={}{0:0}%}" TextAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/>
+        <Slider x:Name="VoiceVolumeSlider" Style="{StaticResource AccentSlider}" Margin="-10,0,0,0" Minimum="0" Maximum="200" SmallChange="5" LargeChange="10" IsSnapToTickEnabled="True" TickFrequency="5" AutomationProperties.Name="Voice volume" VerticalAlignment="Center"/>
+        <TextBlock Grid.Column="1" Text="{Binding Value, ElementName=VoiceVolumeSlider, StringFormat={}{0:0}%}" TextAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource Ink}" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular"/>
        </Grid>
        <CheckBox x:Name="VoiceDucking" Content="Lower the video while people talk"/>
        <TextBlock Text="The movie fades to half volume while someone speaks, then returns." Style="{StaticResource Hint}" Margin="28,0,0,0"/>

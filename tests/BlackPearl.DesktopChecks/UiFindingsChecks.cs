@@ -318,11 +318,12 @@ static class UiFindingsChecks
             Check(MetadataOptions.Load(store).RefreshDays > 0 && !Pending(), "applying resumes once the draft checks finish");
 
             foreach (var size in new[] { (900, 600), (1280, 810) })
-            foreach (var section in new[] { "Profile", "Metadata", "Playback", "Appearance", "Updates" })
+            foreach (var section in new[] { "Profile", "Metadata", "Playback", "Voice", "Appearance", "Updates" })
             {
                 Call("ShowPreferenceSection", section); Layout(size.Item1, size.Item2);
                 if (section == "Playback") { Control<ScrollViewer>("PlaybackPreferences").ScrollToHome(); Layout(size.Item1, size.Item2); Capture("playback-" + size.Item1); }
                 if (section == "Metadata") { Control<ScrollViewer>("MetadataPreferences").ScrollToHome(); Layout(size.Item1, size.Item2); Capture("metadata-" + size.Item1); }
+                if (section == "Voice") { Control<Slider>("VoiceVolumeSlider").BringIntoView(); Layout(size.Item1, size.Item2); Capture("voice-" + size.Item1); }
             }
             Call("ToggleTheme", window, new RoutedEventArgs()); Call("ShowPreferenceSection", "Playback");
             foreach (var size in new[] { (900, 600), (1280, 810) }) { Layout(size.Item1, size.Item2); Capture("playback-light-" + size.Item1); }
