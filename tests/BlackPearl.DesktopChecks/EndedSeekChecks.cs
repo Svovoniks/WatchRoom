@@ -38,6 +38,10 @@ static class EndedSeekChecks
             check(previous.IsEnabled && (string)previous.ToolTip == "Back to the start (P)" &&
                 System.Windows.Automation.AutomationProperties.GetName(previous) == "Back to the start",
                 "after the video ends, Previous offers to return to its start");
+            previous.RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
+            Call("UpdateSessionControls");
+            check(player.State == VLCState.Ended && Field<long?>("endedSeek") == 0 && !previous.IsEnabled && (string)previous.ToolTip == "Previous video (P)",
+                "pressed after the end, Previous keeps the start for the next Play, and a second press would step back");
 
             Set("seeking", true); timeline.Value = 5000; Call("CommitSeek");
             Call("PlaybackTickCore");
