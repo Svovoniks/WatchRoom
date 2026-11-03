@@ -248,8 +248,9 @@ public partial class MainWindow
         displaySpecialsWithinSeasons = DisplaySpecials.IsChecked == true;
         library.Setting("name", DisplayNameBox.Text.Trim()); library.Setting("server", ServerBox.Text.Trim().TrimEnd('/'));
         library.Setting("artwork", AutoArtwork.IsChecked == true ? "true" : "false");
-        // Missing and upcoming episodes follow their settings now rather than at the next scan.
-        if (SavedAutoArtwork && (before.ImportMissing != (ImportMissing.IsChecked == true) || before.ImportUpcoming != (ImportUpcoming.IsChecked == true)))
+        // Missing and upcoming episodes, and titles and plots in a new language or country, follow their settings now rather than at the next scan.
+        if (SavedAutoArtwork && (before.ImportMissing != (ImportMissing.IsChecked == true) || before.ImportUpcoming != (ImportUpcoming.IsChecked == true) ||
+            before.Language != language || before.Country != country))
             _ = Guard(async () => { await FetchArtwork(); await RefreshLibrary(); });
         SaveVoicePreferences();
         preferencesBaseline = PreferenceSnapshot();

@@ -28,7 +28,9 @@ public record MediaItem(string Id, string Path, string Title, string Kind, int? 
     // A video's length in minutes as its file header records it; 0 once read and found absent. It wins over provider runtimes.
     int? FileRuntimeMinutes = null,
     // What a bonus clip is: "special", "opening", "ending" or "trailer"; null for any other clip.
-    string? BonusKind = null)
+    string? BonusKind = null,
+    // A film's name from its metadata provider, in the metadata language. Title keeps the name its file gave it, which matching uses.
+    string? ProviderTitle = null)
 {
     public bool IsMusic => Kind == MusicFiles.Kind;
     public string Caption => IsMusic ? string.Join(" · ", new[] { Artist, Series, DurationSeconds is > 0 ? MusicFiles.Duration(DurationSeconds.Value) : null }.Where(x => !string.IsNullOrWhiteSpace(x))) : IsBonus ? Series is null ? BonusLabel : $"{Series} · {BonusLabel}" : Series is not null ? $"{Series} · {(Season is null ? "Season unknown" : $"S{Season:00}")} {(Episode is null ? "Episode unknown" : $"E{Episode:00}" + (EpisodeEnd > Episode ? $"–E{EpisodeEnd:00}" : ""))}" : $"{Kind} · {Year?.ToString() ?? "Local video"}";
@@ -36,9 +38,13 @@ public record MediaItem(string Id, string Path, string Title, string Kind, int? 
     // Extras list specials first, then openings, endings, trailers and the rest.
     public int BonusOrder => BonusKind switch { "special" => 0, "opening" => 1, "ending" => 2, "trailer" => 3, _ => 4 };
     public string DisplayTitle => Series ?? Title;
-    public string QueueTitle => IsMusic ? Artist is null ? Title : $"{Title} · {Artist}" : Episode is null ? Title : Caption;
+    // What people see: a film shows its provider name unless its title was corrected by hand or comes from an NFO file.
+    public string ShownName => Series is null && !IsMusic && !string.IsNullOrWhiteSpace(ProviderTitle) &&
+        !(LockedFields ?? []).Concat(LocalMetadataFields ?? []).Contains("Title", StringComparer.OrdinalIgnoreCase) ? ProviderTitle : Title;
+    public string ShownTitle => Series ?? ShownName;
+    public string QueueTitle => IsMusic ? Artist is null ? Title : $"{Title} · {Artist}" : Episode is null ? ShownName : Caption;
     public string EpisodeDisplayTitle => IsMusic ? Episode is { } track ? $"{track}. {Title}" : Title : Episode is { } ep ? $"Episode {ep}" + (EpisodeEnd > ep ? $"–{EpisodeEnd}" : "") + (string.IsNullOrWhiteSpace(EpisodeTitle) ? "" : " · " + EpisodeTitle)
-        : IsBonus && !string.IsNullOrWhiteSpace(EpisodeTitle) ? EpisodeTitle : Title;
+        : IsBonus && !string.IsNullOrWhiteSpace(EpisodeTitle) ? EpisodeTitle : ShownName;
     public string? DetailOverview => new[] { EpisodeOverview, SeasonOverview, Overview }.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
     public override string ToString() => IsMusic ? QueueTitle : Episode is not null ? Caption + " · " + Title : Title;
 }

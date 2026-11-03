@@ -57,7 +57,7 @@ public partial class MainWindow
     {
         var byId = MediaById();
         var media = savedQueues.SelectMany(saved => saved.MediaIds).Distinct().Select(id => byId.GetValueOrDefault(id)).OfType<MediaItem>()
-            .Select(item => new SharedQueueMedia(item.Id, item.Title, item.Kind, item.Year, item.Series, item.Season, item.Episode, item.EpisodeEnd,
+            .Select(item => new SharedQueueMedia(item.Id, item.ShownName, item.Kind, item.Year, item.Series, item.Season, item.Episode, item.EpisodeEnd,
                 item.EpisodeTitle, item.RuntimeMinutes, item.Available, item.IsVirtual, item.IsBonus)).ToArray();
         var active = savedQueues.FirstOrDefault(saved => saved.Id == activeQueueId);
         var playing = active is null ? -1 : SavedEntryIndex(active, byId, queuePosition);

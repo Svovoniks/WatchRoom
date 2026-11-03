@@ -92,7 +92,7 @@ public partial class MainWindow
             if (controls.IsPlayEnabled != allowed) controls.IsPlayEnabled = allowed;
             if (controls.IsPauseEnabled != allowed) controls.IsPauseEnabled = allowed;
             if (controls.PlaybackStatus != status) controls.PlaybackStatus = status;
-            var title = active ? room?.Snapshot?.Media?.Title ?? playingItem?.Title ?? "BlackPearl" : null;
+            var title = active ? room?.Snapshot?.Media?.Title ?? playingItem?.ShownName ?? "BlackPearl" : null;
             // Music shows as a song, with its artist and album, in the Windows media flyout.
             var music = active && audioPlayback;
             var key = music ? $"music\n{AudioTitle.Text}\n{AudioArtist.Text}\n{AudioAlbum.Text}" : title;

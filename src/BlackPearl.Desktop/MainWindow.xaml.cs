@@ -1011,7 +1011,7 @@ public partial class MainWindow : Window
     {
         if (selected is null) return;
         var item = selected;
-        var title = Dialogs.Prompt(this, "Correct title", item.Series is null ? "Movie title" : "Series title (applies to every episode)", item.DisplayTitle,
+        var title = Dialogs.Prompt(this, "Correct title", item.Series is null ? "Movie title" : "Series title (applies to every episode)", item.ShownTitle,
             text => text.Length > 300 ? "Use a title with at most 300 characters." : null, action: "Save title");
         if (title is null) return;
         foreach (var entry in items.Where(x => x.Id == item.Id || LibraryIdentity.SameShow(x, item)))
