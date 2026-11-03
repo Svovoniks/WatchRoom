@@ -303,15 +303,20 @@ internal sealed class AcquisitionPicker : InAppDialog
     {
         if (providers.SelectedItem is not AcquisitionPlugin plugin) return;
         var selected = results.SelectedItems.OfType<AcquisitionChoice>().ToArray();
-        // Releases tagged with requested episodes, one per episode; or a single season pack or special of the title.
+        // Releases tagged with requested episodes, one per episode, together with any season packs or specials of the title.
         var single = selected is [{ Assignable: true }];
-        download.IsEnabled = pending is null && (!plugin.Interactive || fresh && !shows && (single || selected.Length > 0 && selected.All(x => x.Matches) && selected.Select(x => x.Episode).Distinct().Count() == selected.Length));
+        var episodes = selected.Where(x => !x.Assignable).ToArray();
+        var packs = selected.Length - episodes.Length;
+        var unmatched = episodes.Any(x => !x.Matches);
+        var repeated = episodes.Select(x => x.Episode).Distinct().Count() != episodes.Length;
+        download.IsEnabled = pending is null && (!plugin.Interactive || fresh && !shows && selected.Length > 0 && !unmatched && !repeated);
         selectMatches.IsEnabled = fresh && !shows;
         template.IsEnabled = fresh && !shows && selected.FirstOrDefault()?.SuggestedFilter is { Length: > 0 };
         if (fresh && !shows && selected.Length == 0 && Picks().Length > 0) status.Text = request.Scope == "movie" ? "Tick a release, or use Select best match." : "Tick releases, or use Select best matches to take the best one of each episode.";
         if (fresh && !shows && selected.Length > 0) status.Text = single ? $"Downloads this release for {request.Name}. It has no episode number, so check it is the episode or season you want."
-            : selected.Any(x => x.Assignable) ? "A season pack or special downloads on its own. Untick the other releases."
-            : selected.Any(x => !x.Matches) ? "Only releases tagged with a requested episode can be downloaded. Adjust the title, filter or numbering if needed." : selected.Select(x => x.Episode).Distinct().Count() != selected.Length ? "Choose one release per episode, or use Select best matches." : $"{Count(selected.Length, "release")} ticked. Nothing downloads until you choose Download" + (pickedTitle is null ? "." : "; Search to choose a different title.");
+            : unmatched ? "Only releases tagged with a requested episode, season packs and specials can be downloaded. Adjust the title, filter or numbering if needed."
+            : repeated ? "Choose one release per episode, or use Select best matches."
+            : $"{Count(selected.Length, "release")} ticked" + (packs == 0 ? "" : packs == 1 ? ", including a season pack or special with no episode number" : $", including {packs} season packs or specials with no episode number") + ". Nothing downloads until you choose Download" + (pickedTitle is null ? "." : "; Search to choose a different title.");
         download.Content = !plugin.Interactive ? "Acquire with " + plugin.Name : selected.Length == 0 || shows ? "Download" : "Download " + Count(selected.Length, "release");
         RefreshList();
     }
