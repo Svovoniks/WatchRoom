@@ -37,54 +37,59 @@ static class PreferenceNavigationChecks
 
         Call("LoadPreferences"); Call("ShowPage", "Settings"); Call("ShowPreferenceSection", "Profile");
         var name = Control<TextBox>("DisplayNameBox");
+        bool Pending() => (bool)typeof(MainWindow).GetProperty("HasUnsavedPreferences", flags)!.GetValue(window)!;
+        bool Prompted(Action navigate)
+        {
+            var shown = false;
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
+            timer.Tick += (_, _) => { if (InAppDialog.Open.FirstOrDefault(d => d.Title == "Unsaved settings") is { } dialog) { shown = true; dialog.Close(); } };
+            timer.Start();
+            try { navigate(); } finally { timer.Stop(); }
+            return shown;
+        }
         var originalName = name.Text;
         name.Text = "Navigation draft";
         var history = HistoryCount();
-        Answer("Keep editing", () => Call("NavigateLibrary", 3, null!, null!, null!));
-        check((string)Field("currentPage") == "Settings" && name.Text == "Navigation draft" && HistoryCount() == history,
-            "cancelling library navigation keeps settings and history intact");
-        Answer("Close", () => Call("ShowPage", "Queues"));
-        check((string)Field("currentPage") == "Settings" && name.Text == "Navigation draft",
-            "closing the prompt keeps the unsaved draft on settings");
-        Answer("Keep editing", () => ClickSection("Playback"));
-        check(Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Visible,
-            "cancelling a settings section switch retains the current section");
-        Answer("Keep editing", () => Call("BrowseHistory", true));
-        check(HistoryCount() == history && (string)Field("currentPage") == "Settings",
-            "cancelled Back navigation does not consume history");
-        Answer("Discard changes", () => Call("ShowPage", "Queues"));
-        check((string)Field("currentPage") == "Queues" && name.Text == originalName && !Control<Button>("SavePreferencesButton").IsEnabled,
-            "discarding changes restores saved settings and completes navigation");
-
-        Call("ShowPage", "Settings");
-        name.Text = "Saved on navigation";
-        Answer("Save changes", () => Call("ShowPage", "Rooms"));
-        check(store.Setting("name") == "Saved on navigation" && (string)Field("currentPage") == "Rooms" && !Control<Button>("SavePreferencesButton").IsEnabled,
-            "saving from the prompt persists settings before navigating");
-        Call("ShowPage", "Settings"); name.Text = " ";
-        Answer("Save changes", () => ClickSection("Playback"));
-        check((string)Field("currentPage") == "Settings" && Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Visible &&
-            Control<TextBlock>("DisplayNameError").Text.Length > 0 && store.Setting("name") == "Saved on navigation",
-            "failed validation stays in settings and identifies the invalid field");
-        Call("LoadPreferences");
+        check(!Prompted(() => Call("ShowPage", "Queues")) && (string)Field("currentPage") == "Queues" && store.Setting("name") == "Navigation draft" && !Pending(),
+            "leaving Settings applies a change still waiting for a pause, without asking");
+        Call("ShowPage", "Settings"); Call("ShowPreferenceSection", "Profile");
         Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text = "English";
-        Answer("Save changes", () => ClickSection("Metadata"));
-        check(store.Setting("audioLanguages") == "en" && Control<FrameworkElement>("MetadataPreferences").Visibility == Visibility.Visible,
-            "saving on a settings section switch applies drafts before changing section");
-        Control<PasswordBox>("MetadataToken").Password = "discarded-navigation-key";
+        check(!Prompted(() => ClickSection("Metadata")) && store.Setting("audioLanguages") == "en" && Control<FrameworkElement>("MetadataPreferences").Visibility == Visibility.Visible,
+            "switching settings sections applies pending changes first");
+
+        ClickSection("Profile"); name.Text = " ";
+        history = HistoryCount();
+        Answer("Keep editing", () => Call("NavigateLibrary", 3, null!, null!, null!));
+        check((string)Field("currentPage") == "Settings" && name.Text == " " && HistoryCount() == history && Control<TextBlock>("DisplayNameError").Text.Length > 0,
+            "an invalid change asks before leaving, and keeping it stays in settings with history and the field's error intact");
+        Answer("Close", () => Call("ShowPage", "Queues"));
+        check((string)Field("currentPage") == "Settings" && name.Text == " ", "closing the prompt keeps the invalid change on settings");
+        Answer("Keep editing", () => ClickSection("Playback"));
+        check(Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Visible, "keeping an invalid change retains the current section");
+        Answer("Keep editing", () => Call("BrowseHistory", true));
+        check(HistoryCount() == history && (string)Field("currentPage") == "Settings", "cancelled Back navigation does not consume history");
+        Call("ShowPreferenceSection", "Metadata");
+        Answer("Keep editing", () => ClickSection("Playback"));
+        check(Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Visible && Control<TextBlock>("DisplayNameError").Text.Length > 0,
+            "keeping an invalid change from another section opens the field that needs fixing");
+        Answer("Discard changes", () => Call("ShowPage", "Queues"));
+        check((string)Field("currentPage") == "Queues" && name.Text == "Navigation draft" && store.Setting("name") == "Navigation draft" && !Pending(),
+            "discarding an invalid change restores the applied settings and completes navigation");
+
+        Call("ShowPage", "Settings"); ClickSection("Metadata");
+        Control<PasswordBox>("MetadataToken").Password = "Bearer";
         Answer("Discard changes", () => ClickSection("Playback"));
         check(Control<PasswordBox>("MetadataToken").Password == "" && MetadataCredential.Load(App.DataDirectory) == "" &&
             Control<FrameworkElement>("PlaybackPreferences").Visibility == Visibility.Visible,
-            "credential-only drafts prompt and discard without writing the vault");
+            "an invalid key asks and is discarded without writing the vault");
         name.Text = originalName; Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text = "";
         check((bool)Call("TrySavePreferences")!, "navigation fixtures restore the original settings");
 
-        // Folders lives in Settings: links to it open that section, which applies changes at once and has no Save bar.
+        // Folders lives in Settings: links to it open that section.
         Call("ShowPage", "Rooms"); Call("ShowPage", "Folders");
         check(window.FindName("FoldersNav") is null && (string)Field("currentPage") == "Settings" &&
-            Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Visible && Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Collapsed &&
-            Control<FrameworkElement>("PreferenceFooter").Visibility == Visibility.Collapsed,
-            "Folders opens as a Settings section without the Save bar and has no sidebar entry");
+            Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Visible && Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Collapsed,
+            "Folders opens as a Settings section and has no sidebar entry");
         ClickSection("Plugins");
         // The logical tree holds the section's content before its template is applied.
         bool InSection(DependencyObject? element, string section)
@@ -94,15 +99,14 @@ static class PreferenceNavigationChecks
             return false;
         }
         check(Control<FrameworkElement>("PluginPreferences").Visibility == Visibility.Visible && Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Collapsed &&
-            InSection(Control<RadioButton>("AvailablePluginsView"), "PluginPreferences") && InSection(Control<Button>("AddFolderButton"), "FoldersPage") &&
-            Control<FrameworkElement>("PreferenceFooter").Visibility == Visibility.Collapsed,
-            "plugins have their own Settings section, apart from Folders and without the Save bar");
-        ClickSection("Profile"); name.Text = "Folders draft";
+            InSection(Control<RadioButton>("AvailablePluginsView"), "PluginPreferences") && InSection(Control<Button>("AddFolderButton"), "FoldersPage"),
+            "plugins have their own Settings section, apart from Folders");
+        ClickSection("Profile"); name.Text = "";
         Answer("Keep editing", () => Call("ShowPage", "Folders"));
-        check(Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Visible && Control<FrameworkElement>("PreferenceFooter").Visibility == Visibility.Visible &&
-            name.Text == "Folders draft", "opening Folders from Settings asks about unsaved changes first");
+        check(Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Visible && name.Text == "",
+            "opening Folders from Settings asks about an invalid change first");
         Call("LoadPreferences");
         Call("ShowPage", "Queues");
-        check((string)Field("currentPage") == "Queues", "saved settings allow navigation without a prompt");
+        check((string)Field("currentPage") == "Queues", "applied settings allow navigation without a prompt");
     }
 }

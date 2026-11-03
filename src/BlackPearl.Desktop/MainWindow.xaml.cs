@@ -956,7 +956,7 @@ public partial class MainWindow : Window
     private void MetadataKeyChanged(object sender, RoutedEventArgs e)
     {
         PreferencesChanged(sender, e);
-        MetadataKeyStatus.Text = MetadataToken.Password != savedMetadataToken ? "Unsaved key." : savedMetadataToken.Length > 0 ? "Personal key saved securely." : TmdbCredentials.DefaultStatus;
+        MetadataKeyStatus.Text = MetadataToken.Password != savedMetadataToken ? "" : savedMetadataToken.Length > 0 ? "Personal key saved securely." : TmdbCredentials.DefaultStatus;
     }
     private Task FetchArtwork() => FetchArtwork(lifetime.Token);
     private async Task FetchArtwork(CancellationToken cancellation, bool force = false, MetadataRefresh? refresh = null)
@@ -2269,6 +2269,7 @@ public partial class MainWindow : Window
     private async void WindowClosing(object? sender, CancelEventArgs e)
     {
         if (closing) return; e.Cancel = true; closing = true; lifetime.Cancel(); timer.Stop(); scanDelay.Stop();
+        ApplyPreferences(); // A setting typed just before closing is still applied.
         OpenFileHandoff.StopListening();
         DisableSystemMediaControls();
         disconnectToast?.Invoke();

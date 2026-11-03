@@ -561,7 +561,7 @@
      <!-- A skipped subfolder with its button to scan it again. -->
      <DataTemplate x:Key="ExclusionRow"><Border BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="8" Padding="10,1,1,1" Margin="0,0,0,6"><DockPanel><Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="10" Width="30" Height="30" MinHeight="30" Click="RestoreFolder" ToolTip="Scan this subfolder again" AutomationProperties.Name="{Binding Name, StringFormat=Stop skipping {0}}"/><TextBlock Text="{Binding Name}" ToolTip="{Binding Path}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></DockPanel></Border></DataTemplate>
     </Grid.Resources>
-    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
     <StackPanel><TextBlock Text="Settings" Style="{StaticResource PageHeading}" Margin="0,0,0,16"/>
      <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="3" HorizontalAlignment="Left" Margin="0,0,0,20">
       <WrapPanel x:Name="PreferenceSections">
@@ -788,7 +788,7 @@
        <TextBlock Text="TMDB key override" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
        <TextBlock Text="Optional personal key; leave blank to use the bundled BlackPearl key." Style="{StaticResource Hint}"/><PasswordBox x:Name="MetadataToken" AutomationProperties.Name="TMDB API key or read access token" PasswordChanged="MetadataKeyChanged"/>
        <TextBlock x:Name="MetadataKeyStatus" Style="{StaticResource MutedText}" AutomationProperties.LiveSetting="Polite" Margin="0,0,0,8"/>
-       <TextBlock Text="Save changes stores the key in Windows Credential Manager. Clear it and save to remove it." Style="{StaticResource Hint}"/>
+       <TextBlock Text="The key is stored in Windows Credential Manager once you paste or type it. Clear the field to remove it." Style="{StaticResource Hint}"/>
       </StackPanel></Border>
       <Border Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Manual refresh" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/><TextBlock Text="Uses saved preferences." Style="{StaticResource Hint}"/>
@@ -874,8 +874,8 @@
        <TextBlock Text="Listening" Style="{StaticResource CardTitle}"/>
        <TextBlock Text="Voice volume" Style="{StaticResource FieldLabel}"/>
        <Grid MaxWidth="460" HorizontalAlignment="Left" MinWidth="320" Margin="0,6,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/></Grid.ColumnDefinitions>
-        <Slider x:Name="VoiceVolumeSlider" Minimum="0" Maximum="200" SmallChange="5" LargeChange="10" IsSnapToTickEnabled="True" TickFrequency="5" AutomationProperties.Name="Voice volume" VerticalAlignment="Center"/>
-        <TextBlock Grid.Column="1" Text="{Binding Value, ElementName=VoiceVolumeSlider, StringFormat={}{0:0}%}" TextAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/>
+        <Slider x:Name="VoiceVolumeSlider" Style="{StaticResource AccentSlider}" Margin="-10,0,0,0" Minimum="0" Maximum="200" SmallChange="5" LargeChange="10" IsSnapToTickEnabled="True" TickFrequency="5" AutomationProperties.Name="Voice volume" VerticalAlignment="Center"/>
+        <TextBlock Grid.Column="1" Text="{Binding Value, ElementName=VoiceVolumeSlider, StringFormat={}{0:0}%}" TextAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource Ink}" FontWeight="SemiBold" Typography.NumeralAlignment="Tabular"/>
        </Grid>
        <CheckBox x:Name="VoiceDucking" Content="Lower the video while people talk"/>
        <TextBlock Text="The movie fades to half volume while someone speaks, then returns." Style="{StaticResource Hint}" Margin="28,0,0,0"/>
@@ -922,9 +922,6 @@
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
     </Grid>
-    <Border x:Name="PreferenceFooter" Grid.Row="2" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Background="{DynamicResource Canvas}" Padding="0,12,0,0" Margin="0,4,0,0">
-     <DockPanel><WrapPanel DockPanel.Dock="Right"><Button x:Name="CancelPreferencesButton" Content="Cancel" Style="{StaticResource QuietButton}" Click="CancelPreferences" IsEnabled="False" Margin="0,0,8,0"/><Button x:Name="SavePreferencesButton" Content="Save changes" Click="SaveSettings" Style="{StaticResource Primary}" IsEnabled="False" Margin="0"/></WrapPanel><TextBlock x:Name="PreferencesStatus" Style="{StaticResource MutedText}" VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" Margin="0,0,16,0"/></DockPanel>
-    </Border>
    </Grid>
 
    <!-- Saved watch rooms -->

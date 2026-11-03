@@ -460,6 +460,48 @@
    <Setter Property="VerticalAlignment" Value="Center"/><Setter Property="Height" Value="24"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider"><Grid x:Name="Root" Background="Transparent"><Border x:Name="Rail" Height="3" Background="#40FFFFFF" CornerRadius="1.5" Margin="6,0"/><Track x:Name="PART_Track" Margin="0" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}"><Track.DecreaseRepeatButton><RepeatButton Command="Slider.DecreaseLarge" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Height="3" Margin="6,0,-6,0" Background="{DynamicResource PlayerAccent}" CornerRadius="1.5"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton><Track.Thumb><Thumb Width="14" Height="14"><Thumb.Template><ControlTemplate TargetType="Thumb"><Ellipse x:Name="Knob" Fill="#FFFFFF" RenderTransformOrigin="0.5,0.5"><Ellipse.RenderTransform><ScaleTransform x:Name="KnobScale" ScaleX="0.75" ScaleY="0.75"/></Ellipse.RenderTransform></Ellipse><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Knob" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value></Setter></Trigger><Trigger Property="IsDragging" Value="True"><Setter TargetName="Knob" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value></Setter></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb></Track.Thumb><Track.IncreaseRepeatButton><RepeatButton Command="Slider.IncreaseLarge" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton></Track></Grid><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Rail" Property="Background" Value="#59FFFFFF"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
   </Style>
+  <!-- A slider for pages in the theme's colours: an accent fill and a knob in the text colour with an accent centre that grows while it is pointed at,
+       dragged or focused. Pressing anywhere on it moves the knob there and keeps following the pointer. -->
+  <Style x:Key="AccentSlider" TargetType="Slider">
+   <Setter Property="Height" Value="32"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+   <Setter Property="local:SliderFollow.Enabled" Value="True"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider">
+    <Grid Background="Transparent">
+     <Border x:Name="Rail" Height="6" CornerRadius="3" Margin="10,0" Background="{DynamicResource Line}"/>
+     <Track x:Name="PART_Track" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}">
+      <Track.DecreaseRepeatButton><RepeatButton Command="Slider.DecreaseLarge" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton">
+       <Border Height="6" CornerRadius="3" Margin="10,0,-10,0" Background="{DynamicResource Accent}"/>
+      </ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton>
+      <Track.Thumb><Thumb Width="20" Height="20" Focusable="False"><Thumb.Template><ControlTemplate TargetType="Thumb">
+       <Grid>
+        <Ellipse x:Name="Halo" Margin="-6" Fill="{DynamicResource Accent}" Opacity="0"/>
+        <Ellipse Fill="{DynamicResource Ink}"><Ellipse.Effect><DropShadowEffect BlurRadius="6" ShadowDepth="1" Opacity="0.35"/></Ellipse.Effect></Ellipse>
+        <Ellipse x:Name="Dot" Width="10" Height="10" Fill="{DynamicResource Accent}" RenderTransformOrigin="0.5,0.5"><Ellipse.RenderTransform><ScaleTransform x:Name="DotScale"/></Ellipse.RenderTransform></Ellipse>
+       </Grid>
+       <ControlTemplate.Triggers>
+        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Slider}}" Value="True">
+         <Setter TargetName="Dot" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1.25" ScaleY="1.25"/></Setter.Value></Setter>
+         <Setter TargetName="Halo" Property="Opacity" Value="0.14"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding IsKeyboardFocused, RelativeSource={RelativeSource AncestorType=Slider}}" Value="True">
+         <Setter TargetName="Halo" Property="Opacity" Value="0.24"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding IsMouseCaptured, RelativeSource={RelativeSource AncestorType=Slider}}" Value="True">
+         <Setter TargetName="Dot" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="1.4" ScaleY="1.4"/></Setter.Value></Setter>
+         <Setter TargetName="Halo" Property="Opacity" Value="0.24"/>
+        </DataTrigger>
+       </ControlTemplate.Triggers>
+      </ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+      <Track.IncreaseRepeatButton><RepeatButton Command="Slider.IncreaseLarge" Focusable="False"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton">
+       <Border Background="Transparent"/>
+      </ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton>
+     </Track>
+    </Grid>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <!-- The volume flyout's slider: PlayerSlider stood upright, filling from the bottom. -->
   <Style x:Key="PlayerVerticalSlider" TargetType="Slider">
    <Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="Width" Value="24"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>

@@ -173,19 +173,39 @@ static class UiFindingsChecks
             Check(Control<FrameworkElement>("FolderEditor").Visibility == Visibility.Collapsed, "no folder selection hides category editing");
 
             Call("ShowPage", "Settings"); Call("ShowPreferenceSection", "Profile");
+            bool Pending() => (bool)typeof(MainWindow).GetProperty("HasUnsavedPreferences", flags)!.GetValue(window)!;
+            var autoSave = (System.Windows.Threading.DispatcherTimer)Field("preferencesAutoSave");
+            string SavedName() => (string)typeof(MainWindow).GetProperty("SavedDisplayName", flags)!.GetValue(window)!;
+            Check(window.FindName("SavePreferencesButton") is null && window.FindName("CancelPreferencesButton") is null && window.FindName("PreferenceFooter") is null,
+                "settings apply as they change, with no Save or Cancel bar");
             var originalName = Control<TextBox>("DisplayNameBox").Text;
             Control<TextBox>("DisplayNameBox").Text = "Draft name";
-            Check(Control<Button>("SavePreferencesButton").IsEnabled && Control<Button>("CancelPreferencesButton").IsEnabled, "profile edits reveal persistent Save and Cancel actions");
-            Check((string)typeof(MainWindow).GetProperty("SavedDisplayName", flags)!.GetValue(window)! == originalName, "room connections ignore unsaved profile drafts");
+            Check(Pending() && autoSave.IsEnabled && SavedName() == originalName, "typing waits for a pause before applying");
             Call("ShowPage", "Settings");
-            Check(Control<TextBox>("DisplayNameBox").Text == "Draft name", "selecting the current settings page preserves its draft");
-            Call("CancelPreferences", window, new RoutedEventArgs());
-            Check(Control<TextBox>("DisplayNameBox").Text == originalName && !Control<Button>("SavePreferencesButton").IsEnabled, "Cancel restores persisted values and clears dirty state");
-            Check(window.FindName("SaveMetadataKeyButton") is null, "TMDB uses the common Save changes action without a separate key button");
+            Check(Control<TextBox>("DisplayNameBox").Text == "Draft name", "selecting the current settings page preserves what is being typed");
+            Call("ApplyPreferences");
+            Check(SavedName() == "Draft name" && store.Setting("name") == "Draft name" && !Pending() && !autoSave.IsEnabled, "a typed name applies after the pause");
+            Control<TextBox>("DisplayNameBox").Text = " "; Call("ApplyPreferences");
+            Check(SavedName() == "Draft name" && Control<TextBlock>("DisplayNameError").Text.Length > 0 && Pending() &&
+                Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Visible, "an invalid value shows its error and is not applied");
+            Call("ShowPreferenceSection", "Playback"); Control<TextBox>("DisplayNameBox").Text = " x"; Call("ApplyPreferences");
+            Check(Control<FrameworkElement>("PlaybackPreferences").Visibility == Visibility.Visible && store.Setting("name") == "x",
+                "applying a change never switches the settings section");
+            Control<TextBox>("DisplayNameBox").Text = originalName; Call("ApplyPreferences");
+            Check(store.Setting("name") == originalName.Trim() && !Pending(), "restoring the name applies it");
+            Call("ShowPreferenceSection", "Metadata");
+            var saveNfo = Control<CheckBox>("SaveNfo").IsChecked == true;
+            Control<CheckBox>("SaveNfo").IsChecked = !saveNfo;
+            Check(MetadataOptions.Load(store).SaveNfo == !saveNfo && !Pending() && !autoSave.IsEnabled, "switches apply at once");
+            Control<CheckBox>("SaveNfo").IsChecked = saveNfo;
+            Check(MetadataOptions.Load(store).SaveNfo == saveNfo, "switching back applies at once too");
+            Check(window.FindName("SaveMetadataKeyButton") is null, "TMDB keys apply like other settings, without a separate key button");
             Control<PasswordBox>("MetadataToken").Password = "draft-fixture-key";
-            Check(Control<Button>("SavePreferencesButton").IsEnabled && MetadataCredential.Load(App.DataDirectory) == "", "key edits enable Save without writing the credential vault");
-            Call("CancelPreferences", window, new RoutedEventArgs());
-            Check(Control<PasswordBox>("MetadataToken").Password == "" && !Control<Button>("SavePreferencesButton").IsEnabled, "Cancel discards an unsaved key and clears dirty state");
+            Check(Pending() && MetadataCredential.Load(App.DataDirectory) == "", "a typed key waits for a pause before writing the credential vault");
+            Call("LoadPreferences");
+            Check(Control<PasswordBox>("MetadataToken").Password == "" && !Pending() && !autoSave.IsEnabled, "reloading settings drops a key that hasn't applied yet");
+            // The checks below build drafts across several fields to test validation, so applying as they change is held meanwhile.
+            typeof(MainWindow).GetField("applyingPreferences", flags)!.SetValue(window, true); var appliedAudio = store.Setting("audioLanguages"); var appliedRules = store.Setting("subtitleLanguageRules");
             Call("ShowPreferenceSection", "Playback"); Layout();
             var audioPriority = Control<LanguagePriorityPicker>("PreferredAudioLanguages");
             var subtitlePriority = Control<LanguagePriorityPicker>("PreferredSubtitleLanguages");
@@ -201,11 +221,11 @@ static class UiFindingsChecks
             Check(audioPriority.Text == "en, ru", "priority arrows change the language order");
             Descendants<Button>(audioPriority).First(button => System.Windows.Automation.AutomationProperties.GetName(button) == "Remove language" && ReferenceEquals(button.DataContext, audioRows.Items[0]))
                 .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            Check(audioPriority.Text == "ru" && Control<Button>("SavePreferencesButton").IsEnabled && store.Setting("audioLanguages") is null,
-                "removing a language updates only the settings draft");
+            Check(audioPriority.Text == "ru" && Pending() && store.Setting("audioLanguages") == appliedAudio,
+                "removing a language updates only the settings draft until it applies");
             AddLanguage(subtitlePriority, "off");
             Check(subtitlePriority.Text == "off", "subtitle priority offers an explicit Off choice");
-            Call("CancelPreferences", window, new RoutedEventArgs());
+            Call("LoadPreferences");
             Call("AddSubtitleRule", window, new RoutedEventArgs()); Layout();
             var ruleControls = Control<ItemsControl>("SubtitleLanguageRules");
             Descendants<ComboBox>(ruleControls).First(picker => System.Windows.Automation.AutomationProperties.GetName(picker) == "Audio language for subtitle rule").SelectedValue = "ja";
@@ -214,18 +234,18 @@ static class UiFindingsChecks
             Check((string)subtitleRules[0]!.GetType().GetProperty("AudioLanguage")!.GetValue(subtitleRules[0])! == "ja" &&
                 (string)subtitleRules[0]!.GetType().GetProperty("SubtitleLanguages")!.GetValue(subtitleRules[0])! == "en, off",
                 "audio-specific subtitle rules can be configured entirely with language pickers");
-            Call("CancelPreferences", window, new RoutedEventArgs());
+            Call("LoadPreferences");
             AddRule("Japanese", "Russian, English, off");
-            Check(Control<Button>("SavePreferencesButton").IsEnabled && store.Setting("subtitleLanguageRules") is null, "audio-specific subtitle drafts enable Save without writing settings");
-            Call("CancelPreferences", window, new RoutedEventArgs());
-            Check(subtitleRules.Count == 0 && !Control<Button>("SavePreferencesButton").IsEnabled, "Cancel discards added subtitle rules");
+            Check(Pending() && store.Setting("subtitleLanguageRules") == appliedRules, "audio-specific subtitle drafts are pending without writing settings");
+            Call("LoadPreferences");
+            Check(subtitleRules.Count == 0 && !Pending(), "reloading discards added subtitle rules");
             Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text = "Russian, English";
             Control<LanguagePriorityPicker>("PreferredSubtitleLanguages").Text = "English, off";
-            Check(Control<Button>("SavePreferencesButton").IsEnabled && ((string[])Field("audioLanguages")).Length == 0,
-                "track language drafts enable Save without changing active preferences");
-            Call("CancelPreferences", window, new RoutedEventArgs());
+            Check(Pending() && ((string[])Field("audioLanguages")).Length == 0,
+                "track language drafts are pending without changing active preferences");
+            Call("LoadPreferences");
             Check(Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text == "" && Control<LanguagePriorityPicker>("PreferredSubtitleLanguages").Text == "",
-                "Cancel restores both track language preferences");
+                "reloading restores both track language preferences");
             Control<TextBox>("DisplayNameBox").Text = " ";
             Check((bool)Call("TrySavePreferences")! == false && Control<TextBlock>("DisplayNameError").Text.Length > 0, "empty name gets field-specific validation");
             Control<TextBox>("DisplayNameBox").Text = "Saved name"; Control<TextBox>("ServerBox").Text = "invalid";
@@ -247,7 +267,7 @@ static class UiFindingsChecks
             Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text = "Russian, English";
             Control<LanguagePriorityPicker>("PreferredSubtitleLanguages").Text = "English, off";
             AddRule("Japanese", "Russian, English, off"); AddRule("ja-JP", "off");
-            Check(!(bool)Call("TrySavePreferences")! && Control<TextBlock>("TrackPreferencesError").Text.Contains("already") && store.Setting("subtitleLanguageRules") is null,
+            Check(!(bool)Call("TrySavePreferences")! && Control<TextBlock>("TrackPreferencesError").Text.Contains("already") && store.Setting("subtitleLanguageRules") == appliedRules,
                 "duplicate audio rules reject the whole draft with an actionable error");
             Call("RemoveSubtitleRule", new Button { DataContext = subtitleRules[1] }, new RoutedEventArgs());
             AddRule("English", "off");
@@ -256,60 +276,65 @@ static class UiFindingsChecks
             Control<CheckBox>("NeverRefresh").IsChecked = true;
             Control<ComboBox>("MetadataLanguage").SelectedValue = "fr-FR"; Control<ComboBox>("MetadataCountry").SelectedValue = "FR";
             Control<PasswordBox>("MetadataToken").Password = new string('x', 1281);
-            Check(!(bool)Call("TrySavePreferences")! && Control<TextBlock>("MetadataKeyStatus").Text.Contains("too long") && store.Setting("audioLanguages") is null && store.Setting("name") != "Saved name",
+            Check(!(bool)Call("TrySavePreferences")! && Control<TextBlock>("MetadataKeyStatus").Text.Contains("too long") && store.Setting("audioLanguages") == appliedAudio && store.Setting("name") != "Saved name",
                 "credential storage failure identifies Metadata and leaves other settings unsaved");
             Control<PasswordBox>("MetadataToken").Password = " fixture-key-one ";
             Check((bool)Call("TrySavePreferences")!, "valid structured preferences save successfully");
             Check(store.Setting("audioLanguages") == "ru, en" && store.Setting("subtitleLanguages") == "en, off",
-                "Save persists normalized audio and subtitle preferences together");
+                "applying persists normalized audio and subtitle preferences together");
             var savedRules = Wire.Read<SubtitleLanguageRule[]>(store.Setting("subtitleLanguageRules")!);
             Check(savedRules.Length == 2 && savedRules[0].AudioLanguage == "ja" && savedRules[0].Languages.SequenceEqual(["ru", "en", "off"]) && savedRules[1].Languages.SequenceEqual(["off"]),
-                "Save changes persists audio-specific subtitle priority lists in order");
+                "applying persists audio-specific subtitle priority lists in order");
             Check(MetadataCredential.Load(App.DataDirectory) == "fixture-key-one" && (string)Field("savedMetadataToken") == "fixture-key-one",
-                "Save changes stores the trimmed key in the credential vault and activates it");
+                "applying stores the trimmed key in the credential vault and activates it");
             Check(!((string)Call("PreferenceSnapshot")!).Contains("fixture-key-one"), "preference snapshots exclude the secret key");
             var restoredWindow = new MainWindow();
             try
             {
                 Check(((PasswordBox)restoredWindow.FindName("MetadataToken")).Password == "fixture-key-one" &&
-                    !((Button)restoredWindow.FindName("SavePreferencesButton")).IsEnabled, "a reopened settings window restores the saved key without an unsaved draft");
+                    !(bool)typeof(MainWindow).GetProperty("HasUnsavedPreferences", flags)!.GetValue(restoredWindow)!, "a reopened settings window restores the saved key without an unsaved draft");
             }
             finally { restoredWindow.Close(); }
             var options = MetadataOptions.Load(store);
             Check(options.ProviderOrder.Length == 0 && options.RefreshDays == 0 && options.Language == "fr-FR" && options.Country == "FR", "local-only providers, Never and locale selections round-trip");
-            Call("CancelPreferences", window, new RoutedEventArgs());
+            Call("LoadPreferences");
             Check(Control<CheckBox>("NeverRefresh").IsChecked == true && !Control<TextBox>("MetadataRefreshDays").IsEnabled, "Never restores with its numeric field disabled");
-            Check(Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text == "ru, en" && !Control<Button>("SavePreferencesButton").IsEnabled,
+            Check(Control<LanguagePriorityPicker>("PreferredAudioLanguages").Text == "ru, en" && !Pending(),
                 "saved track preferences reload without leaving a dirty draft");
             Check(subtitleRules.Count == 2 && (string)subtitleRules[0]!.GetType().GetProperty("AudioLanguage")!.GetValue(subtitleRules[0])! == "ja",
                 "saved subtitle rules reload with normalized audio languages");
             Control<PasswordBox>("MetadataToken").Password = "replacement-fixture-key";
-            Call("CancelPreferences", window, new RoutedEventArgs());
-            Check(Control<PasswordBox>("MetadataToken").Password == "fixture-key-one" && MetadataCredential.Load(App.DataDirectory) == "fixture-key-one", "Cancel restores the saved key after an unsaved replacement");
+            Call("LoadPreferences");
+            Check(Control<PasswordBox>("MetadataToken").Password == "fixture-key-one" && MetadataCredential.Load(App.DataDirectory) == "fixture-key-one", "reloading restores the saved key after an unapplied replacement");
             Control<PasswordBox>("MetadataToken").Clear();
-            Check(MetadataCredential.Load(App.DataDirectory) == "fixture-key-one", "clearing a key remains a draft until Save changes");
-            Check((bool)Call("TrySavePreferences")! && MetadataCredential.Load(App.DataDirectory) == "" && (string)Field("savedMetadataToken") == "", "Save changes removes a cleared key from the vault and active metadata client");
+            Check(MetadataCredential.Load(App.DataDirectory) == "fixture-key-one", "clearing a key remains a draft until it applies");
+            Check((bool)Call("TrySavePreferences")! && MetadataCredential.Load(App.DataDirectory) == "" && (string)Field("savedMetadataToken") == "", "applying removes a cleared key from the vault and active metadata client");
             var first = providers[0]!; first.GetType().GetProperty("Enabled")!.SetValue(first, true);
             var move = new Button { Tag = "Down", DataContext = first }; Call("ProviderMoved", move, new RoutedEventArgs());
             Check(ReferenceEquals(providers[1], first), "provider move changes the fallback ordering");
             Check((bool)Call("TrySavePreferences")! && MetadataOptions.Load(store).ProviderOrder.Length == 1, "provider toggles persist independently of ordering");
+            typeof(MainWindow).GetField("applyingPreferences", flags)!.SetValue(window, false);
+            Control<CheckBox>("NeverRefresh").IsChecked = false;
+            Check(MetadataOptions.Load(store).RefreshDays > 0 && !Pending(), "applying resumes once the draft checks finish");
 
             foreach (var size in new[] { (900, 600), (1280, 810) })
-            foreach (var section in new[] { "Profile", "Metadata", "Playback", "Appearance", "Updates" })
+            foreach (var section in new[] { "Profile", "Metadata", "Playback", "Voice", "Appearance", "Updates" })
             {
                 Call("ShowPreferenceSection", section); Layout(size.Item1, size.Item2);
-                var save = Control<Button>("SavePreferencesButton");
-                var bounds = save.TransformToAncestor(root).TransformBounds(new Rect(new Point(), save.RenderSize));
-                Check(bounds.Bottom <= root.ActualHeight && bounds.Left >= 0 && bounds.Right <= root.ActualWidth && save.ActualHeight >= 40,
-                    $"Save stays visible in {section} at {size}");
                 if (section == "Playback") { Control<ScrollViewer>("PlaybackPreferences").ScrollToHome(); Layout(size.Item1, size.Item2); Capture("playback-" + size.Item1); }
-                if (section == "Metadata")
+                if (section == "Metadata") { Control<ScrollViewer>("MetadataPreferences").ScrollToHome(); Layout(size.Item1, size.Item2); Capture("metadata-" + size.Item1); }
+                if (section == "Voice")
                 {
-                    Control<ScrollViewer>("MetadataPreferences").ScrollToEnd(); Layout(size.Item1, size.Item2);
-                    var after = save.TransformToAncestor(root).TransformBounds(new Rect(new Point(), save.RenderSize));
-                    Check(after == bounds, "scrolling settings never moves the Save bar at " + size);
-                    Control<ScrollViewer>("MetadataPreferences").ScrollToHome(); Layout(size.Item1, size.Item2);
-                    Capture("metadata-" + size.Item1);
+                    var volume = Control<Slider>("VoiceVolumeSlider"); volume.BringIntoView(); Layout(size.Item1, size.Item2); Capture("voice-" + size.Item1);
+                    var track = (System.Windows.Controls.Primitives.Track)volume.Template.FindName("PART_Track", volume);
+                    var valueAt = typeof(SliderFollow).GetMethod("ValueAt", BindingFlags.NonPublic | BindingFlags.Static)!;
+                    double At(double fraction) => (double)valueAt.Invoke(null, [volume, track, new Point(track.Thumb.ActualWidth / 2 + fraction * (track.ActualWidth - track.Thumb.ActualWidth), track.ActualHeight / 2)])!;
+                    var original = volume.Value;
+                    // Pointer moves arrive faster than layout while dragging, so each value must not depend on where the knob was last drawn.
+                    var follows = new[] { 0.5, 0.8, 0.825, 0.3, 1, 0 }.Select(f => { var v = At(f); volume.Value = v; return v; }).ToArray();
+                    Check(follows.SequenceEqual(new double[] { 100, 160, 165, 60, 200, 0 }), $"the voice volume knob goes to the point pressed or dragged to at {size}: {string.Join(", ", follows)}");
+                    Check(At(-0.2) == 0 && At(1.3) == 200, "dragging past either end of the voice volume slider stops at that end");
+                    volume.Value = original;
                 }
             }
             Call("ToggleTheme", window, new RoutedEventArgs()); Call("ShowPreferenceSection", "Playback");

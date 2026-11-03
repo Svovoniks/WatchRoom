@@ -421,7 +421,7 @@ public partial class MainWindow
         if (voice is { } session) session.Mixer.Volume = volume / 100f;
         VoiceCardVolumeText.Text = volume + "%";
     }
-    // Moving the slider in Settings is heard at once; Save keeps it and Cancel puts the saved value back.
+    // Moving the slider in Settings is heard at once and saved once it rests.
     private void PreviewVoiceVolume(double value)
     {
         if (voice is { } session) session.Mixer.Volume = (float)(Math.Clamp(value, 0, 200) / 100);
@@ -530,7 +530,7 @@ public partial class MainWindow
         VoiceProcessingPicker.SelectedValue = saved.Processing;
         VoicePushToTalk.IsChecked = saved.PushToTalk; VoiceAlwaysOn.IsChecked = saved.AlwaysOn;
         VoiceDucking.IsChecked = saved.Ducking; VoiceAutoJoin.IsChecked = saved.AutoJoin; VoiceVolumeSlider.Value = saved.Volume;
-        // Cancel restores the saved microphone; the level meter follows it.
+        // Reloading or discarding settings restores the saved microphone; the level meter follows it.
         if (VoicePreferences.IsVisible) _ = Guard(RestartVoiceTest);
     }
     private sealed record VoiceProcessingChoice(VoiceAudio.Processing Id, string Name);

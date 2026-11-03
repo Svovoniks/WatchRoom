@@ -239,9 +239,11 @@ static class VoiceUiChecks
                 $"the panel's voice volume applies at once and is mirrored in Settings without unsaved changes (mixer {mixer.Volume:F2})");
             await Wait(() => store.Setting("voiceVolume") == "60", "the voice volume is saved once the slider settles", 5);
             settingsVolume.Value = 120;
-            check(Math.Abs(mixer.Volume - 1.2f) < 0.001f && store.Setting("voiceVolume") == "60", "moving the Settings slider is heard at once but only saved with the page");
-            Call("LoadPreferences");
-            check(Math.Abs(mixer.Volume - 0.6f) < 0.001f && settingsVolume.Value == 60, "cancelling the Settings page puts the saved voice volume back");
+            check(Math.Abs(mixer.Volume - 1.2f) < 0.001f && store.Setting("voiceVolume") == "60", "moving the Settings slider is heard at once and waits for it to rest before saving");
+            Call("ApplyPreferences");
+            check(store.Setting("voiceVolume") == "120" && Math.Abs(mixer.Volume - 1.2f) < 0.001f, "the Settings slider's volume is saved once it rests");
+            settingsVolume.Value = 60; Call("ApplyPreferences");
+            check(Math.Abs(mixer.Volume - 0.6f) < 0.001f && store.Setting("voiceVolume") == "60", "moving the Settings slider back applies the earlier volume");
             mixer.Volume = 0.0001f;
             if (shots is not null)
             {
