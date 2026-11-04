@@ -26,6 +26,7 @@ static class MetadataRecoveryFixture
             "a later season's release folder does not date the show's premiere");
         foreach (var (folder,season,expected) in new (string,int,int?)[] { ("The.Flash.2014.S02.1080p",2,2014), ("The.Flash.2014.S02E01.1080p",2,2014), ("Show (2014) Season 2",2,2014),
             ("The.Flash.2014.1080p",2,2014), ("The Flash (2014)",2,2014), ("The.Flash.2014.S01-S03.1080p",3,2014), ("The.Flash.2014.Complete.1080p",3,2014),
+            ("2.Broke.Girls.2011.S02.720p",2,2011), ("3.Body.Problem.2024.Complete",3,2024),
             ("Show.S02.2017.HDTV",2,null), ("Show.03.2018.HDTV",3,null), ("Show Season 2 (2017)",2,null), ("Show.S02E01.2017",2,null) })
             check(MetadataTitles.FolderYear(new("y",Path.Combine(directory,folder,"Episode.mkv"),"Show","Show",Series:"Show",Season:season,Episode:1))==expected,
                 "only a year after the season dates that season: "+folder);

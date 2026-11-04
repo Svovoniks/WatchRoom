@@ -157,8 +157,8 @@ public static class MetadataTitles
         var name = Path.GetFileName(Path.GetDirectoryName(item.Path));
         var year = Regex.Match(name ?? "", @"(?:^|[ _.(-])((?:19|20)\d{2})(?:$|[ _.)-])");
         if (!year.Success) return null;
-        // A year after a later season dates that season, as in "Show.S02.2017"; any other, as in "The.Flash.2014.S02" or "The Flash (2014)", names the show.
-        if (item.Season > 1 && Regex.IsMatch(name![..year.Index], $@"(?i)(?:^|[ _.(-])(?:S|Season[ _.]*)?0*{item.Season}(?:E\d+)?(?:$|[ _.)-])")) return null;
+        // A year right after a later season dates that season, as in "Show.S02.2017"; any other, as in "The.Flash.2014.S02" or "The Flash (2014)", names the show.
+        if (item.Season > 1 && Regex.IsMatch(name![..year.Index], $@"(?i)(?:^|[ _.(-])(?:S|Season[ _.]*)?0*{item.Season}(?:E\d+)?[ _.(-]*$")) return null;
         return int.Parse(year.Groups[1].Value);
     }
     public static MediaItem WithSplitIdentity(MediaItem item, IEnumerable<MediaItem> library)

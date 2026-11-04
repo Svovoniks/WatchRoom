@@ -15,6 +15,7 @@ internal static class FilenameEpisodes
     private const string Number = @"(?<n>\d{1,4})(?:v\d+)?(?!\d)";
     // Plain "seria" is a word elsewhere ("Seria A", "Ostatnia Seria 3"), so only a count ("01 seria iz 08") accepts it.
     private const string LatinSeriya = @"seri(?:ya|ia|ja)";
+    private const string CountOf = @"\s*(?:сери[яий]|seria|serii|" + LatinSeriya + @")\s+(?:из|iz)\s+\d{1,4}\)?";
     private const string Label = @"(?:episode|épisode|episodio|cap[ií]tulo|folge|ep|e|серия|эпизод|" + LatinSeriya + ")";
     private static readonly ConcurrentDictionary<string, Regex> Patterns = new();
     private static Regex Pattern(string pattern) => Patterns.GetOrAdd(pattern, p => new Regex(p,
@@ -63,7 +64,7 @@ internal static class FilenameEpisodes
         if (season.Success) return Finish(name, season, int.Parse(season.Groups["s"].Value), true);
         // "Title 03 (01 seriya iz 08) 2018" counts through a season, so the number or S02 before the count names that season,
         // with or without the release year between them. What follows a year describes the release, not the episode.
-        var counted = Match(name, @"(?:(?<=\s)S?(?<s>\d{1,2})\s+(?:(?:19|20)\d{2}\s+)?)?(?<![\p{L}\p{N}])\(?" + Number + @"(?:\s*-\s*(?<end>\d{1,4}))?\s*(?:сери[яий]|seria|serii|" + LatinSeriya + @")\s+(?:из|iz)\s+\d{1,4}\)?");
+        var counted = Match(name, @"(?:(?<=\s)S?(?<s>\d{1,2})\s+(?:(?:19|20)\d{2}\s+)?)?(?<![\p{L}\p{N}])\(?" + Number + @"(?:\s*-\s*(?<end>\d{1,4}))?" + CountOf);
         if (counted.Success)
         {
             var found = Finish(name, counted, counted.Groups["s"].Success ? int.Parse(counted.Groups["s"].Value) : 1, counted.Groups["s"].Success) with { Counted = true };
@@ -126,11 +127,19 @@ internal static class FilenameEpisodes
     {
         var match = Match(Path.GetFileNameWithoutExtension(path), @"^(?<title>.*\S)[ ._-]+(?<n>\d{2,3})[ ._-]+(?<rest>(?:19|20)\d{2}(?!\d).*)$");
         if (!match.Success || int.Parse(match.Groups["n"].Value) == 0) return null;
-        static string Words(string text) => Replace(text, @"[ ._-]+", " ").Trim();
         var named = Words(match.Groups["title"].Value + " " + match.Groups["rest"].Value);
         return string.Equals(named, Words(Path.GetFileName(Path.GetDirectoryName(path)) ?? ""), StringComparison.OrdinalIgnoreCase)
             ? new(Trim(Words(match.Groups["title"].Value)), 1, int.Parse(match.Groups["n"].Value), Counted: true) : null;
     }
+
+    // "Show.S02.(01.seriya.iz.08).2017.HDTV" inside "Show.S02.2017.HDTV": take the count away and the file carries its folder's name,
+    // so the folder is this release. "Fargo (01 серия из 08)" inside "Fargo (2014)" may be in the show's own folder.
+    internal static bool CountedInRelease(string path)
+    {
+        var name = Replace(Path.GetFileNameWithoutExtension(path), @"[._]+", " ");
+        return string.Equals(Words(Replace(name, @"\(?\d{1,4}(?:\s*-\s*\d{1,4})?" + CountOf, " ")), Words(Path.GetFileName(Path.GetDirectoryName(path)) ?? ""), StringComparison.OrdinalIgnoreCase);
+    }
+    private static string Words(string text) => Replace(text, @"[ ._-]+", " ").Trim();
 
     private static string? Subtitle(string text)
     {
