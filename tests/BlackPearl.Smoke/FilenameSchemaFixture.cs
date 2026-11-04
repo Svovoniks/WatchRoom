@@ -35,11 +35,11 @@ static class FilenameSchemaFixture
         {
             ("Example.Show.03.2018.HDTV.(1080i).Group", "Example.Show.03.(05.seriya.iz.08).2018.HDTV.(1080i).Group.ts", "Example Show", 3, true),
             ("Example.Show.S02.2017.HDTV.(1080i).Group", "Example.Show.S02.(05.seriya.iz.08).2017.HDTV.(1080i).Group.ts", "Example Show", 2, true),
-            ("Example Show", "Example Show 4 (5 серия из 8).mkv", "Example Show", 4, true),
+            ("Example Show 4 2018", "Example Show 4 (5 серия из 8) 2018.mkv", "Example Show", 4, true),
             ("Example Show", "Example Show (05 серия из 08) 2018.mkv", "Example Show", 1, false),
             ("Example Show", "Example Show 90210 (05 seriya iz 08).mkv", "Example Show 90210", 1, false),
-            ("Example Show", "Example.Show.3.(05.seria.iz.08).mkv", "Example Show", 3, true),
-            ("Example.Show.03.2018.Group", "Example.Show.03.2018.(05.seriya.iz.08).avi", "Example Show", 3, true),
+            ("Example.Show.3.2018", "Example.Show.3.(05.seria.iz.08).2018.mkv", "Example Show", 3, true),
+            ("Example.Show.03.2018", "Example.Show.03.2018.(05.seriya.iz.08).avi", "Example Show", 3, true),
             ("Example.Show.03.2018.SATRip.Group", "Example.Show.03.(05.seriya.iz.08).2018.SATRip.Group.avi", "Example Show", 3, true),
         })
         {
@@ -115,9 +115,9 @@ static class FilenameSchemaFixture
             var decoy = FileNames.Parse(Path.Combine(directory, "Movies", name));
             check(decoy.Series is null && decoy.Episode is null, "a word that only resembles the label stays a movie title: " + name);
         }
-        var counts = FileNames.Parse(Path.Combine(countedRoot, "Example Show", "Example.Show.3.(01-02.seriya.iz.08).mkv"), "Mixed", countedRoot);
+        var counts = FileNames.Parse(Path.Combine(countedRoot, "Example.Show.3.2018", "Example.Show.3.(01-02.seriya.iz.08).2018.mkv"), "Mixed", countedRoot);
         check(counts.Series == "Example Show" && counts.Season == 3 && counts.Episode == 1 && counts.EpisodeEnd == 2, "a counted range keeps its show and both episodes");
-        var plural = FileNames.Parse(Path.Combine(countedRoot, "Example Show", "Example Show 3 (01-04 серии из 16).mkv"), "Mixed", countedRoot);
+        var plural = FileNames.Parse(Path.Combine(countedRoot, "Example Show 3 2018", "Example Show 3 (01-04 серии из 16) 2018.mkv"), "Mixed", countedRoot);
         check(plural.Series == "Example Show" && plural.Season == 3 && plural.Episode == 1 && plural.EpisodeEnd == 4, "a counted Cyrillic range keeps its show and episodes");
         // Two shows' releases in one folder stay two shows, and a release folder's tags never become the show's name.
         var nested = Path.Combine(directory, "nested-releases");
@@ -126,7 +126,37 @@ static class FilenameSchemaFixture
         check(nestedShows.All(x => x.Item.Series == x.Series && x.Item.Title == x.Series && x.Item.Season == x.Season && x.Item.Episode == 1 && x.Item.SeriesPath is null) && nestedShows.Select(x => x.Item.ShowId).Distinct().Count() == 3,
             "counted releases one folder below the root keep their own shows");
         var ownFolder = FileNames.Parse(Path.Combine(directory, "Shows", "Example Show", "Example Show 3 (05 seriya iz 08).mkv"));
-        check(ownFolder.Series == "Example Show" && ownFolder.SeriesPath is not null && ownFolder.Season == 3 && ownFolder.Episode == 5, "a counted episode in the show's own folder belongs to that folder");
+        check(ownFolder.Series == "Example Show" && ownFolder.SeriesPath is not null && ownFolder.Season == 1 && ownFolder.Episode == 5 && ownFolder.EpisodeTitle is null, "a counted episode in the show's own folder belongs to that folder");
+        // Outside a release of the same name, a count is only an episode label, read as these names always were.
+        var plainRoot = Path.Combine(directory, "plain-counts");
+        foreach (var (path, kind, series, season, episode) in new (string, string, string, int, int)[]
+        {
+            (Path.Combine("Dated", "Dated 2014 - 05 серия из 10.mkv"), "Mixed", "Dated", 1, 5),
+            (Path.Combine("By Year (2014)", "Fargo 2014 - 05 серия из 10.mkv"), "Show", "By Year", 1, 5),
+            (Path.Combine("Twelve", "Show 12 - 05 серия из 12.mkv"), "Mixed", "Show 12", 1, 5),
+            (Path.Combine("Major 2", "Major 2 - 05 серия из 12.mkv"), "Show", "Major 2", 1, 5),
+            (Path.Combine("Major 2", "Major 2 - 06 серия из 12.mkv"), "Show", "Major 2", 1, 6),
+            (Path.Combine("Major", "Season 2", "Major 2 - 05 серия из 12.mkv"), "Show", "Major", 2, 5),
+            (Path.Combine("Title 3", "Title 3 (5 серия из 8).mkv"), "Show", "Title 3", 1, 5),
+            (Path.Combine("Apollo 13", "Apollo 13 (01 seriya iz 08).mkv"), "Mixed", "Apollo 13", 1, 1),
+            (Path.Combine("24", "24 (05 серия из 24).mkv"), "Show", "24", 1, 5),
+            (Path.Combine("86", "86 (05 серия из 11).mkv"), "Anime", "86", 1, 5),
+            (Path.Combine("24", "Season 3", "24 (05 серия из 24).mkv"), "Show", "24", 3, 5),
+            (Path.Combine("Downloads", "24 (05 серия из 24).mkv"), "Mixed", "24", 1, 5),
+            (Path.Combine("Downloads", "13 (01 серия из 13).mkv"), "Mixed", "13", 1, 1),
+            (Path.Combine("11.22.63", "11.22.63.(05.seriya.iz.08).mkv"), "Show", "11 22 63", 1, 5),
+            (Path.Combine("Plain","Show 3 (05 seriya iz 08) 2018.mkv"), "Mixed", "Show 3", 1, 5),
+        })
+        {
+            var item = FileNames.Parse(Path.Combine(plainRoot, path), kind, plainRoot);
+            check(item.Series == series && item.Season == season && item.Episode == episode && item.EpisodeEnd is null && item.EpisodeTitle is null && item.NumberingConflict is null, "a count outside its own release is only an episode label: " + path);
+        }
+        var parted = new[] { "Fargo", "Other" }.Select(show => FileNames.Parse(Path.Combine(plainRoot, show, "Part 2", "Part 2 (05 серия из 10).mkv"), "Show", plainRoot)).ToArray();
+        check(parted[0].Series == "Fargo" && parted[1].Series == "Other" && parted.All(x => x.SeriesPath is not null && x.SourcePart == 2 && x.SourcePartEpisode == 5) && parted[0].ShowId != parted[1].ShowId, "a part folder stays with the show that holds it");
+        var bookFolder = FileNames.Parse(Path.Combine(plainRoot, "Fargo", "Часть 2", "Часть 2 (05 серия из 10).mkv"), "Show", plainRoot);
+        check(bookFolder.Series == "Часть 2" && bookFolder.SeriesPath is not null, "a folder named only as a part keeps its name");
+        var sezon = FileNames.Parse(Path.Combine(plainRoot, "Show.Sezon.2.2017", "Show.Sezon.2.(05.seriya.iz.10).2017.ts"), "Mixed", plainRoot);
+        check(sezon.Series == "Show" && sezon.Season == 2 && sezon.Episode == 5, "a romanized season word stays out of the show's title");
         // A folder that only adds a year or a number to the title may be the show's own, and two of them are two shows.
         var ownFolders = Path.Combine(directory, "own-folders");
         var fargos = new[] { "Fargo (1996)", "Fargo (2014)" }.Select(folder => FileNames.Parse(Path.Combine(ownFolders, folder, "Fargo (01 серия из 08).mkv"), "Show", ownFolders)).ToArray();

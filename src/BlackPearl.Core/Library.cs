@@ -909,7 +909,7 @@ public static partial class FileNames
         if (extraClip) { bonus = true; series = clipShow ?? System.IO.Path.GetFileName(seriesDir); }
         // A release folder ("Show.S02.2017.HDTV") is not the show's own folder, and the folder holding it may be anything, unless it's named after the show.
         // Files numbered inside "Show.2016" repeat its year, so that folder is a release of Show even though it names Show.
-        var releaseShow = clipShow ?? (numbering is { Counted: true } && (withinRelease || FilenameEpisodes.CountedInRelease(path)) ? numbering.Series : null);
+        var releaseShow = clipShow ?? (numbering is { Counted: true } ? numbering.Series : null);
         var releaseOfShow = !string.IsNullOrEmpty(releaseShow) && ((withinRelease || clipHome.Files >= 3) && seriesDir == releaseHome || !NamesShow(System.IO.Path.GetFileName(seriesDir), releaseShow));
         // Dates in an episode title are not the premiere year of the entire series.
         var years = Regex.Matches(series ?? episodeName, @"\b(19\d{2}|20\d{2})\b");

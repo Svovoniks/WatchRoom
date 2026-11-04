@@ -16,6 +16,8 @@ internal static class FilenameEpisodes
     // Plain "seria" is a word elsewhere ("Seria A", "Ostatnia Seria 3"), so only a count ("01 seria iz 08") accepts it.
     private const string LatinSeriya = @"seri(?:ya|ia|ja)";
     private const string CountOf = @"\s*(?:сери[яий]|seria|serii|" + LatinSeriya + @")\s+(?:из|iz)\s+\d{1,4}\)?";
+    // "Part 2 (05 серия из 10)" and "Season 2 (05 серия из 10)" name a part of a show, which their folders place, not a title and a season.
+    private const string NoOwnTitle = @"(?:(?:^|\s)(?:part|часть|book|vol|volume|том|книга)\s*\d{1,3}|^(?:S\d{1,2}|(?:season|сезон|sezon|saison|temporada|staffel|stagione)\s*\d{1,2}|\d{1,2}\s*(?:сезон|sezon)))\s*\(?\d{1,4}(?:-\d{1,4})?" + CountOf;
     private const string Label = @"(?:episode|épisode|episodio|cap[ií]tulo|folge|ep|e|серия|эпизод|" + LatinSeriya + ")";
     private static readonly ConcurrentDictionary<string, Regex> Patterns = new();
     private static Regex Pattern(string pattern) => Patterns.GetOrAdd(pattern, p => new Regex(p,
@@ -62,13 +64,17 @@ internal static class FilenameEpisodes
         if (!season.Success) season = Match(name, @"\b(?<s>\d{1,2})\s*(?:сезон|sezon)\s*" + Number + @"\s*(?:сери(?:я|и|й)|" + LatinSeriya + @")\b");
         if (!season.Success) season = Match(name, @"\b[сc](?<s>\d{1,2})[ -]*[еэ]" + Number + @"\b");
         if (season.Success) return Finish(name, season, int.Parse(season.Groups["s"].Value), true);
-        // "Title 03 (01 seriya iz 08) 2018" counts through a season, so the number or S02 before the count names that season,
-        // with or without the release year between them. What follows a year describes the release, not the episode.
-        var counted = Match(name, @"(?:(?<=^|\s)(?:S|(?:season|сезон|sezon|saison|temporada|staffel|stagione)\s*)?(?<s>\d{1,2})(?:\s+(?:сезон|sezon))?\s+(?:(?:19|20)\d{2}\s+)?)?(?<![\p{L}\p{N}])\(?" + Number + @"(?:\s*-\s*(?<end>\d{1,4}))?" + CountOf);
-        if (counted.Success)
+        // "Title.03.(01.seriya.iz.08).2018.HDTV" inside "Title.03.2018.HDTV" counts through a season, so the number or S02 before the count names that season,
+        // with or without the release year between them. What follows a year describes the release, not the episode. Only a file carrying its
+        // folder's name is read this way: elsewhere "Fargo 2014 - 05 серия из 10" is plainly episode 5, and the labels below read it.
+        // A bare number needs that release year too: "Apollo 13 (01 seriya iz 08)" is a title, "Title.03.(01.seriya.iz.08).2018" a season.
+        var counted = Match(name, @"(?:(?<=\s)(?<word>S|(?:season|сезон|sezon|saison|temporada|staffel|stagione)\s*)?(?<s>\d{1,2})(?<word>\s+(?:сезон|sezon))?\s+(?:(?:19|20)\d{2}\s+)?)?(?<![\p{L}\p{N}])\(?" + Number + @"(?:-(?<end>\d{1,4}))?" + CountOf);
+        if (counted.Success && CountedInRelease(path) && !Match(name, NoOwnTitle).Success &&
+            (!counted.Groups["s"].Success || Match(name[..counted.Index], @"\p{L}").Success && (counted.Groups["word"].Success || Match(name, @"(?<!\d)(?:19|20)\d{2}(?!\d)").Success)) &&
+            (!counted.Groups["end"].Success || !Year(int.Parse(counted.Groups["n"].Value)) && int.Parse(counted.Groups["end"].Value) > int.Parse(counted.Groups["n"].Value)))
         {
             var found = Finish(name, counted, counted.Groups["s"].Success ? int.Parse(counted.Groups["s"].Value) : 1, counted.Groups["s"].Success) with { Counted = true };
-            if (counted.Groups["end"].Success && int.Parse(counted.Groups["end"].Value) > found.Episode) found = found with { End = int.Parse(counted.Groups["end"].Value) };
+            if (counted.Groups["end"].Success) found = found with { End = int.Parse(counted.Groups["end"].Value) };
             return found.Subtitle is { } words && Match(words, @"^(?:19|20)\d{2}(?!\d)").Success ? found with { Subtitle = null } : found;
         }
         // "One Piece - Egghead SP4" and "OVA2" are numbered specials outside a Movies library; a show's "Special 3" is too.
@@ -137,12 +143,15 @@ internal static class FilenameEpisodes
     internal static bool CountedInRelease(string path)
     {
         var name = Replace(Path.GetFileNameWithoutExtension(path), @"[._]+", " ");
-        return string.Equals(Words(Replace(name, @"\(?\d{1,4}(?:\s*-\s*\d{1,4})?" + CountOf, " ")), Words(Path.GetFileName(Path.GetDirectoryName(path)) ?? ""), StringComparison.OrdinalIgnoreCase);
+        return string.Equals(Words(Replace(name, @"\(?\d{1,4}(?:-\d{1,4})?" + CountOf, " ")), Words(Path.GetFileName(Path.GetDirectoryName(path)) ?? ""), StringComparison.OrdinalIgnoreCase);
     }
     private static string Words(string text) => Replace(text, @"[ ._-]+", " ").Trim();
 
     private static string? Subtitle(string text)
     {
+        // The rest of a count ("05 серия из 10") is not a title, and a year after it describes the release.
+        var count = Match(text, @"^[\s)]*(?:из|iz)\s+\d{1,4}\)?");
+        if (count.Success && Match(text = text[count.Length..], @"^\s*(?:19|20)\d{2}(?!\d)").Success) return null;
         text = Trim(Replace(text, @"\s+", " "));
         return text.Length == 0 || Match(text, @"^(?:END|FINAL|COMPLETE|v\d+)$").Success ? null : text;
     }
