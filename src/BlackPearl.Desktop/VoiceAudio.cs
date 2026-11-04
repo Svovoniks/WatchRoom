@@ -19,6 +19,10 @@ internal sealed class VoiceAudio : IAsyncDisposable
     // Automated checks set BLACKPEARL_SIMULATED_AUDIO=1 so voice never opens Windows audio devices, which would ask
     // for microphone access: a test microphone sends silence and test speakers take the room's mix.
     internal static bool Simulated { get; } = AppEnvironment.Get("SIMULATED_AUDIO") == "1";
+    // Voice plays as ordinary audio, because Windows treats Communications and GameChat streams as a call. Communications
+    // lowers other apps such as the movie, and either one puts Bluetooth headphones into mono call mode for everything
+    // they play, even when the microphone is a separate device.
+    internal static readonly AudioStreamCategory OutputCategory = AudioStreamCategory.Other;
     private static readonly Device SimulatedInput = new("simulated-microphone", "Test microphone"), SimulatedOutput = new("simulated-speakers", "Test speakers");
     public static Task<(Device[] Inputs, Device[] Outputs)> ListDevicesAsync() => Simulated ? Task.FromResult<(Device[], Device[])>(([SimulatedInput], [SimulatedOutput])) : Task.Run(() =>
     {
@@ -43,7 +47,7 @@ internal sealed class VoiceAudio : IAsyncDisposable
         {
             var mixer = new VoiceMixer();
             mixer.Cue(samples);
-            using var player = new WasapiPlayerBuilder().WithDevice(device).WithLatency(60).WithCategory(AudioStreamCategory.GameChat).Build();
+            using var player = new WasapiPlayerBuilder().WithDevice(device).WithLatency(60).WithCategory(OutputCategory).Build();
             player.Init(new MixerProvider(mixer));
             player.Play();
             try { await Task.Delay(samples.Length * 1000 / VoicePacket.SampleRate + 250, cancel); }
@@ -231,8 +235,7 @@ internal sealed class VoiceAudio : IAsyncDisposable
         using var device = Find(enumerator, DataFlow.Render, settings.Output);
         if (device is null) throw new InvalidOperationException("No audio output");
         OutputName = device.FriendlyName;
-        // Voice is not marked as communications audio, which would make Windows lower other apps such as the movie.
-        var created = new WasapiPlayerBuilder().WithDevice(device).WithLatency(40).WithCategory(AudioStreamCategory.GameChat).Build();
+        var created = new WasapiPlayerBuilder().WithDevice(device).WithLatency(40).WithCategory(OutputCategory).Build();
         created.PlaybackStopped += (_, e) =>
         {
             if (e.Exception is null || lifetime.IsCancellationRequested) return;
