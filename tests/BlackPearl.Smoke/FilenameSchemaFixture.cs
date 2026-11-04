@@ -75,6 +75,18 @@ static class FilenameSchemaFixture
         var clip = FileNames.Parse(clipPath, "Mixed", releases);
         var clipEpisode = FileNames.Parse(Path.Combine(clipHome, "K.Show.01.2016.HDTV.ts"), "Mixed", releases);
         check(clip.IsBonus && clip.ExtraOf is null && clip.Series == "K Show" && clip.ShowId == clipEpisode.ShowId, "an extras clip beside a numbered release joins its show");
+        foreach (var (folder, show, file) in new[] { ("C.Show.03.2018.HDTV", "C Show", "C.Show.03.(01.seriya.iz.08).2018.HDTV.ts"), (Path.Combine("Russian", "B.Show.S02.2017.HDTV"), "B Show", "B.Show.S02.(01.seriya.iz.08).2017.HDTV.ts") })
+        {
+            var episode = (await Release(folder, "Mixed", file)).Single();
+            var extra = Path.Combine(releases, folder, "Extras", "Making of.ts"); Directory.CreateDirectory(Path.GetDirectoryName(extra)!); await File.WriteAllBytesAsync(extra, [0]);
+            var countedClip = FileNames.Parse(extra, "Mixed", releases);
+            check(episode.Series == show && countedClip.IsBonus && countedClip.ExtraOf is null && countedClip.Series == show && countedClip.ShowId == episode.ShowId, "an extras clip beside a counted release joins its show: " + folder);
+        }
+        var filmClipHome = Path.Combine(releases, "K.Film.2016.HDTV");
+        var filmFiles = await Release("K.Film.2016.HDTV", "Movie", "K.Film.01.2016.HDTV.ts", "K.Film.02.2016.HDTV.ts", "K.Film.03.2016.HDTV.ts");
+        var filmClipPath = Path.Combine(filmClipHome, "Extras", "Making of.ts"); Directory.CreateDirectory(Path.GetDirectoryName(filmClipPath)!); await File.WriteAllBytesAsync(filmClipPath, [0]);
+        var filmClip = FileNames.Parse(filmClipPath, "Movie", releases);
+        check(filmClip.IsBonus && filmClip.ExtraOf == filmFiles[0].Id && filmClip.Series is null && filmClip.Kind == "Movie", "an extras clip in a Movie library stays with its film");
         var clipStore = new LibraryStore(Path.Combine(directory, "numbered-clip-db"));
         clipStore.Save(clip with { ExtraOf = clipEpisode.Id, Series = null, ShowId = null, SeasonId = null, Season = null, Title = "Making of", Kind = "Movie" });
         await clipStore.ScanAsync([new(clipHome)]);
@@ -108,6 +120,17 @@ static class FilenameSchemaFixture
             "counted releases one folder below the root keep their own shows");
         var ownFolder = FileNames.Parse(Path.Combine(directory, "Shows", "Example Show", "Example Show 3 (05 seriya iz 08).mkv"));
         check(ownFolder.Series == "Example Show" && ownFolder.SeriesPath is not null && ownFolder.Season == 3 && ownFolder.Episode == 5, "a counted episode in the show's own folder belongs to that folder");
+        // A folder that only adds a year or a number to the title may be the show's own, and two of them are two shows.
+        var ownFolders = Path.Combine(directory, "own-folders");
+        var fargos = new[] { "Fargo (1996)", "Fargo (2014)" }.Select(folder => FileNames.Parse(Path.Combine(ownFolders, folder, "Fargo (01 серия из 08).mkv"), "Show", ownFolders)).ToArray();
+        check(fargos.All(x => x.Series == "Fargo" && x.SeriesPath is not null) && fargos[0].Year == 1996 && fargos[1].Year == 2014 && fargos[0].ShowId != fargos[1].ShowId, "a show's own dated folders stay separate shows");
+        var numberedFolder = FileNames.Parse(Path.Combine(ownFolders, "Major 2", "Major (05 seriya iz 12).mkv"), "Show", ownFolders);
+        check(numberedFolder.Series == "Major 2" && numberedFolder.SeriesPath is not null, "a folder that only adds a number stays the show's own folder");
+        foreach (var release in new[] { "Fargo Season 2", "Fargo.S02.2017.HDTV" })
+        {
+            var inShow = FileNames.Parse(Path.Combine(ownFolders, "Fargo", release, "Fargo.S02.(05.seriya.iz.08).mkv"), "Show", ownFolders);
+            check(inShow.Series == "Fargo" && inShow.SeriesPath == Path.Combine(ownFolders, "Fargo") && inShow.Season == 2 && inShow.Episode == 5, "a season's folder inside the show's folder joins that show: " + release);
+        }
         var underShow = FileNames.Parse(Path.Combine(directory, "Shows", "Example Show", "Season 2", "Example Show (05 seriya iz 08).mkv"));
         check(underShow.Series == "Example Show" && underShow.SeriesPath is not null && underShow.Season == 2 && underShow.Episode == 5, "a counted episode in a season folder belongs to the show folder");
         var tight = FileNames.Parse(Path.Combine(directory, "Anime", "Example-03-Pilot.mkv"));
