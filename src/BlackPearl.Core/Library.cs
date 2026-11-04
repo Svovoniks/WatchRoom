@@ -790,6 +790,9 @@ public sealed partial class LibraryStore
         // A film's clip stays with its film, including one an earlier scan had filed under a show of its own.
         if (parsed.ExtraOf is not null && (previous is null || CanRepairGrouping(previous)))
         { item = item with { ExtraOf = parsed.ExtraOf, Title = parsed.Title, Kind = parsed.Kind, Series = null, ShowId = null, SeasonId = null, SeriesPath = null, Season = null, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, Year = null }; bonus = true; }
+        // A clip filed under a "film" that turned out to be a numbered episode joins that episode's show, or no list would reach it.
+        else if (previous?.ExtraOf is not null && parsed.ExtraOf is null && parsed.IsBonus && CanRepairGrouping(previous))
+            item = item with { ExtraOf = null, Title = parsed.Title, Kind = parsed.Kind, Series = parsed.Series, ShowId = parsed.ShowId, Season = parsed.Season, EpisodeTitle = parsed.EpisodeTitle, Year = parsed.Year };
         // A clip's home season comes from its folder, so a rescan places clips indexed before seasons were recorded.
         if (bonus && parsed.IsBonus && parsed.AirsAfterSeason is not null) item = item with { AirsAfterSeason = parsed.AirsAfterSeason };
         return LocalMetadata.Apply(item with { IsBonus = bonus, BonusKind = bonus ? parsed.IsBonus ? parsed.BonusKind : previous?.BonusKind : null, NumberingSource = parsed.NumberingSource,
@@ -843,7 +846,8 @@ public static partial class FileNames
             if (File.Exists(System.IO.Path.Combine(parent, "tvshow.nfo")) || Directory.EnumerateDirectories(parent).Any(folder => IsSeasonFolder(System.IO.Path.GetFileName(folder)))) return (true, null);
             var videos = Directory.EnumerateFiles(parent).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file)) && !IsExtra(file)).OrderBy(file => file, StringComparer.OrdinalIgnoreCase).ToArray();
             if (videos.Length == 0) return (false, null);
-            var film = videos.FirstOrDefault(file => FilenameEpisodes.Read(file, true) is null);
+            var numberedHome = NumberedRelease(parent).Files >= 3;
+            var film = videos.FirstOrDefault(file => FilenameEpisodes.Read(file, true) is null && !(numberedHome && FilenameEpisodes.WithinRelease(file) is not null));
             return film is null ? (true, null) : (false, film);
         }
         catch (IOException) { return (false, null); }
@@ -866,7 +870,7 @@ public static partial class FileNames
         var name = FilenameEpisodes.Clean(path, seriesContext || seasonFolder.Success);
         var episodeName = name;
         var numbering = FilenameEpisodes.Read(path, seriesContext || seasonFolder.Success, folderSeason, name, specials: sourceKind != "Movie");
-        if (numbering is null && sourceKind != "Movie" && !seasonFolder.Success && !bonus && !IsExtra(path) && FilenameEpisodes.WithinRelease(path) is { } numberedRelease && NumberedReleaseFiles(dir) >= 3)
+        if (numbering is null && sourceKind != "Movie" && !seasonFolder.Success && !bonus && !IsExtra(path) && FilenameEpisodes.WithinRelease(path) is { } numberedRelease && NumberedRelease(dir).Files >= 3)
             numbering = numberedRelease;
         var season = numbering?.Season; var number = numbering?.Episode;
         string? series = numbering?.Series;
@@ -898,7 +902,11 @@ public static partial class FileNames
         }
         // A show's extras folder joins the show as bonus clips, whatever the file names say; an explicit S00 file there is a numbered special.
         var extraClip = showExtras && seriesDir != dir && numbering is not { ExplicitSeason: true, Season: 0 };
-        if (extraClip) { bonus = true; series = System.IO.Path.GetFileName(seriesDir); }
+        var clipRelease = extraClip ? NumberedRelease(seriesDir) : default;
+        if (extraClip) { bonus = true; series = clipRelease.Files >= 3 ? clipRelease.Series : System.IO.Path.GetFileName(seriesDir); }
+        // A release folder named after the show ("Show.S02.2017.HDTV") is not the show's own folder, and the folder holding it may be anything.
+        var releaseOfShow = clipRelease.Files >= 3 || numbering is { Counted: true, Series: { } countedSeries } &&
+            MetadataTitles.Normalize(seasonFolderName) is var folderName && folderName != MetadataTitles.Normalize(countedSeries) && folderName.StartsWith(MetadataTitles.Normalize(countedSeries), StringComparison.Ordinal);
         // Dates in an episode title are not the premiere year of the entire series.
         var years = Regex.Matches(series ?? episodeName, @"\b(19\d{2}|20\d{2})\b");
         var year = series is null && years.Count > 1 ? years[^1] : years.Count > 0 ? years[0] : Match.Empty;
@@ -917,7 +925,7 @@ public static partial class FileNames
         var parentName = System.IO.Path.GetFileName(seriesDir);
         var structured = File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) || (numbering is not null || bonus) && (seasonFolder.Success || seriesContext || seriesDir != dir) &&
             (libraryRoot is null || !string.Equals(System.IO.Path.GetFullPath(libraryRoot), seriesDir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) &&
-            !Regex.IsMatch(parentName, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы)$");
+            !Regex.IsMatch(parentName, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы)$") && !releaseOfShow;
         if (structured)
         {
             var folderTitle = StripReleaseTags(parentName);
@@ -998,22 +1006,24 @@ public static partial class FileNames
         var rest = text[match.Length..].Trim(' ', '-', '–', ':', '.', '_');
         return !clip || rest.Length > 0 && !Regex.IsMatch(rest, @"^\(?(?:19|20)\d{2}(?!\d)");
     }
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Written, int Files)> NumberedReleases =
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Written, int Files, string? Series)> NumberedReleases =
         new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-    private static int NumberedReleaseFiles(string dir)
+    // How many differently numbered files a release folder holds under its own name, and the show they name.
+    private static (int Files, string? Series) NumberedRelease(string dir)
     {
         try
         {
             var written = Directory.GetLastWriteTimeUtc(dir);
-            if (NumberedReleases.TryGetValue(dir, out var cached) && cached.Written == written) return cached.Files;
-            var files = Directory.EnumerateFiles(dir).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file)) && !IsExtra(file))
-                .Select(FilenameEpisodes.WithinRelease).OfType<FilenameEpisodes.Result>().Select(found => found.Episode).Distinct().Count();
+            if (NumberedReleases.TryGetValue(dir, out var cached) && cached.Written == written) return (cached.Files, cached.Series);
+            var found = Directory.EnumerateFiles(dir).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file)) && !IsExtra(file))
+                .Select(FilenameEpisodes.WithinRelease).OfType<FilenameEpisodes.Result>().ToArray();
+            var files = found.Select(file => file.Episode).Distinct().Count(); var series = found.FirstOrDefault()?.Series;
             if (NumberedReleases.Count > 4096) NumberedReleases.Clear();
-            NumberedReleases[dir] = (written, files);
-            return files;
+            NumberedReleases[dir] = (written, files, series);
+            return (files, series);
         }
-        catch (IOException) { return 0; }
-        catch (UnauthorizedAccessException) { return 0; }
+        catch (IOException) { return (0, null); }
+        catch (UnauthorizedAccessException) { return (0, null); }
     }
     private static string? EpisodeFolderSeries(string dir, string name, string? libraryRoot, bool seriesContext)
     {

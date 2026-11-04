@@ -10,10 +10,11 @@ internal static class FilenameEpisodes
     internal const string CrossSeasonRange = "This file contains episodes from multiple seasons; split it or correct its numbering.";
     internal const string InvalidRange = "This file has non-contiguous or invalid episode numbering; correct its numbering before matching.";
     internal sealed record Result(string Series, int? Season, int? Episode, int? End = null,
-        bool ExplicitSeason = false, string? Subtitle = null, string? AirDate = null, string? Conflict = null);
+        bool ExplicitSeason = false, string? Subtitle = null, string? AirDate = null, string? Conflict = null, bool Counted = false);
 
     private const string Number = @"(?<n>\d{1,4})(?:v\d+)?(?!\d)";
-    private const string LatinSeriya = @"seri(?:ya|ia|ja|a)";
+    // Plain "seria" is a word elsewhere ("Seria A", "Ostatnia Seria 3"), so only a count ("01 seria iz 08") accepts it.
+    private const string LatinSeriya = @"seri(?:ya|ia|ja)";
     private const string Label = @"(?:episode|épisode|episodio|cap[ií]tulo|folge|ep|e|серия|эпизод|" + LatinSeriya + ")";
     private static readonly ConcurrentDictionary<string, Regex> Patterns = new();
     private static Regex Pattern(string pattern) => Patterns.GetOrAdd(pattern, p => new Regex(p,
@@ -60,13 +61,14 @@ internal static class FilenameEpisodes
         if (!season.Success) season = Match(name, @"\b(?<s>\d{1,2})\s*(?:сезон|sezon)\s*" + Number + @"\s*(?:сери(?:я|и|й)|" + LatinSeriya + @")\b");
         if (!season.Success) season = Match(name, @"\b[сc](?<s>\d{1,2})[ -]*[еэ]" + Number + @"\b");
         if (season.Success) return Finish(name, season, int.Parse(season.Groups["s"].Value), true);
-        // "Title 03 (01 seriya iz 08) 2018" counts through a season, so the number or S02 before the count names that season.
-        // The release year after it belongs to the release, not to the episode's title.
-        var counted = Match(name, @"(?:(?<=\s)S?(?<s>\d{1,2})\s+)?(?<![\p{L}\p{N}])\(?" + Number + @"\s*(?:серия|" + LatinSeriya + @")\s+(?:из|iz)\s+\d{1,4}\)?");
+        // "Title 03 (01 seriya iz 08) 2018" counts through a season, so the number or S02 before the count names that season,
+        // with or without the release year between them. What follows a year describes the release, not the episode.
+        var counted = Match(name, @"(?:(?<=\s)S?(?<s>\d{1,2})\s+(?:(?:19|20)\d{2}\s+)?)?(?<![\p{L}\p{N}])\(?" + Number + @"(?:\s*-\s*(?<end>\d{1,4}))?\s*(?:сери[яий]|seria|serii|" + LatinSeriya + @")\s+(?:из|iz)\s+\d{1,4}\)?");
         if (counted.Success)
         {
-            var found = Finish(name, counted, counted.Groups["s"].Success ? int.Parse(counted.Groups["s"].Value) : 1, counted.Groups["s"].Success);
-            return found.Subtitle is { } words && int.TryParse(words, out var trailing) && Year(trailing) ? found with { Subtitle = null } : found;
+            var found = Finish(name, counted, counted.Groups["s"].Success ? int.Parse(counted.Groups["s"].Value) : 1, counted.Groups["s"].Success) with { Counted = true };
+            if (counted.Groups["end"].Success && int.Parse(counted.Groups["end"].Value) > found.Episode) found = found with { End = int.Parse(counted.Groups["end"].Value) };
+            return found.Subtitle is { } words && Match(words, @"^(?:19|20)\d{2}(?!\d)").Success ? found with { Subtitle = null } : found;
         }
         // "One Piece - Egghead SP4" and "OVA2" are numbered specials outside a Movies library; a show's "Special 3" is too.
         var special = seriesContext || specials ? Match(name, @"(?:^|\s|-)(?:SP|OVA|OAD)[ #-]?" + Number + @"(?=\s*(?:$|-|\())") : System.Text.RegularExpressions.Match.Empty;
@@ -127,7 +129,7 @@ internal static class FilenameEpisodes
         static string Words(string text) => Replace(text, @"[ ._-]+", " ").Trim();
         var named = Words(match.Groups["title"].Value + " " + match.Groups["rest"].Value);
         return string.Equals(named, Words(Path.GetFileName(Path.GetDirectoryName(path)) ?? ""), StringComparison.OrdinalIgnoreCase)
-            ? new(Trim(Words(match.Groups["title"].Value)), 1, int.Parse(match.Groups["n"].Value)) : null;
+            ? new(Trim(Words(match.Groups["title"].Value)), 1, int.Parse(match.Groups["n"].Value), Counted: true) : null;
     }
 
     private static string? Subtitle(string text)

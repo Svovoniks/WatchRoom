@@ -154,11 +154,12 @@ public static class MetadataTitles
     }
     public static int? FolderYear(MediaItem item)
     {
-        // A later season's release folder dates that season, not the show's premiere, so it can't vouch for a match.
-        if (item.Season > 1) return null;
         var name = Path.GetFileName(Path.GetDirectoryName(item.Path));
         var year = Regex.Match(name ?? "", @"(?:^|[ _.(-])((?:19|20)\d{2})(?:$|[ _.)-])");
-        return year.Success ? int.Parse(year.Groups[1].Value) : null;
+        if (!year.Success) return null;
+        // A later season's year dates that season, as in "Show.S02.2017"; only one before the season, as in "The.Flash.2014.S02", names the show.
+        if (item.Season > 1 && !Regex.IsMatch(name![(year.Index + 1)..], $@"(?i)[ _.(-](?:S|Season[ _.]*)?0*{item.Season}(?:E\d+)?(?:$|[ _.)-])")) return null;
+        return int.Parse(year.Groups[1].Value);
     }
     public static MediaItem WithSplitIdentity(MediaItem item, IEnumerable<MediaItem> library)
     {

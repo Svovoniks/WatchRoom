@@ -24,6 +24,9 @@ static class MetadataRecoveryFixture
         var seasonRelease = FileNames.Parse(Path.Combine(directory,"Example.Show.03.2018.HDTV.(1080i).Group","Example.Show.03.(01.seriya.iz.08).2018.HDTV.(1080i).Group.ts"),"Mixed",directory);
         check(seasonRelease.Season==3 && MetadataTitles.FolderYear(seasonRelease) is null,
             "a later season's release folder does not date the show's premiere");
+        foreach (var (folder,season,expected) in new (string,int,int?)[] { ("The.Flash.2014.S02.1080p",2,2014), ("The.Flash.2014.S02E01.1080p",2,2014), ("Show (2014) Season 2",2,2014), ("Show.S02.2017.HDTV",2,null) })
+            check(MetadataTitles.FolderYear(new("y",Path.Combine(directory,folder,"Episode.mkv"),"Show","Show",Series:"Show",Season:season,Episode:1))==expected,
+                "only a year before the season names the show: "+folder);
         check(MetadataTitles.FolderYear(seasonRelease with { Season=1 })==2018,
             "a first season's release folder still supplies the missing year");
         check(MetadataMatching.Choose([new(13007,"tv","Полицейский с Рублёвки","2016",null,"","Show",Provider:"tvmaze")],seasonRelease with { Title="полицейский с рублевки",Series="полицейский с рублевки",Year=MetadataTitles.FolderYear(seasonRelease) }) is { Id: 13007 },

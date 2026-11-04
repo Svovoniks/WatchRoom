@@ -19,12 +19,12 @@ static class FilenameSchemaFixture
             check(item.Series == "Example" && item.Season == 1 && item.Episode == 3 && item.EpisodeTitle == "Pilot", "absolute schema extracts subtitle: " + marker);
             check(MetadataTitles.FilenameAlias(path) == "Example", "metadata alias agrees with absolute schema: " + marker);
         }
-        foreach (var marker in new[] { "Sezon 2 Seriya 3", "2 sezon 3 seriya", "Season 2 Seria 3" })
+        foreach (var marker in new[] { "Sezon 2 Seriya 3", "2 sezon 3 seriya", "Season 2 Seriia 3" })
         {
             var item = FileNames.Parse(Path.Combine(directory, $"Example {marker} - Pilot.mkv"));
             check(item.Series == "Example" && item.Season == 2 && item.Episode == 3 && item.EpisodeTitle == "Pilot" && item.NumberingSource == "filename", "romanized Russian season schema: " + marker);
         }
-        foreach (var marker in new[] { "Seriya 3", "3 seriya", "seria 3", "serija 3", "seriia 3" })
+        foreach (var marker in new[] { "Seriya 3", "3 seriya", "serija 3", "seriia 3" })
         {
             var item = FileNames.Parse(Path.Combine(directory, $"Example {marker}.mkv"));
             check(item.Series == "Example" && item.Season == 1 && item.Episode == 3, "romanized Russian episode label: " + marker);
@@ -38,6 +38,9 @@ static class FilenameSchemaFixture
             ("Example Show", "Example Show 4 (5 серия из 8).mkv", "Example Show", 4, true),
             ("Example Show", "Example Show (05 серия из 08) 2018.mkv", "Example Show", 1, false),
             ("Example Show", "Example Show 90210 (05 seriya iz 08).mkv", "Example Show 90210", 1, false),
+            ("Example Show", "Example.Show.3.(05.seria.iz.08).mkv", "Example Show", 3, true),
+            ("Example.Show.03.2018.Group", "Example.Show.03.2018.(05.seriya.iz.08).avi", "Example Show", 3, true),
+            ("Example.Show.03.2018.SATRip.Group", "Example.Show.03.(05.seriya.iz.08).2018.SATRip.Group.avi", "Example Show", 3, true),
         })
         {
             var item = FileNames.Parse(Path.Combine(countedRoot, folder, file), "Mixed", countedRoot);
@@ -56,6 +59,27 @@ static class FilenameSchemaFixture
         var numberedRelease = await Release("Example.Show.2016.HDTV.1080i", "Mixed", "Example.Show.01.2016.HDTV.1080i.ts", "Example.Show.02.2016.HDTV.1080i.ts", "Example.Show.03.2016.HDTV.1080i.ts");
         check(numberedRelease.Select(x => x.Episode).SequenceEqual([1, 2, 3]) && numberedRelease.All(x => x.Kind == "Show" && x.Series == "Example Show" && x.Title == "Example Show" && x.Season == 1 && x.EpisodeTitle is null),
             "files numbered inside a release folder of the same name are that show's episodes");
+        foreach (var (kind, parent) in new[] { ("Show", "by-show"), ("Anime", "by-anime"), ("Mixed", "Shows"), ("Mixed", Path.Combine("Shows", "Russian")) })
+        {
+            var home = Path.Combine(releases, parent, "C.Show.2016.HDTV.1080i"); Directory.CreateDirectory(home);
+            var names = new[] { "C.Show.01.2016.HDTV.1080i.ts", "C.Show.02.2016.HDTV.1080i.ts", "C.Show.03.2016.HDTV.1080i.ts" };
+            foreach (var file in names) await File.WriteAllBytesAsync(Path.Combine(home, file), [0]);
+            var found = names.Select(file => FileNames.Parse(Path.Combine(home, file), kind, Path.Combine(releases, parent))).ToArray();
+            check(found.Select(x => x.Episode).SequenceEqual([1, 2, 3]) && found.All(x => x.Series == "C Show" && x.Title == "C Show" && x.DisplayTitle == "C Show" && x.SeriesPath is null && MetadataTitles.Queries(x)[0] == "C Show"),
+                $"a numbered release searches by the show's clean name in a {kind} library under {parent}");
+        }
+        // Clips beside a numbered release are the show's, not those of a film that turned out to be an episode.
+        var clipHome = Path.Combine(releases, "K.Show.2016.HDTV");
+        await Release("K.Show.2016.HDTV", "Mixed", "K.Show.01.2016.HDTV.ts", "K.Show.02.2016.HDTV.ts", "K.Show.03.2016.HDTV.ts");
+        var clipPath = Path.Combine(clipHome, "Extras", "Making of.ts"); Directory.CreateDirectory(Path.GetDirectoryName(clipPath)!); await File.WriteAllBytesAsync(clipPath, [0]);
+        var clip = FileNames.Parse(clipPath, "Mixed", releases);
+        var clipEpisode = FileNames.Parse(Path.Combine(clipHome, "K.Show.01.2016.HDTV.ts"), "Mixed", releases);
+        check(clip.IsBonus && clip.ExtraOf is null && clip.Series == "K Show" && clip.ShowId == clipEpisode.ShowId, "an extras clip beside a numbered release joins its show");
+        var clipStore = new LibraryStore(Path.Combine(directory, "numbered-clip-db"));
+        clipStore.Save(clip with { ExtraOf = clipEpisode.Id, Series = null, ShowId = null, SeasonId = null, Season = null, Title = "Making of", Kind = "Movie" });
+        await clipStore.ScanAsync([new(clipHome)]);
+        var repairedClip = clipStore.All().Single(x => x.Path == clipPath);
+        check(repairedClip.ExtraOf is null && repairedClip.IsBonus && repairedClip.Series == "K Show", "a rescan moves a clip stored under a film that became an episode");
         foreach (var (reason, folder, kind, files) in new (string, string, string, string[])[]
         {
             ("a two-part film", "Example.Film.1973.DVDRip", "Mixed", ["Example.Film.01.1973.DVDRip.avi", "Example.Film.02.1973.DVDRip.avi"]),
@@ -67,8 +91,25 @@ static class FilenameSchemaFixture
             ("a Movies library", "Example.Movies.2016.HDTV", "Movie", ["Example.Movies.01.2016.HDTV.ts", "Example.Movies.02.2016.HDTV.ts", "Example.Movies.03.2016.HDTV.ts"]),
         })
             check((await Release(folder, kind, files)).All(x => x.Series is null && x.Episode is null && x.Kind == "Movie"), "stays a movie: " + reason);
-        var seriesDecoy = FileNames.Parse(Path.Combine(directory, "Movies", "Seria A 2023.mkv"));
-        check(seriesDecoy.Series is null && seriesDecoy.Episode is null, "a word that only resembles the label stays a movie title");
+        foreach (var name in new[] { "Seria A 2023.mkv", "Inter vs Milan 2023 Seria A.mkv", "Seria 2023.mkv", "Top 10 Seria.mkv", "Ostatnia Seria 3.mkv" })
+        {
+            var decoy = FileNames.Parse(Path.Combine(directory, "Movies", name));
+            check(decoy.Series is null && decoy.Episode is null, "a word that only resembles the label stays a movie title: " + name);
+        }
+        var counts = FileNames.Parse(Path.Combine(countedRoot, "Example Show", "Example.Show.3.(01-02.seriya.iz.08).mkv"), "Mixed", countedRoot);
+        check(counts.Series == "Example Show" && counts.Season == 3 && counts.Episode == 1 && counts.EpisodeEnd == 2, "a counted range keeps its show and both episodes");
+        var plural = FileNames.Parse(Path.Combine(countedRoot, "Example Show", "Example Show 3 (01-04 серии из 16).mkv"), "Mixed", countedRoot);
+        check(plural.Series == "Example Show" && plural.Season == 3 && plural.Episode == 1 && plural.EpisodeEnd == 4, "a counted Cyrillic range keeps its show and episodes");
+        // Two shows' releases in one folder stay two shows, and a release folder's tags never become the show's name.
+        var nested = Path.Combine(directory, "nested-releases");
+        var nestedShows = new[] { ("B.Show.S02.2017.HDTV.(1080i).Grp", "B.Show.S02.(01.seriya.iz.08).2017.HDTV.(1080i).Grp.ts", "B Show", 2), ("Z.Other.S03.2019.HDTV.(1080i).Grp", "Z.Other.S03.(01.seriya.iz.08).2019.HDTV.(1080i).Grp.ts", "Z Other", 3), ("C.Show.03.2018.HDTV", "C.Show.03.(01.seriya.iz.08).2018.HDTV.ts", "C Show", 3) }
+            .Select(x => (Item: FileNames.Parse(Path.Combine(nested, "Russian", x.Item1, x.Item2), "Mixed", nested), Series: x.Item3, Season: x.Item4)).ToArray();
+        check(nestedShows.All(x => x.Item.Series == x.Series && x.Item.Title == x.Series && x.Item.Season == x.Season && x.Item.Episode == 1 && x.Item.SeriesPath is null) && nestedShows.Select(x => x.Item.ShowId).Distinct().Count() == 3,
+            "counted releases one folder below the root keep their own shows");
+        var ownFolder = FileNames.Parse(Path.Combine(directory, "Shows", "Example Show", "Example Show 3 (05 seriya iz 08).mkv"));
+        check(ownFolder.Series == "Example Show" && ownFolder.SeriesPath is not null && ownFolder.Season == 3 && ownFolder.Episode == 5, "a counted episode in the show's own folder belongs to that folder");
+        var underShow = FileNames.Parse(Path.Combine(directory, "Shows", "Example Show", "Season 2", "Example Show (05 seriya iz 08).mkv"));
+        check(underShow.Series == "Example Show" && underShow.SeriesPath is not null && underShow.Season == 2 && underShow.Episode == 5, "a counted episode in a season folder belongs to the show folder");
         var tight = FileNames.Parse(Path.Combine(directory, "Anime", "Example-03-Pilot.mkv"));
         check(tight.Series == "Example" && tight.Episode == 3 && tight.EpisodeTitle == "Pilot", "unspaced hyphens in anime episode names retain the subtitle");
         foreach (var episode in Enumerable.Range(1, 26))
