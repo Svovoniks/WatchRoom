@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Concentus;
 using Concentus.Enums;
+using NAudio.CoreAudioApi;
 using BlackPearl.Core;
 using BlackPearl.Desktop;
 
@@ -76,6 +78,28 @@ static class VoiceDeviceChecks
         for (var i = 0; i < tone.Count; i++) { mixer.Receive(9, (ushort)i, 0, tone[i]); await Task.Delay(20); }
         await Task.Delay(200);
         check(audio.PeakPlayed > 0.2f, $"a remote voice reaches the audio device (peak {audio.PeakPlayed:F2})");
+        CheckNotCallAudio(check);
+    }
+    // Bluetooth headphones report their mono call format for a stream category Windows treats as a call, and opening
+    // such a stream drops everything they play to that format. Voice has to keep the output's normal format.
+    static void CheckNotCallAudio(Action<bool, string> check)
+    {
+        check(VoiceAudio.OutputCategory is not (AudioStreamCategory.Communications or AudioStreamCategory.GameChat), "voice output is not marked as a call");
+        try
+        {
+            using var devices = new MMDeviceEnumerator();
+            if (!devices.TryGetDefaultAudioEndpoint(DataFlow.Render, Role.Console, out var output)) return;
+            using (output)
+            using (var plain = output.CreateAudioClient())
+            using (var voice = output.CreateAudioClient())
+            {
+                voice.SetClientProperties(VoiceAudio.OutputCategory);
+                var normal = plain.MixFormat; var used = voice.MixFormat;
+                check(used.SampleRate == normal.SampleRate && used.Channels == normal.Channels,
+                    $"voice keeps the output's normal format on {output.FriendlyName} ({used.SampleRate} Hz, {used.Channels} channels; normally {normal.SampleRate} Hz, {normal.Channels})");
+            }
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException) { Console.WriteLine($"SKIP: the output format check could not read the device ({ex.GetType().Name})."); }
     }
     static List<byte[]> Encode(double hz, float amplitude, int count)
     {
