@@ -64,7 +64,7 @@ internal static class FilenameEpisodes
         if (season.Success) return Finish(name, season, int.Parse(season.Groups["s"].Value), true);
         // "Title 03 (01 seriya iz 08) 2018" counts through a season, so the number or S02 before the count names that season,
         // with or without the release year between them. What follows a year describes the release, not the episode.
-        var counted = Match(name, @"(?:(?<=\s)S?(?<s>\d{1,2})\s+(?:(?:19|20)\d{2}\s+)?)?(?<![\p{L}\p{N}])\(?" + Number + @"(?:\s*-\s*(?<end>\d{1,4}))?" + CountOf);
+        var counted = Match(name, @"(?:(?<=^|\s)(?:S|(?:season|сезон|sezon|saison|temporada|staffel|stagione)\s*)?(?<s>\d{1,2})(?:\s+(?:сезон|sezon))?\s+(?:(?:19|20)\d{2}\s+)?)?(?<![\p{L}\p{N}])\(?" + Number + @"(?:\s*-\s*(?<end>\d{1,4}))?" + CountOf);
         if (counted.Success)
         {
             var found = Finish(name, counted, counted.Groups["s"].Success ? int.Parse(counted.Groups["s"].Value) : 1, counted.Groups["s"].Success) with { Counted = true };

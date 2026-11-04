@@ -908,8 +908,9 @@ public static partial class FileNames
         var clipShow = clipHome.Files >= 3 ? clipHome.Series : clipHome.CountedSeries;
         if (extraClip) { bonus = true; series = clipShow ?? System.IO.Path.GetFileName(seriesDir); }
         // A release folder ("Show.S02.2017.HDTV") is not the show's own folder, and the folder holding it may be anything, unless it's named after the show.
+        // Files numbered inside "Show.2016" repeat its year, so that folder is a release of Show even though it names Show.
         var releaseShow = clipShow ?? (numbering is { Counted: true } && (withinRelease || FilenameEpisodes.CountedInRelease(path)) ? numbering.Series : null);
-        var releaseOfShow = releaseShow is not null && (seriesDir == releaseHome || !NamesShow(System.IO.Path.GetFileName(seriesDir), releaseShow));
+        var releaseOfShow = !string.IsNullOrEmpty(releaseShow) && ((withinRelease || clipHome.Files >= 3) && seriesDir == releaseHome || !NamesShow(System.IO.Path.GetFileName(seriesDir), releaseShow));
         // Dates in an episode title are not the premiere year of the entire series.
         var years = Regex.Matches(series ?? episodeName, @"\b(19\d{2}|20\d{2})\b");
         var year = series is null && years.Count > 1 ? years[^1] : years.Count > 0 ? years[0] : Match.Empty;
@@ -1010,8 +1011,11 @@ public static partial class FileNames
         return !clip || rest.Length > 0 && !Regex.IsMatch(rest, @"^\(?(?:19|20)\d{2}(?!\d)");
     }
     // "Fargo", "Fargo (2014)" and "The.Show [1080p]" name their shows, whatever tags and premiere year they carry.
-    private static bool NamesShow(string folder, string series) => MetadataTitles.Normalize(Regex.Replace(Regex.Replace(StripReleaseTags(folder), @"[._]+", " "),
-        @"\s*\(?(?:19|20)\d{2}\)?\s*$", "")) == MetadataTitles.Normalize(Regex.Replace(series, @"[._]+", " "));
+    private static bool NamesShow(string folder, string series)
+    {
+        static string Title(string name) => MetadataTitles.Normalize(Regex.Replace(Regex.Replace(name, @"[._]+", " "), @"\s*\(?(?:19|20)\d{2}\)?\s*$", ""));
+        return Title(StripReleaseTags(folder)) == Title(series);
+    }
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Written, int Files, string? Series, string? CountedSeries)> NumberedReleases =
         new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     // How many differently numbered files a release folder holds under its own name, the show they name, and the show any counted episode of this release names.
@@ -1024,7 +1028,7 @@ public static partial class FileNames
             var videos = Directory.EnumerateFiles(dir).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file)) && !IsExtra(file)).ToArray();
             var found = videos.Select(FilenameEpisodes.WithinRelease).OfType<FilenameEpisodes.Result>().ToArray();
             var files = found.Select(file => file.Episode).Distinct().Count(); var series = found.FirstOrDefault()?.Series;
-            var counted = videos.Where(FilenameEpisodes.CountedInRelease).Select(file => FilenameEpisodes.Read(file, true)).FirstOrDefault(file => file is { Counted: true })?.Series;
+            var counted = videos.Where(FilenameEpisodes.CountedInRelease).Select(file => FilenameEpisodes.Read(file, true)).FirstOrDefault(file => file is { Counted: true, Series.Length: > 0 })?.Series;
             if (NumberedReleases.Count > 4096) NumberedReleases.Clear();
             NumberedReleases[dir] = (written, files, series, counted);
             return (files, series, counted);

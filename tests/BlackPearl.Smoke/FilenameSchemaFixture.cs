@@ -68,6 +68,12 @@ static class FilenameSchemaFixture
             check(found.Select(x => x.Episode).SequenceEqual([1, 2, 3]) && found.All(x => x.Series == "C Show" && x.Title == "C Show" && x.DisplayTitle == "C Show" && x.SeriesPath is null && MetadataTitles.Queries(x)[0] == "C Show"),
                 $"a numbered release searches by the show's clean name in a {kind} library under {parent}");
         }
+        // Numbered files repeat their folder's year, so "Plain.Show.2016" is a release of Plain Show, not a show called "Plain Show 2016".
+        foreach (var kind in new[] { "Show", "Mixed" })
+        {
+            var plain = await Release(Path.Combine(kind == "Show" ? "plain-show" : "Shows", "Plain.Show.2016"), kind, "Plain.Show.01.2016.ts", "Plain.Show.02.2016.ts", "Plain.Show.03.2016.ts");
+            check(plain.All(x => x.Series == "Plain Show" && x.SeriesPath is null && x.Episode is not null), "a numbered release in a folder of just its title and year keeps the clean title in a " + kind + " library");
+        }
         // Clips beside a numbered release are the show's, not those of a film that turned out to be an episode.
         var clipHome = Path.Combine(releases, "K.Show.2016.HDTV");
         await Release("K.Show.2016.HDTV", "Mixed", "K.Show.01.2016.HDTV.ts", "K.Show.02.2016.HDTV.ts", "K.Show.03.2016.HDTV.ts");
@@ -133,6 +139,30 @@ static class FilenameSchemaFixture
                 var inShow = FileNames.Parse(Path.Combine(ownFolders, show, release, file), "Show", ownFolders);
                 check(inShow.Series == "Fargo" && inShow.SeriesPath == Path.Combine(ownFolders, show) && inShow.Season == 2 && inShow.Episode == 5, $"a season's folder inside the show's folder joins that show: {show}/{release}/{file}");
             }
+        // A season word is part of the season, not of the show's title.
+        foreach (var (path, kind, series, hasFolder) in new[]
+        {
+            (Path.Combine("Show Season 2", "Show Season 2 (05 серия из 10).mkv"), "Mixed", "Show", false),
+            (Path.Combine("Show.Season.2.2017.HDTV", "Show.Season.2.(05.seriya.iz.10).2017.HDTV.ts"), "Mixed", "Show", false),
+            (Path.Combine("Show 2 сезон", "Show 2 сезон (05 серия из 10).mkv"), "Mixed", "Show", false),
+            (Path.Combine("Other", "Other Season 2", "Other Season 2 (05 серия из 10).mkv"), "Show", "Other", true),
+            (Path.Combine("Third", "Season 2", "Season 2 (05 серия из 10).mkv"), "Show", "Third", true),
+            (Path.Combine("Fourth", "Season 2", "Season 2 (05 seriya iz 10).mkv"), "Show", "Fourth", true),
+        })
+        {
+            var item = FileNames.Parse(Path.Combine(ownFolders, path), kind, ownFolders);
+            check(item.Series == series && item.Season == 2 && item.Episode == 5 && (item.SeriesPath is not null) == hasFolder, "a season word stays out of the show's title: " + path);
+        }
+        // A folder named exactly after the show is that show's folder, and folders of one name in different places stay apart.
+        foreach (var (kind, parent) in new[] { ("Show", "own-show"), ("Anime", "own-anime"), ("Mixed", "Shows") })
+        {
+            var owners = new[] { "Mine", "Theirs" }.Select(owner => FileNames.Parse(Path.Combine(ownFolders, parent, owner, "Fargo", "Fargo (01 серия из 08).mkv"), kind, Path.Combine(ownFolders, parent))).ToArray();
+            check(owners.All(x => x.Series == "Fargo" && x.SeriesPath is not null) && owners[0].ShowId != owners[1].ShowId, $"same-named show folders stay separate shows in a {kind} library");
+            var sameName = FileNames.Parse(Path.Combine(ownFolders, parent, "Mine", "Fargo", "Fargo (02 seriya iz 08).mkv"), kind, Path.Combine(ownFolders, parent));
+            check(sameName.ShowId == owners[0].ShowId, $"a new counted episode joins its show's folder in a {kind} library");
+            var yearName = FileNames.Parse(Path.Combine(ownFolders, parent, "Fargo 2014", "Fargo 2014 (01 серия из 08).mkv"), kind, Path.Combine(ownFolders, parent));
+            check(yearName.SeriesPath is not null, $"a folder and file sharing a dated title stay on that folder in a {kind} library");
+        }
         var datedSeason = FileNames.Parse(Path.Combine(ownFolders, "Fargo (2014)", "Fargo Season 2", "Fargo (05 серия из 10).mkv"), "Show", ownFolders);
         check(datedSeason.ShowId == fargos[1].ShowId && datedSeason.Year == 2014 && datedSeason.Season == 2, "a season folder inside a dated show folder stays on that show's card");
         var taggedFargos = new[] { "Fargo (1996) [1080p]", "Fargo (2014) [1080p]" }.Select(folder => FileNames.Parse(Path.Combine(ownFolders, folder, "Fargo (01 серия из 08).mkv"), "Show", ownFolders)).ToArray();
