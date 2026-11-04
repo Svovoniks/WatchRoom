@@ -132,9 +132,11 @@ public static class MetadataTitles
         // English ch/sh are not evidence of a romanized Russian title. Require
         // distinctive Russian word endings or consonant combinations instead.
         if (Regex.IsMatch(value, @"\p{IsCyrillic}") || !Regex.IsMatch(value,
-            @"(?i)dzh|shch|\b\w*(?:skiy|skaya|skaia|ovaya|vaya|niya|eniya|iya|ya|yu|evich|ovich|kh|tsiya|ev|ov|ksi)\b")) return null;
+            @"(?i)dzh|shch|\b\w*(?:skiy|skij|skaya|skaia|ovaya|vaya|niya|eniya|iya|ya|yu|evich|ovich|kh|tsiya|ev|ov|ksi)\b")) return null;
         value = value.ToLowerInvariant();
         value = value.Replace("skaia", "ская").Replace("liant", "лиант");
+        // "Rublyovki" is Рублёвки; after a vowel, as in "mayor", y stays й.
+        value = Regex.Replace(value, @"(?<![aeiou])yo", "ё");
         foreach (var (latin, russian) in new[] { ("shch", "щ"), ("sch", "щ"), ("zh", "ж"), ("kh", "х"), ("ts", "ц"), ("ch", "ч"), ("sh", "ш"), ("ya", "я"), ("yu", "ю"), ("ia", "я"), ("iu", "ию") })
             value = value.Replace(latin, russian);
         value = Regex.Replace(value, @"(?<=[aeiou])y|(?<=i)y(?=\b)", "й");
@@ -152,6 +154,8 @@ public static class MetadataTitles
     }
     public static int? FolderYear(MediaItem item)
     {
+        // A later season's release folder dates that season, not the show's premiere, so it can't vouch for a match.
+        if (item.Season > 1) return null;
         var name = Path.GetFileName(Path.GetDirectoryName(item.Path));
         var year = Regex.Match(name ?? "", @"(?:^|[ _.(-])((?:19|20)\d{2})(?:$|[ _.)-])");
         return year.Success ? int.Parse(year.Groups[1].Value) : null;

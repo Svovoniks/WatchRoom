@@ -866,6 +866,8 @@ public static partial class FileNames
         var name = FilenameEpisodes.Clean(path, seriesContext || seasonFolder.Success);
         var episodeName = name;
         var numbering = FilenameEpisodes.Read(path, seriesContext || seasonFolder.Success, folderSeason, name, specials: sourceKind != "Movie");
+        if (numbering is null && sourceKind != "Movie" && !seasonFolder.Success && !bonus && !IsExtra(path) && FilenameEpisodes.WithinRelease(path) is { } numberedRelease && NumberedReleaseFiles(dir) >= 3)
+            numbering = numberedRelease;
         var season = numbering?.Season; var number = numbering?.Episode;
         string? series = numbering?.Series;
         // "Azumanga Daioh - XX - Original Opening Sequence" beside the show's numbered episodes is one of its clips, not a film.
@@ -995,6 +997,23 @@ public static partial class FileNames
         if (!match.Success) return false;
         var rest = text[match.Length..].Trim(' ', '-', '–', ':', '.', '_');
         return !clip || rest.Length > 0 && !Regex.IsMatch(rest, @"^\(?(?:19|20)\d{2}(?!\d)");
+    }
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Written, int Files)> NumberedReleases =
+        new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    private static int NumberedReleaseFiles(string dir)
+    {
+        try
+        {
+            var written = Directory.GetLastWriteTimeUtc(dir);
+            if (NumberedReleases.TryGetValue(dir, out var cached) && cached.Written == written) return cached.Files;
+            var files = Directory.EnumerateFiles(dir).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file)) && !IsExtra(file))
+                .Select(FilenameEpisodes.WithinRelease).OfType<FilenameEpisodes.Result>().Select(found => found.Episode).Distinct().Count();
+            if (NumberedReleases.Count > 4096) NumberedReleases.Clear();
+            NumberedReleases[dir] = (written, files);
+            return files;
+        }
+        catch (IOException) { return 0; }
+        catch (UnauthorizedAccessException) { return 0; }
     }
     private static string? EpisodeFolderSeries(string dir, string name, string? libraryRoot, bool seriesContext)
     {

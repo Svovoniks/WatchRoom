@@ -13,7 +13,8 @@ internal static class FilenameEpisodes
         bool ExplicitSeason = false, string? Subtitle = null, string? AirDate = null, string? Conflict = null);
 
     private const string Number = @"(?<n>\d{1,4})(?:v\d+)?(?!\d)";
-    private const string Label = @"(?:episode|épisode|episodio|cap[ií]tulo|folge|ep|e|серия|эпизод)";
+    private const string LatinSeriya = @"seri(?:ya|ia|ja|a)";
+    private const string Label = @"(?:episode|épisode|episodio|cap[ií]tulo|folge|ep|e|серия|эпизод|" + LatinSeriya + ")";
     private static readonly ConcurrentDictionary<string, Regex> Patterns = new();
     private static Regex Pattern(string pattern) => Patterns.GetOrAdd(pattern, p => new Regex(p,
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromSeconds(1)));
@@ -55,10 +56,18 @@ internal static class FilenameEpisodes
         var name = cleanedName ?? Clean(path, seriesContext);
         var season = Match(name, @"\bS(?<s>\d{1,2})[ -]*(?:x[ -]*)?E(?:P(?:ISODE)?)?[ -]*" + Number + @"(?=\b|E\d)");
         if (!season.Success) season = Match(name, @"\b(?<s>\d{1,2})x" + Number + @"(?=\b|x\d)");
-        if (!season.Success) season = Match(name, @"\b(?:season|сезон|saison|temporada|staffel|stagione)[ -]*(?<s>\d{1,2})[ -]*" + Label + @"[ #:-]*" + Number + @"\b");
-        if (!season.Success) season = Match(name, @"\b(?<s>\d{1,2})\s*(?:сезон|sezon)\s*" + Number + @"\s*сери(?:я|и|й)\b");
+        if (!season.Success) season = Match(name, @"\b(?:season|сезон|sezon|saison|temporada|staffel|stagione)[ -]*(?<s>\d{1,2})[ -]*" + Label + @"[ #:-]*" + Number + @"\b");
+        if (!season.Success) season = Match(name, @"\b(?<s>\d{1,2})\s*(?:сезон|sezon)\s*" + Number + @"\s*(?:сери(?:я|и|й)|" + LatinSeriya + @")\b");
         if (!season.Success) season = Match(name, @"\b[сc](?<s>\d{1,2})[ -]*[еэ]" + Number + @"\b");
         if (season.Success) return Finish(name, season, int.Parse(season.Groups["s"].Value), true);
+        // "Title 03 (01 seriya iz 08) 2018" counts through a season, so the number or S02 before the count names that season.
+        // The release year after it belongs to the release, not to the episode's title.
+        var counted = Match(name, @"(?:(?<=\s)S?(?<s>\d{1,2})\s+)?(?<![\p{L}\p{N}])\(?" + Number + @"\s*(?:серия|" + LatinSeriya + @")\s+(?:из|iz)\s+\d{1,4}\)?");
+        if (counted.Success)
+        {
+            var found = Finish(name, counted, counted.Groups["s"].Success ? int.Parse(counted.Groups["s"].Value) : 1, counted.Groups["s"].Success);
+            return found.Subtitle is { } words && int.TryParse(words, out var trailing) && Year(trailing) ? found with { Subtitle = null } : found;
+        }
         // "One Piece - Egghead SP4" and "OVA2" are numbered specials outside a Movies library; a show's "Special 3" is too.
         var special = seriesContext || specials ? Match(name, @"(?:^|\s|-)(?:SP|OVA|OAD)[ #-]?" + Number + @"(?=\s*(?:$|-|\())") : System.Text.RegularExpressions.Match.Empty;
         if (!special.Success && seriesContext) special = Match(name, @"(?:^|\s|-)Special[ #-]*" + Number + @"(?=\s*(?:$|-|\())");
@@ -79,7 +88,7 @@ internal static class FilenameEpisodes
         var leading = seriesContext ? Match(name, @"^" + Number + @"(?=\s)") : System.Text.RegularExpressions.Match.Empty;
         var part = leading.Success && !Year(int.Parse(leading.Groups["n"].Value)) && name[..labelled.Index].TrimEnd().EndsWith('(');
         if (labelled.Success && !acronymYear && !part) return Finish(name, labelled, 1, false);
-        labelled = Match(name, @"\b" + Number + @"\s*(?:серия|эпизод)\b");
+        labelled = Match(name, @"\b" + Number + @"\s*(?:серия|эпизод|" + LatinSeriya + @")\b");
         if (labelled.Success) return Finish(name, labelled, 1, false);
 
         var numbered = Match(name, @"(?:^|\s)-\s*" + Number + @"(?=\s*(?:$|-|\(|END\b|FINAL\b))");
@@ -107,6 +116,18 @@ internal static class FilenameEpisodes
         if (folderSeason is not null && digits.Length is 3 or 4 && int.Parse(digits[..^2]) == folderSeason && int.Parse(digits[^2..]) > 0)
             return new(Trim(name[..suffix.Index]), folderSeason, int.Parse(digits[^2..]), ExplicitSeason: true);
         return Finish(name, suffix, 1, false);
+    }
+
+    // "Title.01.2016.HDTV" inside "Title.2016.HDTV": take the number away and the file carries its folder's name, year included.
+    // A bare number can't say this alone; FileNames also requires several such files, so a sequel or a two-part film stays a film.
+    internal static Result? WithinRelease(string path)
+    {
+        var match = Match(Path.GetFileNameWithoutExtension(path), @"^(?<title>.*\S)[ ._-]+(?<n>\d{2,3})[ ._-]+(?<rest>(?:19|20)\d{2}(?!\d).*)$");
+        if (!match.Success || int.Parse(match.Groups["n"].Value) == 0) return null;
+        static string Words(string text) => Replace(text, @"[ ._-]+", " ").Trim();
+        var named = Words(match.Groups["title"].Value + " " + match.Groups["rest"].Value);
+        return string.Equals(named, Words(Path.GetFileName(Path.GetDirectoryName(path)) ?? ""), StringComparison.OrdinalIgnoreCase)
+            ? new(Trim(Words(match.Groups["title"].Value)), 1, int.Parse(match.Groups["n"].Value)) : null;
     }
 
     private static string? Subtitle(string text)

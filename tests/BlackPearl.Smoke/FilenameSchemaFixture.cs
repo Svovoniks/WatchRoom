@@ -19,6 +19,56 @@ static class FilenameSchemaFixture
             check(item.Series == "Example" && item.Season == 1 && item.Episode == 3 && item.EpisodeTitle == "Pilot", "absolute schema extracts subtitle: " + marker);
             check(MetadataTitles.FilenameAlias(path) == "Example", "metadata alias agrees with absolute schema: " + marker);
         }
+        foreach (var marker in new[] { "Sezon 2 Seriya 3", "2 sezon 3 seriya", "Season 2 Seria 3" })
+        {
+            var item = FileNames.Parse(Path.Combine(directory, $"Example {marker} - Pilot.mkv"));
+            check(item.Series == "Example" && item.Season == 2 && item.Episode == 3 && item.EpisodeTitle == "Pilot" && item.NumberingSource == "filename", "romanized Russian season schema: " + marker);
+        }
+        foreach (var marker in new[] { "Seriya 3", "3 seriya", "seria 3", "serija 3", "seriia 3" })
+        {
+            var item = FileNames.Parse(Path.Combine(directory, $"Example {marker}.mkv"));
+            check(item.Series == "Example" && item.Season == 1 && item.Episode == 3, "romanized Russian episode label: " + marker);
+        }
+        // A release counting through a season: Policejskij.s.rublevki.03.(01.seriya.iz.08).2018.HDTV.(1080i).Nikolspup.ts
+        var countedRoot = Path.Combine(directory, "counted");
+        foreach (var (folder, file, series, season, explicitSeason) in new (string, string, string, int, bool)[]
+        {
+            ("Example.Show.03.2018.HDTV.(1080i).Group", "Example.Show.03.(05.seriya.iz.08).2018.HDTV.(1080i).Group.ts", "Example Show", 3, true),
+            ("Example.Show.S02.2017.HDTV.(1080i).Group", "Example.Show.S02.(05.seriya.iz.08).2017.HDTV.(1080i).Group.ts", "Example Show", 2, true),
+            ("Example Show", "Example Show 4 (5 серия из 8).mkv", "Example Show", 4, true),
+            ("Example Show", "Example Show (05 серия из 08) 2018.mkv", "Example Show", 1, false),
+            ("Example Show", "Example Show 90210 (05 seriya iz 08).mkv", "Example Show 90210", 1, false),
+        })
+        {
+            var item = FileNames.Parse(Path.Combine(countedRoot, folder, file), "Mixed", countedRoot);
+            check(item.Kind == "Show" && item.Series == series && item.Title == series && item.Season == season && item.Episode == 5 && item.EpisodeEnd is null &&
+                item.EpisodeTitle is null && item.Year is null && (item.NumberingSource == "filename") == explicitSeason, "a counted episode names its show, season and number: " + file);
+            check(MetadataTitles.FilenameAlias(item.Path) == series, "metadata alias agrees with a counted episode: " + file);
+        }
+        // A release numbering its files inside a folder of the same name: Policejskij.s.Rublyovki.2016.HDTV.1080i\Policejskij.s.Rublyovki.01.2016.HDTV.1080i.ts
+        var releases = Path.Combine(directory, "numbered-releases");
+        async Task<MediaItem[]> Release(string folder, string kind, params string[] files)
+        {
+            var home = Path.Combine(releases, folder); Directory.CreateDirectory(home);
+            foreach (var file in files) await File.WriteAllBytesAsync(Path.Combine(home, file), [0]);
+            return files.Select(file => FileNames.Parse(Path.Combine(home, file), kind, releases)).ToArray();
+        }
+        var numberedRelease = await Release("Example.Show.2016.HDTV.1080i", "Mixed", "Example.Show.01.2016.HDTV.1080i.ts", "Example.Show.02.2016.HDTV.1080i.ts", "Example.Show.03.2016.HDTV.1080i.ts");
+        check(numberedRelease.Select(x => x.Episode).SequenceEqual([1, 2, 3]) && numberedRelease.All(x => x.Kind == "Show" && x.Series == "Example Show" && x.Title == "Example Show" && x.Season == 1 && x.EpisodeTitle is null),
+            "files numbered inside a release folder of the same name are that show's episodes");
+        foreach (var (reason, folder, kind, files) in new (string, string, string, string[])[]
+        {
+            ("a two-part film", "Example.Film.1973.DVDRip", "Mixed", ["Example.Film.01.1973.DVDRip.avi", "Example.Film.02.1973.DVDRip.avi"]),
+            ("a one-file folder", "Example.Single.2016.HDTV", "Mixed", ["Example.Single.01.2016.HDTV.ts"]),
+            ("sequels from different years", "Example.Saga", "Mixed", ["Example.Saga.01.2001.mkv", "Example.Saga.02.2002.mkv", "Example.Saga.03.2004.mkv"]),
+            ("a franchise folder without a year", "Example Franchise", "Mixed", ["Example Franchise 01.mkv", "Example Franchise 02.mkv", "Example Franchise 03.mkv"]),
+            ("a numbered trilogy without a year", "Example.Trilogy.1080p", "Mixed", ["Example.Trilogy.01.1080p.mkv", "Example.Trilogy.02.1080p.mkv", "Example.Trilogy.03.1080p.mkv"]),
+            ("a folder named differently", "Other.Name.2016.HDTV", "Mixed", ["Example.Other.01.2016.HDTV.ts", "Example.Other.02.2016.HDTV.ts", "Example.Other.03.2016.HDTV.ts"]),
+            ("a Movies library", "Example.Movies.2016.HDTV", "Movie", ["Example.Movies.01.2016.HDTV.ts", "Example.Movies.02.2016.HDTV.ts", "Example.Movies.03.2016.HDTV.ts"]),
+        })
+            check((await Release(folder, kind, files)).All(x => x.Series is null && x.Episode is null && x.Kind == "Movie"), "stays a movie: " + reason);
+        var seriesDecoy = FileNames.Parse(Path.Combine(directory, "Movies", "Seria A 2023.mkv"));
+        check(seriesDecoy.Series is null && seriesDecoy.Episode is null, "a word that only resembles the label stays a movie title");
         var tight = FileNames.Parse(Path.Combine(directory, "Anime", "Example-03-Pilot.mkv"));
         check(tight.Series == "Example" && tight.Episode == 3 && tight.EpisodeTitle == "Pilot", "unspaced hyphens in anime episode names retain the subtitle");
         foreach (var episode in Enumerable.Range(1, 26))

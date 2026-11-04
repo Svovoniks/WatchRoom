@@ -15,10 +15,19 @@ static class MetadataRecoveryFixture
         check(MetadataMatching.Score("Ivan Vasilievich Menyaet Professiu",1973,"Ivan Vasilyevich Changes His Profession","Иван Васильевич меняет профессию",1973)==10,
             "common Russian romanization variants preserve title identity");
         check(MetadataTitles.RussianSearchAlias("Politseyskiy s Rublevki")=="полицейский с рублевки", "Russian aliases distinguish vowel-following and final y from ы");
+        check(MetadataTitles.RussianSearchAlias("Policejskij s rublevki")=="полицейский с рублевки", "the -skij romanization reaches the same Russian alias as -skiy");
+        check(MetadataTitles.RussianSearchAlias("Policejskij s Rublyovki")=="полицейский с рублёвки" && MetadataTitles.RussianSearchAlias("Mayorov")=="майоров", "yo after a consonant is ё, and after a vowel stays йо");
         check(MetadataTitles.Queries(new("t",Path.Combine(directory,"Taxi","Taksi.3.2003.mkv"),"Taksi 3","Movie",2003)).Contains("Taxi 3"),
             "franchise folder spelling retains sequel number");
         check(MetadataTitles.FolderYear(new("f",Path.Combine(directory,"Обыкновенное чудо_1978-DVDRip","Чудо-1.mkv"),"Чудо-1","Movie"))==1978,
             "split-film release folder supplies the missing year");
+        var seasonRelease = FileNames.Parse(Path.Combine(directory,"Example.Show.03.2018.HDTV.(1080i).Group","Example.Show.03.(01.seriya.iz.08).2018.HDTV.(1080i).Group.ts"),"Mixed",directory);
+        check(seasonRelease.Season==3 && MetadataTitles.FolderYear(seasonRelease) is null,
+            "a later season's release folder does not date the show's premiere");
+        check(MetadataTitles.FolderYear(seasonRelease with { Season=1 })==2018,
+            "a first season's release folder still supplies the missing year");
+        check(MetadataMatching.Choose([new(13007,"tv","Полицейский с Рублёвки","2016",null,"","Show",Provider:"tvmaze")],seasonRelease with { Title="полицейский с рублевки",Series="полицейский с рублевки",Year=MetadataTitles.FolderYear(seasonRelease) }) is { Id: 13007 },
+            "a later season's release matches a show that premiered years earlier");
         var split = new MediaItem("s",Path.Combine(directory,"parts","Film (1977) 02.mkv"),"Film","Movie",1977);
         var identified = split with { Id="first",Path=Path.Combine(directory,"parts","Film (1977) 01.mkv"),Matched=true,MetadataProvider="tmdb",MetadataId=42,MetadataType="tv" };
         check(MetadataTitles.WithSplitIdentity(split,[identified]).MetadataId==42, "explicit split files reuse a unique manual sibling identity");
