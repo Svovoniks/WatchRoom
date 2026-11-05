@@ -388,7 +388,7 @@ static class AcquisitionChecks
         Call("UpdatePluginGroupClick", new Button { DataContext = Group() }, new RoutedEventArgs());
         Until(() => !PluginsBusy() && !(bool)Prop(Group(), "Update"));
         check(!Updatable(Row("Catalog anime")) && !Updatable(Row("Catalog shows")) && File.ReadAllText(Path.Combine(pluginsDirectory, "catalog-runtime", "get.cmd")).Contains("Queued")
-            && Named<TextBlock>("CatalogStatus").Text == "Updated Catalog: Catalog anime and Catalog shows.", "the group's Update updates every plugin in it and names them");
+            && Named<TextBlock>("CatalogStatus").Text == "Updated Catalog: Catalog anime and Catalog shows.", $"the group's Update updates every plugin in it and names them (status: {Named<TextBlock>("CatalogStatus").Text})");
         File.WriteAllText(Path.Combine(pluginsDirectory, "catalog-anime", "plugin.json"), """{ "name": "Catalog anime", "description": "From the catalog", "contentTypes": ["anime"], "command": "../catalog-runtime/get.cmd" }""");
         Call("CatalogRefreshClick", null, new RoutedEventArgs());
         Until(() => !PluginsBusy() && (bool)Prop(Group(), "Update"));
