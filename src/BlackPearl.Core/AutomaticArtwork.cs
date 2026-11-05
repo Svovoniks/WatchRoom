@@ -246,7 +246,7 @@ public static class AutomaticArtwork
         var known = options.ProviderOrder.Where(provider => new[] { item.MetadataProvider }.Concat(item.ProviderIds?.Keys.AsEnumerable() ?? []).Any(id => string.Equals(id?.Split(':')[0], provider, StringComparison.OrdinalIgnoreCase))).ToArray();
         return known.Length == 0 ? options : options with { Providers = known };
     }
-    private static MediaItem ResetIdentity(MediaItem item) => item with
+    internal static MediaItem ResetIdentity(MediaItem item) => item with
     {
         ProviderIds = [], MetadataProvider = null, MetadataId = null, ProviderTitle = null,
         Overview = LibraryIdentity.Locked(item, "Overview") ? item.Overview : null,

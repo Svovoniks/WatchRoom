@@ -44,6 +44,33 @@ static class FilenameReadingFixture
         // A year after a one-digit number still marks a numbered film rather than giving it a shorter name to search for.
         check(MetadataTitles.FilenameAlias(Path.Combine(directory, "Harbor.Lights.2.2017.1080p.WEB-DL.x264-Group.mkv")) is null, "a numbered film's year doesn't make it a show to search for");
 
+        // A number in a film's own title, with nothing around it to say it's running.
+        Film(["Calm 13 (1995).mkv"], "Calm 13", 1995);
+        Film(["Harbor's 11 (2001).mkv"], "Harbor's 11", 2001);
+        Film(["12 Harbors.mkv"], "12 Harbors", null);
+        Film(["300.mkv"], "300", null);
+        Film(["12 Harbors", "12 Harbors.mkv"], "12 Harbors", null);
+        Film(["300", "300.mkv"], "300", null);
+        // A folder called "1" or "Vol 2" only makes a season of a file with a number of its own.
+        Film(["Tide", "1", "Tide.1979.1080p.mkv"], "Tide", 1979);
+        Film(["Tide", "02 - Tides", "Tides.1986.mkv"], "Tides", 1986);
+        Film(["Collections", "Vol 2", "Some Film (1999).mkv"], "Some Film", 1999);
+        Numbered(["Harbor Lights", "2", "Harbor Lights - 05.mkv"], "Harbor Lights", 2, 5);
+        Numbered(["Harbor Lights", "2", "06.mkv"], "Harbor Lights", 2, 6);
+        // Short folder names can be a show's own name, and folders above the library say nothing about its files.
+        check(Read("Extra", "Extra S01E01.mkv") is { IsExtra: false, IsBonus: false, Series: "Extra", Season: 1, Episode: 1 }, "a show called Extra isn't an extras folder");
+        check(Read("Bonus", "Bonus - 01.mkv") is { IsExtra: false, IsBonus: false, Series: "Bonus", Episode: 1 }, "a show called Bonus isn't an extras folder");
+        check(new[] { Read("Harbor Lights", "NC", "NCOP1.mkv"), Read("Harbor Lights", "Bonus", "Making Of.mkv"), Read("Harbor Lights", "Extras", "Making Of.mkv") }.All(x => x.IsExtra || x.IsBonus), "those names still mean extras inside a show's folder");
+        check(!FileNames.IsExtra(Path.Combine("C:", "Users", "cm", "Videos", "Calm Waters.mkv"), Path.Combine("C:", "Users", "cm", "Videos")) && FileNames.IsExtra(Path.Combine("C:", "Users", "cm", "Videos", "Harbor Lights", "cm", "Spot.mkv"), Path.Combine("C:", "Users", "cm", "Videos")), "folders above the library don't make its files extras");
+        // No name stops a scan: a title can start after the number, and the reader has nothing else to go on here.
+        var oddRoot = Path.Combine(directory, "Odd", "cm", "Videos"); Directory.CreateDirectory(oddRoot);
+        string[] oddNames = ["(Ep 03) Harbor Lights.mkv", "(E05) Harbor Lights.mkv", "(#3) Harbor Lights.mkv", "(3 of 12) Harbor Lights.mkv", "[S02][E05] Harbor Lights.mkv", "[S02][NCOP] Harbor Lights.mkv", "(S02)(E05) Harbor Lights.mkv", "Calm Waters (2001).mkv"];
+        foreach (var odd in oddNames) await File.WriteAllBytesAsync(Path.Combine(oddRoot, odd), [0]);
+        var oddStore = new LibraryStore(Path.Combine(directory, "OddData"));
+        await oddStore.ScanAsync([new(oddRoot)]);
+        check(oddStore.All().Count(x => !x.IsVirtual && !x.IsExtra) == oddNames.Length, $"a name starting with its numbers doesn't stop a scan, in a library under a folder called cm (indexed {oddStore.All().Count(x => !x.IsVirtual && !x.IsExtra)})");
+        check(oddStore.All().Single(x => x.Path.EndsWith("[S02][E05] Harbor Lights.mkv")) is { Season: 2, Episode: 5 }, "numbers ahead of the title are still read");
+
         // Release groups, tags and separators.
         Numbered(["[Group] Harbor Lights - 07 (1080p) [A1B2C3D4].mkv"], "Harbor Lights", null, 7);
         Numbered(["[Group]_Harbor_Lights_07_[DVD][10bit][A1B2C3D4].mkv"], "Harbor Lights", null, 7);
@@ -228,6 +255,11 @@ static class FilenameReadingFixture
         var partPath = Path.Combine(partFolder, "Harbor Tale (1977) 01.mp4"); await File.WriteAllBytesAsync(partPath, [0]);
         seed.Save(FileNames.Parse(partPath, "Mixed", mediaRoot) with { Series = "Harbor Tale", Season = 1, Episode = 1, MetadataProvider = "tvmaze", MetadataId = 55, MetadataType = "tv", ProviderIds = new() { ["tvmaze"] = "55" } });
         foreach (var item in new[] { oldEpisode, oldFilm, oldLocked, oldMapped }) seed.Save(item);
+        // An episode the old parser matched to a film, and a numbered film it matched correctly.
+        var wrongFilmPath = Path.Combine(media, "Harbor Lights - S01E03 - Name.mkv"); var numberedFilmPath = Path.Combine(mediaRoot, "Calm 13 (1995).mkv");
+        await File.WriteAllBytesAsync(wrongFilmPath, [0]); await File.WriteAllBytesAsync(numberedFilmPath, [0]);
+        seed.Save(FileNames.Parse(wrongFilmPath, "Mixed", mediaRoot) with { Series = null, Episode = null, Season = null, MetadataProvider = "tvmaze", MetadataId = 70, MetadataType = "movie", ProviderIds = new() { ["tvmaze"] = "70" }, Overview = "The wrong film's plot", Poster = "wrong-film.jpg", PosterSource = "https://example.org/movie/70", MetadataFetchedAt = 5000 });
+        seed.Save(FileNames.Parse(numberedFilmPath, "Mixed", mediaRoot) with { MetadataProvider = "tvmaze", MetadataId = 71, MetadataType = "movie", ProviderIds = new() { ["tvmaze"] = "71" }, Overview = "The right film's plot", MetadataFetchedAt = 5000 });
         seed.Setting("watched:" + oldEpisode.Id, "true"); seed.Setting("position:" + oldFilm.Id, "120"); seed.Setting("metadata-retry:title:" + oldFilm.Id, "{}");
         var queues = Wire.Serialize(new SavedQueue[] { new("fixture", "Queue", [oldEpisode.Id]) }); seed.Setting("queues", queues);
         // A library from before this reader has no record of it.
@@ -245,6 +277,8 @@ static class FilenameReadingFixture
         var read = reopened.All().Where(x => !x.IsVirtual).ToDictionary(x => x.Path);
         check(read[episodePath] is { Episode: 5, EpisodeOverview: null, EpisodeSource: null } && read[episodePath].Season != 9 && read[episodePath].EpisodeTitle != "Wrong plot's name", "a wrong reading and the plot it pointed at are dropped");
         check(read[filmPath] is { Title: "Calm Waters", Year: 2019 }, "a film takes the new title and year");
+        check(read[wrongFilmPath] is { MetadataId: null, Poster: null, PosterSource: null, Season: 1, Episode: 3 } && read[wrongFilmPath].Overview != "The wrong film's plot", $"an episode matched to the wrong film loses that film's identity, plot and poster (got {read[wrongFilmPath].MetadataId} {read[wrongFilmPath].Overview} {read[wrongFilmPath].Poster} {read[wrongFilmPath].PosterSource} {read[wrongFilmPath].Season}x{read[wrongFilmPath].Episode})");
+        check(read[numberedFilmPath] is { MetadataId: 71, Overview: "The right film's plot", Series: null, Title: "Calm 13" }, $"a film with a number in its title keeps its match (got {read[numberedFilmPath].MetadataId} {read[numberedFilmPath].Overview} {read[numberedFilmPath].Series} {read[numberedFilmPath].Title})");
         check(read[lockedPath] is { Season: 7, Episode: 77 }, "locked numbering isn't touched");
         check(read[mappedPath] is { Season: 3, Episode: 2, MetadataId: 44, Overview: "Provider plot", MetadataFetchedAt: 5000 }, "a provider's identity, text, mapped numbering and refresh time stay when the file reads the same number");
         check(read[partPath] is { MetadataId: 55, MetadataType: "tv", Season: 1, Episode: 1 }, "a numbered film part verified as a miniseries keeps its identity and numbering");

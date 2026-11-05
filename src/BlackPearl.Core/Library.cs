@@ -124,9 +124,13 @@ public sealed partial class LibraryStore
     {
         var backupPath = System.IO.Path.Combine(DataDirectory, "library-before-filename-reader-v1.db");
         if (File.Exists(backupPath)) return;
-        using var source = Open();
-        using var backup = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = backupPath }.ToString());
-        backup.Open(); source.BackupDatabase(backup);
+        // Written aside first, so a crash partway through can't leave a partial backup that counts as done.
+        var partial = backupPath + ".partial";
+        File.Delete(partial);
+        using (var source = Open())
+        using (var backup = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = partial, Pooling = false }.ToString()))
+        { backup.Open(); source.BackupDatabase(backup); }
+        File.Move(partial, backupPath);
     }
     private void DropMetadataRetries()
     {
@@ -143,8 +147,8 @@ public sealed partial class LibraryStore
         // A numbered film part can have been verified as a miniseries, so that identity stands.
         var contradicted = previous.MetadataType == "movie" && parsed.Series is not null && episodic ||
             previous.MetadataType == "tv" && parsed.Series is null && MetadataTitles.NumberedMoviePart(parsed) is null;
-        var item = contradicted ? previous with { MetadataKind = null, MetadataType = null, MetadataProvider = null, MetadataId = null, ProviderTitle = null, ProviderIds = null,
-            MetadataFetchedAt = 0, ArtworkFetchedAt = 0, PosterSource = null } : previous;
+        // The wrong title's plot and poster go with its identity, or a later correct match would keep them.
+        var item = contradicted ? AutomaticArtwork.ResetIdentity(previous) with { MetadataKind = null, MetadataType = null, ProviderIds = null, ArtworkFetchedAt = 0 } : previous;
         var identified = item.MetadataId is not null;
         var sameNumber = previous.AbsoluteEpisode is not null && previous.AbsoluteEpisode == (parsed.AbsoluteEpisode ?? parsed.Episode) && previous.AbsoluteEpisodeEnd == (parsed.AbsoluteEpisodeEnd ?? parsed.EpisodeEnd) ||
             previous.SourcePartEpisode is not null && previous.SourcePartEpisode == parsed.SourcePartEpisode && previous.SourcePart == parsed.SourcePart ||
@@ -767,7 +771,7 @@ public sealed partial class LibraryStore
                     // A bonus clip from a show's extras folder is a catalog entry, so losing its file makes it unavailable rather than
                     // hidden; a clip the parser no longer counts as a show's becomes a hidden extra again.
                     var root = roots.Where(r => IsWithin(stored.Path, r.Path)).OrderByDescending(r => r.Path.Length).FirstOrDefault();
-                    var extra = stored.IsExtra || FileNames.IsExtra(stored.Path) && (!stored.IsBonus || FileNames.Parse(stored.Path, root?.Kind ?? "Mixed", root?.Path).IsExtra);
+                    var extra = stored.IsExtra || FileNames.IsExtra(stored.Path, root?.Path) && (!stored.IsBonus || FileNames.Parse(stored.Path, root?.Kind ?? "Mixed", root?.Path).IsExtra);
                     var missing = stored with { IsExtra = extra, Available = extra && File.Exists(stored.Path) };
                     if (missing != stored) { Save(missing); changes++; }
                 }
@@ -895,15 +899,32 @@ public static partial class FileNames
         if (deleted) return !IgnoredChanges.Contains(extension);
         return Directory.Exists(path);
     }
-    private const string ExtrasFolders = @"(?i)^(?:(?:bd |dvd )?(?:extras?|bonus)|trailers|featurettes|behind the scenes|sps|nc|nc ?op-?ed|ncops?|nceds?|creditless(?: ops?)?(?: ?& ?eds?)?|(?:bd |web )?menus?|(?:web )?pvs?|cms?|interviews.*)$";
+    private const string PlainExtras = @"(?:bd |dvd )?extras|trailers|featurettes|behind the scenes|interviews.*";
+    // These are also ordinary names for a person, a show or any other folder, so they only count inside a folder that names a title.
+    private const string ShortExtras = @"(?:bd |dvd )?(?:extra|bonus)|sps|nc|nc ?op-?ed|ncops?|nceds?|creditless(?: ops?)?(?: ?& ?eds?)?|(?:bd |web )?menus?|(?:web )?pvs?|cms?";
+    private const string ExtrasFolders = @"(?i)^(?:" + PlainExtras + "|" + ShortExtras + ")$";
     // "(S01-S07+Movies)" and "[Season 1 + 2]" hold several seasons, so neither is a season folder.
     private const string SeasonFolder = @"(?i)(?:^|\s|\(|\[)(?:(?:Season|Сезон|Saison|Temporada|Staffel|Stagione)\s*|S)(\d{1,2}|(?:19|20)\d{2})(?!\d|E\d)\b(?!\s*[-+~,&–]\s*(?:S|Season\s*)?\d)|^(\d+)\s*(?:сезон|sezon)\b|^(?:T|Vol\s*|Volume\s*)?(\d{1,2})(?:\s+-\s+\w+)?$|^Specials$";
     private static string[] Parts(string path) => path.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
     private static bool IsSeasonFolder(string name) => Regex.IsMatch(Regex.Replace(name, @"[._]+", " "), SeasonFolder);
     private static int? SeasonNumber(string name) => Regex.Match(Regex.Replace(name, @"[._]+", " "), SeasonFolder) is { Success: true } match
         ? match.Groups[1].Success ? int.Parse(match.Groups[1].Value) : match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : 0 : null;
+    // The extras folder a file sits in, if any. Folders above the library say nothing about its files. With no library to go by, a
+    // short name only counts as the file's own folder.
+    private static int ExtrasFolderIndex(string[] parts, string? libraryRoot)
+    {
+        string[]? root = libraryRoot is null ? null : Parts(System.IO.Path.GetFullPath(libraryRoot).TrimEnd(System.IO.Path.DirectorySeparatorChar));
+        var within = root is not null && root.Length < parts.Length && root.SequenceEqual(parts[..root.Length], OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var first = within ? root!.Length : 1;
+        for (var index = first; index < parts.Length - 1; index++)
+        {
+            if (Regex.IsMatch(parts[index], "(?i)^(?:" + PlainExtras + ")$")) return index;
+            if (Regex.IsMatch(parts[index], "(?i)^(?:" + ShortExtras + ")$") && (within ? index > first : index == parts.Length - 2) && !FilenameFolders.IsGeneric(parts[index - 1])) return index;
+        }
+        return -1;
+    }
     // Raw path policy: a file in an extras folder, or named as a trailer or sample. Parse keeps a show's extras as bonus clips.
-    public static bool IsExtra(string path) => (Parts(path).SkipLast(1).Any(part => Regex.IsMatch(part, ExtrasFolders) || Regex.IsMatch(part, @"(?i)^samples?$")) ||
+    public static bool IsExtra(string path, string? libraryRoot = null) => (ExtrasFolderIndex(Parts(path), libraryRoot) >= 0 || Parts(path).SkipLast(1).Any(part => Regex.IsMatch(part, @"(?i)^samples?$")) ||
         Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path), @"(?i)(?:^|[-._ ])(?:trailer|sample|featurette)\d*$")) &&
         FilenameEpisodes.Read(path, false) is not { ExplicitSeason: true, Season: 0 };
     private static bool IsSample(string path) => Parts(path).SkipLast(1).Any(part => Regex.IsMatch(part, @"(?i)^samples?$")) ||
@@ -911,11 +932,11 @@ public static partial class FileNames
     private static string Identity(string path) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(OperatingSystem.IsWindows() ? path.ToUpperInvariant() : path)))[..32];
     // An extras folder belongs to a show when it sits under a season folder, or beside season folders or numbered
     // episodes. A folder with an unnumbered video beside it is a film's own extras folder, even inside an anime library.
-    private static (bool Show, string? Film, string? Owner) ExtrasHome(string path, bool seriesContext)
+    private static (bool Show, string? Film, string? Owner) ExtrasHome(string path, bool seriesContext, string? libraryRoot)
     {
         if (IsSample(path)) return (false, null, null);
         var parts = Parts(path);
-        var extras = Array.FindIndex(parts, 0, parts.Length - 1, part => Regex.IsMatch(part, ExtrasFolders));
+        var extras = ExtrasFolderIndex(parts, libraryRoot);
         if (extras < 1) return (false, null, null);
         var owner = string.Join(System.IO.Path.DirectorySeparatorChar, parts[..extras]);
         if (parts[..extras].Any(IsSeasonFolder)) return (true, null, owner);
@@ -924,7 +945,7 @@ public static partial class FileNames
         {
             if (!Directory.Exists(parent)) return (seriesContext, null, seriesContext ? owner : null);
             if (File.Exists(System.IO.Path.Combine(parent, "tvshow.nfo")) || Directory.EnumerateDirectories(parent).Any(folder => IsSeasonFolder(System.IO.Path.GetFileName(folder)))) return (true, null, owner);
-            var videos = Directory.EnumerateFiles(parent).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file)) && !IsExtra(file)).OrderBy(file => file, StringComparer.OrdinalIgnoreCase).ToArray();
+            var videos = Directory.EnumerateFiles(parent).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file)) && !IsExtra(file, libraryRoot)).OrderBy(file => file, StringComparer.OrdinalIgnoreCase).ToArray();
             if (videos.Length == 0) return (false, null, null);
             // Mostly numbered videos are a show's episodes, even with a stray special among them.
             var films = videos.Where(file => FilenameEpisodes.Read(file, true) is null).ToArray();
@@ -941,8 +962,9 @@ public static partial class FileNames
             .Any(part => Regex.IsMatch(part, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы)$")) || File.Exists(System.IO.Path.Combine(dir, "tvshow.nfo"));
         var season = Regex.Match(Regex.Replace(System.IO.Path.GetFileName(dir), @"[._]+", " "), SeasonFolder);
         int? number = season.Success ? season.Groups[1].Success ? int.Parse(season.Groups[1].Value) : season.Groups[2].Success ? int.Parse(season.Groups[2].Value) : season.Groups[3].Success ? int.Parse(season.Groups[3].Value) : 0 : null;
-        // A bare "2" is only a season under a folder that names something, and it holds numbered files.
-        if (season.Success && season.Groups[3].Success && (dir.Length == 0 || System.IO.Path.GetDirectoryName(dir) is not { } above || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(above)))) return (series, Match.Empty, null);
+        // A bare "2" is only a season under a folder that names something, and for a file with a number of its own: a film in a
+        // folder called "1" or "Vol 2" is still a film.
+        if (season.Success && season.Groups[3].Success && (dir.Length == 0 || System.IO.Path.GetDirectoryName(dir) is not { } above || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(above)) || FilenameEpisodes.Read(path, true) is not { Episode: not null })) return (series, Match.Empty, null);
         return (series, season, number);
     }
     // A library root, or a folder whose name only says what kind of files sit in it.
@@ -990,7 +1012,7 @@ public static partial class FileNames
         var id = Identity(path);
         var dir = System.IO.Path.GetDirectoryName(path)!;
         var (seriesContext, seasonFolder, folderSeason) = NameContext(path, kind);
-        var (showExtras, filmExtra, extrasOwner) = ExtrasHome(path, seriesContext);
+        var (showExtras, filmExtra, extrasOwner) = ExtrasHome(path, seriesContext, libraryRoot);
         var seasonFolderName = System.IO.Path.GetFileName(dir);
         var reading = FilenameEpisodes.Analyze(path, seriesContext || seasonFolder.Success, folderSeason, sourceKind != "Movie", libraryRoot, sourceKind == "Movie");
         var name = reading.Cleaned;
@@ -1004,7 +1026,7 @@ public static partial class FileNames
         var bonus = reading.Clip is not null && !reading.Film && (seriesContext || seasonFolder.Success);
         // "Azumanga Daioh - XX - Original Opening Sequence" beside the show's numbered episodes is one of its clips, not a film.
         // "One Piece - 492A" is half of an episode, so it stays where its folder put it.
-        var besideEpisodes = numbering is null && !bonus && sourceKind != "Movie" && filmExtra is null && !showExtras && !IsExtra(path) &&
+        var besideEpisodes = numbering is null && !bonus && sourceKind != "Movie" && filmExtra is null && !showExtras && !IsExtra(path, libraryRoot) &&
             !Regex.IsMatch(name, @"(?i)(?:^|\s-\s)\d{1,4}[a-z]\b")
             ? EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success) : null;
         if (besideEpisodes is not null) { bonus = true; series = besideEpisodes; }
@@ -1099,7 +1121,7 @@ public static partial class FileNames
                 SourcePart = null, SourcePartEpisode = null, SourcePartEpisodeEnd = null, NumberingOrder = "aired", NumberingConflict = null, AirsAfterSeason = null };
         // A clip's kind follows its title: "NCOP1" is an opening, "Original Closing Sequence" an ending, "Gallery" none of these.
         if (result.IsBonus) result = result with { BonusKind = FilenameExtras.Kind(result.EpisodeTitle) };
-        return LocalMetadata.Apply(LibraryIdentity.Ensure(result with { SourceLibraryKind = sourceKind, IsExtra = IsExtra(path) && !showExtras && filmExtra is null,
+        return LocalMetadata.Apply(LibraryIdentity.Ensure(result with { SourceLibraryKind = sourceKind, IsExtra = IsExtra(path, libraryRoot) && !showExtras && filmExtra is null,
             NumberingSource = result.IsBonus ? null : sourcePart is not null ? "part" : numbering?.AirDate is not null ? "date" : filenameSeason is not null ? "filename" :
                 seasonFolder.Success && number is not null && !absoluteFolder ? "season-folder" : result.AbsoluteEpisode is not null ? "absolute" : null }));
     }
@@ -1140,7 +1162,7 @@ public static partial class FileNames
             if (EpisodeFolders.TryGetValue(key, out var cached) && cached.Written == written) shows = cached.Shows;
             else
             {
-                shows = Directory.EnumerateFiles(dir).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file)) && !IsExtra(file))
+                shows = Directory.EnumerateFiles(dir).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file)) && !IsExtra(file, libraryRoot))
                     .Select(file => FilenameEpisodes.Read(file, seriesContext)).Where(found => found is { Episode: not null } && found.Season != 0 && found.Conflict is null)
                     .Select(found => string.IsNullOrWhiteSpace(found!.Series) ? System.IO.Path.GetFileName(dir) : found.Series)
                     .GroupBy(series => MetadataTitles.Normalize(series)).Where(group => group.Count() >= 2).Select(group => (group.First(), group.Count())).ToArray();

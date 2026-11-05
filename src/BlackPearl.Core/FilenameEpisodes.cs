@@ -37,6 +37,7 @@ internal static class FilenameEpisodes
     private static readonly TimeSpan Limit = TimeSpan.FromSeconds(1);
     private static Regex Rx(string pattern) => new(pattern, Options, Limit);
 
+    private static readonly Regex YearOrNothing = Rx(@"^\(?(?:(?:19|20)\d{2})?\)?$");
     private static readonly Regex[] SeasonEpisodeForms =
     [
         Rx(@"(?<![\p{L}\p{N}])S(?<s>\d{1,4})[ -]*(?:x[ -]*)?E(?:P(?:ISODE)?)?[ -]*" + Number),
@@ -124,14 +125,23 @@ internal static class FilenameEpisodes
     internal static Reading AnalyzeName(string stem, FilenameFolders.FolderEvidence evidence, bool allowSpecials)
     {
         if (IsDiscFile(stem)) return new(stem, [], null, null, null, false, stem, false, "Disc");
-        var scan = new FilenameScan(stem);
-        var hypotheses = Hypotheses(scan, evidence, allowSpecials);
-        foreach (var hypothesis in hypotheses)
+        try
         {
-            FilenameFeatures.Add(hypothesis, scan, evidence, hypotheses);
-            hypothesis.Score = FilenameModel.Score(hypothesis.Features);
+            var scan = new FilenameScan(stem);
+            var hypotheses = Hypotheses(scan, evidence, allowSpecials);
+            foreach (var hypothesis in hypotheses)
+            {
+                FilenameFeatures.Add(hypothesis, scan, evidence, hypotheses);
+                hypothesis.Score = FilenameModel.Score(hypothesis.Features);
+            }
+            return Interpret(hypotheses.MaxBy(h => h.Score)!, scan, evidence);
         }
-        return Interpret(hypotheses.MaxBy(h => h.Score)!, scan, evidence);
+        // One name the reader can't make sense of must not stop a whole scan: the file is listed under its own name.
+        catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or FormatException or OverflowException or InvalidOperationException or RegexMatchTimeoutException)
+        {
+            PlaybackDiagnostics.Record("filename-read-failed", new { error = ex.GetType().Name });
+            return new(stem, [], null, null, null, false, stem, false, "None");
+        }
     }
 
     // For model training: every reading the name allows, with its features.
@@ -242,14 +252,13 @@ internal static class FilenameEpisodes
             else if (seasons.FirstOrDefault(s => s.Start >= labelled.End && s.Start - labelled.End <= 3) is { End: > 0 } later) { labelled.Season = later.Season; labelled.Explicit = true; labelled.SeasonAfterEnd = later.End; }
         // "Show.03.(01.seriya.iz.08)": the number right before a bracketed episode label is the season.
         foreach (var labelled in results.Where(r => r.Form == Form.Label && r.Season is null))
-            if (scan.BracketAt(labelled.Start) is { Open: '(' } holder && SeasonBeforeBracket.Match(text[scan.CoreStart..holder.Start]) is { Success: true } before && !IsYear(int.Parse(before.Groups["s"].Value)))
+            if (scan.BracketAt(labelled.Start) is { Open: '(' } holder && holder.Start > scan.CoreStart && SeasonBeforeBracket.Match(text[scan.CoreStart..holder.Start]) is { Success: true } before && !IsYear(int.Parse(before.Groups["s"].Value)))
             { labelled.Season = int.Parse(before.Groups["s"].Value); labelled.SeasonStart = scan.CoreStart + before.Index; labelled.Explicit = true; }
         // "Show S3 - OVA1" and "Show S6 NCOP" keep the season marker out of the title.
         foreach (var named in results.Where(r => r.Form is Form.Special or Form.Clip))
             if (seasons.LastOrDefault(s => s.End <= named.Start) is { End: > 0 } season) named.SeasonStart = season.Start;
 
         // Every other number could be the episode. Season markers are linked to a number that comes after them.
-        var hasMarked = results.Any(r => r.Form is Form.SeasonEpisode or Form.SeasonWords or Form.CrossForm);
         foreach (Match match in BareNumber.Matches(text))
         {
             if (match.Index < scan.CoreStart || match.Index >= scan.CoreEnd || !Clear(match.Index) || !Free(match.Index, match.Index + match.Length)) continue;
@@ -258,11 +267,12 @@ internal static class FilenameEpisodes
             if (IsYear(value) && !match.Groups["e"].Success) continue;
             // Anything in a film location stays a film unless a dash sets its number apart.
             if (evidence.Movies && !text[..match.Index].TrimEnd().EndsWith('-')) continue;
-            // "Apollo 13", "Area 51": outside a TV location, an unpadded number closing a plain name belongs to the title,
-            // unless sibling files or the folder's name say it's running.
+            // "Apollo 13", "Area 51 (2015)", "12 Monkeys", "300": outside a TV location, an unpadded number in a plain name belongs to
+            // the title, unless sibling files or the folder's name say it's running. A number that opens the name is only ruled
+            // out with no other folder around it, since a show's folder can hold it as an episode.
             if (!evidence.Series && digits[0] != '0' && !match.Groups["e"].Success && !match.Groups["v"].Success && !scan.LeadingGroup && !scan.HasTail && scan.BracketAt(match.Index) is null
-                && match.Index > scan.CoreStart && !text[..match.Index].TrimEnd().EndsWith('-') && scan.Slice(match.Index + match.Length, scan.CoreEnd).Length == 0
-                && !evidence.Varies(match.Index) && !evidence.NamesFolder(scan.Slice(scan.CoreStart, match.Index))) continue;
+                && !text[..match.Index].TrimEnd().EndsWith('-') && !evidence.Varies(match.Index) && !evidence.NamesFolder(scan.Slice(scan.CoreStart, match.Index))
+                && (match.Index > scan.CoreStart ? YearOrNothing.IsMatch(scan.Slice(match.Index + match.Length, scan.CoreEnd)) : !evidence.HasFolder || evidence.OwnFolder)) continue;
             var half = match.Groups["half"].Success && match.Groups["half"].Value != ".0";
             int? last = match.Groups["e"].Success ? int.Parse(match.Groups["e"].Value) : null;
             var season = seasons.LastOrDefault(s => s.End <= match.Index);
@@ -478,6 +488,8 @@ internal static class FilenameEpisodes
 
     private static (int Start, int End, int Year, string? Alternate)? FindYear(FilenameScan scan, int from, int to)
     {
+        // "[S02][E05] Name": the title can start after the number, so there may be nothing between them.
+        if (from >= Math.Min(to, scan.Text.Length)) return null;
         var matches = YearToken.Matches(scan.Text[from..Math.Min(to, scan.Text.Length)]).Where(m => !scan.Technical[from + m.Index]).ToArray();
         // The first token of a name is its title: "2001 A Space Odyssey", "1917 (2019)".
         matches = matches.Where(m => !string.IsNullOrWhiteSpace(scan.Slice(scan.CoreStart, from + m.Index))).ToArray();
