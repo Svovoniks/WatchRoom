@@ -997,17 +997,27 @@ public static partial class FileNames
         // folder called "1" or "Vol 2" is still a film. "24 - 12" in a folder called 24 is the show's name, and so is that folder
         // directly in a library, which names no show above it.
         if (season.Success && season.Groups[3].Success && (dir.Length == 0 || System.IO.Path.GetDirectoryName(dir) is not { } above || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(above)) || IsLibraryRoot(above, libraryRoot) ||
-            !FilenameEpisodes.HasOwnNumber(path) || NamesShowInFolder(path, dir))) return (series, Match.Empty, null);
+            !FilenameEpisodes.HasOwnNumber(path) || NamesShowInFolder(path, dir) || NamesOtherShow(path, above))) return (series, Match.Empty, null);
         return (series, season, number);
     }
     private static bool IsLibraryRoot(string dir, string? libraryRoot) =>
-        libraryRoot is not null && string.Equals(System.IO.Path.GetFullPath(libraryRoot).TrimEnd(System.IO.Path.DirectorySeparatorChar), dir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        libraryRoot is not null && string.Equals(System.IO.Path.GetFullPath(libraryRoot).TrimEnd(System.IO.Path.DirectorySeparatorChar), dir.TrimEnd(System.IO.Path.DirectorySeparatorChar), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     // A file that names its show the same as the number its folder is called: "24 - 12" or "[Group] 86 - 05".
     private static bool NamesShowInFolder(string path, string dir)
     {
         var folder = System.IO.Path.GetFileName(dir);
-        return Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path), $@"^(?:\[[^\]]*\]\s*)?{Regex.Escape(folder)}[\s._-]+.*\d");
+        return Regex.IsMatch(folder, @"^\d{1,3}$") && Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path), $@"^(?:\[[^\]]*\]\s*)?{Regex.Escape(folder)}[\s._-]+.*\d");
     }
+    // A file that names a show other than the folder above its numbered folder: "Ninety - 05" and "Naruto S01E05" in "Backup\1".
+    private static bool NamesOtherShow(string path, string above)
+    {
+        var named = LibraryIdentity.Normalize(FilenameEpisodes.Analyze(path, false).Numbering?.Series ?? "");
+        var folder = LibraryIdentity.Normalize(FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(above)).Title);
+        return named.Length > 0 && folder.Length > 0 && !named.StartsWith(folder, StringComparison.Ordinal) && !folder.StartsWith(named, StringComparison.Ordinal);
+    }
+    // A folder called only a number, directly in a library or a folder that names no show, holding numbered files: "TV\24\01 - Midnight".
+    private static bool IsNumberedShow(string dir, string? libraryRoot) => Regex.IsMatch(System.IO.Path.GetFileName(dir), @"^\d{1,3}$") &&
+        System.IO.Path.GetDirectoryName(dir) is { } above && (IsLibraryRoot(above, libraryRoot) || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(above)));
     // A library root, or a folder whose name only says what kind of files sit in it.
     private static bool IsLooseFolder(string dir, string? libraryRoot) => IsLibraryRoot(dir, libraryRoot) || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(dir));
     // The closest folder above a file whose name says something about it, for files named with only a number.
@@ -1082,7 +1092,7 @@ public static partial class FileNames
                 series = FilenameEpisodes.AnalyzeFolder(seasonFolderName).Title is { Length: > 0 } own ? own : FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(dir)!)).Title;
         }
         // A file named only by its number with no folder to name it has only its own remaining words.
-        if (numbering is not null && string.IsNullOrWhiteSpace(series) && NamesShowInFolder(path, dir)) series = System.IO.Path.GetFileName(dir);
+        if (numbering is not null && string.IsNullOrWhiteSpace(series) && (NamesShowInFolder(path, dir) || IsNumberedShow(dir, libraryRoot))) series = System.IO.Path.GetFileName(dir);
         if (numbering is not null && string.IsNullOrWhiteSpace(series)) series = NearestTitledFolder(dir, libraryRoot) ?? (IsLooseFolder(dir, libraryRoot) && numbering.Subtitle is { Length: > 0 } words ? words : System.IO.Path.GetFileName(dir));
         var seriesDir = showExtras && extrasOwner is not null ? extrasOwner : dir;
         int? sourcePart = null;
@@ -1119,8 +1129,10 @@ public static partial class FileNames
         // Structured show folders own membership, regardless of aliases in individual filenames.
         var parentName = System.IO.Path.GetFileName(seriesDir);
         // A folder of many different titles is a collection, and a name like "UHD" or "Video" isn't a show at all.
-        var collection = !File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) && (IsLooseFolder(seriesDir, libraryRoot) || HoldsManyTitles(seriesDir, seriesContext || seasonFolder.Success) || HoldsManyTitles(dir, seriesContext || seasonFolder.Success));
-        var structured = File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) || (numbering is not null || bonus) && (seasonFolder.Success || seriesContext || seriesDir != dir) &&
+        var collection = !File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) && (IsLooseFolder(seriesDir, libraryRoot) && !(numbering is not null && string.IsNullOrWhiteSpace(numbering.Series) && IsNumberedShow(seriesDir, libraryRoot)) || HoldsManyTitles(seriesDir, seriesContext || seasonFolder.Success) || HoldsManyTitles(dir, seriesContext || seasonFolder.Success));
+        // "Backup\1\Harbor S01E05": the file names its show, and the folders above only hold it.
+        var heldElsewhere = Regex.IsMatch(System.IO.Path.GetFileName(dir), @"^\d{1,3}$") && System.IO.Path.GetDirectoryName(dir) is { } holder && NamesOtherShow(path, holder);
+        var structured = File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) || !heldElsewhere && (numbering is not null || bonus) && (seasonFolder.Success || seriesContext || seriesDir != dir) &&
             (libraryRoot is null || !string.Equals(System.IO.Path.GetFullPath(libraryRoot), seriesDir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) &&
             !Regex.IsMatch(parentName, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы)$") && !collection;
         if (structured)

@@ -69,7 +69,7 @@ internal static class FilenameEpisodes
         Rx(@"第\s*" + Number + @"\s*[話话集回巻]"),
         Rx(@"(?<![\p{L}\p{N}])" + Number + @"\s*[話话]"),
     ];
-    private static readonly Regex SeasonOnly = Rx(@"(?<![\p{L}\p{N}])(?:S(?<s>\d{1,2})(?:v\d+)?(?![\p{L}\p{N}])|(?:" + SeasonWord + @")[ .#-]*(?<s>\d{1,2})(?![\p{L}\p{N}])|(?<s>\d{1,2})" + Ordinal + @"[ .-]*(?:" + SeasonWord + @")(?![\p{L}])|TV-?(?<s>\d{1,2})(?![\p{L}\p{N}]))");
+    private static readonly Regex SeasonOnly = Rx(@"(?<![\p{L}\p{N}])(?:S(?<s>\d{1,2})(?:v\d+)?(?![\p{L}\p{N}])|(?:" + SeasonWord + @")[ .#-]*(?<s>\d{1,2})(?![\p{L}\p{N}])|(?!\d{1,2}[ .-]*(?:" + SeasonWord + @")[ .#-]*\d)(?<s>\d{1,2})" + Ordinal + @"[ .-]*(?:" + SeasonWord + @")(?![\p{L}])|TV-?(?<s>\d{1,2})(?![\p{L}\p{N}]))");
     private static readonly Regex Special = Rx(@"(?<![\p{L}\p{N}])(?:S\d{1,2})?(?:SP|OVA|OAV|OAD|ONA|Specials?)\)?[ #-]*(?:episode[ #-]*|ep[ .#-]*)?(?<n>\d{1,3})(?:v\d+)?(?:[+-](?<e>\d{1,3}))?(?![\p{L}\p{N}])");
     private static readonly Regex Film = Rx(@"(?<![\p{L}\p{N}])(?:(?:the[ -]+)?(?:movie|film)(?:[ #-]*\d{1,2})?|gekijou-?ban|劇場版)(?![\p{L}\p{N}])");
     private static readonly Regex ShortClip = new(@"(?<![\p{L}\p{N}])(?:NC[ -]?(?:OP|ED)|(?:S\d{1,2})?NC(?:OP|ED)|OP|ED|PV|CM|SPOT)[ -]?\d{0,2}(?:v\d+|[a-z])?(?![\p{L}\p{N}])", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
@@ -194,8 +194,8 @@ internal static class FilenameEpisodes
             foreach (Match match in Special.Matches(text))
             {
                 if (!Clear(match.Index) || !Free(match.Index, match.Index + match.Length) || match.Index < scan.CoreStart || match.Index >= scan.CoreEnd) continue;
-                // "Special 26 (2013)": a dated name opening with the word is a film.
-                if (!evidence.Series && match.Index == scan.CoreStart && match.Value.StartsWith("special", StringComparison.OrdinalIgnoreCase) && EndsWithYear.IsMatch(scan.Slice(match.Index + match.Length, scan.CoreEnd))) continue;
+                // "Special 26 (2013)", "Special.26.1080p": a name opening with the word is a film. Beside a show's episodes it still joins them as a clip.
+                if (!evidence.Series && match.Index == scan.CoreStart && match.Value.StartsWith("special", StringComparison.OrdinalIgnoreCase)) continue;
                 var first = int.Parse(match.Groups["n"].Value);
                 var last = match.Groups["e"].Success ? int.Parse(match.Groups["e"].Value) : (int?)null;
                 results.Add(new() { Form = Form.Special, Start = match.Index, End = match.Index + match.Length, Season = 0, Episode = first, EpisodeEnd = last > first ? last : null, Explicit = true, Digits = match.Groups["n"].Value });
@@ -297,6 +297,8 @@ internal static class FilenameEpisodes
             // to the title, unless sibling files or the folder's name say it's running or a dash sets it apart.
             if (!evidence.Series && !match.Groups["e"].Success && !match.Groups["v"].Success && !scan.LeadingGroup && scan.BracketAt(match.Index) is null
                 && !SetApartByDash(text, match.Index) && !seasons.Any(s => s.End <= match.Index) && !evidence.NamesFolder(scan.Slice(scan.CoreStart, match.Index)) && TitleNumber(scan, match, digits, evidence)) continue;
+            // "86 - 5" in a folder called 86, "Room 104 - 5": the show's own number isn't its episode when another number follows.
+            if (value != evidence.FolderSeason && !evidence.Varies(match.Index) && evidence.TitleHas(digits) && Regex.IsMatch(scan.Slice(match.Index + match.Length, scan.CoreEnd), @"(?<![\p{L}\p{N}])\d{1,4}(?![\p{L}\p{N}])", RegexOptions.None, Limit)) continue;
             var half = match.Groups["half"].Success && match.Groups["half"].Value != ".0";
             int? last = match.Groups["e"].Success ? int.Parse(match.Groups["e"].Value) : null;
             var season = seasons.LastOrDefault(s => s.End <= match.Index);
@@ -319,7 +321,9 @@ internal static class FilenameEpisodes
             results.Add(bare);
             // 0104 and 203 can also be season and episode.
             if (digits.Length is 3 or 4 && !IsYear(value) && last is null && int.Parse(digits[^2..]) > 0 && int.Parse(digits[..^2]) is >= 0 and <= 40
-                && !evidence.PlainRun(match.Index) && !evidence.TitleHas(digits) && (evidence.FolderSeason is not { } holder || holder == int.Parse(digits[..^2])))
+                && !evidence.PlainRun(match.Index) && !evidence.TitleHas(digits) && (evidence.FolderSeason is not { } holder || holder == int.Parse(digits[..^2]))
+                // Three digits need siblings that say so, or "Show 203" in the folder for season 2. "Show - 203" and a bare "203" count up.
+                && (digits.Length == 4 || evidence.PackedRun(match.Index) || evidence.FolderSeason == int.Parse(digits[..^2]) && match.Index > scan.CoreStart && !SetApartByDash(text, match.Index)))
                 results.Add(new() { Form = Form.Compact, Start = match.Index, End = bare.End, Season = int.Parse(digits[..^2]), Episode = int.Parse(digits[^2..]), Explicit = true, Digits = digits });
         }
         // "4-13 Title", "Show 03-20": a span too long for one file reads as season and episode.
@@ -436,7 +440,10 @@ internal static class FilenameEpisodes
         // "[S02E03] Harbor of Glass" with nothing else to go on: the words after the marker are all there is to name it.
         if (numbering is not null && best.Form != Form.Bare && title.Length == 0 && subtitle is not null && !evidence.HasFolder) { title = subtitle; numbering = numbering with { Series = title, Subtitle = null }; }
         if (numbering is { Subtitle: { } remaining }) numbering = numbering with { Subtitle = Subtitle(Regex.Replace(remaining, @"\[[^\]]*\]?", " ", RegexOptions.None, Limit)) };
-        if (numbering is { Subtitle: { } after }) numbering = numbering with { Name = EpisodeName(after, scan) };
+        // "Show - 05 [SubsPlease]": a release group's tag left on its own names nothing.
+        var tagFrom = Math.Min(Math.Max(best.End, best.SeasonAfterEnd), scan.Original.Length);
+        var tagOnly = Regex.IsMatch(scan.Original[tagFrom..Math.Max(tagFrom, Math.Min(scan.CoreEnd, scan.Original.Length))].Trim(' ', '-', '.', '_'), @"^\[[^\]]*\]$", RegexOptions.None, Limit);
+        if (numbering is { Subtitle: { } after }) numbering = numbering with { Name = tagOnly ? null : EpisodeName(after, scan) };
         var cleaned = Regex.Replace(Regex.Replace(scan.Slice(scan.CoreStart, scan.CoreEnd), @"\[[^\]]*\]?", " "), @"\s+", " ").Trim();
         if (cleaned.Length == 0) cleaned = Regex.Replace(scan.Text, @"\s+", " ").Trim();
         return new(title, alternates, year, numbering, clip, best.Form == Form.Film, cleaned, scan.LeadingGroup, best.Form.ToString());
