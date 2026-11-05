@@ -37,7 +37,7 @@ internal static class FilenameEpisodes
     private static readonly TimeSpan Limit = TimeSpan.FromSeconds(1);
     private static Regex Rx(string pattern) => new(pattern, Options, Limit);
 
-    private static readonly Regex YearOrNothing = Rx(@"^\(?(?:(?:19|20)\d{2})?\)?$");
+    private static readonly Regex EndsWithYear = Rx(@"(?:^|[\s(])(?:19|20)\d{2}\)?$");
     private static readonly Regex[] SeasonEpisodeForms =
     [
         Rx(@"(?<![\p{L}\p{N}])S(?<s>\d{1,4})[ -]*(?:x[ -]*)?E(?:P(?:ISODE)?)?[ -]*" + Number),
@@ -104,6 +104,14 @@ internal static class FilenameEpisodes
 
     internal static Result? Read(string path, bool seriesContext, int? folderSeason = null, bool specials = false) =>
         Analyze(path, seriesContext, folderSeason, specials).Numbering;
+
+    // Whether a file in a folder called "2" or "Vol 2" has a number of its own, without that folder's help: a dated name needs
+    // an explicit season or numbered files beside it, since "02 - Aliens (1986)" can be a place in a film series.
+    internal static bool HasOwnNumber(string path)
+    {
+        var reading = Analyze(path, false);
+        return reading.Numbering is { Episode: not null } number && (number.ExplicitSeason || reading.Year is null || FilenameFolders.Evidence(path, false, null, null).Ordered >= 2);
+    }
 
     // One parse reads a name several times with the same evidence (extras checks, sibling lookups), so readings are kept until the folder changes.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, bool, int?, bool, string?, bool), (FilenameFolders.FolderEvidence Evidence, Reading Reading)> Readings = new();
@@ -201,6 +209,15 @@ internal static class FilenameEpisodes
             var leadingTag = bracket is { } b && b.End <= scan.CoreStart;
             if (bracket is { } tag && scan.IsSeriesTag(tag)) return;
             if (!Clear(match.Index) || !Free(match.Index, match.Index + match.Length) || match.Index >= clipLimit && !leadingTag || match.Index < scan.CoreStart && !leadingTag) return;
+            // "Opening Night", "Interview with the Vampire", "The Menu (2022)": outside a show's location, a clip word that opens a
+            // plain name is part of its title. Beside a show's episodes the file still joins them as a clip.
+            if (!isShort && !evidence.Series && !leadingTag && bracket is null && match.Index >= scan.CoreStart)
+            {
+                var before = scan.Slice(scan.CoreStart, match.Index); var rest = scan.Slice(match.Index + match.Length, scan.CoreEnd);
+                var article = Regex.IsMatch(before, @"(?i)^(?:the|a|an)$", RegexOptions.None, Limit);
+                var joined = match.Index + match.Length < text.Length && text[match.Index + match.Length] == '-';
+                if (!joined && (article || before.Length == 0 && (EndsWithYear.IsMatch(rest) || rest.Any(char.IsLetter)))) return;
+            }
             results.Add(new() { Form = Form.Clip, Start = match.Index, End = match.Index + match.Length, Clip = Trim(match.Value), ShortClip = isShort, LeadingTag = leadingTag });
             Take(match.Index, match.Index + match.Length);
         }
@@ -218,6 +235,8 @@ internal static class FilenameEpisodes
         {
             if (!Clear(match.Index) || !Free(match.Index, match.Index + match.Length) || match.Index < scan.CoreStart) continue;
             if (scan.BracketAt(match.Index) is { } holder && text[(holder.Start + 1)..(holder.End - 1)].Trim().Length > match.Length) continue;
+            // "Film Socialisme": a word that opens the name, with more words after it, is part of the title.
+            if (match.Index == scan.CoreStart && scan.BracketAt(match.Index) is null && !match.Value.StartsWith("geki", StringComparison.OrdinalIgnoreCase) && !match.Value.StartsWith('劇') && scan.Slice(match.Index + match.Length, scan.CoreEnd).Any(char.IsLetter) && !text[(match.Index + match.Length)..].TrimStart().StartsWith('-')) continue;
             results.Add(new() { Form = Form.Film, Start = match.Index, End = match.Index + match.Length });
             Take(match.Index, match.Index + match.Length);
         }
@@ -267,12 +286,10 @@ internal static class FilenameEpisodes
             if (IsYear(value) && !match.Groups["e"].Success) continue;
             // Anything in a film location stays a film unless a dash sets its number apart.
             if (evidence.Movies && !text[..match.Index].TrimEnd().EndsWith('-')) continue;
-            // "Apollo 13", "Area 51 (2015)", "12 Monkeys", "300": outside a TV location, an unpadded number in a plain name belongs to
-            // the title, unless sibling files or the folder's name say it's running. A number that opens the name is only ruled
-            // out with no other folder around it, since a show's folder can hold it as an episode.
-            if (!evidence.Series && digits[0] != '0' && !match.Groups["e"].Success && !match.Groups["v"].Success && !scan.LeadingGroup && !scan.HasTail && scan.BracketAt(match.Index) is null
-                && !text[..match.Index].TrimEnd().EndsWith('-') && !evidence.Varies(match.Index) && !evidence.NamesFolder(scan.Slice(scan.CoreStart, match.Index))
-                && (match.Index > scan.CoreStart ? YearOrNothing.IsMatch(scan.Slice(match.Index + match.Length, scan.CoreEnd)) : !evidence.HasFolder || evidence.OwnFolder)) continue;
+            // "Apollo 13", "Area 51 (2015)", "The 39 Steps", "12 Monkeys", "300": outside a TV location, a number in a plain name belongs
+            // to the title, unless sibling files or the folder's name say it's running or a dash sets it apart.
+            if (!evidence.Series && !match.Groups["e"].Success && !match.Groups["v"].Success && !scan.LeadingGroup && scan.BracketAt(match.Index) is null
+                && !SetApartByDash(text, match.Index) && !seasons.Any(s => s.End <= match.Index) && !evidence.NamesFolder(scan.Slice(scan.CoreStart, match.Index)) && TitleNumber(scan, match, digits, evidence)) continue;
             var half = match.Groups["half"].Success && match.Groups["half"].Value != ".0";
             int? last = match.Groups["e"].Success ? int.Parse(match.Groups["e"].Value) : null;
             var season = seasons.LastOrDefault(s => s.End <= match.Index);
@@ -348,6 +365,31 @@ internal static class FilenameEpisodes
             position += next.Length;
         }
         return (conflict is null ? end : null, position, conflict);
+    }
+
+    private static bool TitleNumber(FilenameScan scan, Match match, string digits, FilenameFolders.FolderEvidence evidence)
+    {
+        var after = match.Index + match.Length;
+        var rest = scan.Slice(after, scan.CoreEnd);
+        var opens = match.Index == scan.CoreStart;
+        // "12 Monkeys" and "13 Hours" side by side are two films; a show's episodes named this way take more than two files.
+        if (evidence.Varies(match.Index) && !(opens && rest.Length > 0 && digits[0] != '0' && evidence.Ordered < 3)) return false;
+        // "02 - Aliens (1986)": a padded number opening a dated name is a place in a collection. "01.Show.2026.WEBRip" is an episode.
+        if (digits[0] == '0') return opens && !scan.HasTail && EndsWithYear.IsMatch(rest);
+        // "1. Name" numbers a list.
+        if (opens && scan.Spaced && after < scan.Original.Length && scan.Original[after] == '.') return false;
+        // "Show.2.03" is a pair of numbers, not a title ending in one.
+        if (rest.Length > 0 && char.IsDigit(rest[0]) && !EndsWithYear.IsMatch(rest)) return false;
+        // "Show 5 - Name" sets its name apart, so the number before it isn't part of it.
+        if (scan.Text[after..Math.Min(scan.CoreEnd, scan.Text.Length)].TrimStart(' ', '.', '_').StartsWith('-')) return false;
+        // A file that's only a number can be an episode of the show its folder names, up to the numbers titles rarely are.
+        return rest.Length > 0 || !opens || !evidence.HasFolder || evidence.OwnFolder || digits.Length >= 3;
+    }
+    // "Show - 5" sets the number apart. "Catch-22" joins it to the word before.
+    private static bool SetApartByDash(string text, int index)
+    {
+        if (!text[..index].TrimEnd().EndsWith('-')) return false;
+        return !(index >= 2 && text[index - 1] == '-' && char.IsLetterOrDigit(text[index - 2]));
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Regex> Patterns = new();
@@ -653,7 +695,7 @@ internal static class FilenameEpisodes
         var title = Trim(Regex.Replace(FormatTitle(scan, start, stop, alternates), @"(?:\s+(?:TV|MOVIE|MOVIES|OVA|OAV|BD|DVD|WEB|Series))+$", "", RegexOptions.IgnoreCase, Limit));
         // "01. Season 1" numbers a folder; it doesn't name one.
         if (Regex.IsMatch(title, @"^\d{1,3}\.?$", RegexOptions.None, Limit) && (season is not null || stop < scan.CoreEnd || scan.Text.TrimStart().StartsWith(title + ".", StringComparison.Ordinal))) title = "";
-        title = Regex.Replace(title, @"^0\d{0,2}\.\s*(?=\S)", "", RegexOptions.None, Limit);
+        title = Regex.Replace(title, @"^0\d{0,2}(?:\.|\s+-)\s*(?=\S)", "", RegexOptions.None, Limit);
         // A single episode's release: "Clione no Akari 01 Vostfr", "Mai-ZHiME 02v2 vostfr".
         title = Regex.Replace(title, @"\s+0\d(?:v\d+)?$", "", RegexOptions.None, Limit);
         return new(title, alternates.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), yearValue, season);

@@ -51,6 +51,45 @@ static class FilenameReadingFixture
         Film(["300.mkv"], "300", null);
         Film(["12 Harbors", "12 Harbors.mkv"], "12 Harbors", null);
         Film(["300", "300.mkv"], "300", null);
+        Film(["Stuff", "12 Harbors.mkv"], "12 Harbors", null);
+        Film(["12 Harbors (1995)", "12 Harbors.mkv"], "12 Harbors", null);
+        Film(["The 39 Harbors.mkv"], "The 39 Harbors", null);
+        Film(["Calm-22.mkv"], "Calm-22", null);
+        Film(["Calm.13.1080p.WEB-DL.x265-GRP.mkv"], "Calm 13", null);
+        Film(["Stuff", "12.Harbors.1080p.WEB-DL.x265-GRP.mkv"], "12 Harbors", null);
+        Film(["Stuff", "300.mkv"], "300", null);
+        // A clip word opening a film's name is part of its title.
+        Film(["Opening Night (1977).mkv"], "Opening Night", 1977);
+        Film(["Opening.Night.1977.1080p.BluRay.mkv"], "Opening Night", 1977);
+        Film(["The Menu (2022).mkv"], "The Menu", 2022);
+        Film(["The Menu.mkv"], "The Menu", null);
+        Film(["The Interview.mkv"], "The Interview", null);
+        Film(["Interview with the Harbor (1994).mkv"], "Interview with the Harbor", 1994);
+        Film(["Film Socialisme (2010).mkv"], "Film Socialisme", 2010);
+        // What still marks an episode: a list number and a season before it.
+        Directory.CreateDirectory(Path.Combine(directory, "Calm Harbor"));
+        Numbered(["Calm Harbor", "1. Блокада.mkv"], "Calm Harbor", null, 1);
+        Numbered(["Calm Harbor", "S04.17.Дело о победителе.mkv"], "Calm Harbor", 4, 17);
+        Film(["Calm 13 (1995) Director's Cut.mkv"], "Calm 13", 1995);
+        Film(["Hanks", "1", "Calm 13 (1995).mkv"], "Calm 13", 1995);
+        Film(["Collections", "Vol 2", "Calm 13 (1995).mkv"], "Calm 13", 1995);
+        Film(["Tide", "2", "02 - Tides (1986).mkv"], "Tides", 1986);
+        // A film called only a number keeps it, however the folder is named.
+        Film(["Kubrick", "2001 (1968).mkv"], "2001", 1968);
+        // Numbers between unrelated files aren't a run.
+        void Folder(string folder, params string[] files) { Directory.CreateDirectory(Path.Combine(directory, folder)); foreach (var file in files) File.WriteAllBytes(Path.Combine(directory, folder, file), [0]); }
+        Folder("Flat Films", "12 Harbors.mkv", "300.mkv");
+        foreach (var (file, title) in new[] { ("12 Harbors.mkv", "12 Harbors"), ("300.mkv", "300") })
+            check(FileNames.Parse(Path.Combine(directory, "Flat Films", file), "Mixed", Path.Combine(directory, "Flat Films")) is { Series: null, Episode: null } flat && flat.Title == title, $"{file} is a film in a flat library");
+        Folder("HD Films", "12 Harbors.mkv", "127 Tides.mkv", "Heat.mkv", "Calm.mkv");
+        foreach (var (file, title) in new[] { ("12 Harbors.mkv", "12 Harbors"), ("127 Tides.mkv", "127 Tides"), ("Heat.mkv", "Heat"), ("Calm.mkv", "Calm") }) Film(["HD Films", file], title, null);
+        Folder("Sequels", "Calm's 11 (2001).mkv", "Calm's 12 (2004).mkv", "Calm's 13 (2007).mkv");
+        Film(["Sequels", "Calm's 12 (2004).mkv"], "Calm's 12", 2004);
+        // A real run still counts, with gaps and with names beside the numbers.
+        Folder("Harbor Kept", "Harbor Kept - 01.mkv", "Harbor Kept - 12.mkv");
+        Numbered(["Harbor Kept", "Harbor Kept - 12.mkv"], "Harbor Kept", null, 12);
+        Folder("Harbor Named", "1 Pilot.mkv", "2 Return.mkv", "3 Storm.mkv");
+        Numbered(["Harbor Named", "2 Return.mkv"], "Harbor Named", null, 2);
         // A folder called "1" or "Vol 2" only makes a season of a file with a number of its own.
         Film(["Tide", "1", "Tide.1979.1080p.mkv"], "Tide", 1979);
         Film(["Tide", "02 - Tides", "Tides.1986.mkv"], "Tides", 1986);
@@ -58,17 +97,25 @@ static class FilenameReadingFixture
         Numbered(["Harbor Lights", "2", "Harbor Lights - 05.mkv"], "Harbor Lights", 2, 5);
         Numbered(["Harbor Lights", "2", "06.mkv"], "Harbor Lights", 2, 6);
         // Short folder names can be a show's own name, and folders above the library say nothing about its files.
+        Folder(Path.Combine("Harbor Kept", "NC"), "NCOP1.mkv"); Folder(Path.Combine("Harbor Kept", "Bonus"), "Making Of.mkv"); Folder(Path.Combine("Harbor Kept", "Extras"), "Making Of.mkv");
+        Folder(Path.Combine("Family", "CM"), "Birthday.mkv"); Folder(Path.Combine("Directors", "PV"), "Some Film (1999).mkv"); Folder(Path.Combine("Comedy", "Bonus"), "Bonus - 01.mkv", "Bonus - 02.mkv");
+        Folder("Interviews with Harbor Girls", "Interviews with Harbor Girls - 01.mkv", "Interviews with Harbor Girls - 02.mkv"); Folder("Interviews Before Dawn (2012)", "Interviews Before Dawn (2012).mkv");
+        check(Read("Family", "CM", "Birthday.mkv") is { IsExtra: false, IsBonus: false } && Read("Directors", "PV", "Some Film (1999).mkv") is { IsExtra: false, IsBonus: false, Title: "Some Film" } && Read("Comedy", "Bonus", "Bonus - 01.mkv") is { IsExtra: false, IsBonus: false }, "a short name under a folder that only groups things isn't an extras folder");
+        var harborGirls = Read("Interviews with Harbor Girls", "Interviews with Harbor Girls - 01.mkv"); var beforeDawn = Read("Interviews Before Dawn (2012)", "Interviews Before Dawn (2012).mkv");
+        check(harborGirls is { IsExtra: false, IsBonus: false, Episode: 1 }, $"a show starting with Interviews isn't an extras folder (got extra {harborGirls.IsExtra}, bonus {harborGirls.IsBonus}, episode {harborGirls.Episode})");
+        check(beforeDawn is { IsExtra: false, IsBonus: false, Title: "Interviews Before Dawn" }, $"a film starting with Interviews isn't an extras folder (got extra {beforeDawn.IsExtra}, bonus {beforeDawn.IsBonus}, {beforeDawn.Title})");
         check(Read("Extra", "Extra S01E01.mkv") is { IsExtra: false, IsBonus: false, Series: "Extra", Season: 1, Episode: 1 }, "a show called Extra isn't an extras folder");
         check(Read("Bonus", "Bonus - 01.mkv") is { IsExtra: false, IsBonus: false, Series: "Bonus", Episode: 1 }, "a show called Bonus isn't an extras folder");
-        check(new[] { Read("Harbor Lights", "NC", "NCOP1.mkv"), Read("Harbor Lights", "Bonus", "Making Of.mkv"), Read("Harbor Lights", "Extras", "Making Of.mkv") }.All(x => x.IsExtra || x.IsBonus), "those names still mean extras inside a show's folder");
-        check(!FileNames.IsExtra(Path.Combine("C:", "Users", "cm", "Videos", "Calm Waters.mkv"), Path.Combine("C:", "Users", "cm", "Videos")) && FileNames.IsExtra(Path.Combine("C:", "Users", "cm", "Videos", "Harbor Lights", "cm", "Spot.mkv"), Path.Combine("C:", "Users", "cm", "Videos")), "folders above the library don't make its files extras");
+        check(new[] { Read("Harbor Kept", "NC", "NCOP1.mkv"), Read("Harbor Kept", "Bonus", "Making Of.mkv"), Read("Harbor Kept", "Extras", "Making Of.mkv") }.All(x => x.IsExtra || x.IsBonus), "those names still mean extras inside a show's folder");
+        check(!FileNames.IsExtra(Path.Combine("C:", "Users", "cm", "Videos", "Calm Waters.mkv"), Path.Combine("C:", "Users", "cm", "Videos")) && !FileNames.IsExtra(Path.Combine(directory, "Family", "CM", "Birthday.mkv"), directory), "folders above the library don't make its files extras");
         // No name stops a scan: a title can start after the number, and the reader has nothing else to go on here.
         var oddRoot = Path.Combine(directory, "Odd", "cm", "Videos"); Directory.CreateDirectory(oddRoot);
+        Directory.CreateDirectory(Path.Combine(oddRoot, "99999999999 сезон")); await File.WriteAllBytesAsync(Path.Combine(oddRoot, "99999999999 сезон", "Odd Season.mkv"), [0]);
         string[] oddNames = ["(Ep 03) Harbor Lights.mkv", "(E05) Harbor Lights.mkv", "(#3) Harbor Lights.mkv", "(3 of 12) Harbor Lights.mkv", "[S02][E05] Harbor Lights.mkv", "[S02][NCOP] Harbor Lights.mkv", "(S02)(E05) Harbor Lights.mkv", "Calm Waters (2001).mkv"];
         foreach (var odd in oddNames) await File.WriteAllBytesAsync(Path.Combine(oddRoot, odd), [0]);
         var oddStore = new LibraryStore(Path.Combine(directory, "OddData"));
         await oddStore.ScanAsync([new(oddRoot)]);
-        check(oddStore.All().Count(x => !x.IsVirtual && !x.IsExtra) == oddNames.Length, $"a name starting with its numbers doesn't stop a scan, in a library under a folder called cm (indexed {oddStore.All().Count(x => !x.IsVirtual && !x.IsExtra)})");
+        check(oddStore.All().Count(x => !x.IsVirtual && !x.IsExtra) == oddNames.Length + 1, $"a name starting with its numbers doesn't stop a scan, in a library under a folder called cm (indexed {oddStore.All().Count(x => !x.IsVirtual && !x.IsExtra)})");
         check(oddStore.All().Single(x => x.Path.EndsWith("[S02][E05] Harbor Lights.mkv")) is { Season: 2, Episode: 5 }, "numbers ahead of the title are still read");
 
         // Release groups, tags and separators.
@@ -257,6 +304,9 @@ static class FilenameReadingFixture
         foreach (var item in new[] { oldEpisode, oldFilm, oldLocked, oldMapped }) seed.Save(item);
         // An episode the old parser matched to a film, and a numbered film it matched correctly.
         var wrongFilmPath = Path.Combine(media, "Harbor Lights - S01E03 - Name.mkv"); var numberedFilmPath = Path.Combine(mediaRoot, "Calm 13 (1995).mkv");
+        var sequelFolder = Path.Combine(mediaRoot, "Rock"); Directory.CreateDirectory(sequelFolder);
+        var sequelPath = Path.Combine(sequelFolder, "Rock 2.mkv"); await File.WriteAllBytesAsync(sequelPath, [0]); await File.WriteAllBytesAsync(Path.Combine(sequelFolder, "Rock 3.mkv"), [0]);
+        seed.Save(new MediaItem(FileNames.Parse(sequelPath, "Mixed", mediaRoot).Id, sequelPath, "Rock 2", "Movie", MetadataProvider: "tvmaze", MetadataId: 72, MetadataType: "movie", ProviderIds: new() { ["tvmaze"] = "72" }, Overview: "The sequel's plot", MetadataFetchedAt: 5000));
         await File.WriteAllBytesAsync(wrongFilmPath, [0]); await File.WriteAllBytesAsync(numberedFilmPath, [0]);
         seed.Save(FileNames.Parse(wrongFilmPath, "Mixed", mediaRoot) with { Series = null, Episode = null, Season = null, MetadataProvider = "tvmaze", MetadataId = 70, MetadataType = "movie", ProviderIds = new() { ["tvmaze"] = "70" }, Overview = "The wrong film's plot", Poster = "wrong-film.jpg", PosterSource = "https://example.org/movie/70", MetadataFetchedAt = 5000 });
         seed.Save(FileNames.Parse(numberedFilmPath, "Mixed", mediaRoot) with { MetadataProvider = "tvmaze", MetadataId = 71, MetadataType = "movie", ProviderIds = new() { ["tvmaze"] = "71" }, Overview = "The right film's plot", MetadataFetchedAt = 5000 });
@@ -279,6 +329,7 @@ static class FilenameReadingFixture
         check(read[filmPath] is { Title: "Calm Waters", Year: 2019 }, "a film takes the new title and year");
         check(read[wrongFilmPath] is { MetadataId: null, Poster: null, PosterSource: null, Season: 1, Episode: 3 } && read[wrongFilmPath].Overview != "The wrong film's plot", $"an episode matched to the wrong film loses that film's identity, plot and poster (got {read[wrongFilmPath].MetadataId} {read[wrongFilmPath].Overview} {read[wrongFilmPath].Poster} {read[wrongFilmPath].PosterSource} {read[wrongFilmPath].Season}x{read[wrongFilmPath].Episode})");
         check(read[numberedFilmPath] is { MetadataId: 71, Overview: "The right film's plot", Series: null, Title: "Calm 13" }, $"a film with a number in its title keeps its match (got {read[numberedFilmPath].MetadataId} {read[numberedFilmPath].Overview} {read[numberedFilmPath].Series} {read[numberedFilmPath].Title})");
+        check(read[sequelPath] is { MetadataId: 72, Overview: "The sequel's plot", Series: null, Episode: null }, $"a bare number doesn't overturn a film a provider identified (got {read[sequelPath].MetadataId} {read[sequelPath].Series} {read[sequelPath].Episode})");
         check(read[lockedPath] is { Season: 7, Episode: 77 }, "locked numbering isn't touched");
         check(read[mappedPath] is { Season: 3, Episode: 2, MetadataId: 44, Overview: "Provider plot", MetadataFetchedAt: 5000 }, "a provider's identity, text, mapped numbering and refresh time stay when the file reads the same number");
         check(read[partPath] is { MetadataId: 55, MetadataType: "tv", Season: 1, Episode: 1 }, "a numbered film part verified as a miniseries keeps its identity and numbering");

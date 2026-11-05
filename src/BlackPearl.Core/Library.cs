@@ -144,6 +144,8 @@ public sealed partial class LibraryStore
     private static MediaItem ForgetOldReading(MediaItem parsed, MediaItem previous)
     {
         var episodic = parsed.Episode is not null || parsed.SourcePartEpisode is not null || parsed.AirDate is not null;
+        // A bare number can't overturn a film a provider identified, as "Rocky 2" beside "Rocky 3" reads as a run.
+        if (previous.MetadataType == "movie" && parsed.Series is not null && episodic && parsed.NumberingSource is null) return previous;
         // A numbered film part can have been verified as a miniseries, so that identity stands.
         var contradicted = previous.MetadataType == "movie" && parsed.Series is not null && episodic ||
             previous.MetadataType == "tv" && parsed.Series is null && MetadataTitles.NumberedMoviePart(parsed) is null;
@@ -742,7 +744,16 @@ public sealed partial class LibraryStore
                         parsed = MusicFiles.Parse(path, folder.Path, DataDirectory) with { FileSize = file.Length, FileWriteTime = writeTime };
                     }
                     // Samples and film trailers stay out; a show's extras folder joins the show as bonus clips.
-                    else parsed = FileNames.Parse(path, folder.Kind, folder.Path) with { FileSize = file.Length };
+                    else
+                    {
+                        // One file that can't be read must not stop the scan.
+                        try { parsed = FileNames.Parse(path, folder.Kind, folder.Path) with { FileSize = file.Length }; }
+                        catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or FormatException or OverflowException or InvalidOperationException or RegexMatchTimeoutException)
+                        {
+                            PlaybackDiagnostics.Record("library-file-unreadable", new { error = ex.GetType().Name });
+                            continue;
+                        }
+                    }
                     if (parsed.IsExtra) continue;
                     // Merge into the record as stored now: edits and fetches can land while a scan runs.
                     MediaItem item;
@@ -899,29 +910,49 @@ public static partial class FileNames
         if (deleted) return !IgnoredChanges.Contains(extension);
         return Directory.Exists(path);
     }
-    private const string PlainExtras = @"(?:bd |dvd )?extras|trailers|featurettes|behind the scenes|interviews.*";
-    // These are also ordinary names for a person, a show or any other folder, so they only count inside a folder that names a title.
-    private const string ShortExtras = @"(?:bd |dvd )?(?:extra|bonus)|sps|nc|nc ?op-?ed|ncops?|nceds?|creditless(?: ops?)?(?: ?& ?eds?)?|(?:bd |web )?menus?|(?:web )?pvs?|cms?";
+    private const string PlainExtras = @"(?:bd |dvd )?extras|trailers|featurettes|behind the scenes";
+    // These are also ordinary names for a person, a show or a film, so they only count inside a folder that holds a title's videos or seasons.
+    private const string ShortExtras = @"(?:bd |dvd )?(?:extra|bonus)|sps|nc|nc ?op-?ed|ncops?|nceds?|creditless(?: ops?)?(?: ?& ?eds?)?|(?:bd |web )?menus?|(?:web )?pvs?|cms?|interviews.*";
     private const string ExtrasFolders = @"(?i)^(?:" + PlainExtras + "|" + ShortExtras + ")$";
     // "(S01-S07+Movies)" and "[Season 1 + 2]" hold several seasons, so neither is a season folder.
-    private const string SeasonFolder = @"(?i)(?:^|\s|\(|\[)(?:(?:Season|Сезон|Saison|Temporada|Staffel|Stagione)\s*|S)(\d{1,2}|(?:19|20)\d{2})(?!\d|E\d)\b(?!\s*[-+~,&–]\s*(?:S|Season\s*)?\d)|^(\d+)\s*(?:сезон|sezon)\b|^(?:T|Vol\s*|Volume\s*)?(\d{1,2})(?:\s+-\s+\w+)?$|^Specials$";
+    private const string SeasonFolder = @"(?i)(?:^|\s|\(|\[)(?:(?:Season|Сезон|Saison|Temporada|Staffel|Stagione)\s*|S)(\d{1,2}|(?:19|20)\d{2})(?!\d|E\d)\b(?!\s*[-+~,&–]\s*(?:S|Season\s*)?\d)|^(\d{1,3})\s*(?:сезон|sezon)\b|^(?:T|Vol\s*|Volume\s*)?(\d{1,2})(?:\s+-\s+\w+)?$|^Specials$";
     private static string[] Parts(string path) => path.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
     private static bool IsSeasonFolder(string name) => Regex.IsMatch(Regex.Replace(name, @"[._]+", " "), SeasonFolder);
     private static int? SeasonNumber(string name) => Regex.Match(Regex.Replace(name, @"[._]+", " "), SeasonFolder) is { Success: true } match
         ? match.Groups[1].Success ? int.Parse(match.Groups[1].Value) : match.Groups[2].Success ? int.Parse(match.Groups[2].Value) : 0 : null;
     // The extras folder a file sits in, if any. Folders above the library say nothing about its files. With no library to go by, a
     // short name only counts as the file's own folder.
+    private static int RootDepth(string[] parts, string? libraryRoot)
+    {
+        if (libraryRoot is null) return -1;
+        var root = Parts(System.IO.Path.GetFullPath(libraryRoot).TrimEnd(System.IO.Path.DirectorySeparatorChar));
+        return root.Length < parts.Length && root.SequenceEqual(parts[..root.Length], OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal) ? root.Length : -1;
+    }
     private static int ExtrasFolderIndex(string[] parts, string? libraryRoot)
     {
-        string[]? root = libraryRoot is null ? null : Parts(System.IO.Path.GetFullPath(libraryRoot).TrimEnd(System.IO.Path.DirectorySeparatorChar));
-        var within = root is not null && root.Length < parts.Length && root.SequenceEqual(parts[..root.Length], OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        var first = within ? root!.Length : 1;
+        var depth = RootDepth(parts, libraryRoot);
+        var within = depth >= 0;
+        var first = within ? depth : 1;
         for (var index = first; index < parts.Length - 1; index++)
         {
             if (Regex.IsMatch(parts[index], "(?i)^(?:" + PlainExtras + ")$")) return index;
-            if (Regex.IsMatch(parts[index], "(?i)^(?:" + ShortExtras + ")$") && (within ? index > first : index == parts.Length - 2) && !FilenameFolders.IsGeneric(parts[index - 1])) return index;
+            if (Regex.IsMatch(parts[index], "(?i)^(?:" + ShortExtras + ")$") && (within ? index > first : index == parts.Length - 2) && HoldsTitle(string.Join(System.IO.Path.DirectorySeparatorChar, parts[..index]))) return index;
         }
         return -1;
+    }
+    // Whether a folder is a title's own rather than one that groups things: it has seasons or videos in it, looking through folders like "BD".
+    private static bool HoldsTitle(string folder)
+    {
+        try
+        {
+            while (FilenameFolders.IsContainer(System.IO.Path.GetFileName(folder)) && System.IO.Path.GetDirectoryName(folder) is { } above) folder = above;
+            if (FilenameFolders.IsGeneric(System.IO.Path.GetFileName(folder)) && !IsSeasonFolder(System.IO.Path.GetFileName(folder))) return false;
+            return Directory.Exists(folder) && (File.Exists(System.IO.Path.Combine(folder, "tvshow.nfo")) ||
+                Directory.EnumerateFiles(folder).Any(file => Extensions.Contains(System.IO.Path.GetExtension(file))) ||
+                Directory.EnumerateDirectories(folder).Any(child => IsSeasonFolder(System.IO.Path.GetFileName(child))));
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
     }
     // Raw path policy: a file in an extras folder, or named as a trailer or sample. Parse keeps a show's extras as bonus clips.
     public static bool IsExtra(string path, string? libraryRoot = null) => (ExtrasFolderIndex(Parts(path), libraryRoot) >= 0 || Parts(path).SkipLast(1).Any(part => Regex.IsMatch(part, @"(?i)^samples?$")) ||
@@ -939,7 +970,7 @@ public static partial class FileNames
         var extras = ExtrasFolderIndex(parts, libraryRoot);
         if (extras < 1) return (false, null, null);
         var owner = string.Join(System.IO.Path.DirectorySeparatorChar, parts[..extras]);
-        if (parts[..extras].Any(IsSeasonFolder)) return (true, null, owner);
+        if (parts[Math.Max(0, RootDepth(parts, libraryRoot))..extras].Any(IsSeasonFolder)) return (true, null, owner);
         var parent = string.Join(System.IO.Path.DirectorySeparatorChar, parts[..extras]);
         try
         {
@@ -964,7 +995,7 @@ public static partial class FileNames
         int? number = season.Success ? season.Groups[1].Success ? int.Parse(season.Groups[1].Value) : season.Groups[2].Success ? int.Parse(season.Groups[2].Value) : season.Groups[3].Success ? int.Parse(season.Groups[3].Value) : 0 : null;
         // A bare "2" is only a season under a folder that names something, and for a file with a number of its own: a film in a
         // folder called "1" or "Vol 2" is still a film.
-        if (season.Success && season.Groups[3].Success && (dir.Length == 0 || System.IO.Path.GetDirectoryName(dir) is not { } above || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(above)) || FilenameEpisodes.Read(path, true) is not { Episode: not null })) return (series, Match.Empty, null);
+        if (season.Success && season.Groups[3].Success && (dir.Length == 0 || System.IO.Path.GetDirectoryName(dir) is not { } above || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(above)) || !FilenameEpisodes.HasOwnNumber(path))) return (series, Match.Empty, null);
         return (series, season, number);
     }
     // A library root, or a folder whose name only says what kind of files sit in it.
@@ -977,7 +1008,7 @@ public static partial class FileNames
         for (var folder = dir; folder is not null && !IsLooseFolder(folder, libraryRoot); folder = System.IO.Path.GetDirectoryName(folder))
         {
             var name = System.IO.Path.GetFileName(folder);
-            if (name.Length > 0 && !FilenameFolders.IsContainer(name) && !Regex.IsMatch(name, ExtrasFolders) && FilenameEpisodes.AnalyzeFolder(name).Title is { Length: > 0 } title) return title;
+            if (name.Length > 0 && !FilenameFolders.IsContainer(name) && !Regex.IsMatch(name, "(?i)^(?:" + PlainExtras + ")$") && FilenameEpisodes.AnalyzeFolder(name).Title is { Length: > 0 } title) return title;
         }
         return null;
     }
@@ -1060,7 +1091,8 @@ public static partial class FileNames
         var title = series ?? reading.Title;
         var titleYear = reading.Year;
         // "00002.m2ts" says nothing, so a disc's streams and bare numbered files are read through the nearest folder that says something.
-        if (series is null && (FilenameEpisodes.IsDiscFile(title) || Regex.IsMatch(title, @"^\d{3,}$")) && NearestTitledFolder(dir, libraryRoot) is { } discTitle) title = discTitle;
+        // A dated one is a film called that: "2001 (1968)".
+        if (series is null && (FilenameEpisodes.IsDiscFile(title) || reading.Year is null && Regex.IsMatch(title, @"^0\d{2,}$|^\d{5,}$")) && NearestTitledFolder(dir, libraryRoot) is { } discTitle) title = discTitle;
         // A name that says only its numbering is dated by the folder that names it.
         if (titleYear is null && string.IsNullOrWhiteSpace(reading.Title) || series is null && title != reading.Title)
             for (var folder = dir; folder is not null && titleYear is null && !IsLooseFolder(folder, libraryRoot); folder = System.IO.Path.GetDirectoryName(folder))

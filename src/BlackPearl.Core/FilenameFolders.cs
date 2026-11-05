@@ -128,7 +128,16 @@ internal static class FilenameFolders
                 if (gap.Key == "\u0001end" || members.Length < 2) continue;
                 var values = members.Select(row => int.Parse(row.Runs[run].Value.Length > 9 ? "0" : row.Runs[run].Value)).ToArray();
                 var distinct = values.Distinct().Count();
-                if (distinct >= 2 && distinct * 2 >= members.Length)
+                // Each file with a year of its own is a set of releases, not a run: "Ocean's 11 (2001)", "Ocean's 12 (2004)".
+                if (distinct >= 2 && OwnYears(members, run))
+                {
+                    foreach (var row in members)
+                    {
+                        if (!names.TryGetValue(row.File, out var slots)) names[row.File] = slots = [];
+                        slots[row.Runs[run].Start] = false;
+                    }
+                }
+                else if (distinct >= 2 && distinct * 2 >= members.Length && IsRun(values, distinct))
                 {
                     foreach (var row in members)
                     {
@@ -151,5 +160,19 @@ internal static class FilenameFolders
         }
         Walk(rows, 0);
         return (names, maxRun);
+    }
+    // A running number has few gaps for how many values it takes: 1 and 12 can be the episodes someone kept, 12 and 300 aren't.
+    private static bool IsRun(int[] values, int distinct) => values.Max() - values.Min() < 3 * distinct + 20;
+    private static bool OwnYears(IReadOnlyList<(string File, (int Start, string Value)[] Runs, string Text)> members, int run)
+    {
+        var years = new HashSet<string>();
+        foreach (var row in members)
+        {
+            if (run + 1 >= row.Runs.Length || row.Runs[run + 1].Value is not { Length: 4 } year || !(year.StartsWith("19") || year.StartsWith("20"))) return false;
+            var gap = row.Text[(row.Runs[run].Start + row.Runs[run].Value.Length)..row.Runs[run + 1].Start];
+            if (gap.Trim(' ', '.', '_', '(', '[', '-').Length > 0) return false;
+            years.Add(year);
+        }
+        return years.Count >= 2;
     }
 }
