@@ -1,6 +1,6 @@
 namespace BlackPearl.Core;
 
-// Scores a reading of a name from its structural features. The weights in FilenameModel.Weights.cs are trained by tools/filename-model/train.py.
+// Scores a reading of a name from its structural features. The weights in FilenameModel.Weights.cs are trained by scripts/filename-model/train.py.
 internal static partial class FilenameModel
 {
     internal static double Score(List<KeyValuePair<string, float>> features)

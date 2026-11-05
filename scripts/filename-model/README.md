@@ -14,7 +14,7 @@ Labelled names stay outside the repository, because they can hold private librar
 Then train, with NumPy installed:
 
 ```powershell
-py tools/filename-model/train.py --features features.jsonl --labels labels.jsonl --folds 5 --out src/BlackPearl.Core/FilenameModel.Weights.cs
+py scripts/filename-model/train.py --features features.jsonl --labels labels.jsonl --folds 5 --out src/BlackPearl.Core/FilenameModel.Weights.cs
 ```
 
 `--folds` holds out whole release families (`group`) and reports accuracy on them. Judge a change by that number and by names the model has never seen, not by training accuracy. The objective is convex, so the same data gives the same weights.

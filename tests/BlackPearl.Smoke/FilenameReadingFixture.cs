@@ -280,7 +280,7 @@ static class FilenameReadingFixture
         }
     }
 
-    // Features of every reading, for tools/filename-model/train.py.
+    // Features of every reading, for scripts/filename-model/train.py.
     public static void WriteFeatures(string input, string output)
     {
         var json = new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
