@@ -97,6 +97,23 @@ static class FilenameSchemaFixture
         store.Save(repaired with { Series = "Manual title", Title = "Manual title", Season = 4, Episode = 8, EpisodeTitle = "Manual subtitle", LockedFields = ["Title", "Season", "Episode", "EpisodeTitle"] });
         await store.ScanAsync([new(root)]); var locked = store.All().Single();
         check(locked.Title == "Manual title" && locked.Season == 4 && locked.Episode == 8 && locked.EpisodeTitle == "Manual subtitle", "broader filename parsing preserves manually locked identities");
+        // A rescan corrects a title that came from the file, even after a lookup marked the episode, and leaves a provider's alone.
+        const string TmdbEpisode = "https://www.themoviedb.org/tv/1/season/1/episode/2";
+        var titleRoot = Path.Combine(directory, "title-media"); Directory.CreateDirectory(titleRoot);
+        await File.WriteAllBytesAsync(Path.Combine(titleRoot, "Harbor Lights - S01E02 - Real Name.mkv"), [0]);
+        var titleStore = new LibraryStore(Path.Combine(directory, "title-db"));
+        async Task<string?> AfterRescan(Func<MediaItem, MediaItem> change)
+        {
+            await titleStore.ScanAsync([new(titleRoot)]);
+            titleStore.Save(change(titleStore.All().Single()));
+            await titleStore.ScanAsync([new(titleRoot)]);
+            return titleStore.All().Single().EpisodeTitle;
+        }
+        check(await AfterRescan(x => x with { EpisodeTitle = "Real Name (1" }) == "Real Name", "a rescan corrects a title the file gave");
+        check(await AfterRescan(x => x with { EpisodeTitle = "Real Name (1", EpisodeSource = TmdbEpisode }) == "Real Name", "a rescan corrects a file's title on an episode a lookup has marked");
+        check(await AfterRescan(x => TmdbRetention.Record(x, x with { EpisodeTitle = "TMDB Name", EpisodeSource = TmdbEpisode }, "tmdb", TmdbRetention.EpisodeFields)) == "TMDB Name", "a rescan keeps TMDB's title");
+        var tvmazeTitles = new LibraryStore(Path.Combine(directory, "title-tvmaze-db")); titleStore = tvmazeTitles;
+        check(await AfterRescan(x => x with { EpisodeTitle = "TVmaze Name", EpisodeSource = "https://www.tvmaze.com/shows/1" }) == "TVmaze Name", "a rescan keeps another provider's title");
         var raceRoot = Path.Combine(directory, "race-media"); var raceSeason = Path.Combine(raceRoot, "Doctor Who", "Season 03"); Directory.CreateDirectory(raceSeason);
         var raceFiles = new[] { "Doctor Who - S03E07 - 42.mkv", "Doctor Who - S03E08 - Human Nature.mkv", "Doctor Who - S03E09 - Removed.mkv" }.Select(name => Path.Combine(raceSeason, name)).ToArray();
         foreach (var file in raceFiles[..2]) await File.WriteAllBytesAsync(file, [0]);
@@ -125,6 +142,13 @@ static class FilenameSchemaFixture
         await SeriesMetadata.FetchAsync(dates, directory, null, null, CancellationToken.None, http, force: true);
         var mapped = dates.All().Single(x => x.Id == dateItem.Id);
         check(mapped.Season == 2 && mapped.Episode == 1 && mapped.EpisodeTitle == "Return", "daily-show air date resolves to the unique provider season and episode");
+        var keyless = new LibraryStore(Path.Combine(directory, "keyless-db"));
+        var identified = FileNames.Parse(Path.Combine(directory, "Shows", "Example Show", "Example Show S01E02.mkv")) with { MetadataProvider = "tmdb", MetadataId = 77, MetadataType = "tv", ProviderIds = new() { ["tmdb"] = "77", ["tvmaze"] = "1" }, Season = 5, Episode = 9, MetadataFetchedAt = 0, ArtworkFetchedAt = 0 };
+        keyless.Save(identified);
+        await AutomaticArtwork.FetchAsync(keyless, directory, null, null, CancellationToken.None, http, force: true);
+        await SeriesMetadata.FetchAsync(keyless, directory, null, null, CancellationToken.None, http, force: true);
+        check(keyless.All().Single(x => x.Id == identified.Id) is { MetadataProvider: "tmdb", MetadataId: 77, Season: 5, Episode: 9 },
+            "without a TMDB key, a TMDB-identified show keeps its identity and numbering rather than moving to another provider");
         var ranges = new LibraryStore(Path.Combine(directory, "invalid-range-db"));
         var invalidRange = FileNames.Parse(Path.Combine(directory, "Anime", "Example Show", "Example Show - 01-200.mkv")) with
             { Matched = true, MetadataProvider = "tvmaze", MetadataId = 1, ProviderIds = new() { ["tvmaze"] = "1" } };

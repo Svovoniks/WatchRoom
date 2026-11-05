@@ -409,8 +409,8 @@ public partial class MainWindow : Window
         else if (page == "Queues" && activeQueueId is not null && openQueueId != activeQueueId) { CloseQueueAddPanel(); openQueueId = activeQueueId; }
         ShowPage(page);
     }
-    private static int CategoryFor(MediaItem item) => item.IsMusic ? LibraryCatalog.Music : item.Kind == "Anime" ? 3 : item.Series is not null ? 2 : 1;
-    private static string CategoryName(int category) => category switch { 1 => "Movies", 2 => "Shows", 3 => "Anime", 4 => "Unavailable", 5 => "Missing", LibraryCatalog.Music => "Music", _ => "All" };
+    private int CategoryFor(MediaItem item) => item.IsMusic ? LibraryCatalog.Music : unmatchedTitles.Contains(LibraryIdentity.ShowKey(item)) ? LibraryCatalog.Unmatched : item.Kind == "Anime" ? 3 : item.Series is not null ? 2 : 1;
+    private static string CategoryName(int category) => category switch { 1 => "Movies", 2 => "Shows", 3 => "Anime", 4 => "Unavailable", 5 => "Missing", LibraryCatalog.Music => "Music", LibraryCatalog.Unmatched => "Unmatched", _ => "All" };
     private static string SeasonName(int season, IEnumerable<MediaItem>? members = null) => LibraryCatalog.SeasonName(season, members);
     private void UpdateLibraryCategorySelection(bool active)
     {
@@ -421,7 +421,10 @@ public partial class MainWindow : Window
         MusicLibraryNav.Visibility = GuestLibrary || folders.Any(x => x.Kind == MusicFiles.Kind) || items.Any(x => x.IsMusic) ? Visibility.Visible : Visibility.Collapsed;
         MissingLibraryCount.Text = missingTitleCount.ToString();
         System.Windows.Automation.AutomationProperties.SetName(MissingLibraryNav, $"Missing, {missingTitleCount} {(missingTitleCount == 1 ? "title" : "titles")}");
-        foreach (var button in new[] { AllLibraryNav, AnimeLibraryNav, ShowsLibraryNav, MoviesLibraryNav, UnavailableLibraryNav, MissingLibraryNav })
+        UnmatchedLibraryNav.Visibility = !GuestLibrary && unmatchedTitles.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        UnmatchedLibraryCount.Text = unmatchedTitles.Count.ToString();
+        System.Windows.Automation.AutomationProperties.SetName(UnmatchedLibraryNav, $"Unmatched, {unmatchedTitles.Count} {(unmatchedTitles.Count == 1 ? "title" : "titles")}");
+        foreach (var button in new[] { AllLibraryNav, AnimeLibraryNav, ShowsLibraryNav, MoviesLibraryNav, UnavailableLibraryNav, MissingLibraryNav, UnmatchedLibraryNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, active && int.Parse((string)button.Tag) == libraryCategory ? "Selected" : "");
     }
     private void LibraryMenuClick(object sender, RoutedEventArgs e)
@@ -606,13 +609,16 @@ public partial class MainWindow : Window
         // All lists videos; music has its own category, and an album opened from search stays browsable.
         if (libraryCategory is 0 or 5 && browseSeries is null) source.RemoveAll(x => x.IsMusic);
         var missingOnly = libraryCategory == 5 && browseSeries is null;
+        // Unmatched titles leave Shows, Anime and Movies for their own category, and All still lists everything.
+        if (libraryCategory == LibraryCatalog.Unmatched && browseSeries is null) source.RemoveAll(x => !unmatchedTitles.Contains(LibraryIdentity.ShowKey(x)));
+        else if (libraryCategory is 1 or 2 or 3 && browseSeries is null) source.RemoveAll(x => unmatchedTitles.Contains(LibraryIdentity.ShowKey(x)));
         var series = browseSeries; var kind = browseKind; var season = browseSeason;
         var showTitle = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind))?.Series ?? browseSeries;
         var album = browseKind == MusicFiles.Kind;
         SearchHint.Text = browseSeries is null ? libraryCategory == LibraryCatalog.Music ? "Search your music" : "Search your library" : album ? "Search tracks" : browseSeason is null ? "Search seasons" : "Search episodes";
         SearchBox.ToolTip = browseSeries is null ? "Search your library (Ctrl+F)" : "Search within " + showTitle + (browseSeason is null ? "" : $" · Season {browseSeason}");
         System.Windows.Automation.AutomationProperties.SetName(SearchBox, SearchHint.Text);
-        var filter = libraryCategory is 4 or 5 ? 0 : libraryCategory;
+        var filter = libraryCategory is 4 or 5 or LibraryCatalog.Unmatched ? 0 : libraryCategory;
         var query = SearchBox.Text.Trim();
         if (!backgroundUpdate)
         {

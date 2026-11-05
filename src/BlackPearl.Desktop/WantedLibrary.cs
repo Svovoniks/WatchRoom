@@ -11,15 +11,17 @@ public partial class MainWindow
 {
     private Dictionary<string, WantedTitle> wanted = [];
     private int missingTitleCount;
+    private HashSet<string> unmatchedTitles = [];
     private void ReloadWanted() => wanted = library.Wanted().ToDictionary(x => x.Id);
     private WantedTitle? WantedFor(MediaItem? item) => item is null ? null : wanted.GetValueOrDefault(LibraryIdentity.ShowKey(item));
-    // Shows and films whose cards carry a Missing or Upcoming badge, for the sidebar's Missing category.
+    // Shows and films whose cards carry a Missing or Upcoming badge, and those nothing identified, for the sidebar's categories.
     private void CountMissingTitles()
     {
         var playable = items.Where(x => x.Available && x.Series is not null).Select(LibraryIdentity.ShowKey).ToHashSet();
         var keys = items.Where(x => x.IsVirtual).Select(LibraryIdentity.ShowKey).Where(key => playable.Contains(key) || wanted.ContainsKey(key)).ToHashSet();
         missingTitleCount = keys.Count == 0 ? 0 : items.Where(x => !x.IsExtra && (x.Available || x.IsVirtual) && keys.Contains(LibraryIdentity.ShowKey(x)))
             .GroupBy(LibraryIdentity.ShowKey).Count(g => LibraryCatalog.TitleStatus(g.ToArray()) is not null);
+        unmatchedTitles = LibraryCatalog.UnmatchedTitles(items);
     }
     private void LibraryToolbarSizeChanged(object sender, SizeChangedEventArgs e)
     {

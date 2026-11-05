@@ -86,6 +86,8 @@ public static class SeriesMetadata
             foreach (var provider in options.ProviderOrder.Where(p => p is "tmdb" or "tvmaze"))
             {
                 if (provider == "tmdb" && tmdb is null || provider == "tvmaze" && item.NumberingOrder == "dvd") continue;
+                // A show identified through TMDB waits for TMDB; another provider's numbering would replace its seasons and episodes.
+                if (provider != "tmdb" && tmdb is null && item.MetadataProvider == "tmdb") continue;
                 try
                 {
                     int? id = int.TryParse(LibraryIdentity.ProviderId(item, provider), out var stored) && stored > 0 ? stored : null;

@@ -37,7 +37,7 @@ static class AdaptationFixture
         var bridged = await tmdb.MatchAsync(new("owl","owl.mkv","Сова","Show",2016,Series:"Сова",MetadataType:"tv",ProviderIds:new() { ["tvmaze"]="999" }));
         check(bridged is { Id:333, Overview:"Описание" }, "external show ID resolves duplicate names and missing translation falls back to native synopsis");
         check(handler.SafeBridge, "TVmaze identity bridge receives no TMDB credential");
-        var mergeStore = new LibraryStore(Path.Combine(directory,"merge-db")); new MetadataOptions(GroupShowsByProvider:true).Save(mergeStore);
+        var mergeStore = new LibraryStore(Path.Combine(directory,"merge-db")); new MetadataOptions(CombineShowFolders:true).Save(mergeStore);
         mergeStore.Save(anime with {Kind="Anime",MetadataKind="Anime",ProviderIds=new() { ["tmdb"]="999" }});
         mergeStore.Save(anime with {Id="live",Path="live.mkv",Kind="Show",MetadataKind="Show",ShowId="live-show",ProviderIds=new() { ["tmdb"]="999" }});
         mergeStore.GroupShowsByProvider();

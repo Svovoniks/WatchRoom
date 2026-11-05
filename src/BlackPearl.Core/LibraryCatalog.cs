@@ -8,8 +8,16 @@ public record LibraryCard(string DisplayTitle, string Caption, string? Poster, M
 
 public static class LibraryCatalog
 {
-    // The Music library category; 4 and 5 are the Unavailable and Missing views.
-    public const int Music = 6;
+    // The Music library category; 4, 5 and 7 are the Unavailable, Missing and Unmatched views.
+    public const int Music = 6, Unmatched = 7;
+    // Shows and films with no match yet. Every title starts here and lists under Unmatched rather than Shows, Anime or Movies
+    // until something identifies one of its files. Bonus clips are never looked up on their own, so they don't count, and a
+    // title someone locked by hand is settled.
+    public static HashSet<string> UnmatchedTitles(IEnumerable<MediaItem> items) => items
+        .Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && !x.IsMusic)
+        .GroupBy(LibraryIdentity.ShowKey)
+        .Where(title => title.All(x => !x.Matched && !x.MetadataLocked && x.MetadataId is null && (x.ProviderIds?.Count ?? 0) == 0))
+        .Select(title => title.Key).ToHashSet();
     public static Task<List<LibraryCard>> SearchAsync(IEnumerable<MediaItem> source, string query, int filter = 0,
         string? series = null, string? kind = null, int? season = null, CancellationToken cancellation = default, bool displaySpecials = false, string? preferVersion = null) => Task.Run(() =>
     {

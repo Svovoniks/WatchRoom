@@ -50,6 +50,11 @@ static class MetadataFixesFixture
         }
         check(MetadataTitles.RussianSearchAlias("Brilliantovaya Ruka") == "бриллиантовая рука" && MetadataTitles.RussianSearchAlias("Dzhentlmeny Udachi") == "джентлмены удачи" &&
             MetadataTitles.RussianSearchAlias("Operatsiya Y I Drugie Priklyucheniya Shurika") == "операция ы и другие приключения шурика", "Russian digraphs and word-final y preserve search spelling");
+        check(MetadataTitles.RussianSearchAlias("Policejskij s rublevki") == "полицейский с рублевки" && MetadataTitles.RussianSearchAlias("Policejskij s Rublyovki") == "полицейский с рублёвки" &&
+            MetadataTitles.RussianSearchAlias("Novaja Zemlja") == "новая земля" && MetadataTitles.RussianSearchAlias("Mayor Gromov") == "майор громов", "Other romanizations of Russian reach the same Cyrillic title");
+        static int? FolderYear(string folder, int season) => MetadataTitles.FolderYear(new("year", Path.Combine("library", folder, "episode.mkv"), "Show", "Show", Series: "Show", Season: season, Episode: 1));
+        check(FolderYear("Show.Name.03.2018.HDTV", 3) is null && FolderYear("Show.Name.S02.2017.HDTV", 2) is null && FolderYear("Show Name Season 4 (2019)", 4) is null, "a year after a later season's number doesn't date the show");
+        check(FolderYear("Battlestar.Galactica.2003.S02", 2) == 2003 && FolderYear("Show.Name.2016.HDTV", 1) == 2016 && FolderYear("Show.Name.S01.2016", 1) == 2016 && FolderYear("Show.1995.2018.HDTV", 3) == 1995, "a year ahead of the season number, or on a first season, dates the show");
         check(new[] { "John Wick Chapter 3 Parabellum", "Sherlock Holmes A Game Of Shadows", "The Hitchhikers Guide to the Galaxy" }.All(q => MetadataTitles.RussianSearchAlias(q) is null),
             "English ch and sh do not generate garbage Cyrillic aliases");
         check(MetadataTitles.Queries(new("clean", "film.mkv", "Example Movie HDDVDRip 1080p", "Movie")).First() == "Example Movie", "release noise is removed before the first provider query");

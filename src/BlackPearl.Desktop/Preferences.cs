@@ -113,7 +113,7 @@ public partial class MainWindow
             MetadataRefreshDays.Text = Math.Max(1, options.RefreshDays).ToString(CultureInfo.InvariantCulture);
             ImportMissing.IsChecked = options.ImportMissing; ImportUpcoming.IsChecked = options.ImportUpcoming;
             SaveNfo.IsChecked = options.SaveNfo; DisplaySpecials.IsChecked = options.DisplaySpecialsWithinSeasons;
-            GroupShows.IsChecked = options.GroupShowsByProvider;
+            GroupShows.IsChecked = options.CombineShowFolders;
             MetadataRefreshDays.IsEnabled = RefreshLess.IsEnabled = RefreshMore.IsEnabled = NeverRefresh.IsChecked != true;
             preferencesBaseline = PreferenceSnapshot();
             preferencesAutoSave.Stop();

@@ -29,7 +29,7 @@ static class CardSelectionChecks
         var search = (TextBox)window.FindName("SearchBox");
 
         var file = Path.Combine(directory, "selection-check.mkv"); File.WriteAllText(file, "selection");
-        var first = new MediaItem("selection-first", file, "Selection check alpha", "Movie", Year: 2001);
+        var first = new MediaItem("selection-first", file, "Selection check alpha", "Movie", Year: 2001, ProviderIds: new() { ["imdb"] = "tt-selection" });
         var second = first with { Id = "selection-second", Path = file + ".second", Title = "Selection check beta", Year = 2002 };
         var gone = first with { Id = "selection-gone", Path = file + ".gone", Title = "Selection check gone", Year = 2003, Available = false };
         foreach (var item in new[] { first, second, gone }) store.Save(item);
