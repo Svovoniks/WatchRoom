@@ -153,7 +153,6 @@ public partial class MainWindow
         // A failed lookup only means the video plays on its own; the library load reports its own failures.
         try { known = await candidates; }
         catch (Exception ex) { PlaybackDiagnostics.Record("open-file-lookup-failed", new { error = ex.GetType().Name }); known = []; }
-        // Only a few records remain, so matching them is quick enough for this thread.
         var opened = await Task.Run(() => OpenedFiles.Resolve(known, path));
         if (closing || playingItem is not null) return;
         PlaybackDiagnostics.Record("open-file", new { match = opened.Match, known = opened.Library?.Id, startup = true });
