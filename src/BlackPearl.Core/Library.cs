@@ -986,7 +986,7 @@ public static partial class FileNames
         catch (UnauthorizedAccessException) { return (false, null, null); }
     }
     // The folder facts a name is read against: whether the path is a TV or anime location, and any season folder holding the file.
-    internal static (bool Series, Match SeasonFolder, int? FolderSeason) NameContext(string path, string kind)
+    internal static (bool Series, Match SeasonFolder, int? FolderSeason) NameContext(string path, string kind, string? libraryRoot = null)
     {
         var dir = System.IO.Path.GetDirectoryName(path) ?? "";
         var series = kind is "Show" or "Anime" || kind == "Mixed" && path.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar)
@@ -994,14 +994,22 @@ public static partial class FileNames
         var season = Regex.Match(Regex.Replace(System.IO.Path.GetFileName(dir), @"[._]+", " "), SeasonFolder);
         int? number = season.Success ? season.Groups[1].Success ? int.Parse(season.Groups[1].Value) : season.Groups[2].Success ? int.Parse(season.Groups[2].Value) : season.Groups[3].Success ? int.Parse(season.Groups[3].Value) : 0 : null;
         // A bare "2" is only a season under a folder that names something, and for a file with a number of its own: a film in a
-        // folder called "1" or "Vol 2" is still a film.
-        if (season.Success && season.Groups[3].Success && (dir.Length == 0 || System.IO.Path.GetDirectoryName(dir) is not { } above || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(above)) || !FilenameEpisodes.HasOwnNumber(path))) return (series, Match.Empty, null);
+        // folder called "1" or "Vol 2" is still a film. "24 - 12" in a folder called 24 is the show's name, and so is that folder
+        // directly in a library, which names no show above it.
+        if (season.Success && season.Groups[3].Success && (dir.Length == 0 || System.IO.Path.GetDirectoryName(dir) is not { } above || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(above)) || IsLibraryRoot(above, libraryRoot) ||
+            !FilenameEpisodes.HasOwnNumber(path) || NamesShowInFolder(path, dir))) return (series, Match.Empty, null);
         return (series, season, number);
     }
+    private static bool IsLibraryRoot(string dir, string? libraryRoot) =>
+        libraryRoot is not null && string.Equals(System.IO.Path.GetFullPath(libraryRoot).TrimEnd(System.IO.Path.DirectorySeparatorChar), dir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    // A file that names its show the same as the number its folder is called: "24 - 12" or "[Group] 86 - 05".
+    private static bool NamesShowInFolder(string path, string dir)
+    {
+        var folder = System.IO.Path.GetFileName(dir);
+        return Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path), $@"^(?:\[[^\]]*\]\s*)?{Regex.Escape(folder)}[\s._-]+.*\d");
+    }
     // A library root, or a folder whose name only says what kind of files sit in it.
-    private static bool IsLooseFolder(string dir, string? libraryRoot) =>
-        libraryRoot is not null && string.Equals(System.IO.Path.GetFullPath(libraryRoot).TrimEnd(System.IO.Path.DirectorySeparatorChar), dir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
-        FilenameFolders.IsGeneric(System.IO.Path.GetFileName(dir));
+    private static bool IsLooseFolder(string dir, string? libraryRoot) => IsLibraryRoot(dir, libraryRoot) || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(dir));
     // The closest folder above a file whose name says something about it, for files named with only a number.
     private static string? NearestTitledFolder(string dir, string? libraryRoot)
     {
@@ -1042,7 +1050,7 @@ public static partial class FileNames
         var sourceKind = kind;
         var id = Identity(path);
         var dir = System.IO.Path.GetDirectoryName(path)!;
-        var (seriesContext, seasonFolder, folderSeason) = NameContext(path, kind);
+        var (seriesContext, seasonFolder, folderSeason) = NameContext(path, kind, libraryRoot);
         var (showExtras, filmExtra, extrasOwner) = ExtrasHome(path, seriesContext, libraryRoot);
         var seasonFolderName = System.IO.Path.GetFileName(dir);
         var reading = FilenameEpisodes.Analyze(path, seriesContext || seasonFolder.Success, folderSeason, sourceKind != "Movie", libraryRoot, sourceKind == "Movie");
@@ -1074,10 +1082,11 @@ public static partial class FileNames
                 series = FilenameEpisodes.AnalyzeFolder(seasonFolderName).Title is { Length: > 0 } own ? own : FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(dir)!)).Title;
         }
         // A file named only by its number with no folder to name it has only its own remaining words.
+        if (numbering is not null && string.IsNullOrWhiteSpace(series) && NamesShowInFolder(path, dir)) series = System.IO.Path.GetFileName(dir);
         if (numbering is not null && string.IsNullOrWhiteSpace(series)) series = NearestTitledFolder(dir, libraryRoot) ?? (IsLooseFolder(dir, libraryRoot) && numbering.Subtitle is { Length: > 0 } words ? words : System.IO.Path.GetFileName(dir));
         var seriesDir = showExtras && extrasOwner is not null ? extrasOwner : dir;
         int? sourcePart = null;
-        while ((IsReleaseDirectory(seriesDir) || FilenameFolders.IsContainer(System.IO.Path.GetFileName(seriesDir))) && System.IO.Path.GetDirectoryName(seriesDir) is { } parent &&
+        while (!NamesShowInFolder(path, seriesDir) && (IsReleaseDirectory(seriesDir) || FilenameFolders.IsContainer(System.IO.Path.GetFileName(seriesDir))) && System.IO.Path.GetDirectoryName(seriesDir) is { } parent &&
             (libraryRoot is null || !string.Equals(System.IO.Path.GetFullPath(libraryRoot), seriesDir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
         {
             var part = Regex.Match(System.IO.Path.GetFileName(seriesDir), @"(?i)^Part\s*(\d+)\s*$");

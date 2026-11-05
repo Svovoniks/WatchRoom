@@ -194,6 +194,8 @@ internal static class FilenameEpisodes
             foreach (Match match in Special.Matches(text))
             {
                 if (!Clear(match.Index) || !Free(match.Index, match.Index + match.Length) || match.Index < scan.CoreStart || match.Index >= scan.CoreEnd) continue;
+                // "Special 26 (2013)": a dated name opening with the word is a film.
+                if (!evidence.Series && match.Index == scan.CoreStart && match.Value.StartsWith("special", StringComparison.OrdinalIgnoreCase) && EndsWithYear.IsMatch(scan.Slice(match.Index + match.Length, scan.CoreEnd))) continue;
                 var first = int.Parse(match.Groups["n"].Value);
                 var last = match.Groups["e"].Success ? int.Parse(match.Groups["e"].Value) : (int?)null;
                 results.Add(new() { Form = Form.Special, Start = match.Index, End = match.Index + match.Length, Season = 0, Episode = first, EpisodeEnd = last > first ? last : null, Explicit = true, Digits = match.Groups["n"].Value });
@@ -216,7 +218,9 @@ internal static class FilenameEpisodes
                 var before = scan.Slice(scan.CoreStart, match.Index); var rest = scan.Slice(match.Index + match.Length, scan.CoreEnd);
                 var article = Regex.IsMatch(before, @"(?i)^(?:the|a|an)$", RegexOptions.None, Limit);
                 var joined = match.Index + match.Length < text.Length && text[match.Index + match.Length] == '-';
-                if (!joined && (article || before.Length == 0 && (EndsWithYear.IsMatch(rest) || rest.Any(char.IsLetter)))) return;
+                // "Opening 01 - Song" numbers a clip.
+                var numbered = match.Value.Any(char.IsDigit) || rest.Length > 0 && char.IsDigit(rest[0]) && !EndsWithYear.IsMatch(rest);
+                if (!joined && !numbered && (article || before.Length == 0 && (EndsWithYear.IsMatch(rest) || rest.Any(char.IsLetter)))) return;
             }
             results.Add(new() { Form = Form.Clip, Start = match.Index, End = match.Index + match.Length, Clip = Trim(match.Value), ShortClip = isShort, LeadingTag = leadingTag });
             Take(match.Index, match.Index + match.Length);
@@ -235,8 +239,11 @@ internal static class FilenameEpisodes
         {
             if (!Clear(match.Index) || !Free(match.Index, match.Index + match.Length) || match.Index < scan.CoreStart) continue;
             if (scan.BracketAt(match.Index) is { } holder && text[(holder.Start + 1)..(holder.End - 1)].Trim().Length > match.Length) continue;
-            // "Film Socialisme": a word that opens the name, with more words after it, is part of the title.
-            if (match.Index == scan.CoreStart && scan.BracketAt(match.Index) is null && !match.Value.StartsWith("geki", StringComparison.OrdinalIgnoreCase) && !match.Value.StartsWith('劇') && scan.Slice(match.Index + match.Length, scan.CoreEnd).Any(char.IsLetter) && !text[(match.Index + match.Length)..].TrimStart().StartsWith('-')) continue;
+            // "Film Socialisme", "The Last Movie Star": the plain word with more words straight after it is part of the title.
+            // "Show the Movie Subtitle" and "Show - Movie Box" name a film of the show, and "Movie 01 Two Heroes" numbers one.
+            var afterFilm = scan.Slice(match.Index + match.Length, scan.CoreEnd);
+            var plainWord = match.Index == scan.CoreStart || !match.Value.StartsWith("the", StringComparison.OrdinalIgnoreCase) && !SetApartByDash(text, match.Index);
+            if (plainWord && scan.BracketAt(match.Index) is null && !match.Value.StartsWith("geki", StringComparison.OrdinalIgnoreCase) && !match.Value.StartsWith('劇') && !match.Value.Any(char.IsDigit) && afterFilm.Length > 0 && char.IsLetter(afterFilm[0]) && !text[(match.Index + match.Length)..].TrimStart().StartsWith('-')) continue;
             results.Add(new() { Form = Form.Film, Start = match.Index, End = match.Index + match.Length });
             Take(match.Index, match.Index + match.Length);
         }
@@ -311,7 +318,8 @@ internal static class FilenameEpisodes
                 results.Add(new() { Form = Form.Bare, Start = bare.Start, End = bare.End + spaced.Length, Episode = value, EpisodeEnd = batchEnd, Digits = digits, Ranged = true, Season = bare.Season, SeasonStart = bare.SeasonStart, Explicit = bare.Explicit });
             results.Add(bare);
             // 0104 and 203 can also be season and episode.
-            if (digits.Length is 3 or 4 && !IsYear(value) && last is null && int.Parse(digits[^2..]) > 0 && int.Parse(digits[..^2]) is >= 0 and <= 40)
+            if (digits.Length is 3 or 4 && !IsYear(value) && last is null && int.Parse(digits[^2..]) > 0 && int.Parse(digits[..^2]) is >= 0 and <= 40
+                && !evidence.PlainRun(match.Index) && !evidence.TitleHas(digits) && (evidence.FolderSeason is not { } holder || holder == int.Parse(digits[..^2])))
                 results.Add(new() { Form = Form.Compact, Start = match.Index, End = bare.End, Season = int.Parse(digits[..^2]), Episode = int.Parse(digits[^2..]), Explicit = true, Digits = digits });
         }
         // "4-13 Title", "Show 03-20": a span too long for one file reads as season and episode.
@@ -327,6 +335,8 @@ internal static class FilenameEpisodes
         for (var i = 0; i + 1 < numbers.Length; i++)
         {
             var first = numbers[i]; var second = numbers[i + 1];
+            // "Kaiju No. 8 05" in a folder called Kaiju No. 8: the show's own number isn't its season.
+            if (first.Digits is { } own && first.Episode != evidence.FolderSeason && evidence.TitleHas(own)) continue;
             if (second.Start - first.End > 3 || first.Episode is null or > 40 || first.Episode == 0 && (first.Digits?.Length ?? 0) > 2 || second.Digits?.Length is not (2 or 3) || !Regex.IsMatch(text[first.End..second.Start], @"^[\])\s.\[(-]+$", RegexOptions.None, Limit) || Regex.IsMatch(text[first.End..second.Start], @"\s-\s", RegexOptions.None, Limit)) continue;
             results.Add(new() { Form = Form.Pair, Start = first.Start, End = second.End, Season = first.Episode, Episode = second.Episode, Explicit = true, Digits = second.Digits, DottedPair = scan.Spaced && second.Start - first.End == 1 && scan.Original[first.End] == '.' });
         }

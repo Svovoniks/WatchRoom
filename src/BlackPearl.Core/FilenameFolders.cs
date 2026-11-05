@@ -15,8 +15,10 @@ internal static class FilenameFolders
     private static readonly Regex Range = new(@"(?<![\p{L}\p{N}.])(?:EP?|Ep\.?|E)?\s?(?<a>\d{1,4})\s?[-~–—]\s?(?:EP?\s?)?(?<b>\d{1,4})(?![\p{L}\p{N}])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
 
     internal sealed record FolderEvidence(bool Series, bool Movies, int? FolderSeason, bool SeasonFolder, bool HasFolder, (int Low, int High)[] Ranges, string[] TitleNumbers,
-        IReadOnlyDictionary<int, bool>? Slots, int Ordered, bool OwnFolder = false, string[]? FolderTitles = null)
+        IReadOnlyDictionary<int, bool>? Slots, int Ordered, bool OwnFolder = false, string[]? FolderTitles = null, IReadOnlySet<int>? PlainRuns = null)
     {
+        // A number in a run that can't hold seasons and episodes together: 001 to 220 counts up, so 111 isn't season 1, episode 11.
+        internal bool PlainRun(int offset) => PlainRuns?.Contains(offset) == true;
         internal bool NamesFolder(string title) => FolderTitles is not null && FolderTitles.Contains(MetadataTitles.Normalize(title));
         internal static readonly FolderEvidence None = new(false, false, null, false, false, [], [], null, 0);
         internal bool Varies(int offset) => Slots is not null && Slots.TryGetValue(offset, out var state) && state;
@@ -25,7 +27,7 @@ internal static class FilenameFolders
         internal bool TitleHas(string digits) => TitleNumbers.Contains(digits.TrimStart('0'));
     }
 
-    private sealed record FolderSlots(DateTime Written, Dictionary<string, Dictionary<int, bool>> Names, int Ordered);
+    private sealed record FolderSlots(DateTime Written, Dictionary<string, Dictionary<int, bool>> Names, int Ordered, Dictionary<string, HashSet<int>>? PlainRuns = null);
     private static readonly ConcurrentDictionary<string, FolderSlots> Cache = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     // What a folder's own name says never changes, so each directory path is read once.
     private sealed record FolderNames((int Low, int High)[] Ranges, string[] Numbers, string[] Titles, bool Movies, bool HasFolder, string Last);
@@ -44,9 +46,11 @@ internal static class FilenameFolders
         var isRoot = libraryRoot is not null && string.Equals(Path.GetFullPath(libraryRoot).TrimEnd(Path.DirectorySeparatorChar), directory, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
         var slots = Siblings(directory);
         slots.Names.TryGetValue(Path.GetFileName(path), out var own);
+        HashSet<int>? plain = null;
+        slots.PlainRuns?.TryGetValue(Path.GetFileName(path), out plain);
         // A file inside a folder of its own name: one release, not a run of episodes.
         var ownFolder = string.Equals(names.Last, Path.GetFileNameWithoutExtension(path), StringComparison.OrdinalIgnoreCase);
-        return new(seriesContext, (movieLibrary || names.Movies) && !seriesContext, folderSeason, folderSeason is not null, !isRoot && names.HasFolder, names.Ranges, names.Numbers, own, slots.Ordered, ownFolder, names.Titles);
+        return new(seriesContext, (movieLibrary || names.Movies) && !seriesContext, folderSeason, folderSeason is not null, !isRoot && names.HasFolder, names.Ranges, names.Numbers, own, slots.Ordered, ownFolder, names.Titles, plain);
     }
 
     private static FolderNames ReadNames(string directory)
@@ -79,18 +83,19 @@ internal static class FilenameFolders
         catch (UnauthorizedAccessException) { return new(default, [], 0); }
         if (Cache.TryGetValue(directory, out var cached) && cached.Written == written) return cached;
         Dictionary<string, Dictionary<int, bool>> names = [];
+        Dictionary<string, HashSet<int>> plainRuns = [];
         var ordered = 0;
         try
         {
             if (Directory.Exists(directory))
             {
                 var files = Directory.EnumerateFiles(directory).Select(file => Path.GetFileName(file)!).Where(file => FileNames.Extensions.Contains(Path.GetExtension(file))).ToArray();
-                (names, ordered) = Align(files);
+                (names, ordered, plainRuns) = Align(files);
             }
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
-        var result = new FolderSlots(written, names, ordered);
+        var result = new FolderSlots(written, names, ordered, plainRuns);
         if (Cache.Count > 4096) Cache.Clear();
         Cache[directory] = result;
         return result;
@@ -101,10 +106,11 @@ internal static class FilenameFolders
 
     // Walk the names left to right. Names that read the same up to a number form a group; if the number differs across the
     // group it's the running number. If it's the same, it's part of the title or the release, and the walk continues.
-    internal static (Dictionary<string, Dictionary<int, bool>> Names, int Ordered) Align(IReadOnlyCollection<string> files)
+    internal static (Dictionary<string, Dictionary<int, bool>> Names, int Ordered, Dictionary<string, HashSet<int>> PlainRuns) Align(IReadOnlyCollection<string> files)
     {
         var names = new Dictionary<string, Dictionary<int, bool>>(StringComparer.Ordinal);
-        if (files.Count < 2) return (names, 0);
+        var plainRuns = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
+        if (files.Count < 2) return (names, 0, plainRuns);
         var rows = files.Select(file =>
         {
             var stem = Path.GetFileNameWithoutExtension(file);
@@ -137,8 +143,14 @@ internal static class FilenameFolders
                         slots[row.Runs[run].Start] = false;
                     }
                 }
-                else if (distinct >= 2 && distinct * 2 >= members.Length && IsRun(values, distinct))
+                else if (distinct >= 2 && distinct * 2 >= members.Length && IsRun(values, distinct) && !(gap.Key.Trim(' ', '.', '_').Length == 0 && TitledFilms(members, run, values, distinct)))
                 {
+                    if (distinct >= 100 || members.Any(row => row.Runs[run].Value[0] == '0'))
+                        foreach (var row in members)
+                        {
+                            if (!plainRuns.TryGetValue(row.File, out var plain)) plainRuns[row.File] = plain = [];
+                            plain.Add(row.Runs[run].Start);
+                        }
                     foreach (var row in members)
                     {
                         if (!names.TryGetValue(row.File, out var slots)) names[row.File] = slots = [];
@@ -159,10 +171,19 @@ internal static class FilenameFolders
             }
         }
         Walk(rows, 0);
-        return (names, maxRun);
+        return (names, maxRun, plainRuns);
+    }
+    // "12 Monkeys", "13 Hours", "21 Grams": unpadded numbers opening names with words after them are titles, unless they count up almost without a gap.
+    private static bool TitledFilms(IReadOnlyList<(string File, (int Start, string Value)[] Runs, string Text)> members, int run, int[] values, int distinct)
+    {
+        if (members.Any(row => row.Runs[run].Value[0] == '0')) return false;
+        if (!members.All(row => row.Text[(row.Runs[run].Start + row.Runs[run].Value.Length)..].Any(char.IsLetter))) return false;
+        return distinct < 3 || (values.Max() - values.Min() + 1) * 2 > distinct * 3;
     }
     // A running number has few gaps for how many values it takes: 1 and 12 can be the episodes someone kept, 12 and 300 aren't.
-    private static bool IsRun(int[] values, int distinct) => values.Max() - values.Min() < 3 * distinct + 20;
+    // Seasons written into the number jump by hundreds: 101, 102, 201.
+    private static bool IsRun(int[] values, int distinct) => values.Max() - values.Min() < 3 * distinct + 20 ||
+        distinct >= 3 && values.All(value => value is > 100 and < 4100 && value % 100 is > 0 and <= 60);
     private static bool OwnYears(IReadOnlyList<(string File, (int Start, string Value)[] Runs, string Text)> members, int run)
     {
         var years = new HashSet<string>();

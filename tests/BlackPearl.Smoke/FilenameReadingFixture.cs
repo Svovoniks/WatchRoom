@@ -85,6 +85,28 @@ static class FilenameReadingFixture
         foreach (var (file, title) in new[] { ("12 Harbors.mkv", "12 Harbors"), ("127 Tides.mkv", "127 Tides"), ("Heat.mkv", "Heat"), ("Calm.mkv", "Calm") }) Film(["HD Films", file], title, null);
         Folder("Sequels", "Calm's 11 (2001).mkv", "Calm's 12 (2004).mkv", "Calm's 13 (2007).mkv");
         Film(["Sequels", "Calm's 12 (2004).mkv"], "Calm's 12", 2004);
+        Folder("My Collection", "12 Harbors.mkv", "13 Tides.mkv", "21 Grams.mkv", "Heat.mkv", "Calm.mkv");
+        foreach (var (file, title) in new[] { ("12 Harbors.mkv", "12 Harbors"), ("21 Grams.mkv", "21 Grams"), ("Heat.mkv", "Heat") }) Film(["My Collection", file], title, null);
+        // A long show counts up: 111 isn't season 1, episode 11.
+        var longShow = Path.Combine("Harbor Long", "Season 1"); Folder(longShow, Enumerable.Range(1, 220).Select(n => $"Harbor Long - {n:000}.mkv").ToArray());
+        var longEpisodes = Enumerable.Range(1, 220).Select(n => Read("Harbor Long", "Season 1", $"Harbor Long - {n:000}.mkv")).ToArray();
+        check(longEpisodes.Select(x => x.Episode).Distinct().Count() == 220 && longEpisodes[110].Episode == 111 && longEpisodes.All(x => x.Season == 1), $"a long show's episodes stay distinct (got {longEpisodes.Select(x => x.Episode).Distinct().Count()})");
+        Folder("Harbor Flat", Enumerable.Range(1, 150).Select(n => $"Harbor Flat - {n:000}.mkv").ToArray());
+        check(Read("Harbor Flat", "Harbor Flat - 111.mkv").Episode == 111, "so does one in a flat folder");
+        // Seasons written into the number still count as a run of the same show.
+        Folder("Harbor Packed", "Harbor Packed 101.mkv", "Harbor Packed 102.mkv", "Harbor Packed 201.mkv", "Harbor Packed 202.mkv");
+        check(new[] { "101", "102", "201", "202" }.Select(n => Read("Harbor Packed", $"Harbor Packed {n}.mkv")).All(x => x.Series == "Harbor Packed" && x.Episode is not null), "numbers jumping by hundreds are still a show's files");
+        // A number in the show's own name is neither its season nor its episode.
+        Numbered(["Calm No. 8", "Season 1", "Calm No. 8 05 [1080p].mkv"], "Calm No. 8", 1, 5);
+        Numbered(["Room.104.S01.1080p", "Room.104.12.mkv"], "Room 104", 1, 12);
+        // A folder called only a number can be the show.
+        check(Read("24", "24 - 12.mkv") is { Series: "24", Season: 1, Episode: 12 }, $"a show called 24 isn't season 24 (got {Read("24", "24 - 12.mkv").Series} {Read("24", "24 - 12.mkv").Season}x{Read("24", "24 - 12.mkv").Episode})");
+        check(Read("My Shows", "24", "24 - 12.mkv") is { Series: "24", Season: 1, Episode: 12 }, $"nor is it under a named folder (got {Read("My Shows", "24", "24 - 12.mkv").Series} {Read("My Shows", "24", "24 - 12.mkv").Season}x{Read("My Shows", "24", "24 - 12.mkv").Episode})");
+        // Words with a number after them are numbered clips and films, not new shows.
+        Folder("Harbor Clips", "Harbor Clips - 01.mkv", "Harbor Clips - 02.mkv", "Harbor Clips - 03.mkv", "Opening 01 - Song Name.mkv", "Extra 01 - Deleted Scenes.mkv", "Movie 01 Two Heroes.mkv");
+        foreach (var file in new[] { "Opening 01 - Song Name.mkv", "Extra 01 - Deleted Scenes.mkv", "Movie 01 Two Heroes.mkv" }) check(Read("Harbor Clips", file) is { Series: "Harbor Clips", Episode: null }, $"{file} stays with its show (got {Read("Harbor Clips", file).Series} {Read("Harbor Clips", file).Episode})");
+        Film(["Special 26 (2013).mkv"], "Special 26", 2013);
+        Film(["The Last Movie Star (2017).mkv"], "The Last Movie Star", 2017);
         // A real run still counts, with gaps and with names beside the numbers.
         Folder("Harbor Kept", "Harbor Kept - 01.mkv", "Harbor Kept - 12.mkv");
         Numbered(["Harbor Kept", "Harbor Kept - 12.mkv"], "Harbor Kept", null, 12);
