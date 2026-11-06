@@ -214,6 +214,19 @@ static class MetadataPipelineFixture
             await SeriesMetadata.FetchAsync(numberedStore,directory,"fixture",null,default,http,metadata:tmdb);
         check(numberedStore.All().Count(x => x.IsVirtual) == 3, "enabling placeholder imports adds them even when metadata is fresh");
 
+        // A lookup maps a show's absolute numbers, but not its OVA folder's, so the two can't land on one episode.
+        var ovaShow = Path.Combine(directory,"Harbor Tide"); var ovaEpisode = Path.Combine(ovaShow,"TV","[Grp] Harbor Tide - 03.mkv"); var ovaFile = Path.Combine(ovaShow,"OVA","[Grp] Harbor Tide Ultimate - 03.mkv");
+        Directory.CreateDirectory(Path.GetDirectoryName(ovaEpisode)!); Directory.CreateDirectory(Path.GetDirectoryName(ovaFile)!);
+        File.WriteAllBytes(ovaEpisode,[0]); File.WriteAllBytes(ovaFile,[0]);
+        var ovaStore = new LibraryStore(Path.Combine(directory,"ova-db"));
+        foreach (var file in new[] { ovaEpisode, ovaFile }) ovaStore.Save(FileNames.Parse(file,"Anime",directory) with { MetadataProvider = "tmdb", MetadataId = 1, MetadataType = "tv" });
+        using (var handler = new PipelineHandler())
+        using (var tmdb = new MetadataClient("fixture",handler))
+        using (var http = new HttpClient(new ArtworkFixture()))
+            await SeriesMetadata.FetchAsync(ovaStore,directory,"fixture",null,default,http,true,tmdb);
+        var ovaRead = ovaStore.All().Where(x => !x.IsVirtual).ToDictionary(x => x.Path);
+        check(ovaRead[ovaEpisode] is { Season: 2, Episode: 1, AbsoluteEpisode: 3 } && ovaRead[ovaFile] is { Season: 0, Episode: 3 },$"a lookup maps a show's episodes and leaves its OVAs apart (got {ovaRead[ovaEpisode].Season}x{ovaRead[ovaEpisode].Episode} and {ovaRead[ovaFile].Season}x{ovaRead[ovaFile].Episode})");
+
         var refreshStore = new LibraryStore(Path.Combine(directory,"refresh-db"));
         var poster = Path.Combine(directory,"old.png"); await File.WriteAllBytesAsync(poster,ArtworkFixture.Png);
         refreshStore.Save(new("refresh",Path.Combine(directory,"refresh.mkv"),"Example Show","Show",2020,"Example Show",1,1,Poster:poster,Overview:"Old plot",SeriesPoster:poster,MetadataProvider:"tmdb",MetadataId:1,MetadataType:"tv",MetadataKind:"Show",ArtworkFetchedAt:Wire.Now));

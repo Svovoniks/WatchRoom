@@ -152,11 +152,12 @@ public sealed partial class LibraryStore
         // The wrong title's plot and poster go with its identity, or a later correct match would keep them.
         var item = contradicted ? AutomaticArtwork.ResetIdentity(previous) with { MetadataKind = null, MetadataType = null, ProviderIds = null, ArtworkFetchedAt = 0 } : previous;
         var identified = item.MetadataId is not null;
-        var sameNumber = previous.AbsoluteEpisode is not null && previous.AbsoluteEpisode == (parsed.AbsoluteEpisode ?? parsed.Episode) && previous.AbsoluteEpisodeEnd == (parsed.AbsoluteEpisodeEnd ?? parsed.EpisodeEnd) ||
+        // A file now read as a special isn't the same number as the episode it was stored as, whatever the digits say.
+        var sameNumber = !(parsed.Season == 0 && previous.Season is > 0) && (previous.AbsoluteEpisode is not null && previous.AbsoluteEpisode == (parsed.AbsoluteEpisode ?? parsed.Episode) && previous.AbsoluteEpisodeEnd == (parsed.AbsoluteEpisodeEnd ?? parsed.EpisodeEnd) ||
             previous.SourcePartEpisode is not null && previous.SourcePartEpisode == parsed.SourcePartEpisode && previous.SourcePart == parsed.SourcePart ||
             previous.Season == parsed.Season && previous.Episode == parsed.Episode && previous.EpisodeEnd == parsed.EpisodeEnd ||
             // A miniseries verified from numbered film parts keeps the numbering it was verified with.
-            identified && item.MetadataType == "tv" && parsed.Series is null && MetadataTitles.NumberedMoviePart(parsed) is not null;
+            identified && item.MetadataType == "tv" && parsed.Series is null && MetadataTitles.NumberedMoviePart(parsed) is not null);
         item = item with
         {
             Title = identified ? item.Title : parsed.Title, Kind = identified ? item.Kind : parsed.Kind,
@@ -1073,6 +1074,17 @@ public static partial class FileNames
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
     }
+    // Whether a show's folder holds episodes of its own, beside any OVA or specials folders.
+    private static bool HoldsOwnEpisodes(string show)
+    {
+        try
+        {
+            return Directory.Exists(show) && (Directory.EnumerateFiles(show).Any(file => Extensions.Contains(System.IO.Path.GetExtension(file))) ||
+                Directory.EnumerateDirectories(show).Select(System.IO.Path.GetFileName).Any(child => child is not null && !Regex.IsMatch(child, @"(?i)^(?:ova|oad|ona|specials?)$") && (IsSeasonFolder(child) || Regex.IsMatch(child, @"(?i)^tv$"))));
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, bool), (DateTime Written, bool Several)> SeveralShows = new();
     private static bool HoldsSeveralShows(string dir, bool seriesContext)
     {
@@ -1168,8 +1180,10 @@ public static partial class FileNames
             throughOva |= Regex.IsMatch(System.IO.Path.GetFileName(seriesDir), @"(?i)^(?:ova|oad|ona)$");
             seriesDir = parent;
         }
-        // "Show\OVA\Show Ultimate - 01" isn't the show's own episode 1: like its specials, a show's OVAs number apart, unless the file gives a season.
-        if (throughOva && filenameSeason is null && number is not null) season = 0;
+        // "Show\OVA\Show Ultimate - 01" beside the show's own episodes isn't episode 1: like its specials, a show's OVAs number apart, in the
+        // show's order rather than as a run through it, unless the file or a season folder gives a season. A title with only OVAs numbers them itself.
+        var apartFromShow = throughOva && filenameSeason is null && number is not null && !seasonFolder.Success && !IsLooseFolder(seriesDir, libraryRoot) && HoldsOwnEpisodes(seriesDir);
+        if (apartFromShow) season = 0;
         // A show's extras folder joins the show as bonus clips, whatever the file names say; an explicit S00 file there is a numbered special.
         var extraClip = showExtras && seriesDir != dir && numbering is not { ExplicitSeason: true, Season: 0 };
         if (extraClip) { bonus = true; series = IsLooseFolder(seriesDir, libraryRoot) ? NearestTitledFolder(extrasOwner!, libraryRoot) ?? reading.Title : FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(seriesDir)).Title; }
@@ -1215,10 +1229,10 @@ public static partial class FileNames
         if (filenameSeason is not null and not 0 && folderSeason is not null && filenameSeason != folderSeason)
             result = result with { NumberingConflict = $"Filename season {filenameSeason} differs from folder season {folderSeason}; using filename." };
         var absoluteFolder = Regex.IsMatch(seasonFolderName, @"(?i)\bEP\s*\d{3,4}\b");
-        if (number is not null && filenameSeason is null && result.Kind == "Anime" && (!seasonFolder.Success || absoluteFolder))
+        if (number is not null && filenameSeason is null && !apartFromShow && result.Kind == "Anime" && (!seasonFolder.Success || absoluteFolder))
             result = result with { AbsoluteEpisode = number, AbsoluteEpisodeEnd = numbering?.End, NumberingOrder = "absolute" };
         // Unlabelled ranges retain absolute ordering unless a season folder confirms relative numbering.
-        if (numbering?.End is not null && filenameSeason is null && (!seasonFolder.Success || absoluteFolder))
+        if (numbering?.End is not null && filenameSeason is null && !apartFromShow && (!seasonFolder.Success || absoluteFolder))
             result = result with { AbsoluteEpisode = number, AbsoluteEpisodeEnd = numbering.End, NumberingOrder = "absolute" };
         if (sourcePart is not null && filenameSeason is null && result.Episode is not null)
             result = result with { SourcePart = sourcePart, SourcePartEpisode = result.Episode, SourcePartEpisodeEnd = result.EpisodeEnd,
@@ -1243,7 +1257,7 @@ public static partial class FileNames
         // A clip's kind follows its title: "NCOP1" is an opening, "Original Closing Sequence" an ending, "Gallery" none of these.
         if (result.IsBonus) result = result with { BonusKind = FilenameExtras.Kind(result.EpisodeTitle) };
         return LocalMetadata.Apply(LibraryIdentity.Ensure(result with { SourceLibraryKind = sourceKind, IsExtra = IsExtra(path, libraryRoot) && !showExtras && filmExtra is null,
-            NumberingSource = result.IsBonus ? null : sourcePart is not null ? "part" : numbering?.AirDate is not null ? "date" : filenameSeason is not null ? "filename" :
+            NumberingSource = result.IsBonus ? null : apartFromShow ? "season-folder" : sourcePart is not null ? "part" : numbering?.AirDate is not null ? "date" : filenameSeason is not null ? "filename" :
                 seasonFolder.Success && number is not null && !absoluteFolder ? "season-folder" : result.AbsoluteEpisode is not null ? "absolute" : null }));
     }
     // "Outlaw Star - NCOP1" is the clip "NCOP1" once the show's own name is dropped, and "Azumanga Daioh - XX - Gallery"
