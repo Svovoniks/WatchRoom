@@ -178,6 +178,15 @@ static class FilenameReadingFixture
                 var otherRead = FileNames.Parse(Path.Combine(directory, folder, "OVA", otherFile), library, directory);
                 check(otherRead is { IsBonus: false }, $"{otherFile} in a {library} library has none of this show's episodes to join (got {otherRead.Series} clip {otherRead.IsBonus})");
             }
+        // Nor are samples and trailers, which the scan never lists.
+        Folder("Calm Tau", "Calm Tau.S01E01.sample.mkv"); Folder(Path.Combine("Calm Tau", "OVA"), "Calm Tau OVA.mkv");
+        Folder("Calm Phi", "Calm Phi - 01 trailer.mkv"); Folder(Path.Combine("Calm Phi", "OVA"), "Calm Phi OVA.mkv");
+        foreach (var library in new[] { "Anime", "Show" })
+            foreach (var unlisted in new[] { "Calm Tau", "Calm Phi" })
+            {
+                var unlistedRead = FileNames.Parse(Path.Combine(directory, unlisted, "OVA", unlisted + " OVA.mkv"), library, directory);
+                check(unlistedRead is { IsBonus: false }, $"{unlisted} OVA in a {library} library has only unlisted files beside it, so a lookup can find it (got {unlistedRead.Series} clip {unlistedRead.IsBonus})");
+            }
         // Numbered files beside it in the same folder are a show to join.
         Folder(Path.Combine("Calm Omega", "OVA"), "Calm Omega - 01.mkv", "Calm Omega - 02.mkv", "Calm Omega - NCED.mkv");
         check(FileNames.Parse(Path.Combine(directory, "Calm Omega", "OVA", "Calm Omega - NCED.mkv"), "Anime", directory) is { IsBonus: true, Series: "Calm Omega" } besideOva && besideOva.ShowId == FileNames.Parse(Path.Combine(directory, "Calm Omega", "OVA", "Calm Omega - 01.mkv"), "Anime", directory).ShowId, "a clip beside numbered files in an OVA folder joins them");

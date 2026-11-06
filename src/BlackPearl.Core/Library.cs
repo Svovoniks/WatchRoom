@@ -1080,17 +1080,24 @@ public static partial class FileNames
     }
     private static bool OvaFolder(string name) => Regex.IsMatch(name, @"(?i)^(?:ova|oad|ona)$");
     private static bool HoldsEpisodeFiles(string name) => !Regex.IsMatch(name, @"(?i)^(?:ova|oad|ona|specials?|movies?|films?)$") && !Regex.IsMatch(name, ExtrasFolders);
-    // Whether the scan reads a file in a show's folder, or one level down, as a numbered episode of that show. Asking the scan itself means a folder
-    // that's a show of its own, and a name that's only a title, don't count. A numbered file has no need of this check, so this can't recurse.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, string, string?), (DateTime Written, bool Holds)> NumberedEpisodes = new();
+    // Whether the scan reads a file in a show's folder, or one level down, as a listed, numbered episode of that show. Asking the scan itself means a folder
+    // that's a show of its own, a name that's only a title, and a sample it never lists don't count. A clip further down can bring this back here for a folder
+    // nearer the root, which always ends. The answer is kept until one of those folders changes, so many clips cost one read.
     private static bool HoldsNumberedEpisodes(string show, string kind, string? libraryRoot)
     {
         try
         {
             if (!Directory.Exists(show)) return false;
-            return new[] { show }.Concat(Directory.EnumerateDirectories(show).Where(child => HoldsEpisodeFiles(System.IO.Path.GetFileName(child))))
-                .SelectMany(folder => Directory.EnumerateFiles(folder).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file))).Take(50))
-                .Any(file => Parse(file, kind, libraryRoot) is { IsBonus: false, Season: not 0, SeriesPath: { } home } found && (found.Episode is not null || found.AirDate is not null) &&
+            var folders = new[] { show }.Concat(Directory.EnumerateDirectories(show).Where(child => HoldsEpisodeFiles(System.IO.Path.GetFileName(child)))).ToArray();
+            var written = folders.Max(Directory.GetLastWriteTimeUtc);
+            if (NumberedEpisodes.TryGetValue((show, kind, libraryRoot), out var known) && known.Written == written) return known.Holds;
+            var holds = folders.SelectMany(folder => Directory.EnumerateFiles(folder).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file))).Take(50))
+                .Any(file => Parse(file, kind, libraryRoot) is { IsBonus: false, IsExtra: false, Season: not 0, SeriesPath: { } home } found && (found.Episode is not null || found.AirDate is not null) &&
                     string.Equals(home, show, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+            if (NumberedEpisodes.Count > 4096) NumberedEpisodes.Clear();
+            NumberedEpisodes[(show, kind, libraryRoot)] = (written, holds);
+            return holds;
         }
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
