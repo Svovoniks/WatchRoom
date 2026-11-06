@@ -38,6 +38,7 @@ internal static class FilenameFolders
     internal static bool IsGeneric(string folder) => GenericFolder.IsMatch(folder.Trim());
     // "DVDRip.MKV.686x480.RAW", "SourceUnknown.AVI.480x360.enDub": a folder that only describes its files.
     private static readonly Regex FormatFolder = new(@"(?i)(?:^|[. _])(?:avi|mkv|mp4|mpg|ogm|wmv)[. _](?:\d{3,4}x\d{3,4}|\d{3,4}p)(?:$|[. _])|(?:^|[. _])\d{3,4}x\d{3,4}[. _](?:dual|en|jp|raw)", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
+    internal static bool IsLocation(string folder) => ContainerFolder.IsMatch(folder.Trim());
     internal static bool IsContainer(string folder) => ContainerFolder.IsMatch(folder.Trim()) || FormatFolder.IsMatch(folder) || new FilenameScan(folder).Slice(0, folder.Length).Length == 0;
 
     internal static FolderEvidence Evidence(string path, bool seriesContext, int? folderSeason, string? libraryRoot, bool movieLibrary = false)

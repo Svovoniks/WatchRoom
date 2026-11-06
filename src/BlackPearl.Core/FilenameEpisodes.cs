@@ -71,11 +71,13 @@ internal static class FilenameEpisodes
         Rx(@"第\s*" + Number + @"\s*[話话集回巻]"),
         Rx(@"(?<![\p{L}\p{N}])" + Number + @"\s*[話话]"),
     ];
-    private static readonly Regex SeasonOnly = Rx(@"(?<![\p{L}\p{N}])(?:S(?<s>\d{1,2})(?:v\d+)?(?![\p{L}\p{N}])|(?:" + SeasonWord + @")[ .#-]*(?<s>\d{1,2})(?![\p{L}\p{N}])|(?!\d{1,2}[ .-]*(?:" + SeasonWord + @")[ .#-]*\d)(?<s>\d{1,2})" + Ordinal + @"[ .-]*(?:" + SeasonWord + @")(?![\p{L}])|TV-?(?<s>\d{1,2})(?![\p{L}\p{N}]))");
+    private static readonly Regex SeasonOnly = Rx(@"(?<![\p{L}\p{N}])(?:S(?<s>\d{1,2})(?:v\d+)?(?![\p{L}\p{N}])|(?:" + SeasonWord + @")(?!\s+-\s+\d{1,2}(?![\p{L}\p{N}])(?!\s+-\s+\d))[ .#-]*(?<s>\d{1,2})(?![\p{L}\p{N}])|(?!\d{1,2}[ .-]*(?:" + SeasonWord + @")[ .#-]*\d)(?<s>\d{1,2})" + Ordinal + @"[ .-]*(?:" + SeasonWord + @")(?![\p{L}])|TV-?(?<s>\d{1,2})(?![\p{L}\p{N}]))");
     private static readonly Regex Special = Rx(@"(?<![\p{L}\p{N}])(?:S\d{1,2})?(?:SP|OVA|OAV|OAD|ONA|Specials?)\)?[ #-]*(?:episode[ #-]*|ep[ .#-]*)?(?<n>\d{1,3})(?:v\d+)?(?:[+-](?<e>\d{1,3}))?(?![\p{L}\p{N}])");
     private static readonly Regex Film = Rx(@"(?<![\p{L}\p{N}])(?:(?:the[ -]+)?(?:movie|film)(?:[ #-]*\d{1,2})?|gekijou-?ban|劇場版)(?![\p{L}\p{N}])");
     private static readonly Regex ShortClip = new(@"(?<![\p{L}\p{N}])(?:NC[ -]?(?:OP|ED)|(?:S\d{1,2})?NC(?:OP|ED)|OP|ED|PV|CM|SPOT)[ -]?\d{0,2}(?:v\d+|[a-z])?(?![\p{L}\p{N}])", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
     private static readonly Regex WordClip = Rx(@"(?<![\p{L}\p{N}])(?:(?:creditless|clean|textless|non-?credit)[ -]*(?:op|ed|opening|ending)?[ -]*\d{0,2}|opening(?:[ -]?(?:sequence|theme))?[ -]*\d{0,2}|ending(?:[ -]?(?:sequence|theme))?[ -]*\d{0,2}|closing[ -]?sequence|ova|oav|oad|ona|sp|specials?|preview[ -]*\d{0,2}|trailers?[ -]*\d{0,2}|teasers?[ -]*\d{0,2}|promos?[ -]*\d{0,2}|(?:bd |dvd |usa bd )?menu[ -]*\d{0,2}|commercials?|interviews?|art[ -]?gallery|gallery|storyboards?|outtakes|bloopers|featurette|music[ -]video|mv|extras?[ -]*\d{0,2}|bonus|recaps?[ -]*(?:\d{1,3}(?:-\d{1,3})?)?|summary|résumé|cm[ -]collection|pilot[ -]film|ncop|nced)(?![\p{L}\p{N}])");
+    private static readonly Regex TitleEndingWord = Rx(@"^(?:ending|opening|gallery|specials?|interviews?|commercials?|summary|menu)$");
+    private static readonly Regex TitleNumberedWord = Rx(@"^(?:gallery|interviews?|commercials?|summary)$");
     private static readonly Regex CjkClip = new(@"ノンクレジット|テロップ無し|映像特典|告知|特報|番宣|予告|メニュー|アイキャッチ|キャラクター設定|オープニング|エンディング|(?<=[\p{IsHiragana}\p{IsKatakana}\p{IsCJKUnifiedIdeographs}])PV|CM集", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
     private static readonly Regex DateForward = new(@"(?<!\d)(?<y>19\d{2}|20\d{2})[ .\-](?<m>0[1-9]|1[0-2])[ .\-](?<d>0[1-9]|[12]\d|3[01])(?!\d)", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
     private static readonly Regex DateBackward = new(@"(?<!\d)(?<d>0[1-9]|[12]\d|3[01])[ .\-](?<m>0[1-9]|1[0-2])[ .\-](?<y>19\d{2}|20\d{2})(?!\d)", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
@@ -238,6 +240,8 @@ internal static class FilenameEpisodes
                 var from = match.Index + match.Length;
                 var nextNumber = Regex.Match(text[from..Math.Max(from, Math.Min(scan.CoreEnd, text.Length))], @"(?<![\p{L}\p{N}])\d{1,4}(?![\p{L}\p{N}])", RegexOptions.None, Limit);
                 var at = from + nextNumber.Index;
+                // "Night Gallery 3": a word that doesn't usually number clips, straight before a number, unless the words before it name the folder.
+                if (nextNumber.Success && match.Index > scan.CoreStart && TitleNumberedWord.IsMatch(match.Value.Trim()) && text[from..at].Trim().Length == 0 && !SetApartByDash(text, match.Index) && scan.Slice(scan.CoreStart, match.Index) is var words && !SeasonOnly.IsMatch(words) && !evidence.NamesFolder(words)) return;
                 if (nextNumber.Success && (evidence.NamesFolder(scan.Slice(scan.CoreStart, at)) || evidence.Varies(at) && !SetApartByDash(text, match.Index) && match.Index == scan.CoreStart && text[from..at].Any(char.IsLetter) ||
                     !SetApartByDash(text, match.Index) && match.Index > scan.CoreStart && text[from..at].TrimEnd().EndsWith('-'))) return;
             }
@@ -251,6 +255,9 @@ internal static class FilenameEpisodes
                 // "Opening 01 - Song" numbers a clip.
                 var numbered = match.Value.Any(char.IsDigit) || rest.Length > 0 && char.IsDigit(rest[0]) && !EndsWithYear.IsMatch(rest);
                 if (!joined && (article || !numbered && before.Length == 0 && (EndsWithYear.IsMatch(rest) || rest.Any(char.IsLetter)))) return;
+                // "Hollywood Ending (2002)", "National Gallery": one closing a plain name is part of its title, unless the words before it name the folder.
+                var plain = before.Length > 0 && !joined && !SetApartByDash(text, match.Index) && !SeasonOnly.IsMatch(before) && !evidence.NamesFolder(before);
+                if (plain && TitleEndingWord.IsMatch(match.Value.Trim()) && OnlyYear(rest)) return;
             }
             results.Add(new() { Form = Form.Clip, Start = match.Index, End = match.Index + match.Length, Clip = Trim(match.Value), ShortClip = isShort, LeadingTag = leadingTag });
             Take(match.Index, match.Index + match.Length);
@@ -391,7 +398,8 @@ internal static class FilenameEpisodes
                 results.Add(new() { Form = Form.Bare, Start = match.Index, End = match.Index + match.Length, Episode = value, Digits = match.Groups["n"].Value, Glued = true, Ranged = last is not null, EpisodeEnd = last > value ? last : null });
             }
         // A season marker with nothing numbered after it still shapes the title of a season pack.
-        if (seasons.Count > 0)
+        // "Calm Season 2 (2008)": outside a show's location, a season's word with only a year after it is part of a plain title.
+        if (seasons.Count > 0 && !(!evidence.Series && SeasonWordInTitle(scan, seasons[0].Start, seasons[0].End)))
         {
             var none = results[0];
             none.Season = seasons[0].Season; none.SeasonStart = seasons[0].Start;
@@ -438,6 +446,10 @@ internal static class FilenameEpisodes
         // A file that's only a number can be an episode of the show its folder names, up to the numbers titles rarely are.
         return rest.Length > 0 || !opens || !evidence.HasFolder || evidence.OwnFolder || digits.Length >= 3;
     }
+    private static bool SeasonWordInTitle(FilenameScan scan, int start, int end) =>
+        start > scan.CoreStart && scan.Text[start..].TakeWhile(char.IsLetter).Count() > 2 && scan.BracketAt(start) is null && !SetApartByDash(scan.Text, start) &&
+        (end >= scan.CoreEnd || OnlyYear(scan.Slice(end, scan.CoreEnd)));
+    private static bool OnlyYear(string rest) => rest.Length == 0 || EndsWithYear.IsMatch(rest) && rest.Trim('(', ')', ' ').Length == 4;
     // "Show - 5" sets the number apart. "Catch-22" joins it to the word before.
     private static bool SetApartByDash(string text, int index)
     {
@@ -535,7 +547,9 @@ internal static class FilenameEpisodes
         // "Show - 05.5 - S00E01": the marker gives the numbering; the dashed number before it is the release's own.
         if (best.Form is Form.SeasonEpisode or Form.CrossForm or Form.SeasonWords) title = Regex.Replace(title, @"\s+-\s*\d{1,4}(?:\.\d)?(?:v\d+)?$", "", RegexOptions.None, Limit).Trim(' ', '-');
         // "Show (2025) - 13v2 (S01E13)": the bracketed marker repeats the number just before it.
-        if (numbered && scan.BracketAt(best.Start) is not null && best.Start >= scan.CoreStart) title = Regex.Replace(title, @"(?:\s+-)?\s+\d{1,4}(?:v\d+)?$", "", RegexOptions.None, Limit).Trim(' ', '-');
+        // "The 100 (S01E05)", "Babylon 5 [01]": with no dash, version or matching padded number, it's the title's own.
+        if (numbered && scan.BracketAt(best.Start) is not null && best.Start >= scan.CoreStart && Regex.Match(title, @"(?<dash>\s+-)?\s+(?<n>\d{1,4})(?<v>v\d+)?$", RegexOptions.None, Limit) is { Success: true } closing &&
+            (closing.Groups["dash"].Success || closing.Groups["v"].Success || closing.Groups["n"].Value[0] == '0' && int.Parse(closing.Groups["n"].Value) == best.Episode)) title = title[..closing.Index].Trim(' ', '-');
         // "[TV Series] Mazinger Z - Song Name": the tag says the part before the dash is the show.
         if (scan.LeadingKindTag && !numbered && title.IndexOf(" - ", StringComparison.Ordinal) is > 0 and var dash) { alternates.Add(title); title = title[..dash]; }
         if (best.Form == Form.Clip && !best.LeadingTag) title = Regex.Replace(title, @"(?:\s+-)?\s+\d{1,3}(?:\.\d)?$", "", RegexOptions.None, Limit).Trim(' ', '-');

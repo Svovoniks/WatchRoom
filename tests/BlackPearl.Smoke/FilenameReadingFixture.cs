@@ -67,6 +67,35 @@ static class FilenameReadingFixture
         Film(["The Interview.mkv"], "The Interview", null);
         Film(["Interview with the Harbor (1994).mkv"], "Interview with the Harbor", 1994);
         Film(["Film Socialisme (2010).mkv"], "Film Socialisme", 2010);
+        // So is one closing a plain name, and a season's word with only a year after it.
+        Film(["Calm Ending (2002).mkv"], "Calm Ending", 2002);
+        Film(["Calm Ending.mkv"], "Calm Ending", null);
+        Film(["Stuff", "Calm Gallery (2014).mkv"], "Calm Gallery", 2014);
+        Film(["Harbor Holiday Special (1978).mkv"], "Harbor Holiday Special", 1978);
+        Film(["Calm Season 2 (2008).mkv"], "Calm Season 2", 2008);
+        Film(["Calm TV-2 [2020].mkv"], "Calm", 2020);
+        Run("Calm Gallery numbered in a plain folder", ["Galleries"], n => $"Calm Gallery {n}", Span(1, 12), "Calm Gallery");
+        Run("Calm Gallery numbered in a TV folder", ["TV"], n => $"Calm Gallery {n}", Span(1, 12), "Calm Gallery");
+        Run("Calm Gallery numbered in a TV folder on a shelf", ["Shelf", "TV"], n => $"Calm Gallery {n}", Span(1, 12), "Calm Gallery");
+        // A folder that only holds files doesn't hand a show's files to the folder above it, unless that's the show.
+        Run("a show in a TV folder on a shelf", ["Shelf", "TV"], n => $"Harbor Lights - {n:00}", Span(1, 6), "Harbor Lights");
+        Run("a show in a downloads folder on a shelf", ["Shelf", "Downloads"], n => $"Harbor Lights - {n:00}", Span(1, 6), "Harbor Lights");
+        Run("a show in a format folder inside its own", ["Harbor Lights", "1080p"], n => $"Harbor Lights - {n:00}", Span(1, 6), "Harbor Lights");
+        // "The Final Season - 60" numbers an episode; a season's number only comes after the dash when an episode's follows it.
+        Numbered(["[Erai] Calm Harbor - The Final Season - 60 [1080p].mkv"], "Calm Harbor - The Final Season", null, 60);
+        Numbered(["Calm Harbor The Final Season - 01.mkv"], "Calm Harbor The Final Season", null, 1);
+        Numbered(["Calm Harbor Season - 2 - 05.mkv"], "Calm Harbor", 2, 5);
+        Numbered(["Calm Harbor Season-2 - 05.mkv"], "Calm Harbor", 2, 5);
+        // The number closing a title stays when a bracket gives the numbering, unless a dash or a version sets it apart.
+        Numbered(["Calm 100 (S01E05).mkv"], "Calm 100", 1, 5);
+        Numbered(["Calm 5 [S01E03].mkv"], "Calm 5", 1, 3);
+        Numbered(["[Group] Calm 100 [01].mkv"], "Calm 100", null, 1);
+        Numbered(["[Group] Calm 2 [01].mkv"], "Calm 2", null, 1);
+        Numbered(["Harbor Lights - 14 (S02E02).mkv"], "Harbor Lights", 2, 2);
+        Numbered(["Harbor Lights 05 (S01E05).mkv"], "Harbor Lights", 1, 5);
+        Numbered(["Harbor Lights 13v2 (S01E13).mkv"], "Harbor Lights", 1, 13);
+        // A folder's number that isn't a usable part number is ignored.
+        foreach (var part in new[] { "Part \u0663", "Part 99999999999" }) Numbered(["Calm Parts", part, "Calm Parts - 01.mkv"], "Calm Parts", null, 1);
         // What still marks an episode: a list number and a season before it.
         Directory.CreateDirectory(Path.Combine(directory, "Calm Harbor"));
         Numbered(["Calm Harbor", "1. Блокада.mkv"], "Calm Harbor", null, 1);
@@ -482,7 +511,8 @@ static class FilenameReadingFixture
         Directory.CreateDirectory(media); Directory.CreateDirectory(upgradeData);
         var episodePath = Path.Combine(media, "Harbor Lights - 05 [1080p].mkv"); var filmPath = Path.Combine(upgrade, "media", "Calm.Waters.2019.1080p.mkv"); var lockedPath = Path.Combine(media, "Harbor Lights - 06 [1080p].mkv");
         var mappedPath = Path.Combine(media, "Harbor Lights - 07 [1080p].mkv");
-        foreach (var file in new[] { episodePath, filmPath, lockedPath, mappedPath }) await File.WriteAllBytesAsync(file, [0]);
+        var namedPath = Path.Combine(media, "Harbor Lights - 08 [1080p].mkv"); var sameNamedPath = Path.Combine(media, "Harbor Lights - 09 - Parsed Name [1080p].mkv"); var datedPath = Path.Combine(upgrade, "media", "Quiet.Harbor.2019.1080p.mkv");
+        foreach (var file in new[] { episodePath, filmPath, lockedPath, mappedPath, namedPath, sameNamedPath, datedPath }) await File.WriteAllBytesAsync(file, [0]);
         var mediaRoot = Path.Combine(upgrade, "media");
         var seed = new LibraryStore(upgradeData);
         var oldEpisode = FileNames.Parse(episodePath, "Mixed", mediaRoot) with { Season = 9, Episode = 99, EpisodeTitle = "Wrong plot's name", EpisodeOverview = "Wrong plot", EpisodeSource = "fixture", Available = true };
@@ -494,6 +524,10 @@ static class FilenameReadingFixture
         var partPath = Path.Combine(partFolder, "Harbor Tale (1977) 01.mp4"); await File.WriteAllBytesAsync(partPath, [0]);
         seed.Save(FileNames.Parse(partPath, "Mixed", mediaRoot) with { Series = "Harbor Tale", Season = 1, Episode = 1, MetadataProvider = "tvmaze", MetadataId = 55, MetadataType = "tv", ProviderIds = new() { ["tvmaze"] = "55" } });
         foreach (var item in new[] { oldEpisode, oldFilm, oldLocked, oldMapped }) seed.Save(item);
+        // Single fields the user locked, on a reading that moves and on one that doesn't.
+        seed.Save(FileNames.Parse(namedPath, "Mixed", mediaRoot) with { Season = 9, Episode = 88, EpisodeTitle = "My name", EpisodeOverview = "My plot", AirDate = "2001-02-03", SeasonTitle = "My season", LockedFields = ["EpisodeTitle", "EpisodeOverview", "AirDate", "SeasonTitle"] });
+        seed.Save(FileNames.Parse(sameNamedPath, "Mixed", mediaRoot) with { EpisodeTitle = "My other name", LockedFields = ["EpisodeTitle"] });
+        seed.Save(FileNames.Parse(datedPath, "Mixed", mediaRoot) with { Year = 1999, LockedFields = ["Year"] });
         // An episode the old parser matched to a film, and a numbered film it matched correctly.
         var wrongFilmPath = Path.Combine(media, "Harbor Lights - S01E03 - Name.mkv"); var numberedFilmPath = Path.Combine(mediaRoot, "Calm 13 (1995).mkv");
         var sequelFolder = Path.Combine(mediaRoot, "Rock"); Directory.CreateDirectory(sequelFolder);
@@ -523,6 +557,9 @@ static class FilenameReadingFixture
         check(read[numberedFilmPath] is { MetadataId: 71, Overview: "The right film's plot", Series: null, Title: "Calm 13" }, $"a film with a number in its title keeps its match (got {read[numberedFilmPath].MetadataId} {read[numberedFilmPath].Overview} {read[numberedFilmPath].Series} {read[numberedFilmPath].Title})");
         check(read[sequelPath] is { MetadataId: 72, Overview: "The sequel's plot", Series: null, Episode: null }, $"a bare number doesn't overturn a film a provider identified (got {read[sequelPath].MetadataId} {read[sequelPath].Series} {read[sequelPath].Episode})");
         check(read[lockedPath] is { Season: 7, Episode: 77 }, "locked numbering isn't touched");
+        check(read[namedPath] is { Episode: 8, EpisodeTitle: "My name", EpisodeOverview: "My plot", AirDate: "2001-02-03", SeasonTitle: "My season" }, $"locked episode fields stay when the number moves (got {read[namedPath].Episode} {read[namedPath].EpisodeTitle} {read[namedPath].EpisodeOverview} {read[namedPath].AirDate} {read[namedPath].SeasonTitle})");
+        check(read[sameNamedPath] is { Episode: 9, EpisodeTitle: "My other name" }, $"a locked episode title stays when the number doesn't move (got {read[sameNamedPath].EpisodeTitle})");
+        check(read[datedPath] is { Year: 1999 }, $"a locked year stays (got {read[datedPath].Year})");
         check(read[mappedPath] is { Season: 3, Episode: 2, MetadataId: 44, Overview: "Provider plot", MetadataFetchedAt: 5000 }, "a provider's identity, text, mapped numbering and refresh time stay when the file reads the same number");
         check(read[partPath] is { MetadataId: 55, MetadataType: "tv", Season: 1, Episode: 1 }, "a numbered film part verified as a miniseries keeps its identity and numbering");
         check(read[episodePath].Id == oldEpisode.Id && reopened.Setting("watched:" + oldEpisode.Id) == "true" && reopened.Setting("position:" + oldFilm.Id) == "120" && reopened.Setting("queues") == queues, "file IDs, watch state, positions and queues stay");

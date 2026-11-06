@@ -176,7 +176,25 @@ public sealed partial class LibraryStore
                 SeasonTitle = item.Season == parsed.Season ? item.SeasonTitle : null, SeasonOverview = item.Season == parsed.Season ? item.SeasonOverview : null, SeasonSource = item.Season == parsed.Season ? item.SeasonSource : null
             };
         else if (item.EpisodeSource is null) item = item with { EpisodeTitle = parsed.EpisodeTitle, AirDate = parsed.AirDate };
-        return TmdbRetention.Rebase(item, parsed);
+        return TmdbRetention.Rebase(KeepLockedText(item, previous), parsed);
+    }
+    // A single field the user locked stays as they set it, whatever the new reading does to the rest of the item.
+    private static MediaItem KeepLockedText(MediaItem item, MediaItem previous)
+    {
+        bool Locked(string field) => LibraryIdentity.Locked(previous, field);
+        return item with
+        {
+            Year = Locked("Year") ? previous.Year : item.Year,
+            EpisodeTitle = Locked("EpisodeTitle") ? previous.EpisodeTitle : item.EpisodeTitle,
+            EpisodeOverview = Locked("EpisodeOverview") ? previous.EpisodeOverview : item.EpisodeOverview,
+            EpisodePoster = Locked("EpisodePoster") ? previous.EpisodePoster : item.EpisodePoster,
+            EpisodePosterQualityPath = Locked("EpisodePoster") ? previous.EpisodePosterQualityPath : item.EpisodePosterQualityPath,
+            EpisodeSource = Locked("EpisodeTitle") || Locked("EpisodeOverview") || Locked("EpisodePoster") ? previous.EpisodeSource : item.EpisodeSource,
+            AirDate = Locked("AirDate") ? previous.AirDate : item.AirDate,
+            SeasonTitle = Locked("SeasonTitle") ? previous.SeasonTitle : item.SeasonTitle,
+            SeasonOverview = Locked("SeasonOverview") ? previous.SeasonOverview : item.SeasonOverview,
+            SeasonSource = Locked("SeasonTitle") || Locked("SeasonOverview") ? previous.SeasonSource : item.SeasonSource
+        };
     }
     private static bool CanRepairGrouping(MediaItem item) => !item.Matched &&
         !new[] { "Title", "Kind", "Season", "Episode", "ShowId", "MetadataType", "ProviderIds" }.Any(field => LibraryIdentity.Locked(item, field));
@@ -877,6 +895,7 @@ public sealed partial class LibraryStore
             { Episode = previous.Episode, EpisodeEnd = previous.EpisodeEnd, AbsoluteEpisode = previous.AbsoluteEpisode, AbsoluteEpisodeEnd = previous.AbsoluteEpisodeEnd };
             if (LibraryIdentity.Locked(previous, "Title")) item = item with { Title = previous.Title, Series = previous.Series };
             if (LibraryIdentity.Locked(previous, "Kind")) item = item with { Kind = previous.Kind };
+            if (LibraryIdentity.Locked(previous, "Year")) item = item with { Year = previous.Year };
             // Older parsers read "S03E07 - 42" as a range; drop a stored range the filename no longer supports.
             if (previous.Matched && !LibraryIdentity.Locked(previous, "Episode") && previous.AbsoluteEpisode is null && previous.EpisodeEnd is not null &&
                 parsed.NumberingSource == "filename" && parsed.EpisodeEnd is null && parsed.Season == previous.Season && parsed.Episode == previous.Episode)
@@ -1110,10 +1129,19 @@ public static partial class FileNames
         int? sourcePart = null;
         // "Serials\24\Season 1\01.mkv": a folder called a number, with a season folder inside and files that name nothing, is the show.
         bool HoldsSeason() => seriesDir != dir && string.IsNullOrWhiteSpace(numbering?.Series) && Regex.IsMatch(System.IO.Path.GetFileName(seriesDir), @"^[0-9]{1,4}$") && IsSeasonFolder(System.IO.Path.GetFileName(dir));
-        while (!NamesShowInFolder(path, seriesDir) && !HoldsSeason() && (IsReleaseDirectory(seriesDir) || FilenameFolders.IsContainer(System.IO.Path.GetFileName(seriesDir))) && System.IO.Path.GetDirectoryName(seriesDir) is { } parent &&
+        // "Shelf\TV\Show - 03" names its own show, so a folder that says where files are doesn't pass it up to Shelf. "Show\OVA\Show Part Two 01" is the same show's.
+        // A folder that describes its files, "Show\DVDRip.AVI.640x480", is still inside the show.
+        var ownShow = MetadataTitles.Normalize(!string.IsNullOrWhiteSpace(numbering?.Series) ? numbering.Series : bonus ? reading.Title : "");
+        bool OtherShowAbove(string parent)
+        {
+            if (ownShow.Length == 0) return false;
+            var above = MetadataTitles.Normalize(FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(parent)).Title);
+            return above.Length == 0 || !ownShow.Contains(above) && !above.Contains(ownShow);
+        }
+        while (!NamesShowInFolder(path, seriesDir) && !HoldsSeason() && System.IO.Path.GetDirectoryName(seriesDir) is { } parent && (IsReleaseDirectory(seriesDir) || FilenameFolders.IsContainer(System.IO.Path.GetFileName(seriesDir)) && !(FilenameFolders.IsLocation(System.IO.Path.GetFileName(seriesDir)) && OtherShowAbove(parent))) &&
             (libraryRoot is null || !string.Equals(System.IO.Path.GetFullPath(libraryRoot), seriesDir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
         {
-            var part = Regex.Match(System.IO.Path.GetFileName(seriesDir), @"(?i)^Part\s*(\d+)\s*$");
+            var part = Regex.Match(System.IO.Path.GetFileName(seriesDir), @"(?i)^Part\s*([0-9]{1,4})\s*$");
             if (part.Success) sourcePart = int.Parse(part.Groups[1].Value);
             seriesDir = parent;
         }
