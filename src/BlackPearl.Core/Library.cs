@@ -147,7 +147,9 @@ public sealed partial class LibraryStore
         // A bare number can't overturn a film a provider identified, as "Rocky 2" beside "Rocky 3" reads as a run.
         if (previous.MetadataType == "movie" && parsed.Series is not null && episodic && parsed.NumberingSource is null) return previous;
         // A numbered film part can have been verified as a miniseries, so that identity stands.
-        var contradicted = previous.MetadataType == "movie" && parsed.Series is not null && episodic ||
+        // So does a file now read as a special of a different show than the one it was stored in, or that show's match would pass to its new show.
+        var contradicted = previous.MetadataType == "tv" && parsed.Season == 0 && previous.Season is > 0 && parsed.Series is { } specialOf && previous.Series is { } storedIn && MetadataTitles.Normalize(specialOf) != MetadataTitles.Normalize(storedIn) ||
+            previous.MetadataType == "movie" && parsed.Series is not null && episodic ||
             previous.MetadataType == "tv" && parsed.Series is null && MetadataTitles.NumberedMoviePart(parsed) is null;
         // The wrong title's plot and poster go with its identity, or a later correct match would keep them.
         var item = contradicted ? AutomaticArtwork.ResetIdentity(previous) with { MetadataKind = null, MetadataType = null, ProviderIds = null, ArtworkFetchedAt = 0 } : previous;
@@ -1074,13 +1076,14 @@ public static partial class FileNames
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
     }
-    // Whether a show's folder holds episodes of its own, beside any OVA or specials folders.
+    private static bool OvaFolder(string name) => Regex.IsMatch(name, @"(?i)^(?:ova|oad|ona)$");
+    // Whether a show's folder holds episodes of its own, beside any OVA, specials, films or extras folders.
     private static bool HoldsOwnEpisodes(string show)
     {
         try
         {
             return Directory.Exists(show) && (Directory.EnumerateFiles(show).Any(file => Extensions.Contains(System.IO.Path.GetExtension(file))) ||
-                Directory.EnumerateDirectories(show).Select(System.IO.Path.GetFileName).Any(child => child is not null && !Regex.IsMatch(child, @"(?i)^(?:ova|oad|ona|specials?)$") && (IsSeasonFolder(child) || Regex.IsMatch(child, @"(?i)^tv$"))));
+                Directory.EnumerateDirectories(show).Select(System.IO.Path.GetFileName).Any(child => child is not null && !Regex.IsMatch(child, @"(?i)^(?:ova|oad|ona|specials?|movies?|films?)$") && !Regex.IsMatch(child, ExtrasFolders)));
         }
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
@@ -1167,6 +1170,9 @@ public static partial class FileNames
             var above = TitleWords(FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(parent)).Title);
             // A folder above that says nothing, like "Season 1", isn't another show.
             if (above.Length == 2) return false;
+            // "Show\OVA\Show Ultimate - 01" has a title of its own, and providers list it apart. A file that gives a season says it's the show's.
+            // Its extras stay with whatever holds them.
+            if (OvaFolder(System.IO.Path.GetFileName(seriesDir)) && filenameSeason is null && !showExtras) return ownShow != above;
             if (!ownShow.Contains(above, StringComparison.Ordinal) && !above.Contains(ownShow, StringComparison.Ordinal)) return true;
             // "Star Trek\TV" with TNG and DS9 beside each other: each file is its own show.
             return HoldsSeveralShows(seriesDir, seriesContext || seasonFolder.Success);
@@ -1177,10 +1183,10 @@ public static partial class FileNames
         {
             var part = Regex.Match(System.IO.Path.GetFileName(seriesDir), @"(?i)^Part\s*([0-9]{1,4})\s*$");
             if (part.Success) sourcePart = int.Parse(part.Groups[1].Value);
-            throughOva |= Regex.IsMatch(System.IO.Path.GetFileName(seriesDir), @"(?i)^(?:ova|oad|ona)$");
+            throughOva |= OvaFolder(System.IO.Path.GetFileName(seriesDir));
             seriesDir = parent;
         }
-        // "Show\OVA\Show Ultimate - 01" beside the show's own episodes isn't episode 1: like its specials, a show's OVAs number apart, in the
+        // "Show\OVA\Show - 01" beside the show's own episodes isn't episode 1: like its specials, a show's OVAs number apart, in the
         // show's order rather than as a run through it, unless the file or a season folder gives a season. A title with only OVAs numbers them itself.
         var apartFromShow = throughOva && filenameSeason is null && number is not null && !seasonFolder.Success && !IsLooseFolder(seriesDir, libraryRoot) && HoldsOwnEpisodes(seriesDir);
         if (apartFromShow) season = 0;
@@ -1216,7 +1222,7 @@ public static partial class FileNames
         var heldElsewhere = Regex.IsMatch(System.IO.Path.GetFileName(dir), @"^\d{1,3}$") && System.IO.Path.GetDirectoryName(dir) is { } holder && NamesOtherShow(path, holder);
         var structured = File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) || !heldElsewhere && (numbering is not null || bonus) && (seasonFolder.Success || seriesContext || seriesDir != dir) &&
             (libraryRoot is null || !string.Equals(System.IO.Path.GetFullPath(libraryRoot), seriesDir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) &&
-            !Regex.IsMatch(parentName, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы)$") && !collection;
+            !Regex.IsMatch(parentName, @"(?i)^(?:Anime|Shows?|TV(?: Shows)?|Сериалы)$") && !collection && !(OvaFolder(parentName) && !string.IsNullOrWhiteSpace(numbering?.Series));
         if (structured)
         {
             var folder = FilenameEpisodes.AnalyzeFolder(parentName);

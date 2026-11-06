@@ -215,7 +215,7 @@ static class MetadataPipelineFixture
         check(numberedStore.All().Count(x => x.IsVirtual) == 3, "enabling placeholder imports adds them even when metadata is fresh");
 
         // A lookup maps a show's absolute numbers, but not its OVA folder's, so the two can't land on one episode.
-        var ovaShow = Path.Combine(directory,"Harbor Tide"); var ovaEpisode = Path.Combine(ovaShow,"TV","[Grp] Harbor Tide - 03.mkv"); var ovaFile = Path.Combine(ovaShow,"OVA","[Grp] Harbor Tide Ultimate - 03.mkv");
+        var ovaShow = Path.Combine(directory,"Harbor Tide"); var ovaEpisode = Path.Combine(ovaShow,"TV","[Grp] Harbor Tide - 03.mkv"); var ovaFile = Path.Combine(ovaShow,"OVA","[Grp] Harbor Tide - 03.mkv");
         Directory.CreateDirectory(Path.GetDirectoryName(ovaEpisode)!); Directory.CreateDirectory(Path.GetDirectoryName(ovaFile)!);
         File.WriteAllBytes(ovaEpisode,[0]); File.WriteAllBytes(ovaFile,[0]);
         var ovaStore = new LibraryStore(Path.Combine(directory,"ova-db"));
