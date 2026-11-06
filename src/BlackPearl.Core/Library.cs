@@ -915,7 +915,7 @@ public static partial class FileNames
     private const string ShortExtras = @"(?:bd |dvd )?(?:extra|bonus)|sps|nc|nc ?op-?ed|ncops?|nceds?|creditless(?: ops?)?(?: ?& ?eds?)?|(?:bd |web )?menus?|(?:web )?pvs?|cms?|interviews.*";
     private const string ExtrasFolders = @"(?i)^(?:" + PlainExtras + "|" + ShortExtras + ")$";
     // "(S01-S07+Movies)" and "[Season 1 + 2]" hold several seasons, so neither is a season folder.
-    private const string SeasonFolder = @"(?i)(?:^|\s|\(|\[)(?:(?:Season|Сезон|Saison|Temporada|Staffel|Stagione)\s*|S)(\d{1,2}|(?:19|20)\d{2})(?!\d|E\d)\b(?!\s*[-+~,&–]\s*(?:S|Season\s*)?\d)|^(\d{1,3})\s*(?:сезон|sezon)\b|^(?:T|Vol\s*|Volume\s*)?(\d{1,2})(?:\s+-\s+\w+)?$|^Specials$";
+    private const string SeasonFolder = @"(?i)(?:^|\s|\(|\[)(?:(?:Season|Сезон|Saison|Temporada|Staffel|Stagione)\s*|S)([0-9]{1,2}|(?:19|20)[0-9]{2})(?![0-9]|E[0-9])\b(?!\s*[-+~,&–]\s*(?:S|Season\s*)?[0-9])|^([0-9]{1,3})\s*(?:сезон|sezon)\b|^(?:T|Vol\s*|Volume\s*)?([0-9]{1,2})(?:\s+-\s+\w+)?$|^Specials$";
     private static string[] Parts(string path) => path.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
     private static bool IsSeasonFolder(string name) => Regex.IsMatch(Regex.Replace(name, @"[._]+", " "), SeasonFolder);
     private static int? SeasonNumber(string name) => Regex.Match(Regex.Replace(name, @"[._]+", " "), SeasonFolder) is { Success: true } match
@@ -1006,7 +1006,7 @@ public static partial class FileNames
     private static bool NamesShowInFolder(string path, string dir)
     {
         var folder = System.IO.Path.GetFileName(dir);
-        return Regex.IsMatch(folder, @"^\d{1,3}$") && Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path), $@"^(?:\[[^\]]*\]\s*)?{Regex.Escape(folder)}[\s._-]+.*\d");
+        return Regex.IsMatch(folder, @"^[0-9]{1,4}$") && Regex.IsMatch(System.IO.Path.GetFileNameWithoutExtension(path), $@"^(?:\[[^\]]*\]\s*)?{Regex.Escape(folder)}[\s._-]+.*\d");
     }
     // A file that names a show other than the folder above its numbered folder: "Ninety - 05" and "Naruto S01E05" in "Backup\1".
     private static bool NamesOtherShow(string path, string above)
@@ -1016,7 +1016,7 @@ public static partial class FileNames
         return named.Length > 0 && folder.Length > 0 && !named.StartsWith(folder, StringComparison.Ordinal) && !folder.StartsWith(named, StringComparison.Ordinal);
     }
     // A folder called only a number, directly in a library or a folder that names no show, holding numbered files: "TV\24\01 - Midnight".
-    private static bool IsNumberedShow(string dir, string? libraryRoot) => Regex.IsMatch(System.IO.Path.GetFileName(dir), @"^\d{1,3}$") &&
+    private static bool IsNumberedShow(string dir, string? libraryRoot) => Regex.IsMatch(System.IO.Path.GetFileName(dir), @"^[0-9]{1,4}$") &&
         System.IO.Path.GetDirectoryName(dir) is { } above && (IsLibraryRoot(above, libraryRoot) || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(above)));
     // A library root, or a folder whose name only says what kind of files sit in it.
     private static bool IsLooseFolder(string dir, string? libraryRoot) => IsLibraryRoot(dir, libraryRoot) || FilenameFolders.IsGeneric(System.IO.Path.GetFileName(dir));
@@ -1070,8 +1070,13 @@ public static partial class FileNames
         // An obfuscated file inside a named release: the folder "Show.S01E02.720p" says what "gNWDXow11s.mkv" doesn't.
         if (numbering is null && reading.Clip is null && System.IO.Path.GetFileName(dir) is { Length: > 0 } releaseName && FilenameEpisodes.ReleaseNumbering(releaseName) is { } releaseFolder && !FilenameEpisodes.SameTitle(reading.Title, releaseFolder.Series)) numbering = releaseFolder;
         // "Deleted Scene 2" beside "Harbor - 01": extra material numbering itself isn't a second show in the folder.
-        if (numbering is { ExplicitSeason: false, Series: { } numberedTitle } && sourceKind != "Movie" && filmExtra is null && !showExtras && FilenameExtras.Named(numberedTitle) &&
-            (FilenameExtras.OnlyExtra(numberedTitle) || EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success) is { } folderShow && !FilenameEpisodes.SameTitle(folderShow, numberedTitle))) numbering = null;
+        if (numbering is { ExplicitSeason: false, Series: { } numberedTitle } && sourceKind != "Movie" && filmExtra is null && !showExtras && FilenameExtras.Named(numberedTitle))
+        {
+            var folderShow = EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success);
+            if (folderShow is not null && !FilenameEpisodes.SameTitle(folderShow, numberedTitle) ? FilenameExtras.OnlyExtraAfter(numberedTitle, folderShow) : FilenameExtras.OnlyExtra(numberedTitle)) { numbering = null; reading = reading with { Title = reading.Cleaned }; }
+            // "Roots\Part 3" with nothing else beside it is a miniseries' episode.
+            else if (FilenameExtras.IsPart(numberedTitle)) numbering = NearestTitledFolder(dir, libraryRoot) is { } miniseries ? numbering with { Series = miniseries } : null;
+        }
         var season = numbering?.Season; var number = numbering?.Episode;
         string? series = numbering?.Series;
         // A clip is a show's when its location says so; anywhere else it needs numbered episodes beside it (below).
@@ -1104,7 +1109,7 @@ public static partial class FileNames
         var seriesDir = showExtras && extrasOwner is not null ? extrasOwner : dir;
         int? sourcePart = null;
         // "Serials\24\Season 1\01.mkv": a folder called a number, with a season folder inside and files that name nothing, is the show.
-        bool HoldsSeason() => seriesDir != dir && string.IsNullOrWhiteSpace(numbering?.Series) && Regex.IsMatch(System.IO.Path.GetFileName(seriesDir), @"^\d{1,3}$") && IsSeasonFolder(System.IO.Path.GetFileName(dir));
+        bool HoldsSeason() => seriesDir != dir && string.IsNullOrWhiteSpace(numbering?.Series) && Regex.IsMatch(System.IO.Path.GetFileName(seriesDir), @"^[0-9]{1,4}$") && IsSeasonFolder(System.IO.Path.GetFileName(dir));
         while (!NamesShowInFolder(path, seriesDir) && !HoldsSeason() && (IsReleaseDirectory(seriesDir) || FilenameFolders.IsContainer(System.IO.Path.GetFileName(seriesDir))) && System.IO.Path.GetDirectoryName(seriesDir) is { } parent &&
             (libraryRoot is null || !string.Equals(System.IO.Path.GetFullPath(libraryRoot), seriesDir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
         {
@@ -1115,6 +1120,7 @@ public static partial class FileNames
         // A show's extras folder joins the show as bonus clips, whatever the file names say; an explicit S00 file there is a numbered special.
         var extraClip = showExtras && seriesDir != dir && numbering is not { ExplicitSeason: true, Season: 0 };
         if (extraClip) { bonus = true; series = IsLooseFolder(seriesDir, libraryRoot) ? NearestTitledFolder(extrasOwner!, libraryRoot) ?? reading.Title : FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(seriesDir)).Title; }
+        if (extraClip && string.IsNullOrWhiteSpace(series)) series = System.IO.Path.GetFileName(seriesDir);
         // Dates in an episode title are not the premiere year of the entire series.
         var title = series ?? reading.Title;
         var titleYear = reading.Year;
@@ -1225,7 +1231,7 @@ public static partial class FileNames
             else
             {
                 shows = Directory.EnumerateFiles(dir).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file)) && !IsExtra(file, libraryRoot))
-                    .Select(file => FilenameEpisodes.Read(file, seriesContext)).Where(found => found is { Episode: not null } && found.Season != 0 && found.Conflict is null)
+                    .Select(file => FilenameEpisodes.Read(file, seriesContext)).Where(found => found is { Episode: not null } && found.Season != 0 && found.Conflict is null && !FilenameExtras.OnlyExtra(found.Series) && !FilenameExtras.IsPart(found.Series))
                     .Select(found => string.IsNullOrWhiteSpace(found!.Series) ? System.IO.Path.GetFileName(dir) : found.Series)
                     .GroupBy(series => MetadataTitles.Normalize(series)).Where(group => group.Count() >= 2).Select(group => (group.First(), group.Count())).ToArray();
                 if (EpisodeFolders.Count > 4096) EpisodeFolders.Clear();

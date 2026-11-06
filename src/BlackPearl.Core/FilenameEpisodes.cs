@@ -227,8 +227,8 @@ internal static class FilenameEpisodes
             // "Night Gallery E05": an episode label after the word says it's part of the show's name.
             if (!isShort && !leadingTag && EpisodeLabelFollows.IsMatch(text[(match.Index + match.Length)..Math.Max(match.Index + match.Length, Math.Min(scan.CoreEnd, text.Length))])) return;
             // "Night Gallery - 3", "Bonus Family 3": a word in the show's name isn't a clip, when the words up to the next number name the
-            // folder, or that number runs across the files and the word opens a longer name or, later in the name, a dash sets the number
-            // apart. "Bonus 3" beside a show's episodes, "Show - Art Gallery 3" and "Show Movie Teaser 3" are numbered clips.
+            // folder, or that number runs across the files and the word opens a longer name, or the word comes later in the name and a dash
+            // sets the number apart. "Bonus 3" beside a show's episodes, "Show - Art Gallery 3" and "Show Movie Teaser 3" are numbered clips.
             // "Night Gallery - S01E01": a season and episode marker after the word says it's part of the show's name.
             if (!isShort && !leadingTag && results.Any(r => r.Form is Form.SeasonEpisode or Form.CrossForm or Form.SeasonWords && r.Start > match.Index)) return;
             // The pattern can take the number along: "Extras - 01" in a folder called Extras.
@@ -238,8 +238,8 @@ internal static class FilenameEpisodes
                 var from = match.Index + match.Length;
                 var nextNumber = Regex.Match(text[from..Math.Max(from, Math.Min(scan.CoreEnd, text.Length))], @"(?<![\p{L}\p{N}])\d{1,4}(?![\p{L}\p{N}])", RegexOptions.None, Limit);
                 var at = from + nextNumber.Index;
-                if (nextNumber.Success && (evidence.NamesFolder(scan.Slice(scan.CoreStart, at)) || evidence.Varies(at) && !SetApartByDash(text, match.Index) &&
-                    (match.Index == scan.CoreStart ? text[from..at].Any(char.IsLetter) : text[from..at].TrimEnd().EndsWith('-')))) return;
+                if (nextNumber.Success && (evidence.NamesFolder(scan.Slice(scan.CoreStart, at)) || evidence.Varies(at) && !SetApartByDash(text, match.Index) && match.Index == scan.CoreStart && text[from..at].Any(char.IsLetter) ||
+                    !SetApartByDash(text, match.Index) && match.Index > scan.CoreStart && text[from..at].TrimEnd().EndsWith('-'))) return;
             }
             // "Opening Night", "Interview with the Vampire", "The Menu (2022)": outside a show's location, a clip word that opens a
             // plain name is part of its title. Beside a show's episodes the file still joins them as a clip.
@@ -250,7 +250,7 @@ internal static class FilenameEpisodes
                 var joined = match.Index + match.Length < text.Length && text[match.Index + match.Length] == '-';
                 // "Opening 01 - Song" numbers a clip.
                 var numbered = match.Value.Any(char.IsDigit) || rest.Length > 0 && char.IsDigit(rest[0]) && !EndsWithYear.IsMatch(rest);
-                if (!joined && !numbered && (article || before.Length == 0 && (EndsWithYear.IsMatch(rest) || rest.Any(char.IsLetter)))) return;
+                if (!joined && (article || !numbered && before.Length == 0 && (EndsWithYear.IsMatch(rest) || rest.Any(char.IsLetter)))) return;
             }
             results.Add(new() { Form = Form.Clip, Start = match.Index, End = match.Index + match.Length, Clip = Trim(match.Value), ShortClip = isShort, LeadingTag = leadingTag });
             Take(match.Index, match.Index + match.Length);
@@ -331,7 +331,7 @@ internal static class FilenameEpisodes
             // "Brooklyn 99 - 5", "86 - 5": an unpadded number before one that a dash sets apart is the show's own.
             if (digits[0] != '0' && !match.Groups["e"].Success && !evidence.Varies(match.Index) && !SetApartByDash(text, match.Index) && DashNumberFollows.IsMatch(text[(match.Index + match.Length)..Math.Max(match.Index + match.Length, Math.Min(scan.CoreEnd, text.Length))])) continue;
             // "Brooklyn 99 1" to "Brooklyn 99 9": a number too big for a season, the same in every file, while a later one runs.
-            if (value > 40 && evidence.Constant(match.Index) && evidence.Slots!.Any(slot => slot.Value && slot.Key > match.Index && slot.Key <= text.Length && !text[(match.Index + match.Length)..slot.Key].Any(char.IsLetter))) continue;
+            if (value > 40 && evidence.Constant(match.Index) && evidence.Slots!.Any(slot => slot.Value && slot.Key > match.Index && slot.Key <= text.Length && text[(match.Index + match.Length)..slot.Key].All(c => c is ' ' or '.' or '_'))) continue;
             // "Room 104 5" in a folder called Room 104. A padded number, or one opening the name or set apart, is an episode with a part in its title: "04 - Part 2" in "Lost 4".
             if (digits[0] != '0' && match.Index > scan.CoreStart && !SetApartByDash(text, match.Index) && value != evidence.FolderSeason && !evidence.Varies(match.Index) && evidence.TitleHas(digits) && Regex.IsMatch(scan.Slice(match.Index + match.Length, scan.CoreEnd), @"(?<![\p{L}\p{N}])\d{1,4}(?![\p{L}\p{N}])", RegexOptions.None, Limit)) continue;
             var half = match.Groups["half"].Success && match.Groups["half"].Value != ".0";
@@ -425,7 +425,8 @@ internal static class FilenameEpisodes
         var rest = scan.Slice(after, scan.CoreEnd);
         var opens = match.Index == scan.CoreStart;
         // "12 Monkeys" and "13 Hours" side by side are two films; a show's episodes named this way take more than two files.
-        if (evidence.Varies(match.Index) && !(opens && rest.Length > 0 && digits[0] != '0' && evidence.Ordered < 3)) return false;
+        // "Toy Story 2" to "Toy Story 4" are sequels; episodes numbered like this run longer. "Part 2" has no title for the number to belong to.
+        if (evidence.Varies(match.Index) && !(opens && rest.Length > 0 && digits[0] != '0' && evidence.Ordered < 3) && !(!opens && rest.Length == 0 && digits[0] != '0' && evidence.Ordered < 6 && !FilenameExtras.IsPart(scan.Slice(scan.CoreStart, match.Index)))) return false;
         // "02 - Aliens (1986)": a padded number opening a dated name is a place in a collection. "01.Show.2026.WEBRip" is an episode.
         if (digits[0] == '0') return opens && !scan.HasTail && EndsWithYear.IsMatch(rest);
         // "1. Name" numbers a list.
@@ -702,14 +703,21 @@ internal static class FilenameEpisodes
     internal static bool SameTitle(string a, string b) => MetadataTitles.Normalize(a) == MetadataTitles.Normalize(b);
 
     internal sealed record FolderReading(string Title, string[] Alternates, int? Year, int? Season);
-    private static readonly Regex FolderStop = new(@"(?<![\p{L}\p{N}])(?:(?:tv|ep?|episodes?|ova|oav|vol|volume)[ .]*)?(?<a>\d{1,4})\s*[-~+]\s*(?:ep?[ .]*)?(?<b>\d{1,4})(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:the\s+)?complete(?:\s+(?:series|collection|batch))?(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:batch|box[ -]?set|seasons?'?s?)(?![\p{L}\p{N}])|\+\s*(?:ova|oav|movies?|specials?|extras?)|(?<![\p{L}\p{N}])(?:vol(?:ume)?|disc|disk|box|bd|dvd)[ .]*\d{1,2}(?![\p{L}\p{N}])", Options, Limit);
+    private static readonly Regex FolderStop = new(@"(?<![\p{L}\p{N}])(?:(?:tv|ep?|episodes?|ova|oav|vol|volume)[ .]*)?(?<a>[0-9]{1,4})\s*[-~+]\s*(?:ep?[ .]*)?(?<b>[0-9]{1,4})(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:the\s+)?complete(?:\s+(?:series|collection|batch))?(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:batch|box[ -]?set|seasons?'?s?)(?![\p{L}\p{N}])|\+\s*(?:ova|oav|movies?|specials?|extras?)|(?<![\p{L}\p{N}])(?:vol(?:ume)?|disc|disk|box|bd|dvd)[ .]*[0-9]{1,2}(?![\p{L}\p{N}])", Options, Limit);
 
     // A folder name is read like a release title: what comes before its season, range or release terms is its title.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, FolderReading> FolderReadings = new();
     internal static FolderReading AnalyzeFolder(string folder)
     {
         if (FolderReadings.TryGetValue(folder, out var known)) return known;
-        var reading = ReadFolderName(folder);
+        FolderReading reading;
+        try { reading = ReadFolderName(folder); }
+        // A folder the reader can't make sense of is just a name, like a file it can't.
+        catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or FormatException or OverflowException or InvalidOperationException or RegexMatchTimeoutException)
+        {
+            PlaybackDiagnostics.Record("folder-read-failed", new { error = ex.GetType().Name });
+            return new(folder, [], null, null);
+        }
         if (FolderReadings.Count > 8192) FolderReadings.Clear();
         FolderReadings[folder] = reading;
         return reading;

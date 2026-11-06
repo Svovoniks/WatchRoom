@@ -24,8 +24,17 @@ internal static class FilenameExtras
 
     // Whether a title's words say it's extra material: "Deleted Scene", "Making of", "Part".
     internal static bool Named(string? title) => !string.IsNullOrWhiteSpace(title) && (OtherWords.IsMatch(title) || OpeningWords.IsMatch(title) || EndingWords.IsMatch(title) || TrailerWords.IsMatch(title) || SpecialWords.IsMatch(title) || title.Trim().Equals("part", StringComparison.OrdinalIgnoreCase));
-    // A title that says nothing but that it's extra material, so it can't be a show: "Deleted Scene 2", "Part 3".
-    internal static bool OnlyExtra(string title) => Regex.IsMatch(title.Trim(), @"^(?:deleted scenes?|making of|behind the scenes|bloopers?|part)$", Options, Timeout);
+    // A title that says nothing but that it's extra material, so it can't be a show: "Deleted Scene 2", "Making of 3".
+    internal static bool OnlyExtra(string title) => Regex.IsMatch(title.Trim(), @"^(?:deleted scenes?|making of|behind the scenes|bloopers?)$", Options, Timeout);
+    // "Part 3" is extra material beside a show's episodes and a miniseries' episode in a folder of its own.
+    internal static bool IsPart(string title) => title.Trim().Equals("part", StringComparison.OrdinalIgnoreCase);
+    // What's left of a title after the show's name, when that only says it's extra: "Harbor - Deleted Scene", "Harbor Bonus". "Special Victims Unit" names another show.
+    internal static bool OnlyExtraAfter(string title, string show)
+    {
+        if (!title.StartsWith(show, StringComparison.OrdinalIgnoreCase)) return true;
+        var rest = title[show.Length..].Trim(' ', '-', '.', '_', ':');
+        return rest.Length == 0 || OnlyExtra(rest) || IsPart(rest) || Regex.IsMatch(rest, @"^(?:bonus|extras?|interviews?|(?:art )?gallery|commercials?|featurettes?|summary|specials?|ova|oad|recap|pilot|opening|ending|trailers?|teasers?|promos?|previews?|menu|storyboards?|commentary)$", Options, Timeout);
+    }
     // The kind of a clip from its title: a clip word on its own, or else the words in the title.
     internal static string? Kind(string? title)
     {

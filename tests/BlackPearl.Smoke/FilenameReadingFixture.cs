@@ -189,6 +189,46 @@ static class FilenameReadingFixture
             check(Read("Harbor Extras", $"{word} 2.mkv") is { Series: "Harbor Extras", IsBonus: true, Episode: null }, $"{word} 2 is a clip beside a show's episodes (got {Read("Harbor Extras", $"{word} 2.mkv").Series} {Read("Harbor Extras", $"{word} 2.mkv").Episode})");
             foreach (var n in new[] { 1, 2, 3 }) File.Delete(Path.Combine(directory, "Harbor Extras", $"{word} {n}.mkv"));
         }
+        // A miniseries named in parts keeps its episodes.
+        Run("a miniseries in a season folder", ["Roots", "Season 1"], n => $"Part {n}", Span(1, 6), "Roots", 1);
+        Run("a miniseries in its own folder", ["Chernobyl"], n => $"Part {n}", Span(1, 5), "Chernobyl");
+        // A longer show beside a shorter one that shares its name is a show.
+        var pair = Path.Combine(directory, "Pairs"); Directory.CreateDirectory(pair);
+        foreach (var n in Span(1, 25)) File.WriteAllBytes(Path.Combine(pair, $"Sword Art Online - {n:00}.mkv"), [0]);
+        foreach (var n in Span(1, 24)) File.WriteAllBytes(Path.Combine(pair, $"Sword Art Online II - {n:00}.mkv"), [0]);
+        check(Read("Pairs", "Sword Art Online II - 05.mkv") is { Series: "Sword Art Online II", Episode: 5, IsBonus: false } && Read("Pairs", "Sword Art Online - 05.mkv") is { Series: "Sword Art Online", Episode: 5 }, $"a sequel series beside its first series stays a show (got {Read("Pairs", "Sword Art Online II - 05.mkv").Series} {Read("Pairs", "Sword Art Online II - 05.mkv").Episode})");
+        var unit = Path.Combine(directory, "Law Pairs"); Directory.CreateDirectory(unit);
+        foreach (var n in Span(1, 12)) File.WriteAllBytes(Path.Combine(unit, $"Calm Order - {n:00}.mkv"), [0]);
+        foreach (var n in Span(1, 10)) File.WriteAllBytes(Path.Combine(unit, $"Calm Order Special Victims Unit - {n:00}.mkv"), [0]);
+        check(Read("Law Pairs", "Calm Order Special Victims Unit - 05.mkv") is { Series: "Calm Order Special Victims Unit", Episode: 5, IsBonus: false }, $"a spin-off with a clip word in its name stays a show (got {Read("Law Pairs", "Calm Order Special Victims Unit - 05.mkv").Series})");
+        // Extra material outnumbering the episodes is still extra material.
+        Folder("Harbor Few", "Harbor Few - 01.mkv", "Harbor Few - 02.mkv", "Harbor Few - 03.mkv", "Deleted Scene 1.mkv", "Deleted Scene 2.mkv", "Deleted Scene 3.mkv", "Deleted Scene 4.mkv", "Deleted Scene 5.mkv", "Deleted Scene 6.mkv", "Deleted Scene 7.mkv", "Deleted Scene 8.mkv");
+        check(Read("Harbor Few", "Deleted Scene 4.mkv") is { Series: "Harbor Few", IsBonus: true, Episode: null }, $"many deleted scenes stay with their show (got {Read("Harbor Few", "Deleted Scene 4.mkv").Series})");
+        Film(["The Menu 2.mkv"], "The Menu 2", null);
+        // Folders named with other digits are just names.
+        var otherDigits = Path.Combine("Harbor Arabic", "الموسم ٣"); Folder(otherDigits, "Harbor Arabic - 01.mkv", "Harbor Arabic - 02.mkv", "Harbor Arabic - 03.mkv");
+        check(Read("Harbor Arabic", "الموسم ٣", "Harbor Arabic - 02.mkv").Episode == 2, "a folder named with other digits can still be read");
+        var oddFolder = Path.Combine(directory, "OddFolder"); Directory.CreateDirectory(Path.Combine(oddFolder, "Harbor Arabic", "الموسم ٣")); Directory.CreateDirectory(Path.Combine(oddFolder, "Harbor Arabic", "Season ٣"));
+        await File.WriteAllBytesAsync(Path.Combine(oddFolder, "Harbor Arabic", "الموسم ٣", "Harbor Arabic - 01.mkv"), [0]); await File.WriteAllBytesAsync(Path.Combine(oddFolder, "Harbor Arabic", "Season ٣", "Harbor Arabic - 02.mkv"), [0]);
+        var oddFolderStore = new LibraryStore(Path.Combine(directory, "OddFolderData"));
+        await oddFolderStore.ScanAsync([new(oddFolder)]);
+        check(oddFolderStore.All().Count(x => !x.IsVirtual) == 2, $"folders named with other digits are scanned (got {oddFolderStore.All().Count(x => !x.IsVirtual)})");
+        // Short undashed runs closing a plain name are sequels.
+        Folder("Sequels Flat", "Calm Story.mkv", "Calm Story 2.mkv", "Calm Story 3.mkv", "Calm Story 4.mkv");
+        foreach (var (file, title) in new[] { ("Calm Story.mkv", "Calm Story"), ("Calm Story 2.mkv", "Calm Story 2"), ("Calm Story 4.mkv", "Calm Story 4") }) Film(["Sequels Flat", file], title, null);
+        Folder("Sequels Pair", "Tide 3.mkv", "Tide 4.mkv");
+        Film(["Sequels Pair", "Tide 3.mkv"], "Tide 3", null);
+        // A number in brackets beside a constant episode number is a part.
+        Folder(Path.Combine("Harbor Brackets", "Season 1"), "Harbor Brackets - 492 (1).mkv", "Harbor Brackets - 492 (2).mkv");
+        check(Read("Harbor Brackets", "Season 1", "Harbor Brackets - 492 (2).mkv").Episode == 492, $"a part in brackets doesn't replace the episode number (got {Read("Harbor Brackets", "Season 1", "Harbor Brackets - 492 (2).mkv").Episode})");
+        // A year can name a show.
+        Folder(Path.Combine("TV", "1923"), "01 - Pilot.mkv", "02 - Two.mkv", "03 - Three.mkv");
+        check(Read("TV", "1923", "02 - Two.mkv") is { Series: "1923", Episode: 2 }, $"a show called 1923 keeps its name (got {Read("TV", "1923", "02 - Two.mkv").Series})");
+        // A clip word alone in a name with a dash before its number is still an episode.
+        Numbered(["Stuff Dashed", "Night Gallery - 05.mkv"], "Night Gallery", null, 5);
+        // A file that isn't an episode keeps its whole name.
+        Folder("Stuff Scenes", "Deleted Scene 1.mkv", "Deleted Scene 2.mkv");
+        check(Read("Stuff Scenes", "Deleted Scene 2.mkv").Title == "Deleted Scene 2", $"a deleted scene alone keeps its number in its title (got {Read("Stuff Scenes", "Deleted Scene 2.mkv").Title})");
         // A clip word doesn't name a show.
         Folder("Foo Harbor", "OVA 1.mkv", "OVA 2.mkv", "OVA 3.mkv");
         check(Read("Foo Harbor", "OVA 2.mkv").Series == "Foo Harbor", $"OVA files take their folder's show (got {Read("Foo Harbor", "OVA 2.mkv").Series})");
@@ -200,8 +240,6 @@ static class FilenameReadingFixture
         Run("24 under a folder", ["Serials", "24", "Season 1"], n => $"{n:00}", Span(1, 3), "24", 1);
         Run("86 under a folder", ["Serials", "86", "Season 1"], n => $"{n:00}", Span(1, 3), "86", 1);
         // Parts of an episode, and numbers that open an episode's name.
-        Run("two parts of one episode", ["One Piece", "Season 1"], n => $"One Piece - 492 - Part {n}", [], "One Piece", 1);
-        check(Read("Parts Of One", "Season 1", "One Piece - 492 - Part 2.mkv").Episode is 492 || !File.Exists(Path.Combine(directory, "Parts Of One")), "a part in an episode's name doesn't replace its number");
         Folder(Path.Combine("Harbor Parts", "Season 1"), "Harbor Parts - 492 - Part 1.mkv", "Harbor Parts - 492 - Part 2.mkv");
         check(Read("Harbor Parts", "Season 1", "Harbor Parts - 492 - Part 2.mkv").Episode == 492, $"a part in an episode's name doesn't replace its number (got {Read("Harbor Parts", "Season 1", "Harbor Parts - 492 - Part 2.mkv").Episode})");
         Numbered(["Stuff Version", "Brooklyn 99 - 5v2.mkv"], "Brooklyn 99", null, 5);
