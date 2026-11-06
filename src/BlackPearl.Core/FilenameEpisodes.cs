@@ -37,7 +37,8 @@ internal static class FilenameEpisodes
     private static readonly TimeSpan Limit = TimeSpan.FromSeconds(1);
     private static Regex Rx(string pattern) => new(pattern, Options, Limit);
 
-    private static readonly Regex DashNumberFollows = Rx(@"^\s+-\s+\d{1,4}(?![\p{L}\p{N}])");
+    private static readonly Regex DashNumberFollows = Rx(@"^\s+-\s+\d{1,4}(?:v\d+)?(?:\s*$|\s+-)");
+    private static readonly Regex EpisodeLabelFollows = Rx(@"^[\s._-]*(?:episode|ep|e)[ ._]*\d{1,4}(?![\p{L}\p{N}])");
     private static readonly Regex EndsWithYear = Rx(@"(?:^|[\s(])(?:19|20)\d{2}\)?$");
     private static readonly Regex[] SeasonEpisodeForms =
     [
@@ -137,16 +138,15 @@ internal static class FilenameEpisodes
     {
         if (IsDiscFile(stem)) return new(stem, [], null, null, null, false, stem, false, "Disc");
         // The patterns have a time limit, which a busy machine can reach on any name.
-        for (var attempt = 0; attempt < 2; attempt++)
+        for (var attempt = 0; ; attempt++)
             try { return ReadName(stem, evidence, allowSpecials); }
-            catch (RegexMatchTimeoutException) { }
-        try { return ReadName(stem, evidence, allowSpecials); }
-        // One name the reader can't make sense of must not stop a whole scan: the file is listed under its own name.
-        catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or FormatException or OverflowException or InvalidOperationException or RegexMatchTimeoutException)
-        {
-            PlaybackDiagnostics.Record("filename-read-failed", new { error = ex.GetType().Name });
-            return new(stem, [], null, null, null, false, stem, false, UnreadKind);
-        }
+            catch (RegexMatchTimeoutException) when (attempt < 2) { }
+            // One name the reader can't make sense of must not stop a whole scan: the file is listed under its own name.
+            catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or FormatException or OverflowException or InvalidOperationException or RegexMatchTimeoutException)
+            {
+                PlaybackDiagnostics.Record("filename-read-failed", new { error = ex.GetType().Name });
+                return new(stem, [], null, null, null, false, stem, false, UnreadKind);
+            }
     }
     private const string UnreadKind = "Unread";
     private static Reading ReadName(string stem, FilenameFolders.FolderEvidence evidence, bool allowSpecials)
@@ -158,10 +158,7 @@ internal static class FilenameEpisodes
             FilenameFeatures.Add(hypothesis, scan, evidence, hypotheses);
             hypothesis.Score = FilenameModel.Score(hypothesis.Features);
         }
-        var best = hypotheses.MaxBy(h => h.Score)!;
-        // A closing number running across three or more files is an episode number, however little else the name says.
-        if (best.Form == Form.None && evidence.Ordered >= 3 && !scan.HasTail && !scan.LeadingGroup && hypotheses.FirstOrDefault(h => h.Form == Form.Bare && evidence.Varies(h.Start) && scan.Slice(h.End, scan.CoreEnd).Length == 0) is { } running) best = running;
-        return Interpret(best, scan, evidence);
+        return Interpret(hypotheses.MaxBy(h => h.Score)!, scan, evidence);
     }
 
     // For model training: every reading the name allows, with its features.
@@ -227,9 +224,11 @@ internal static class FilenameEpisodes
             var leadingTag = bracket is { } b && b.End <= scan.CoreStart;
             if (bracket is { } tag && scan.IsSeriesTag(tag)) return;
             if (!Clear(match.Index) || !Free(match.Index, match.Index + match.Length) || match.Index >= clipLimit && !leadingTag || match.Index < scan.CoreStart && !leadingTag) return;
+            // "Night Gallery E05": an episode label after the word says it's part of the show's name.
+            if (!isShort && !leadingTag && EpisodeLabelFollows.IsMatch(text[(match.Index + match.Length)..Math.Max(match.Index + match.Length, Math.Min(scan.CoreEnd, text.Length))])) return;
             // "Night Gallery - 3", "Bonus Family 3": a word in the show's name isn't a clip, when the words up to the next number name the
-            // folder, or that number runs across the files and the word opens the name or a dash sets the number apart from it.
-            // "Show - Art Gallery 3" and "Show Movie Teaser 3" are numbered clips.
+            // folder, or that number runs across the files and the word opens a longer name or, later in the name, a dash sets the number
+            // apart. "Bonus 3" beside a show's episodes, "Show - Art Gallery 3" and "Show Movie Teaser 3" are numbered clips.
             // "Night Gallery - S01E01": a season and episode marker after the word says it's part of the show's name.
             if (!isShort && !leadingTag && results.Any(r => r.Form is Form.SeasonEpisode or Form.CrossForm or Form.SeasonWords && r.Start > match.Index)) return;
             // The pattern can take the number along: "Extras - 01" in a folder called Extras.
@@ -239,7 +238,8 @@ internal static class FilenameEpisodes
                 var from = match.Index + match.Length;
                 var nextNumber = Regex.Match(text[from..Math.Max(from, Math.Min(scan.CoreEnd, text.Length))], @"(?<![\p{L}\p{N}])\d{1,4}(?![\p{L}\p{N}])", RegexOptions.None, Limit);
                 var at = from + nextNumber.Index;
-                if (nextNumber.Success && (evidence.NamesFolder(scan.Slice(scan.CoreStart, at)) || evidence.Varies(at) && !SetApartByDash(text, match.Index) && (match.Index == scan.CoreStart || text[from..at].TrimEnd().EndsWith('-')))) return;
+                if (nextNumber.Success && (evidence.NamesFolder(scan.Slice(scan.CoreStart, at)) || evidence.Varies(at) && !SetApartByDash(text, match.Index) &&
+                    (match.Index == scan.CoreStart ? text[from..at].Any(char.IsLetter) : text[from..at].TrimEnd().EndsWith('-')))) return;
             }
             // "Opening Night", "Interview with the Vampire", "The Menu (2022)": outside a show's location, a clip word that opens a
             // plain name is part of its title. Beside a show's episodes the file still joins them as a clip.
@@ -331,7 +331,7 @@ internal static class FilenameEpisodes
             // "Brooklyn 99 - 5", "86 - 5": an unpadded number before one that a dash sets apart is the show's own.
             if (digits[0] != '0' && !match.Groups["e"].Success && !evidence.Varies(match.Index) && !SetApartByDash(text, match.Index) && DashNumberFollows.IsMatch(text[(match.Index + match.Length)..Math.Max(match.Index + match.Length, Math.Min(scan.CoreEnd, text.Length))])) continue;
             // "Brooklyn 99 1" to "Brooklyn 99 9": a number too big for a season, the same in every file, while a later one runs.
-            if (value > 40 && evidence.Constant(match.Index) && evidence.Slots!.Any(slot => slot.Key > match.Index && slot.Value)) continue;
+            if (value > 40 && evidence.Constant(match.Index) && evidence.Slots!.Any(slot => slot.Value && slot.Key > match.Index && slot.Key <= text.Length && !text[(match.Index + match.Length)..slot.Key].Any(char.IsLetter))) continue;
             // "Room 104 5" in a folder called Room 104. A padded number, or one opening the name or set apart, is an episode with a part in its title: "04 - Part 2" in "Lost 4".
             if (digits[0] != '0' && match.Index > scan.CoreStart && !SetApartByDash(text, match.Index) && value != evidence.FolderSeason && !evidence.Varies(match.Index) && evidence.TitleHas(digits) && Regex.IsMatch(scan.Slice(match.Index + match.Length, scan.CoreEnd), @"(?<![\p{L}\p{N}])\d{1,4}(?![\p{L}\p{N}])", RegexOptions.None, Limit)) continue;
             var half = match.Groups["half"].Success && match.Groups["half"].Value != ".0";
@@ -750,7 +750,8 @@ internal static class FilenameEpisodes
         var title = Trim(Regex.Replace(FormatTitle(scan, start, stop, alternates), @"(?:\s+(?:TV|MOVIE|MOVIES|OVA|OAV|BD|DVD|WEB|Series))+$", "", RegexOptions.IgnoreCase, Limit));
         // "01. Season 1" numbers a folder; it doesn't name one.
         // "86 - 5" names its show 86.
-        var numberedShow = title[..Math.Min(1, title.Length)] != "0" && DashNumberFollows.IsMatch(scan.Text[Math.Min(scan.CoreStart + title.Length, scan.Text.Length)..]);
+        var numberedFrom = Math.Min(scan.CoreStart + title.Length, scan.Text.Length);
+        var numberedShow = title[..Math.Min(1, title.Length)] != "0" && DashNumberFollows.IsMatch(scan.Text[numberedFrom..Math.Max(numberedFrom, Math.Min(scan.CoreEnd, scan.Text.Length))]);
         if (!numberedShow && Regex.IsMatch(title, @"^\d{1,3}\.?$", RegexOptions.None, Limit) && (season is not null || stop < scan.CoreEnd || scan.Text.TrimStart().StartsWith(title + ".", StringComparison.Ordinal))) title = "";
         title = Regex.Replace(title, @"^0\d{0,2}(?:\.|\s+-)\s*(?=\S)", "", RegexOptions.None, Limit);
         // A single episode's release: "Clione no Akari 01 Vostfr", "Mai-ZHiME 02v2 vostfr".

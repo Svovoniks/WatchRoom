@@ -12,7 +12,7 @@ internal static class FilenameFolders
     private static readonly Regex GenericFolder = new(@"(?i)^(?:" + RootNames + @")$", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
     private static readonly Regex ContainerFolder = new(@"(?i)^(?:mpg|mp4|mkv|avi|mpeg-?2?|ogm|wmv|video_ts|bdmv|stream|\d{3,4}p|bd|dvd|web|web-?dl|bluray|raw|raws|hevc|x264|x265|ova|oad|ona|tv|movies?|films?|specials?|(?:disc|disk|cd|vol\.?|volume)\s*\d{1,2})$", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
     private static readonly Regex MovieFolder = new(@"(?i)^(?:Movies?|Films?|Фильмы|Кино|Kino)$", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
-    private static readonly Regex Range = new(@"(?<![\p{L}\p{N}.])(?:EP?|Ep\.?|E)?\s?(?<a>\d{1,4})\s?[-~–—]\s?(?:EP?\s?)?(?<b>\d{1,4})(?![\p{L}\p{N}])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
+    private static readonly Regex Range = new(@"(?<![\p{L}\p{N}.])(?:EP?|Ep\.?|E)?\s?(?<a>[0-9]{1,4})\s?[-~–—]\s?(?:EP?\s?)?(?<b>[0-9]{1,4})(?![\p{L}\p{N}])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
 
     internal sealed record FolderEvidence(bool Series, bool Movies, int? FolderSeason, bool SeasonFolder, bool HasFolder, (int Low, int High)[] Ranges, string[] TitleNumbers,
         IReadOnlyDictionary<int, bool>? Slots, int Ordered, bool OwnFolder = false, string[]? FolderTitles = null, IReadOnlySet<int>? PlainRuns = null, IReadOnlySet<int>? PackedRuns = null)
@@ -105,7 +105,7 @@ internal static class FilenameFolders
     }
 
     private static readonly Regex HashTag = new(@"[\[(]\s*[0-9A-Fa-f]{8}\s*[\])]", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
-    private static readonly Regex DigitRun = new(@"\d+", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
+    private static readonly Regex DigitRun = new(@"[0-9]+", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
 
     // Walk the names left to right. Names that read the same up to a number form a group; if the number differs across the
     // group it's the running number. If it's the same, it's part of the title or the release, and the walk continues.

@@ -1069,6 +1069,9 @@ public static partial class FileNames
         var numbering = reading.Numbering;
         // An obfuscated file inside a named release: the folder "Show.S01E02.720p" says what "gNWDXow11s.mkv" doesn't.
         if (numbering is null && reading.Clip is null && System.IO.Path.GetFileName(dir) is { Length: > 0 } releaseName && FilenameEpisodes.ReleaseNumbering(releaseName) is { } releaseFolder && !FilenameEpisodes.SameTitle(reading.Title, releaseFolder.Series)) numbering = releaseFolder;
+        // "Deleted Scene 2" beside "Harbor - 01": extra material numbering itself isn't a second show in the folder.
+        if (numbering is { ExplicitSeason: false, Series: { } numberedTitle } && sourceKind != "Movie" && filmExtra is null && !showExtras && FilenameExtras.Named(numberedTitle) &&
+            (FilenameExtras.OnlyExtra(numberedTitle) || EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success) is { } folderShow && !FilenameEpisodes.SameTitle(folderShow, numberedTitle))) numbering = null;
         var season = numbering?.Season; var number = numbering?.Episode;
         string? series = numbering?.Series;
         // A clip is a show's when its location says so; anywhere else it needs numbered episodes beside it (below).
@@ -1080,8 +1083,12 @@ public static partial class FileNames
             ? EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success) : null;
         if (besideEpisodes is not null) { bonus = true; series = besideEpisodes; }
         // "One Piece - Egghead SP4" beside "One Piece - 1100" is a One Piece special, not a show called "One Piece - Egghead".
-        else if (numbering is { ExplicitSeason: true, Season: 0 } && EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success) is { } owner) series = owner;
+        // "OVA 1" to "OVA 3" read alone as a run of a show called OVA, which only says what they are.
+        else if (numbering is { ExplicitSeason: true, Season: 0 } && EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success) is { } owner &&
+            !(string.IsNullOrWhiteSpace(numbering.Series) && name.StartsWith(owner, StringComparison.OrdinalIgnoreCase))) series = owner;
         else if (bonus && string.IsNullOrWhiteSpace(series)) series = reading.Title;
+        // "OP.mkv" loose in a library, with no folder to name a show, has no show to belong to.
+        if (bonus && string.IsNullOrWhiteSpace(series) && IsLooseFolder(dir, libraryRoot) && NearestTitledFolder(dir, libraryRoot) is null) { bonus = false; series = null; }
         if (numbering is not null && !numbering.ExplicitSeason && number is not null && kind == "Mixed" && reading.LeadingGroup) kind = "Anime";
         // "Show Season_2 - 01" inside "Show S02": the folder and the name agree, so the folder's numbering stands.
         var filenameSeason = numbering?.ExplicitSeason == true && !(reading.Kind == "Bare" && season == folderSeason) ? season : null;
@@ -1096,7 +1103,9 @@ public static partial class FileNames
         if (numbering is not null && string.IsNullOrWhiteSpace(series)) series = NearestTitledFolder(dir, libraryRoot) ?? (IsLooseFolder(dir, libraryRoot) && numbering.Subtitle is { Length: > 0 } words ? words : System.IO.Path.GetFileName(dir));
         var seriesDir = showExtras && extrasOwner is not null ? extrasOwner : dir;
         int? sourcePart = null;
-        while (!NamesShowInFolder(path, seriesDir) && (IsReleaseDirectory(seriesDir) || FilenameFolders.IsContainer(System.IO.Path.GetFileName(seriesDir))) && System.IO.Path.GetDirectoryName(seriesDir) is { } parent &&
+        // "Serials\24\Season 1\01.mkv": a folder called a number, with a season folder inside and files that name nothing, is the show.
+        bool HoldsSeason() => seriesDir != dir && string.IsNullOrWhiteSpace(numbering?.Series) && Regex.IsMatch(System.IO.Path.GetFileName(seriesDir), @"^\d{1,3}$") && IsSeasonFolder(System.IO.Path.GetFileName(dir));
+        while (!NamesShowInFolder(path, seriesDir) && !HoldsSeason() && (IsReleaseDirectory(seriesDir) || FilenameFolders.IsContainer(System.IO.Path.GetFileName(seriesDir))) && System.IO.Path.GetDirectoryName(seriesDir) is { } parent &&
             (libraryRoot is null || !string.Equals(System.IO.Path.GetFullPath(libraryRoot), seriesDir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
         {
             var part = Regex.Match(System.IO.Path.GetFileName(seriesDir), @"(?i)^Part\s*(\d+)\s*$");
@@ -1129,7 +1138,7 @@ public static partial class FileNames
         // Structured show folders own membership, regardless of aliases in individual filenames.
         var parentName = System.IO.Path.GetFileName(seriesDir);
         // A folder of many different titles is a collection, and a name like "UHD" or "Video" isn't a show at all.
-        var collection = !File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) && (IsLooseFolder(seriesDir, libraryRoot) && !(numbering is not null && string.IsNullOrWhiteSpace(numbering.Series) && IsNumberedShow(seriesDir, libraryRoot)) || HoldsManyTitles(seriesDir, seriesContext || seasonFolder.Success) || HoldsManyTitles(dir, seriesContext || seasonFolder.Success));
+        var collection = !File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) && (IsLooseFolder(seriesDir, libraryRoot) && !HoldsSeason() && !(numbering is not null && string.IsNullOrWhiteSpace(numbering.Series) && IsNumberedShow(seriesDir, libraryRoot)) || HoldsManyTitles(seriesDir, seriesContext || seasonFolder.Success) || HoldsManyTitles(dir, seriesContext || seasonFolder.Success));
         // "Backup\1\Harbor S01E05": the file names its show, and the folders above only hold it.
         var heldElsewhere = Regex.IsMatch(System.IO.Path.GetFileName(dir), @"^\d{1,3}$") && System.IO.Path.GetDirectoryName(dir) is { } holder && NamesOtherShow(path, holder);
         var structured = File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) || !heldElsewhere && (numbering is not null || bonus) && (seasonFolder.Success || seriesContext || seriesDir != dir) &&

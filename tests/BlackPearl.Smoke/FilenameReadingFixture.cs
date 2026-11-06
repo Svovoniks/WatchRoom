@@ -173,14 +173,45 @@ static class FilenameReadingFixture
         Run("Brooklyn 99 alone", [], n => $"Brooklyn 99 - {n}", [5], "Brooklyn 99");
         Numbered(["Lost 4", "Season 1", "04 - Part 2.mkv"], "Lost 4", 1, 4);
         Numbered(["Harbor 2", "Season 1", "02 - Chapter 3.mkv"], "Harbor 2", 1, 2);
-        // Unpadded numbers beside a number in the show's name count up.
-        Run("Lost 4 with no dash", [], n => $"Lost 4 {n}", Span(1, 12), "Lost 4");
-        Run("Babylon 5 with no dash", ["Downloads"], n => $"Babylon 5 {n}", Span(1, 12), "Babylon 5");
-        Run("a plain name with no dash", [], n => $"Harbor Lights {n}", Span(1, 12), "Harbor Lights");
-        Run("Movie Night with no dash", [], n => $"Movie Night {n}", Span(1, 12), "Movie Night");
+        // Films in parts stay films, in a folder of their own or beside a show's episodes.
+        foreach (var (folder, names) in new (string, string[])[] { ("Film Parts", ["Calm Part 1", "Calm Part 2", "Calm Part 3"]), ("Film Chapters", ["Harbor Wick Chapter 2", "Harbor Wick Chapter 3", "Harbor Wick Chapter 4"]), ("Film Discs", ["Tide CD 1", "Tide CD 2", "Tide CD 3"]), ("Film Volumes", ["Calm Bill Vol 1", "Calm Bill Vol 2", "Harbor Near - 01", "Harbor Near - 02", "Harbor Near - 03", "Harbor Near - 04", "Harbor Near - 05"]) })
+        {
+            Folder(folder, names);
+            var part = names[0];
+            check(Read(folder, part + ".mkv") is { Series: null, Episode: null, IsBonus: false }, $"{part} stays a film (got {Read(folder, part + ".mkv").Series} {Read(folder, part + ".mkv").Episode})");
+        }
+        // Extra material beside a show's episodes is the show's clips.
+        foreach (var extra in new[] { "Bonus 1", "Interview 2", "Gallery 3", "Commercial 1", "Featurette 2", "Summary 3", "Deleted Scene 1", "Making of 2", "Part 3", "Bonus - 1" })
+        {
+            Folder("Harbor Extras", "Harbor Extras - 01.mkv", "Harbor Extras - 02.mkv", "Harbor Extras - 03.mkv", "Harbor Extras - 04.mkv", "Harbor Extras - 05.mkv");
+            var word = extra[..extra.LastIndexOf(' ')].TrimEnd(' ', '-');
+            foreach (var n in new[] { 1, 2, 3 }) File.WriteAllBytes(Path.Combine(directory, "Harbor Extras", $"{word} {n}.mkv"), [0]);
+            check(Read("Harbor Extras", $"{word} 2.mkv") is { Series: "Harbor Extras", IsBonus: true, Episode: null }, $"{word} 2 is a clip beside a show's episodes (got {Read("Harbor Extras", $"{word} 2.mkv").Series} {Read("Harbor Extras", $"{word} 2.mkv").Episode})");
+            foreach (var n in new[] { 1, 2, 3 }) File.Delete(Path.Combine(directory, "Harbor Extras", $"{word} {n}.mkv"));
+        }
+        // A clip word doesn't name a show.
+        Folder("Foo Harbor", "OVA 1.mkv", "OVA 2.mkv", "OVA 3.mkv");
+        check(Read("Foo Harbor", "OVA 2.mkv").Series == "Foo Harbor", $"OVA files take their folder's show (got {Read("Foo Harbor", "OVA 2.mkv").Series})");
+        // An episode label after a clip word.
+        Run("Night Gallery with Episode labels", ["Night Gallery"], n => $"Night Gallery Episode {n}", Span(1, 6), "Night Gallery");
+        Run("Night Gallery with E labels", ["Night Gallery"], n => $"Night Gallery E{n:00}", Span(1, 6), "Night Gallery");
+        Numbered(["Stuff Lone", "Night Gallery E05.mkv"], "Night Gallery", null, 5);
+        // Numeric shows above their season folders keep their names.
+        Run("24 under a folder", ["Serials", "24", "Season 1"], n => $"{n:00}", Span(1, 3), "24", 1);
+        Run("86 under a folder", ["Serials", "86", "Season 1"], n => $"{n:00}", Span(1, 3), "86", 1);
+        // Parts of an episode, and numbers that open an episode's name.
+        Run("two parts of one episode", ["One Piece", "Season 1"], n => $"One Piece - 492 - Part {n}", [], "One Piece", 1);
+        check(Read("Parts Of One", "Season 1", "One Piece - 492 - Part 2.mkv").Episode is 492 || !File.Exists(Path.Combine(directory, "Parts Of One")), "a part in an episode's name doesn't replace its number");
+        Folder(Path.Combine("Harbor Parts", "Season 1"), "Harbor Parts - 492 - Part 1.mkv", "Harbor Parts - 492 - Part 2.mkv");
+        check(Read("Harbor Parts", "Season 1", "Harbor Parts - 492 - Part 2.mkv").Episode == 492, $"a part in an episode's name doesn't replace its number (got {Read("Harbor Parts", "Season 1", "Harbor Parts - 492 - Part 2.mkv").Episode})");
+        Numbered(["Stuff Version", "Brooklyn 99 - 5v2.mkv"], "Brooklyn 99", null, 5);
+        Numbered(["Harbor Named Number", "Season 1", "12 - 300 Spartans.mkv"], "Harbor Named Number", 1, 12);
+        // Other digit systems can't stop a folder being read.
+        Folder("Harbor Digits", "Harbor Digits - 01.mkv", "Harbor Digits - 02.mkv", "Harbor Digits ٣.mkv");
+        check(Read("Harbor Digits", "Harbor Digits ٣.mkv") is not null && Read("Harbor Digits", "Harbor Digits - 02.mkv").Episode == 2, "a name with other digits doesn't stop its folder being read");
         // A clip word before a season and episode marker.
         Run("Night Gallery with markers", [], n => $"Night Gallery - S01E{n:00} - The Name {n}", Span(1, 12), "Night Gallery", 1);
-        // Numbered clips stay clips: the word comes after a dash, or sits right beside its number.
+        // Numbered clips stay clips: the word comes after a dash.
         Folder("Calm Star", "Calm Star - 01.mkv", "Calm Star - 02.mkv", "Calm Star - 03.mkv", "Calm Star - Art Gallery 1.mkv", "Calm Star - Art Gallery 2.mkv", "Calm Star - Art Gallery 3.mkv");
         check(Read("Calm Star", "Calm Star - Art Gallery 2.mkv") is { Series: "Calm Star", IsBonus: true, Episode: null }, $"a numbered gallery is a clip (got {Read("Calm Star", "Calm Star - Art Gallery 2.mkv").Episode})");
         // A clip word in the show's name.

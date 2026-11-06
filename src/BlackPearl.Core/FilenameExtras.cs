@@ -22,6 +22,10 @@ internal static class FilenameExtras
     private static readonly Regex TrailerWords = new(@"\b(?:trailers?|teasers?|promos?|previews?|commercials?|PV|CM)\b", Options, Timeout);
     private static readonly Regex SpecialWords = new(@"\b(?:special|OVA|OAD|recap|movie|pilot)\b", Options, Timeout);
 
+    // Whether a title's words say it's extra material: "Deleted Scene", "Making of", "Part".
+    internal static bool Named(string? title) => !string.IsNullOrWhiteSpace(title) && (OtherWords.IsMatch(title) || OpeningWords.IsMatch(title) || EndingWords.IsMatch(title) || TrailerWords.IsMatch(title) || SpecialWords.IsMatch(title) || title.Trim().Equals("part", StringComparison.OrdinalIgnoreCase));
+    // A title that says nothing but that it's extra material, so it can't be a show: "Deleted Scene 2", "Part 3".
+    internal static bool OnlyExtra(string title) => Regex.IsMatch(title.Trim(), @"^(?:deleted scenes?|making of|behind the scenes|bloopers?|part)$", Options, Timeout);
     // The kind of a clip from its title: a clip word on its own, or else the words in the title.
     internal static string? Kind(string? title)
     {
