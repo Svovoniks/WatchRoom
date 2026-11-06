@@ -133,6 +133,21 @@ static class FilenameReadingFixture
         Folder("Calm Subs", "note.txt"); Directory.CreateDirectory(Path.Combine(directory, "Calm Subs", "Subs"));
         Folder(Path.Combine("Calm Subs", "OVA"), "Calm Subs - 01.mkv");
         Numbered(["Calm Subs", "OVA", "Calm Subs - 01.mkv"], "Calm Subs", 1, 1);
+        // A clip in a show's OVA folder is the show's clip in a show library, and a clip with a title of its own is that title's.
+        Folder(Path.Combine("Calm Clip", "Season 1"), "Calm Clip - 01.mkv", "Calm Clip - 02.mkv");
+        Folder(Path.Combine("Calm Clip", "OVA"), "Calm Clip - NCED.mkv", "Calm Clip OVA.mkv");
+        Folder(Path.Combine("Calm Spin", "Season 1"), "Calm Spin - 01.mkv", "Calm Spin - 02.mkv");
+        Folder(Path.Combine("Calm Spin", "OVA"), "Calm Spin Ultimate - NCOP1.mkv");
+        foreach (var library in new[] { "Anime", "Show" })
+        {
+            foreach (var ovaClip in new[] { "Calm Clip - NCED.mkv", "Calm Clip OVA.mkv" })
+            {
+                var clipRead = FileNames.Parse(Path.Combine(directory, "Calm Clip", "OVA", ovaClip), library, directory);
+                check(clipRead is { Series: "Calm Clip", Season: 0, Episode: null }, $"{ovaClip} in a {library} library is a clip of the show (got {clipRead.Series} season {clipRead.Season} episode {clipRead.Episode} clip {clipRead.IsBonus})");
+            }
+            var spin = FileNames.Parse(Path.Combine(directory, "Calm Spin", "OVA", "Calm Spin Ultimate - NCOP1.mkv"), library, directory);
+            check(spin.Series == "Calm Spin Ultimate", $"a clip with its own title in a {library} library stays that title's (got {spin.Series} season {spin.Season} clip {spin.IsBonus})");
+        }
         Folder(Path.Combine("Calm Beedy", "BD"), "Calm Beedy - 01.mkv", "Calm Beedy - 02.mkv");
         Folder(Path.Combine("Calm Beedy", "OVA"), "Calm Beedy - 01.mkv");
         Numbered(["Calm Beedy", "OVA", "Calm Beedy - 01.mkv"], "Calm Beedy", 0, 1);

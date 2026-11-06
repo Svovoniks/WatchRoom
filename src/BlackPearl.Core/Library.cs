@@ -1173,7 +1173,7 @@ public static partial class FileNames
             if (above.Length == 2) return false;
             // "Show\OVA\Show Ultimate - 01", "Show Ultimate OVA 01" and "Show Ultimate - S01E01" have a title of their own, and providers list them apart.
             // "Show OAD - S00E01" only says what it is, and "Show Two - S02E01" gives a later season, so both are the show's. Extras stay with whatever holds them.
-            if (OvaFolder(System.IO.Path.GetFileName(seriesDir)) && filenameSeason is null or 0 or 1 && !showExtras) return TitleWords(Regex.Replace(numbering?.Series ?? "", @"(?i)(?<![\p{L}\p{N}])(?:ova|oad|ona)(?![\p{L}\p{N}])", " ")) != above;
+            if (OvaFolder(System.IO.Path.GetFileName(seriesDir)) && filenameSeason is null or 0 or 1 && !showExtras) return TitleWords(Regex.Replace(ownShow, @"(?i)(?<![\p{L}\p{N}])(?:ova|oad|ona)(?![\p{L}\p{N}])", " ")) != above;
             if (!ownShow.Contains(above, StringComparison.Ordinal) && !above.Contains(ownShow, StringComparison.Ordinal)) return true;
             // "Star Trek\TV" with TNG and DS9 beside each other: each file is its own show.
             return HoldsSeveralShows(seriesDir, seriesContext || seasonFolder.Success);
