@@ -157,6 +157,16 @@ static class FilenameReadingFixture
                 var loneRead = FileNames.Parse(Path.Combine(directory, folder, "OVA", lone), library, directory);
                 check(loneRead is { IsBonus: false } && loneRead.Series == folder, $"{lone} alone in a {library} library is a title to look up, not a clip (got {loneRead.Series} clip {loneRead.IsBonus})");
             }
+        // Nor does a folder holding only other clips, or a film, have episodes to join.
+        Folder("Calm Iota", "Calm Iota - NCOP.mkv"); Folder(Path.Combine("Calm Iota", "OVA"), "Calm Iota OVA.mkv");
+        Folder(Path.Combine("Calm Kappa", "Season 1"), "Calm Kappa - NCOP.mkv"); Folder(Path.Combine("Calm Kappa", "OVA"), "Calm Kappa OVA.mkv");
+        Folder("Calm Zeta", "Calm Zeta.mkv"); Folder(Path.Combine("Calm Zeta", "OVA"), "Calm Zeta OVA.mkv");
+        foreach (var library in new[] { "Anime", "Show" })
+            foreach (var noEpisodes in new[] { "Calm Iota", "Calm Kappa", "Calm Zeta" })
+            {
+                var noneRead = FileNames.Parse(Path.Combine(directory, noEpisodes, "OVA", noEpisodes + " OVA.mkv"), library, directory);
+                check(noneRead is { IsBonus: false }, $"{noEpisodes} OVA in a {library} library has no episodes to join, so a lookup can find it (got {noneRead.Series} clip {noneRead.IsBonus})");
+            }
         // Numbered files beside it in the same folder are a show to join.
         Folder(Path.Combine("Calm Omega", "OVA"), "Calm Omega - 01.mkv", "Calm Omega - 02.mkv", "Calm Omega - NCED.mkv");
         check(FileNames.Parse(Path.Combine(directory, "Calm Omega", "OVA", "Calm Omega - NCED.mkv"), "Anime", directory) is { IsBonus: true, Series: "Calm Omega" } besideOva && besideOva.ShowId == FileNames.Parse(Path.Combine(directory, "Calm Omega", "OVA", "Calm Omega - 01.mkv"), "Anime", directory).ShowId, "a clip beside numbered files in an OVA folder joins them");
@@ -688,7 +698,7 @@ static class FilenameReadingFixture
         filmClipStore.Save(new MediaItem(FileNames.Parse(filmClipPath, "Show", filmClipRoot).Id, filmClipPath, "Calm Alpha OVA", "Movie", MetadataProvider: "tmdb", MetadataId: 91, MetadataType: "movie", ProviderIds: new() { ["tmdb"] = "91" }, Overview: "The film's plot", MetadataFetchedAt: 5000));
         await filmClipStore.ScanAsync([new(filmClipRoot, "Show")]);
         var filmClip = filmClipStore.All().Single(x => x.Path == filmClipPath);
-        check(filmClip is { IsBonus: false, MetadataId: 91, Series: null, Overview: "The film's plot" }, $"an identified film isn't made a clip (got clip {filmClip.IsBonus} id {filmClip.MetadataId} series {filmClip.Series})");
+        check(filmClip is { IsBonus: false, MetadataId: 91, Series: null, Overview: "The film's plot", EpisodeTitle: null, SeriesPath: null }, $"an identified film isn't made a clip, nor does it take the clip's title or folder (got clip {filmClip.IsBonus} id {filmClip.MetadataId} series {filmClip.Series} title {filmClip.EpisodeTitle} path {filmClip.SeriesPath})");
         var offline = Path.Combine(directory, "Offline"); Directory.CreateDirectory(offline);
         var offlineStore = new LibraryStore(offline); offlineStore.Save(FileNames.Parse(Path.Combine(offline, "Calm.Waters.2019.mkv")));
         FromBeforeReader(offline);
