@@ -119,6 +119,20 @@ static class FilenameReadingFixture
         check(FileNames.Parse(Path.Combine(directory, "Calm Hell", "OVA", "[Grp] Calm Hell - 03.mkv"), "Anime", directory) is { Season: 0, Episode: 3, AbsoluteEpisode: null, NumberingOrder: not "absolute" }, "a show's OVA keeps its place in season 0, not as a run through the show");
         // An OVA with a title of its own is its own show, and its own numbers don't touch the show's.
         check(FileNames.Parse(Path.Combine(directory, "Calm Hell", "OVA", "[Grp] Calm Hell Ultimate - 02.mkv"), "Anime", directory) is { Series: "Calm Hell Ultimate", Season: 1, Episode: 2 } own && own.ShowId != FileNames.Parse(Path.Combine(directory, "Calm Hell", "TV", "[Grp] Calm Hell - 02.mkv"), "Anime", directory).ShowId, $"an OVA with its own title is its own show (got {FileNames.Parse(Path.Combine(directory, "Calm Hell", "OVA", "[Grp] Calm Hell Ultimate - 02.mkv"), "Anime", directory).Series})");
+        // However it says so: the word, or a first season of its own.
+        Folder(Path.Combine("Calm Dawn", "Season 1"), "Calm Dawn - S01E01.mkv", "Calm Dawn - S01E02.mkv");
+        Folder(Path.Combine("Calm Dawn", "OVA"), "[Grp] Calm Dawn Ultimate OVA 01.mkv", "[Grp] Calm Dawn Ultimate OVA 02.mkv");
+        check(Read("Calm Dawn", "OVA", "[Grp] Calm Dawn Ultimate OVA 01.mkv") is { Series: "Calm Dawn Ultimate", Season: 0, Episode: 1 }, $"an OVA named with the word is its own show (got {Read("Calm Dawn", "OVA", "[Grp] Calm Dawn Ultimate OVA 01.mkv").Series} {Read("Calm Dawn", "OVA", "[Grp] Calm Dawn Ultimate OVA 01.mkv").Season})");
+        Folder(Path.Combine("Calm Stamp", "TV"), "Calm Stamp - S01E01.mkv", "Calm Stamp - S01E02.mkv");
+        Folder(Path.Combine("Calm Stamp", "OVA"), "Calm Stamp Stampede - S01E01.mkv", "Calm Stamp Stampede - S01E02.mkv");
+        Numbered(["Calm Stamp", "OVA", "Calm Stamp Stampede - S01E01.mkv"], "Calm Stamp Stampede", 1, 1);
+        Folder(Path.Combine("Calm Sand", "TV"), "Calm Sand - 01.mkv", "Calm Sand - 02.mkv");
+        Folder(Path.Combine("Calm Sand", "OAD"), "Calm Sand OAD - S00E01.mkv");
+        Numbered(["Calm Sand", "OAD", "Calm Sand OAD - S00E01.mkv"], "Calm Sand", 0, 1);
+        // A folder with no videos isn't the show's own episodes, and a clip doesn't make a card out of the folder.
+        Folder("Calm Subs", "note.txt"); Directory.CreateDirectory(Path.Combine(directory, "Calm Subs", "Subs"));
+        Folder(Path.Combine("Calm Subs", "OVA"), "Calm Subs - 01.mkv");
+        Numbered(["Calm Subs", "OVA", "Calm Subs - 01.mkv"], "Calm Subs", 1, 1);
         Folder(Path.Combine("Calm Beedy", "BD"), "Calm Beedy - 01.mkv", "Calm Beedy - 02.mkv");
         Folder(Path.Combine("Calm Beedy", "OVA"), "Calm Beedy - 01.mkv");
         Numbered(["Calm Beedy", "OVA", "Calm Beedy - 01.mkv"], "Calm Beedy", 0, 1);
@@ -566,9 +580,9 @@ static class FilenameReadingFixture
         Directory.CreateDirectory(media); Directory.CreateDirectory(upgradeData);
         var episodePath = Path.Combine(media, "Harbor Lights - 05 [1080p].mkv"); var filmPath = Path.Combine(upgrade, "media", "Calm.Waters.2019.1080p.mkv"); var lockedPath = Path.Combine(media, "Harbor Lights - 06 [1080p].mkv");
         var mappedPath = Path.Combine(media, "Harbor Lights - 07 [1080p].mkv");
-        var ovaEpisodePath = Path.Combine(upgrade, "media", "Calm Sea", "TV", "[Grp] Calm Sea - 01.mkv"); var ovaPath = Path.Combine(upgrade, "media", "Calm Sea", "OVA", "[Grp] Calm Sea - 01.mkv"); var ownOvaPath = Path.Combine(upgrade, "media", "Calm Sea", "OVA", "[Grp] Calm Sea Ultimate - 01.mkv");
+        var ovaEpisodePath = Path.Combine(upgrade, "media", "Calm Sea", "TV", "[Grp] Calm Sea - 01.mkv"); var ovaPath = Path.Combine(upgrade, "media", "Calm Sea", "OVA", "[Grp] Calm Sea - 01.mkv"); var ownOvaPath = Path.Combine(upgrade, "media", "Calm Sea", "OVA", "[Grp] Calm Sea Ultimate - 01.mkv"); var wordOvaPath = Path.Combine(upgrade, "media", "Calm Sea", "OVA", "[Grp] Calm Sea Dawn OVA 01.mkv");
         Directory.CreateDirectory(Path.GetDirectoryName(ovaEpisodePath)!); Directory.CreateDirectory(Path.GetDirectoryName(ovaPath)!);
-        await File.WriteAllBytesAsync(ovaEpisodePath, [0]); await File.WriteAllBytesAsync(ovaPath, [0]); await File.WriteAllBytesAsync(ownOvaPath, [0]);
+        await File.WriteAllBytesAsync(ovaEpisodePath, [0]); await File.WriteAllBytesAsync(ovaPath, [0]); await File.WriteAllBytesAsync(ownOvaPath, [0]); await File.WriteAllBytesAsync(wordOvaPath, [0]);
         var namedPath = Path.Combine(media, "Harbor Lights - 08 [1080p].mkv"); var sameNamedPath = Path.Combine(media, "Harbor Lights - 09 - Parsed Name [1080p].mkv"); var datedPath = Path.Combine(upgrade, "media", "Quiet.Harbor.2019.1080p.mkv");
         foreach (var file in new[] { episodePath, filmPath, lockedPath, mappedPath, namedPath, sameNamedPath, datedPath }) await File.WriteAllBytesAsync(file, [0]);
         var mediaRoot = Path.Combine(upgrade, "media");
@@ -586,6 +600,7 @@ static class FilenameReadingFixture
         seed.Save(FileNames.Parse(ovaPath, "Mixed", Path.Combine(upgrade, "media")) with { Series = "Calm Sea", Season = 1, Episode = 1, AbsoluteEpisode = 1, NumberingOrder = "absolute", NumberingSource = "absolute" });
         // And an OVA it matched to a show of its own, which mustn't hand that match to the show.
         seed.Save(FileNames.Parse(ownOvaPath, "Mixed", Path.Combine(upgrade, "media")) with { Title = "Calm Sea Ultimate", Series = "Calm Sea Ultimate", Season = 1, Episode = 1, MetadataProvider = "tvmaze", MetadataId = 81, MetadataType = "tv", ProviderIds = new() { ["tvmaze"] = "81" }, Overview = "The OVA's plot" });
+        seed.Save(FileNames.Parse(wordOvaPath, "Mixed", Path.Combine(upgrade, "media")) with { Title = "Calm Sea Dawn", Series = "Calm Sea Dawn", Season = 0, Episode = 1, MetadataProvider = "tvmaze", MetadataId = 82, MetadataType = "tv", ProviderIds = new() { ["tvmaze"] = "82" } });
         // Single fields the user locked, on a reading that moves and on one that doesn't.
         seed.Save(FileNames.Parse(namedPath, "Mixed", mediaRoot) with { Season = 9, Episode = 88, EpisodeTitle = "My name", EpisodeOverview = "My plot", AirDate = "2001-02-03", SeasonTitle = "My season", LockedFields = ["EpisodeTitle", "EpisodeOverview", "AirDate", "SeasonTitle"] });
         seed.Save(FileNames.Parse(sameNamedPath, "Mixed", mediaRoot) with { EpisodeTitle = "My other name", LockedFields = ["EpisodeTitle"] });
@@ -620,6 +635,7 @@ static class FilenameReadingFixture
         check(read[sequelPath] is { MetadataId: 72, Overview: "The sequel's plot", Series: null, Episode: null }, $"a bare number doesn't overturn a film a provider identified (got {read[sequelPath].MetadataId} {read[sequelPath].Series} {read[sequelPath].Episode})");
         check(read[lockedPath] is { Season: 7, Episode: 77 }, "locked numbering isn't touched");
         check(read[ovaPath] is { Season: 0, Episode: 1, AbsoluteEpisode: null, Series: "Calm Sea" } && read[ovaEpisodePath] is { Season: 1, Episode: 1, Series: "Calm Sea" }, $"an upgrade moves a show's OVA apart from its episodes (got {read[ovaPath].Series} {read[ovaPath].Season}x{read[ovaPath].Episode} absolute {read[ovaPath].AbsoluteEpisode})");
+        check(read[wordOvaPath] is { MetadataId: 82, Series: "Calm Sea Dawn", Season: 0 } && read[wordOvaPath].ShowId != read[ovaEpisodePath].ShowId && read[ovaEpisodePath].MetadataId is null, $"an OVA named with the word keeps its own match, apart from the show (got {read[wordOvaPath].Series} id {read[wordOvaPath].MetadataId}, show's id {read[ovaEpisodePath].MetadataId})");
         check(read[ownOvaPath] is { Season: 1, Episode: 1, MetadataId: 81, Series: "Calm Sea Ultimate" } && read[ownOvaPath].ShowId != read[ovaEpisodePath].ShowId && read[ovaEpisodePath].MetadataId is null, $"an OVA matched to its own show keeps it, apart from the show (got {read[ownOvaPath].Series} {read[ownOvaPath].Season}x{read[ownOvaPath].Episode} id {read[ownOvaPath].MetadataId}, show's id {read[ovaEpisodePath].MetadataId})");
         check(read[namedPath] is { Episode: 8, EpisodeTitle: "My name", EpisodeOverview: "My plot", AirDate: "2001-02-03", SeasonTitle: "My season" }, $"locked episode fields stay when the number moves (got {read[namedPath].Episode} {read[namedPath].EpisodeTitle} {read[namedPath].EpisodeOverview} {read[namedPath].AirDate} {read[namedPath].SeasonTitle})");
         check(read[sameNamedPath] is { Episode: 9, EpisodeTitle: "My other name" }, $"a locked episode title stays when the number doesn't move (got {read[sameNamedPath].EpisodeTitle})");
