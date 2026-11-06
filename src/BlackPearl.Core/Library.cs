@@ -1080,15 +1080,17 @@ public static partial class FileNames
     }
     private static bool OvaFolder(string name) => Regex.IsMatch(name, @"(?i)^(?:ova|oad|ona)$");
     private static bool HoldsEpisodeFiles(string name) => !Regex.IsMatch(name, @"(?i)^(?:ova|oad|ona|specials?|movies?|films?)$") && !Regex.IsMatch(name, ExtrasFolders);
-    // Whether a show's folder, or a folder of its episodes one level down, holds a file numbered as an episode. Clips and films don't count.
-    private static bool HoldsNumberedEpisodes(string show, bool seriesContext)
+    // Whether the scan reads a file in a show's folder, or one level down, as a numbered episode of that show. Asking the scan itself means a folder
+    // that's a show of its own, and a name that's only a title, don't count. A numbered file has no need of this check, so this can't recurse.
+    private static bool HoldsNumberedEpisodes(string show, string kind, string? libraryRoot)
     {
         try
         {
             if (!Directory.Exists(show)) return false;
             return new[] { show }.Concat(Directory.EnumerateDirectories(show).Where(child => HoldsEpisodeFiles(System.IO.Path.GetFileName(child))))
                 .SelectMany(folder => Directory.EnumerateFiles(folder).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file))).Take(50))
-                .Any(file => FilenameEpisodes.Read(file, seriesContext) is { Season: not 0 } found && (found.Episode is not null || found.AirDate is not null));
+                .Any(file => Parse(file, kind, libraryRoot) is { IsBonus: false, Season: not 0, SeriesPath: { } home } found && (found.Episode is not null || found.AirDate is not null) &&
+                    string.Equals(home, show, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
         }
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
@@ -1191,9 +1193,9 @@ public static partial class FileNames
             // "Show OAD - S00E01" only says what it is, and "Show Two - S02E01" gives a later season, so both are the show's. Extras stay with whatever holds them.
             if (OvaFolder(System.IO.Path.GetFileName(seriesDir)) && filenameSeason is null or 0 or 1 && !showExtras)
             {
-                // A clip only joins a show with numbered episodes. A title holding only clips or a film has to stay one a lookup can find, and a film library has no shows.
-                if (numbering is null && (sourceKind == "Movie" || besideEpisodes is null && !HoldsNumberedEpisodes(parent, seriesContext || seasonFolder.Success))) return true;
-                return TitleWords(Regex.Replace(ownShow, @"(?i)(?<![\p{L}\p{N}])(?:ova|oad|ona)(?![\p{L}\p{N}])", " ")) != above;
+                if (TitleWords(Regex.Replace(ownShow, @"(?i)(?<![\p{L}\p{N}])(?:ova|oad|ona)(?![\p{L}\p{N}])", " ")) != above) return true;
+                // A clip only joins a show with episodes. A title holding only clips or a film has to stay one a lookup can find, and a film library has no shows.
+                return numbering is null && (sourceKind == "Movie" || besideEpisodes is null && !HoldsNumberedEpisodes(parent, sourceKind, libraryRoot));
             }
             if (!ownShow.Contains(above, StringComparison.Ordinal) && !above.Contains(ownShow, StringComparison.Ordinal)) return true;
             // "Star Trek\TV" with TNG and DS9 beside each other: each file is its own show.

@@ -167,6 +167,17 @@ static class FilenameReadingFixture
                 var noneRead = FileNames.Parse(Path.Combine(directory, noEpisodes, "OVA", noEpisodes + " OVA.mkv"), library, directory);
                 check(noneRead is { IsBonus: false }, $"{noEpisodes} OVA in a {library} library has no episodes to join, so a lookup can find it (got {noneRead.Series} clip {noneRead.IsBonus})");
             }
+        // Numbered files the scan reads as another show, or as a title, aren't this show's episodes either.
+        Folder(Path.Combine("Calm Nu", "Calm Nu TV"), "Calm Nu - 01.mkv", "Calm Nu - 02.mkv"); Folder(Path.Combine("Calm Nu", "OVA"), "Calm Nu - NCOP.mkv");
+        Folder(Path.Combine("Calm Xi", "[Group] Calm Xi [1080p]"), "[Group] Calm Xi - 01 [1080p].mkv", "[Group] Calm Xi - 02 [1080p].mkv"); Folder(Path.Combine("Calm Xi", "OVA"), "[Group] Calm Xi - NCOP [1080p].mkv");
+        Folder(Path.Combine("Calm Pi", "Other Thing"), "Other Thing - 01.mkv", "Other Thing - 02.mkv"); Folder(Path.Combine("Calm Pi", "OVA"), "Calm Pi OVA.mkv");
+        Folder("Calm Rho", "Calm Rho.mkv", "Deleted Scene 1.mkv"); Folder(Path.Combine("Calm Rho", "OVA"), "Calm Rho OVA.mkv");
+        foreach (var library in new[] { "Anime", "Show" })
+            foreach (var (folder, otherFile) in new[] { ("Calm Nu", "Calm Nu - NCOP.mkv"), ("Calm Xi", "[Group] Calm Xi - NCOP [1080p].mkv"), ("Calm Pi", "Calm Pi OVA.mkv"), ("Calm Rho", "Calm Rho OVA.mkv") })
+            {
+                var otherRead = FileNames.Parse(Path.Combine(directory, folder, "OVA", otherFile), library, directory);
+                check(otherRead is { IsBonus: false }, $"{otherFile} in a {library} library has none of this show's episodes to join (got {otherRead.Series} clip {otherRead.IsBonus})");
+            }
         // Numbered files beside it in the same folder are a show to join.
         Folder(Path.Combine("Calm Omega", "OVA"), "Calm Omega - 01.mkv", "Calm Omega - 02.mkv", "Calm Omega - NCED.mkv");
         check(FileNames.Parse(Path.Combine(directory, "Calm Omega", "OVA", "Calm Omega - NCED.mkv"), "Anime", directory) is { IsBonus: true, Series: "Calm Omega" } besideOva && besideOva.ShowId == FileNames.Parse(Path.Combine(directory, "Calm Omega", "OVA", "Calm Omega - 01.mkv"), "Anime", directory).ShowId, "a clip beside numbered files in an OVA folder joins them");
