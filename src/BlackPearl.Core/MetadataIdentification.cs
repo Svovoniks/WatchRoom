@@ -38,7 +38,7 @@ public static class MetadataIdentification
                 else if (provider == "wikipedia")
                 {
                     var searchItem = item with { Title = query, Series = null, Year = null, Matched = false };
-                    foreach (var alias in MetadataTitles.Queries(searchItem).Take(3)) matches.AddRange(await WikipediaMetadata.SearchAsync(http, searchItem, alias, ct));
+                    foreach (var alias in (await Task.Run(() => MetadataTitles.Queries(searchItem), ct)).Take(3)) matches.AddRange(await WikipediaMetadata.SearchAsync(http, searchItem, alias, ct));
                 }
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && ex is HttpRequestException or IOException or JsonException or TaskCanceledException)

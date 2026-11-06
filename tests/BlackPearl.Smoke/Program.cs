@@ -62,6 +62,16 @@ if (args.FirstOrDefault() == "--metadata-language")
     Console.WriteLine($"{checks} metadata language checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--filename-features") { FilenameReadingFixture.WriteFeatures(args[1], args[2]); return; }
+
+if (args.FirstOrDefault() == "--filename-readings")
+{
+    var checks = 0;
+    await FilenameReadingFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/filename-readings-" + Guid.NewGuid().ToString("N")), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} filename reading checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--filename-schemas")
 {
     var checks = 0;
@@ -408,6 +418,7 @@ MissingEpisodesFixture.Run(Path.Combine(root, "missing-episodes"), Check);
 await AcquisitionPluginsFixture.Run(Path.Combine(root, "acquisition-plugins"), Check);
 await EpisodeFollowingFixture.Run(Path.Combine(root, "episode-following"), Check);
 await FilenameSchemaFixture.Run(Path.Combine(root, "filename-schemas"), Check);
+await FilenameReadingFixture.Run(Path.Combine(root, "filename-readings"), Check);
 await GroupingAuditFixture.Run(Path.Combine(root, "grouping-audit"), Check);
 HostRoomFixture.Run(Check);
 RoomPlaybackStatusFixture.Run(Check);

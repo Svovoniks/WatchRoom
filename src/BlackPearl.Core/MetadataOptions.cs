@@ -1,7 +1,7 @@
 namespace BlackPearl.Core;
 
 public record MetadataOptions(string[]? Providers = null, string Language = "en-US", string Country = "US", int RefreshDays = 7,
-    bool ImportMissing = false, bool ImportUpcoming = false, bool SaveNfo = false, bool DisplaySpecialsWithinSeasons = false, bool GroupShowsByProvider = false)
+    bool ImportMissing = false, bool ImportUpcoming = false, bool SaveNfo = false, bool DisplaySpecialsWithinSeasons = false, bool CombineShowFolders = true)
 {
     public string[] ProviderOrder => Providers ?? ["tmdb", "tvmaze", "wikipedia"];
     public string Locale => Language + "|" + Country;
@@ -64,9 +64,12 @@ public static class MetadataMatching
     {
         var ranked = results.DistinctBy(x => (x.Provider, x.Type, x.Id)).Select(x => (Match: x,
             Score: CandidateScore(x, title, year)))
-            .Select(x => (x.Match, x.Score, Rank: x.Score + (preferredKind is not null && (x.Match.Kind == preferredKind || preferredKind == "Anime" && x.Match.Animated == true) ? 2 : 0))).OrderByDescending(x => x.Rank).ToArray();
-        // Keep conservative automatic matching: weak or tied results require Identify.
-        var winner = ranked.Length > 0 && ranked[0].Score >= 6 && (ranked.Length == 1 || ranked[0].Rank > ranked[1].Rank) ? ranked[0].Match : null;
+            .Select(x => (x.Match, x.Score, Rank: x.Score + (preferredKind is not null && (x.Match.Kind == preferredKind || preferredKind == "Anime" && x.Match.Animated == true) ? 2 : 0),
+                Spelled: new[] { x.Match.Title, x.Match.OriginalTitle ?? "" }.Concat(x.Match.Aliases ?? []).Contains(title, StringComparer.Ordinal)))
+            .OrderByDescending(x => x.Rank).ThenByDescending(x => x.Spelled).ToArray();
+        // Keep conservative automatic matching: weak or tied results require Identify. Titles that differ only in capitals
+        // aren't really tied, so "Sherlock" is the show spelled that way and not "SHErlock".
+        var winner = ranked.Length > 0 && ranked[0].Score >= 6 && (ranked.Length == 1 || ranked[0].Rank > ranked[1].Rank || ranked[0].Spelled && !ranked[1].Spelled) ? ranked[0].Match : null;
         MetadataDiagnostics.Outcome(winner is not null ? "matched" : ranked.Length == 0 ? "no-candidates" : ranked[0].Score < 6 ? "weak-title" : "ambiguous-candidates");
         MetadataDiagnostics.Record("metadata-candidates", new { Query = title, Year = year, SelectedId = winner?.Id,
             Outcome = winner is not null ? "matched" : ranked.Length == 0 ? "no-candidates" : ranked[0].Score < 6 ? "weak-title" : "ambiguous-candidates",

@@ -86,6 +86,8 @@ public static class SeriesMetadata
             foreach (var provider in options.ProviderOrder.Where(p => p is "tmdb" or "tvmaze"))
             {
                 if (provider == "tmdb" && tmdb is null || provider == "tvmaze" && item.NumberingOrder == "dvd") continue;
+                // A show identified through TMDB waits for TMDB; another provider's numbering would replace its seasons and episodes.
+                if (provider != "tmdb" && tmdb is null && item.MetadataProvider == "tmdb") continue;
                 try
                 {
                     int? id = int.TryParse(LibraryIdentity.ProviderId(item, provider), out var stored) && stored > 0 ? stored : null;
@@ -151,7 +153,8 @@ public static class SeriesMetadata
                             }
                             current = current with { Season = dated[0].Season, Episode = dated[0].Episode, NumberingConflict = null };
                         }
-                        var absoluteNumber = mode == MetadataRefresh.RetryArtwork || dateNumbering ? null : entry.AbsoluteEpisode ?? (entry.NumberingOrder == "absolute" ? entry.Episode : null);
+                        // A show shares its numbering order across its files, but a special's number is never a run through the show.
+                        var absoluteNumber = mode == MetadataRefresh.RetryArtwork || dateNumbering ? null : entry.AbsoluteEpisode ?? (entry.NumberingOrder == "absolute" && entry.Season != 0 ? entry.Episode : null);
                         int? mappedPartEnd = null;
                         if (mode != MetadataRefresh.RetryArtwork && !dateNumbering && entry.SourcePart is > 1 && entry.SourcePartEpisode is { } localNumber)
                         {

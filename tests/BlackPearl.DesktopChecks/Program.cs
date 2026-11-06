@@ -54,7 +54,7 @@ static class Program
         Environment.SetEnvironmentVariable("BLACKPEARL_DISABLE_UPDATES", "1");
         var store = new LibraryStore(directory); store.Setting("artwork", "false");
         store.Setting("folders", Wire.Serialize(new[] { new LibraryFolder(directory) }));
-        var entries = Enumerable.Range(0, 750).Select(index => new MediaItem("item-" + index, Path.Combine(directory, "movie-" + index + ".mp4"), $"Movie {index:0000}", "Movie")).ToArray();
+        var entries = Enumerable.Range(0, 750).Select(index => new MediaItem("item-" + index, Path.Combine(directory, "movie-" + index + ".mp4"), $"Movie {index:0000}", "Movie", ProviderIds: new() { ["imdb"] = "tt" + index })).ToArray();
         foreach (var entry in entries) store.Save(entry);
         var startupQueue = new SavedQueue("startup-queue", "Startup queue", [entries[0].Id, entries[^1].Id]);
         store.Setting("queues", Wire.Serialize(new[] { startupQueue })); store.Setting("activeQueue", startupQueue.Id);
@@ -358,6 +358,7 @@ static class Program
                 await CheckBackNavigation(window, Check);
                 PlayerInteractionChecks.Run(window, Check);
                 UnavailableLibraryChecks.Run(window, activeStore, directory, Check);
+                UnmatchedLibraryChecks.Run(window, activeStore, directory, Check);
                 CardSelectionChecks.Run(window, activeStore, directory, Check);
                 WantedLibraryChecks.Run(window, activeStore, directory, Check);
                 AcquisitionChecks.Run(window, activeStore, directory, Check);
@@ -389,10 +390,10 @@ static class Program
     private static async Task CheckLibraryNavigation(MainWindow window, LibraryStore store, ObservableCollection<LibraryCardView> cards,
         string directory, string poster, Action<bool, string> check)
     {
-        var show = new MediaItem("navigation-show", Path.Combine(directory, "Show S01E01.mkv"), "Navigation Show", "Show", Series: "Navigation Show", Season: 1, Episode: 1, EpisodeTitle: "The Beginning");
+        var show = new MediaItem("navigation-show", Path.Combine(directory, "Show S01E01.mkv"), "Navigation Show", "Show", Series: "Navigation Show", Season: 1, Episode: 1, EpisodeTitle: "The Beginning", ProviderIds: new() { ["imdb"] = "tt-navigation-show" });
         var special = show with { Id = "navigation-special", Path = Path.Combine(directory, "Show S00E01.mkv"), Season = 0 };
         var unknown = show with { Id = "navigation-unknown", Path = Path.Combine(directory, "Unknown episode.mkv"), Season = null };
-        var anime = show with { Id = "navigation-anime", Path = Path.Combine(directory, "Anime S01E01.mkv"), Kind = "Anime", Series = "Navigation Anime", Title = "Navigation Anime" };
+        var anime = show with { Id = "navigation-anime", Path = Path.Combine(directory, "Anime S01E01.mkv"), Kind = "Anime", Series = "Navigation Anime", Title = "Navigation Anime", ProviderIds = new() { ["imdb"] = "tt-navigation-anime" } };
         var animeMovie = new MediaItem("navigation-anime-film", Path.Combine(directory, "Anime film.mkv"), "Navigation Anime Film", "Anime", Poster: poster, Available: false);
         foreach (var item in new[] { show, special, unknown, anime, animeMovie }) store.Save(item);
         await Task.Delay(600);

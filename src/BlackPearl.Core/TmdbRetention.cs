@@ -30,6 +30,18 @@ public static class TmdbRetention
         return after with { TmdbFields = fields.Count == 0 ? null : fields, TmdbRetentionVersion = 1 };
     }
 
+    // Expiry returns a field to its local value, so a field whose local reading was replaced must return to the new one.
+    private static readonly string[] ParsedFields = ["title", "series", "kind", "year", "season", "episode", "episodeEnd", "absoluteEpisode", "absoluteEpisodeEnd", "episodeTitle", "airDate", "numberingSource", "numberingOrder"];
+    internal static MediaItem Rebase(MediaItem item, MediaItem parsed)
+    {
+        if (item.TmdbFields is not { Count: > 0 } tracked) return item;
+        var local = JsonSerializer.SerializeToNode(parsed, Wire.Json)!.AsObject();
+        var fields = new Dictionary<string, TmdbField>(tracked);
+        foreach (var name in ParsedFields)
+            if (fields.TryGetValue(name, out var field)) fields[name] = field with { Original = Read(local, name) };
+        return item with { TmdbFields = fields };
+    }
+
     private static IEnumerable<string> ProviderNames(JsonObject before, JsonObject after) =>
         new[] { before["providerIds"] as JsonObject, after["providerIds"] as JsonObject }.OfType<JsonObject>()
             .SelectMany(x => x.Select(p => "providerIds." + p.Key)).Distinct();

@@ -107,6 +107,8 @@ public static class AutomaticArtwork
             if (!needsOverview && !needsPoster && !needsClassification) continue;
             if (!force && refresh is null && MetadataFetchPolicy.Deferred(library, "title", entries, options, token))
             { deferred++; MetadataDiagnostics.Record("metadata-fetch-deferred", new { Stage = "title", entries[0].Title, RetryAt = MetadataFetchPolicy.RetryAt(library, "title", entries[0].Id) }); continue; }
+            // A title identified through TMDB stays with it when this build has no TMDB key; another provider would replace its identity.
+            if (tmdb is null && mode != MetadataRefresh.RetryArtwork && entries.Any(x => x.MetadataProvider == "tmdb")) continue;
             var item = entries[0]; progress?.Report("Finding metadata · " + item.DisplayTitle);
             using var context = MetadataDiagnostics.BeginItem("title", item);
             MetadataDiagnostics.Record("metadata-title-start", new { Queries = MetadataTitles.Queries(item).ToArray(), needsOverview, needsPoster, needsClassification });
@@ -244,7 +246,7 @@ public static class AutomaticArtwork
         var known = options.ProviderOrder.Where(provider => new[] { item.MetadataProvider }.Concat(item.ProviderIds?.Keys.AsEnumerable() ?? []).Any(id => string.Equals(id?.Split(':')[0], provider, StringComparison.OrdinalIgnoreCase))).ToArray();
         return known.Length == 0 ? options : options with { Providers = known };
     }
-    private static MediaItem ResetIdentity(MediaItem item) => item with
+    internal static MediaItem ResetIdentity(MediaItem item) => item with
     {
         ProviderIds = [], MetadataProvider = null, MetadataId = null, ProviderTitle = null,
         Overview = LibraryIdentity.Locked(item, "Overview") ? item.Overview : null,
@@ -324,6 +326,9 @@ public static class AutomaticArtwork
                     if (match is null && MetadataTitles.IsAnimeSource(item))
                         foreach (var alias in await AnimeTitles.AliasesAsync(http, directory, item.DisplayTitle, ct))
                         { match = await tmdb.MatchAsync(item with { Title = alias, Series = item.Series is null ? null : alias }, ct); if (match is not null) break; }
+                    // Weakest evidence last: one side of a dashed title can name a parent show.
+                    if (match is null) foreach (var part in MetadataTitles.PartQueries(item))
+                    { var source = MetadataTitles.AsPart(item, part); match = await tmdb.MatchAsync(source, ct, [part], entries); if (match is not null) break; }
                     if (match is not null && Accept(new(match.Poster, $"https://www.themoviedb.org/{match.Type}/{match.Id}", match.Overview,
                         match.Kind ?? (match.Type == "tv" ? "Show" : "Movie"), match.Type, provider, match.Id, match.Title, match,
                         Year: int.TryParse(match.Year, out var year) ? year : null, Animated: match.Animated))) return best;
@@ -334,6 +339,8 @@ public static class AutomaticArtwork
                     var show = await LookupShow(http, item, ct, queries);
                     if (show is null && MetadataTitles.IsAnimeSource(item)) foreach (var alias in await AnimeTitles.AliasesAsync(http, directory, item.DisplayTitle, ct))
                     { show = await LookupShow(http, item with { Title = alias, Series = alias }, ct); if (show is not null) break; }
+                    if (show is null && !MetadataTitles.IsLabelledFilm(item)) foreach (var part in MetadataTitles.PartQueries(item))
+                    { show = await LookupShow(http, MetadataTitles.AsPart(item, part), ct, [part]); if (show is not null) break; }
                     if (show is { } value)
                     {
                         // A standalone title can name both a film and a show.

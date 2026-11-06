@@ -13,7 +13,7 @@ public static class MetadataTitles
         if (removeArticle) value = Regex.Replace(value, @"^the\s+", "", RegexOptions.IgnoreCase);
         value = Regex.Replace(value, @"\bneighbours\b", "neighbors", RegexOptions.IgnoreCase);
         value = value.Replace("ь", "", StringComparison.OrdinalIgnoreCase).Replace("ъ", "", StringComparison.OrdinalIgnoreCase);
-        value = new string(value.Normalize(NormalizationForm.FormD).Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray());
+        value = new string(FilenameScan.Composed(value).Normalize(NormalizationForm.FormD).Where(c => CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark).ToArray());
         return Regex.Replace(value, @"[^\p{L}\p{N}]", "").ToLowerInvariant();
     }
     public static bool IsAnimeSource(MediaItem item) => item.Kind == "Anime" || item.SourceLibraryKind == "Anime" ||
@@ -39,6 +39,12 @@ public static class MetadataTitles
         title = Regex.Replace(title, @"\s+\(?(?:19|20)\d{2}\)?\s*$", "").Trim();
         return title.Length >= 3 ? title : null;
     }
+    // One side of a dashed title, for a last search after every fuller title has failed.
+    internal static string[] PartQueries(MediaItem item) => item.IsVirtual ? [] : FilenameEpisodes.PartAliases(item.Path, item.DisplayTitle, item.Series is not null).Distinct(StringComparer.OrdinalIgnoreCase).Take(3).ToArray();
+    internal static bool IsLabelledFilm(MediaItem item) => !item.IsVirtual && item.Series is null && FilenameEpisodes.Analyze(item.Path, false).Film;
+    // A file labelled as a film searches for films only, so it can't be claimed by the show it shares a name with.
+    internal static MediaItem AsPart(MediaItem item, string part) =>
+        item with { Title = part, Series = item.Series is null ? null : part, MetadataType = IsLabelledFilm(item) ? "movie" : item.MetadataType };
     public static string[] Queries(MediaItem item, IEnumerable<MediaItem>? entries = null)
     {
         var titles = new List<string>();
@@ -67,7 +73,14 @@ public static class MetadataTitles
             // "Hyakuemu - Movie" labels the film; providers list it as "Hyakuemu".
             Add(Regex.Replace(clean, @"\s+[-–:]\s+(?:The\s+)?Movie$", "", RegexOptions.IgnoreCase));
         }
-        if (item.SeriesPath is { } folder) Add(Path.GetFileName(folder));
+        if (item.SeriesPath is { } folder)
+        {
+            // The folder's reading first: "Boku No Hero Academia (My Hero Academia) (S01-S07+Movies)" is two titles and a list of seasons.
+            var named = FilenameEpisodes.AnalyzeFolder(Path.GetFileName(folder));
+            Add(named.Title);
+            foreach (var alternate in named.Alternates) Add(alternate);
+            Add(Path.GetFileName(folder));
+        }
         if (item.SeriesPath is { } nested && Path.GetDirectoryName(nested) is { } parentFolder)
         {
             var parentTitle = Path.GetFileName(parentFolder);
@@ -100,6 +113,8 @@ public static class MetadataTitles
                     !Regex.IsMatch(name, @"(?i)фильмы|сериалы|советские|комедии|мультфильмы|классика|сезон")) Add(name);
             }
         }
+        if (!item.IsVirtual)
+            foreach (var alias in FilenameEpisodes.SearchAliases(item.Path, item.Series is not null, item.SeriesPath is not null)) Add(alias);
         foreach (var title in titles.ToArray())
             if (RussianSearchAlias(title) is { } alias)
             {
@@ -132,10 +147,12 @@ public static class MetadataTitles
         // English ch/sh are not evidence of a romanized Russian title. Require
         // distinctive Russian word endings or consonant combinations instead.
         if (Regex.IsMatch(value, @"\p{IsCyrillic}") || !Regex.IsMatch(value,
-            @"(?i)dzh|shch|\b\w*(?:skiy|skaya|skaia|ovaya|vaya|niya|eniya|iya|ya|yu|evich|ovich|kh|tsiya|ev|ov|ksi)\b")) return null;
+            @"(?i)dzh|shch|\b\w*(?:skiy|skaya|skaia|skij|skaja|skoj|yj|aja|ovaya|vaya|niya|eniya|iya|ya|yu|evich|ovich|kh|tsiya|ev|ov|ksi)\b")) return null;
         value = value.ToLowerInvariant();
         value = value.Replace("skaia", "ская").Replace("liant", "лиант");
-        foreach (var (latin, russian) in new[] { ("shch", "щ"), ("sch", "щ"), ("zh", "ж"), ("kh", "х"), ("ts", "ц"), ("ch", "ч"), ("sh", "ш"), ("ya", "я"), ("yu", "ю"), ("ia", "я"), ("iu", "ию") })
+        // After a vowel, yo is й and о, as in Mayor; elsewhere it's ё.
+        value = Regex.Replace(value, @"(?<![aeiou])yo", "ё");
+        foreach (var (latin, russian) in new[] { ("shch", "щ"), ("sch", "щ"), ("zh", "ж"), ("kh", "х"), ("ts", "ц"), ("ch", "ч"), ("sh", "ш"), ("ya", "я"), ("yu", "ю"), ("ja", "я"), ("ju", "ю"), ("ia", "я"), ("iu", "ию") })
             value = value.Replace(latin, russian);
         value = Regex.Replace(value, @"(?<=[aeiou])y|(?<=i)y(?=\b)", "й");
         const string latinLetters = "abvgdezijklmnoprstufhcy";
@@ -154,7 +171,10 @@ public static class MetadataTitles
     {
         var name = Path.GetFileName(Path.GetDirectoryName(item.Path));
         var year = Regex.Match(name ?? "", @"(?:^|[ _.(-])((?:19|20)\d{2})(?:$|[ _.)-])");
-        return year.Success ? int.Parse(year.Groups[1].Value) : null;
+        if (!year.Success) return null;
+        // After a later season's number the year dates that season, as in Show.S03.2018, so it says nothing about when the show began.
+        if (item.Season is > 1 && Regex.IsMatch(name![..year.Index], $@"(?i)(?:^|[ _.(-])(?:s|season[ _.-]*)?0*{item.Season}[ _.(-]*$")) return null;
+        return int.Parse(year.Groups[1].Value);
     }
     public static MediaItem WithSplitIdentity(MediaItem item, IEnumerable<MediaItem> library)
     {

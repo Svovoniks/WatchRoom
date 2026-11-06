@@ -74,8 +74,8 @@ static class LibraryVersionsFixture
             "extras under a season folder become the show's bonus clips, numbered or not");
         check(clips[0].EpisodeDisplayTitle == "NCED" && clips[2].EpisodeDisplayTitle == "S01E12 NCED" && clips[2].Caption.EndsWith("Ending"), "a bonus clip is titled by its file name without the show's name");
         check(episode.Series == "Komi Can't Communicate" && episode.Title == "Komi Can't Communicate", "bracketed release tags and batch notes drop out of a show folder's title");
-        check(FileNames.StripReleaseTags("Doctor Who (2005)") == "Doctor Who (2005)" && FileNames.StripReleaseTags("[Group] Show Name (BD 1080p)") == "Show Name" && FileNames.StripReleaseTags("[Only Tags]") == "[Only Tags]",
-            "release tag stripping keeps years, plain names, and names made only of tags");
+        check(FilenameEpisodes.AnalyzeFolder("Doctor Who (2005)") is { Title: "Doctor Who", Year: 2005 } && FilenameEpisodes.AnalyzeFolder("[Group] Show Name (BD 1080p)").Title == "Show Name" && FilenameEpisodes.AnalyzeFolder("[Only Tags]").Title == "Only Tags",
+            "a folder's reading keeps its year apart and drops release tags, and a name made only of tags still titles it");
         check(clips.All(x => x.AirsAfterSeason == 1), "clips from a season's extras folder remember that season");
         var beside = FileNames.Parse(await FileAt(desktop, komi, "Extras", "[DiabloTripleA] Komi Can't Communicate - Preview.mkv"), "Mixed", desktop);
         check(beside.IsBonus && !beside.IsExtra && beside.ShowId == episode.ShowId && beside.AirsAfterSeason is null, "an extras folder beside the season folders belongs to the show as a whole");

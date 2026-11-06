@@ -66,8 +66,8 @@ public sealed partial class LibraryStore
     private static void ExpireRepairBackups(string directory, long now)
     {
         // Keep recovery files and local data; expire only provider snapshots in
-        // the two SQLite backups created by our own repair migrations.
-        foreach (var name in new[] { "library-before-metadata-repair-v1.db", "library-before-grouping-repair-v1.db" })
+        // the SQLite backups created by our own repair migrations.
+        foreach (var name in new[] { "library-before-metadata-repair-v1.db", "library-before-grouping-repair-v1.db", "library-before-filename-reader-v1.db" })
         {
             var path = Path.Combine(directory, name);
             if (!File.Exists(path)) continue;

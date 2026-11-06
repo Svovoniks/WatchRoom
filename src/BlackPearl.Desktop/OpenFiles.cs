@@ -130,12 +130,13 @@ public partial class MainWindow
     }
 
     private readonly TaskCompletionSource libraryReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    // A video opened at launch shows the player before the library loads, titled from its file name.
+    // A video opened at launch shows the player before the library loads, titled from its file name. Reading the name properly
+    // also reads its folder, which is too slow here before the first frame, and the title follows once the video opens.
     private void ShowStartupPlayer(string path)
     {
         openedFile = true;
         PlayerEmpty.Visibility = Visibility.Collapsed;
-        RoomHeading.Text = PlaybackTitle(FileNames.Parse(path)); RoomSubtitle.Text = "Opening…";
+        RoomHeading.Text = Path.GetFileNameWithoutExtension(path); RoomSubtitle.Text = "Opening…";
         ConnectionStatus.Text = "Local playback";
         ShowPage("Room");
     }
@@ -152,8 +153,7 @@ public partial class MainWindow
         // A failed lookup only means the video plays on its own; the library load reports its own failures.
         try { known = await candidates; }
         catch (Exception ex) { PlaybackDiagnostics.Record("open-file-lookup-failed", new { error = ex.GetType().Name }); known = []; }
-        // Only a few records remain, so matching them is quick enough for this thread.
-        var opened = OpenedFiles.Resolve(known, path);
+        var opened = await Task.Run(() => OpenedFiles.Resolve(known, path));
         if (closing || playingItem is not null) return;
         PlaybackDiagnostics.Record("open-file", new { match = opened.Match, known = opened.Library?.Id, startup = true });
         queuePosition = -1;

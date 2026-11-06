@@ -214,6 +214,19 @@ static class MetadataPipelineFixture
             await SeriesMetadata.FetchAsync(numberedStore,directory,"fixture",null,default,http,metadata:tmdb);
         check(numberedStore.All().Count(x => x.IsVirtual) == 3, "enabling placeholder imports adds them even when metadata is fresh");
 
+        // A lookup maps a show's absolute numbers, but not its OVA folder's, so the two can't land on one episode.
+        var ovaShow = Path.Combine(directory,"Harbor Tide"); var ovaEpisode = Path.Combine(ovaShow,"TV","[Grp] Harbor Tide - 03.mkv"); var ovaFile = Path.Combine(ovaShow,"OVA","[Grp] Harbor Tide - 03.mkv");
+        Directory.CreateDirectory(Path.GetDirectoryName(ovaEpisode)!); Directory.CreateDirectory(Path.GetDirectoryName(ovaFile)!);
+        File.WriteAllBytes(ovaEpisode,[0]); File.WriteAllBytes(ovaFile,[0]);
+        var ovaStore = new LibraryStore(Path.Combine(directory,"ova-db"));
+        foreach (var file in new[] { ovaEpisode, ovaFile }) ovaStore.Save(FileNames.Parse(file,"Anime",directory) with { MetadataProvider = "tmdb", MetadataId = 1, MetadataType = "tv" });
+        using (var handler = new PipelineHandler())
+        using (var tmdb = new MetadataClient("fixture",handler))
+        using (var http = new HttpClient(new ArtworkFixture()))
+            await SeriesMetadata.FetchAsync(ovaStore,directory,"fixture",null,default,http,true,tmdb);
+        var ovaRead = ovaStore.All().Where(x => !x.IsVirtual).ToDictionary(x => x.Path);
+        check(ovaRead[ovaEpisode] is { Season: 2, Episode: 1, AbsoluteEpisode: 3 } && ovaRead[ovaFile] is { Season: 0, Episode: 3 },$"a lookup maps a show's episodes and leaves its OVAs apart (got {ovaRead[ovaEpisode].Season}x{ovaRead[ovaEpisode].Episode} and {ovaRead[ovaFile].Season}x{ovaRead[ovaFile].Episode})");
+
         var refreshStore = new LibraryStore(Path.Combine(directory,"refresh-db"));
         var poster = Path.Combine(directory,"old.png"); await File.WriteAllBytesAsync(poster,ArtworkFixture.Png);
         refreshStore.Save(new("refresh",Path.Combine(directory,"refresh.mkv"),"Example Show","Show",2020,"Example Show",1,1,Poster:poster,Overview:"Old plot",SeriesPoster:poster,MetadataProvider:"tmdb",MetadataId:1,MetadataType:"tv",MetadataKind:"Show",ArtworkFetchedAt:Wire.Now));
@@ -237,11 +250,32 @@ static class MetadataPipelineFixture
             check(handler.Requests.Count == 2,"rate-limited metadata requests retry with Retry-After");
         }
         var cross = new LibraryStore(Path.Combine(directory,"cross-db"));
-        cross.Save(numbered with { Id="folder-one",Path=Path.Combine(directory,"one.mkv"),ShowId="folder-one",MetadataProvider="tmdb",MetadataId=1 });
-        cross.Save(numbered with { Id="folder-two",Path=Path.Combine(directory,"two.mkv"),ShowId="folder-two",MetadataProvider="tmdb",MetadataId=1 });
-        check(cross.Shows().Count == 2,"separate folders remain separate until provider grouping is enabled");
-        new MetadataOptions(GroupShowsByProvider:true).Save(cross); cross.GroupShowsByProvider();
-        check(cross.Shows().Count == 1 && cross.All().Select(x => x.ShowId).Distinct().Count() == 1,"matching provider IDs optionally combine shows across folders");
+        new MetadataOptions(CombineShowFolders:false).Save(cross);
+        cross.Save(numbered with { Id="folder-one",Path=Path.Combine(directory,"one.mkv"),ShowId="folder-one",Season=1,MetadataProvider="tmdb",MetadataId=1 });
+        cross.Save(numbered with { Id="folder-two",Path=Path.Combine(directory,"two.mkv"),ShowId="folder-two",Season=2,MetadataProvider="tmdb",MetadataId=1 });
+        cross.GroupShowsByProvider();
+        check(cross.Shows().Count == 2,"separate folders stay separate when combining is turned off");
+        new MetadataOptions().Save(cross); cross.GroupShowsByProvider();
+        check(cross.Shows().Count == 1 && cross.All().Select(x => x.ShowId).Distinct().Count() == 1,"matching provider IDs combine shows across folders by default");
+        check(Wire.Read<MetadataOptions>("""{"groupShowsByProvider":false}""").CombineShowFolders, "the old setting, off for everyone by default, doesn't turn combining off");
+
+        MediaItem Part(string id, string show, int season, int episode, string? poster = null) => new(id, Path.Combine(directory, id + ".mkv"), "Split Show", "Show", Series: "Split Show", Season: season, Episode: episode,
+            ShowId: show, SeriesPoster: poster, MetadataProvider: "tmdb", MetadataId: 7);
+        MediaItem Hole(string id, string show, int season, int episode, string provider = "tmdb") => Part(id, show, season, episode) with { IsVirtual = true, Available = false, AirDate = "2020-01-01", MetadataProvider = provider };
+        var split = new LibraryStore(Path.Combine(directory, "split-db"));
+        foreach (var part in new[] { Part("a1", "folder-a", 1, 1, "a.jpg"), Part("b2", "folder-b", 2, 1, "b.jpg"), Hole("a-hole-2", "folder-a", 2, 1), Hole("a-hole-3", "folder-a", 3, 1), Hole("b-hole-1", "folder-b", 1, 1), Hole("b-hole-3", "folder-b", 3, 1, "tvmaze") with { ProviderIds = new() { ["tmdb"] = "7" } } }) split.Save(part);
+        split.GroupShowsByProvider();
+        var combined = split.All();
+        check(combined.Select(x => x.ShowId).Distinct().Count() == 1 && split.Shows().Count == 1, "folders holding different seasons combine into one show");
+        check(combined.Where(x => x.IsVirtual).Select(x => x.Id).SequenceEqual(["a-hole-3"]), $"a combined show lists only episodes no folder holds, once each (got {string.Join(", ", combined.Where(x => x.IsVirtual).Select(x => x.Id))})");
+        check(LibraryCatalog.TitleStatus(combined) == "S3 missing", "a combined show's badge counts what's really missing");
+        check(combined.Select(x => x.SeriesPoster).Distinct().Count() == 1, "a combined show has one poster");
+        split.GroupShowsByProvider();
+        check(split.All().Count == combined.Count && split.Shows().Count == 1, "combining again changes nothing");
+        var copies = new LibraryStore(Path.Combine(directory, "copies-db"));
+        foreach (var part in new[] { Part("c1", "copy-one", 1, 1), Part("c2", "copy-two", 1, 2), Part("c3", "copy-two", 2, 1) }) copies.Save(part);
+        copies.GroupShowsByProvider();
+        check(copies.All().Select(x => x.ShowId).Distinct().Count() == 2, "folders holding the same season stay apart");
         using(var handler=new PipelineHandler()) using(var tmdb=new MetadataClient("fixture",handler))
         {
             var dvd=await tmdb.DvdSeasonsAsync(1,default);

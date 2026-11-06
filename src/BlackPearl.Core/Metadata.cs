@@ -57,8 +57,10 @@ public sealed partial class MetadataClient : IDisposable
         return json.RootElement.GetProperty("results").EnumerateArray().Select(x =>
         {
             var date = x.TryGetProperty(series ? "first_air_date" : "release_date", out var d) ? d.GetString() : null;
+            // With a region, a film's date is its release there, often years after its premiere. The year filter
+            // accepts any release in that year, so a film it returned does have one.
             return new MetadataMatch(x.GetProperty("id").GetInt32(), type, x.GetProperty(series ? "name" : "title").GetString()!,
-                date?.Length >= 4 ? date[..4] : null, x.TryGetProperty("poster_path", out var p) ? p.GetString() : null,
+                !series && year is not null && !string.IsNullOrEmpty(date) ? year.ToString() : date?.Length >= 4 ? date[..4] : null, x.TryGetProperty("poster_path", out var p) ? p.GetString() : null,
                 x.TryGetProperty("overview", out var o) ? o.GetString() ?? "" : "", MetadataClassification.Tmdb(x, type),
                 x.TryGetProperty(series ? "original_name" : "original_title", out var original) ? original.GetString() : null, Animated: MetadataClassification.Animation(x), ReleaseDate: string.IsNullOrEmpty(date) ? null : date);
         }).ToList();
