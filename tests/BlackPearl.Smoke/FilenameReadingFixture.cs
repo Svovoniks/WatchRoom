@@ -22,6 +22,7 @@ static class FilenameReadingFixture
                 $"{parts[^1]} reads as the film {title} {year} (got {item.Title} {item.Year}, series {item.Series}, episode {item.Episode})");
         }
 
+        var runFolders = 0;
         // What's named after the number. Only words that name the episode become its title.
         void Named(string name, string? title)
         {
@@ -141,6 +142,67 @@ static class FilenameReadingFixture
         Named("Harbor - 05 - The Name [SubsPlease].mkv", "The Name");
         Film(["Special 26.mkv"], "Special 26", null);
         Film(["Stuff", "Special.26.1080p.BluRay.x264-GRP.mkv"], "Special 26", null);
+        // Whole folders of a show's files, each in its own library.
+        void Run(string label, string[] folders, Func<int, string> name, int[] numbers, string show, int? season = null)
+        {
+            var library = Path.Combine(directory, "Runs", (runFolders++).ToString()); var folder = Path.Combine([library, .. folders]); Directory.CreateDirectory(folder);
+            foreach (var number in numbers) File.WriteAllBytes(Path.Combine(folder, name(number) + ".mkv"), [0]);
+            var read = numbers.Select(number => (Number: number, Item: FileNames.Parse(Path.Combine(folder, name(number) + ".mkv"), "Mixed", library))).ToArray();
+            var wrong = read.FirstOrDefault(x => x.Item.Episode != x.Number || x.Item.Series is not { } series || MetadataTitles.Normalize(series) != MetadataTitles.Normalize(show) || season is not null && x.Item.Season != season);
+            check(wrong.Item is null, $"{label} reads as {show} (got {wrong.Item?.Series} S{wrong.Item?.Season}E{wrong.Item?.Episode} for {wrong.Number})");
+        }
+        int[] Span(int from, int to) => Enumerable.Range(from, to - from + 1).ToArray();
+        // A run partway through a hundred only counts up.
+        Run("150 to 160 in a season", ["One Piece", "Season 1"], n => $"One Piece - {n}", Span(150, 160), "One Piece", 1);
+        Run("150 and 151 in a season", ["One Piece", "Season 1"], n => $"One Piece - {n}", Span(150, 151), "One Piece", 1);
+        Run("a group's 150 to 153", ["One Piece", "Season 1"], n => $"[Grp] One Piece - {n} [1080p]", Span(150, 153), "One Piece", 1);
+        Run("230 to 240 in season 2", ["Bleach", "Season 2"], n => $"Bleach - {n}", Span(230, 240), "Bleach", 2);
+        Run("201 to 220 in season 2", ["Naruto", "Season 2"], n => $"Naruto - {n}", Span(201, 220), "Naruto", 2);
+        Run("125 to 135 in a release folder", ["Frieren.S01.1080p"], n => $"{n}", Span(125, 135), "Frieren", 1);
+        Run("named 125 to 135 in a release folder", ["Frieren.S01.1080p"], n => $"Frieren - {n} [1080p]", Span(125, 135), "Frieren", 1);
+        Run("bare 150 to 155 in a season", ["Harbor", "Season 1"], n => $"{n}", Span(150, 155), "Harbor", 1);
+        // A number in the show's name, with no folder to say so.
+        Run("Area 51 in a library", [], n => $"Area 51 - {n}", Span(1, 9), "Area 51");
+        Run("Area 51 past 9 episodes", [], n => $"Area 51 - {n}", Span(1, 12), "Area 51");
+        Run("Area 51 in Downloads", ["Downloads"], n => $"Area 51 - {n}", Span(1, 9), "Area 51");
+        Run("Brooklyn 99 in a folder", ["Stuff"], n => $"Brooklyn 99 - {n}", Span(1, 9), "Brooklyn 99");
+        Run("Brooklyn 99 with no dash", ["Stuff"], n => $"Brooklyn 99 {n}", Span(1, 9), "Brooklyn 99");
+        Run("Mob Psycho 100 under TV", ["TV"], n => $"Mob Psycho 100 - {n}", Span(1, 9), "Mob Psycho 100");
+        Run("86 in a library", [], n => $"86 - {n}", Span(1, 9), "86");
+        Run("24 in Downloads", ["Downloads"], n => $"24 - {n}", Span(1, 9), "24");
+        Run("Brooklyn 99 alone", [], n => $"Brooklyn 99 - {n}", [5], "Brooklyn 99");
+        Numbered(["Lost 4", "Season 1", "04 - Part 2.mkv"], "Lost 4", 1, 4);
+        Numbered(["Harbor 2", "Season 1", "02 - Chapter 3.mkv"], "Harbor 2", 1, 2);
+        // Unpadded numbers beside a number in the show's name count up.
+        Run("Lost 4 with no dash", [], n => $"Lost 4 {n}", Span(1, 12), "Lost 4");
+        Run("Babylon 5 with no dash", ["Downloads"], n => $"Babylon 5 {n}", Span(1, 12), "Babylon 5");
+        Run("a plain name with no dash", [], n => $"Harbor Lights {n}", Span(1, 12), "Harbor Lights");
+        Run("Movie Night with no dash", [], n => $"Movie Night {n}", Span(1, 12), "Movie Night");
+        // A clip word before a season and episode marker.
+        Run("Night Gallery with markers", [], n => $"Night Gallery - S01E{n:00} - The Name {n}", Span(1, 12), "Night Gallery", 1);
+        // Numbered clips stay clips: the word comes after a dash, or sits right beside its number.
+        Folder("Calm Star", "Calm Star - 01.mkv", "Calm Star - 02.mkv", "Calm Star - 03.mkv", "Calm Star - Art Gallery 1.mkv", "Calm Star - Art Gallery 2.mkv", "Calm Star - Art Gallery 3.mkv");
+        check(Read("Calm Star", "Calm Star - Art Gallery 2.mkv") is { Series: "Calm Star", IsBonus: true, Episode: null }, $"a numbered gallery is a clip (got {Read("Calm Star", "Calm Star - Art Gallery 2.mkv").Episode})");
+        // A clip word in the show's name.
+        Run("Interview with the Vampire in a season", ["Interview with the Vampire", "Season 1"], n => $"Interview with the Vampire - {n}", Span(1, 7), "Interview with the Vampire", 1);
+        Run("padded Interview with the Vampire", ["Interview with the Vampire", "Season 1"], n => $"Interview with the Vampire {n:00}", Span(1, 7), "Interview with the Vampire", 1);
+        Run("Night Gallery in a season", ["Night Gallery", "Season 1"], n => $"Night Gallery - {n}", Span(1, 6), "Night Gallery", 1);
+        Run("Commercial Break in a season", ["Commercial Break", "Season 1"], n => $"Commercial Break - {n}", Span(1, 6), "Commercial Break", 1);
+        Run("Bonus Family with no dash", ["Bonus Family", "Season 1"], n => $"Bonus Family {n}", Span(1, 10), "Bonus Family", 1);
+        Run("Bonus Family under TV", ["TV", "Bonus Family"], n => $"Bonus Family - {n}", Span(1, 9), "Bonus Family");
+        Run("Special Ops Lioness as scene files", ["Special Ops Lioness", "Season 1"], n => $"Special.Ops.Lioness.{n}.1080p.WEB-DL.x264-GRP", Span(1, 8), "Special Ops Lioness", 1);
+        Run("Trailer Park Boys", ["Trailer Park Boys", "Season 1"], n => $"Trailer Park Boys - {n}", Span(1, 12), "Trailer Park Boys", 1);
+        Run("padded Trailer Park Boys", ["Trailer Park Boys", "Season 1"], n => $"Trailer Park Boys {n:00}", Span(1, 12), "Trailer Park Boys", 1);
+        Run("a show called Extras with a year", ["Extras (2005)", "Season 1"], n => $"Extras - {n:00}", Span(1, 3), "Extras", 1);
+        // Special with a number, beside a show's episodes and away from them.
+        Folder("Harbor Beside", "Harbor Beside - 01.mkv", "Harbor Beside - 02.mkv", "Harbor Beside - 03.mkv", "Special 01.mkv", "Special 02.mkv", "Specials 03.mkv", "Special.04.mkv");
+        foreach (var file in new[] { "Special 01.mkv", "Special 02.mkv", "Specials 03.mkv", "Special.04.mkv" }) check(Read("Harbor Beside", file) is { Series: "Harbor Beside", IsBonus: true, Episode: null }, $"{file} is a clip beside a show's episodes (got {Read("Harbor Beside", file).Series} {Read("Harbor Beside", file).Episode})");
+        Folder("Stuff Specials", "Special 26.mkv", "Special 27.mkv");
+        Film(["Stuff Specials", "Special 26.mkv"], "Special 26", null);
+        Film(["Stuff Alone", "Special 01.mkv"], "Special 01", null);
+        // A tag ahead of other words.
+        Named("Harbor - 05 [SubsPlease] (Grp).mkv", null);
+        Named("Harbor - 05 [Grp] The Name.mkv", "The Name");
         // Words with a number after them are numbered clips and films, not new shows.
         Folder("Harbor Clips", "Harbor Clips - 01.mkv", "Harbor Clips - 02.mkv", "Harbor Clips - 03.mkv", "Opening 01 - Song Name.mkv", "Extra 01 - Deleted Scenes.mkv", "Movie 01 Two Heroes.mkv");
         foreach (var file in new[] { "Opening 01 - Song Name.mkv", "Extra 01 - Deleted Scenes.mkv", "Movie 01 Two Heroes.mkv" }) check(Read("Harbor Clips", file) is { Series: "Harbor Clips", Episode: null }, $"{file} stays with its show (got {Read("Harbor Clips", file).Series} {Read("Harbor Clips", file).Episode})");

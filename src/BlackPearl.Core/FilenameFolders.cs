@@ -45,7 +45,7 @@ internal static class FilenameFolders
         var directory = Path.GetDirectoryName(path);
         if (string.IsNullOrEmpty(directory)) return FolderEvidence.None with { Series = seriesContext, Movies = movieLibrary && !seriesContext, FolderSeason = folderSeason, SeasonFolder = folderSeason is not null };
         var names = Names.TryGetValue(directory, out var known) ? known : ReadNames(directory);
-        var isRoot = libraryRoot is not null && string.Equals(Path.GetFullPath(libraryRoot).TrimEnd(Path.DirectorySeparatorChar), directory, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        var isRoot = libraryRoot is not null && string.Equals(Path.GetFullPath(libraryRoot).TrimEnd(Path.DirectorySeparatorChar), directory.TrimEnd(Path.DirectorySeparatorChar), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
         var slots = Siblings(directory);
         slots.Names.TryGetValue(Path.GetFileName(path), out var own);
         HashSet<int>? plain = null, packed = null;
@@ -149,8 +149,8 @@ internal static class FilenameFolders
                 }
                 else if (distinct >= 2 && distinct * 2 >= members.Length && IsRun(values, distinct) && !(gap.Key.Trim(' ', '.', '_').Length == 0 && TitledFilms(members, run, values, distinct)))
                 {
-                    // 001 can't be season 0, episode 1 beside 002, while 0101 can be season 1, episode 1.
-                    if (distinct >= 100 || members.Any(row => row.Runs[run].Value is { Length: 3 or 4 } digits && digits[..^2].All(c => c == '0')))
+                    // 001 can't be season 0, episode 1 beside 002, while 0101 can be season 1, episode 1. Beside an unpadded 1, 10 just counts up too.
+                    if (distinct >= 100 || members.Any(row => row.Runs[run].Value is { Length: 1 } || row.Runs[run].Value is { Length: 3 or 4 } digits && digits[..^2].All(c => c == '0')))
                         foreach (var row in members)
                         {
                             if (!plainRuns.TryGetValue(row.File, out var plain)) plainRuns[row.File] = plain = [];
@@ -193,10 +193,11 @@ internal static class FilenameFolders
     }
     // A running number has few gaps for how many values it takes: 1 and 12 can be the episodes someone kept, 12 and 300 aren't.
     private static bool IsRun(int[] values, int distinct) => values.Max() - values.Min() < 3 * distinct + 20 || distinct >= 3 && Packed(values, distinct);
-    // Seasons written into the number jump by hundreds, with more than one episode to each: 101, 102, 201, 202. Years and numbers of
-    // different lengths are titles: 1408, 1917, 127.
+    // Seasons written into the number jump by hundreds, with more than one episode to each, and each season starts near its first
+    // episode: 101, 102, 201, 202. Years and numbers of different lengths are titles (1408, 1917, 127), and 150 to 160 only counts up.
     private static bool Packed(int[] values, int distinct) => distinct >= 2 && values.All(value => value is > 100 and < 4100 && value is not (>= 1900 and <= 2099) && value % 100 is > 0 and <= 60) &&
-        values.Select(value => value.ToString().Length).Distinct().Count() == 1 && values.Select(value => value / 100).Distinct().Count() * 2 <= distinct;
+        values.Select(value => value.ToString().Length).Distinct().Count() == 1 && values.Select(value => value / 100).Distinct().Count() * 2 <= distinct &&
+        values.GroupBy(value => value / 100).All(season => season.Min() % 100 <= 3);
     private static bool OwnYears(IReadOnlyList<(string File, (int Start, string Value)[] Runs, string Text)> members, int run)
     {
         var years = new HashSet<string>();
