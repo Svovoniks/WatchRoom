@@ -299,6 +299,8 @@ internal static class FilenameEpisodes
             foreach (Match match in pattern.Matches(text))
             {
                 if (!Clear(match.Index) || !Free(match.Index, match.Index + match.Length)) continue;
+                // "Легенда №17 (2013)", "Палата №6": after a title, the sign is part of it, unless it's a show's location, the folder names the show or the number runs across the files.
+                if (match.Index > scan.CoreStart && match.Index < scan.Original.Length && scan.Original[match.Index] == '№' && !evidence.Series && !evidence.Varies(match.Groups["n"].Index) && !evidence.NamesFolder(scan.Slice(scan.CoreStart, match.Index))) continue;
                 var value = int.Parse(match.Groups["n"].Value);
                 var chain = Continue(text, match.Index + match.Length, value, 1);
                 results.Add(new() { Form = Form.Label, Start = match.Index, End = chain.Position, Episode = value, EpisodeEnd = chain.End, Digits = match.Groups["n"].Value, Conflict = chain.Conflict });
@@ -561,6 +563,8 @@ internal static class FilenameEpisodes
         if (!numbered && year is not null) title = Regex.Replace(title, @"^0\d{0,2}[.\s]+(?=\S)", "", RegexOptions.None, Limit);
         title = GenreTail.Replace(title, "");
         if (best.Form == Form.Film) title = FilmTitle(scan, best, title, stop, alternates);
+        // The scan writes "№" as "#" to read it; a title keeps the file's own sign.
+        if (scan.Original.Contains('№') && !scan.Original.Contains('#')) title = title.Replace('#', '№');
         return (Trim(title), alternates.Where(a => a.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), year);
     }
 

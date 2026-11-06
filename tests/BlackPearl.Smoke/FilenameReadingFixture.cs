@@ -111,6 +111,16 @@ static class FilenameReadingFixture
         Numbered(["Calm Hunting Season", "Season 1", "02.mkv"], "Calm Hunting Season", 1, 2);
         // A show's specials folder stays in that show.
         check(Read("TV", "Calm Doctor", "Specials", "The Day of the Calm.mkv") is { Series: "Calm Doctor", Season: 0 } specialOne && Read("TV", "Calm Sherlock", "Specials", "The Calm Bride.mkv") is { Series: "Calm Sherlock", Season: 0 } specialTwo && specialOne.ShowId != specialTwo.ShowId, $"each show keeps its own specials (got {Read("TV", "Calm Doctor", "Specials", "The Day of the Calm.mkv").Series} and {Read("TV", "Calm Sherlock", "Specials", "The Calm Bride.mkv").Series})");
+        // A show's OVA folder numbers apart from the show.
+        Run("a show's episodes beside its OVAs", ["Calm Hell", "TV"], n => $"[Grp] Calm Hell - {n:00}", Span(1, 13), "Calm Hell", 1);
+        Run("a show's OVAs under another name", ["Calm Hell", "OVA"], n => $"[Grp] Calm Hell Ultimate - {n:00}", Span(1, 10), "Calm Hell", 0);
+        Run("a show's OVAs with only numbers", ["Calm Bare", "OVA"], n => $"{n:00}", Span(1, 4), "Calm Bare", 0);
+        Numbered(["Calm Gakki", "OVA", "Calm Gakki Two - S02E01.mkv"], "Calm Gakki", 2, 1);
+        // The number sign in a film's title.
+        Film(["Легенда №17 (2013).mkv"], "Легенда №17", 2013);
+        Film(["Stuff", "Палата №6.mkv"], "Палата №6", null);
+        check(Read("Легенда №17 (2013).mkv").Title == "Легенда №17", $"a film's number sign stays as written (got {Read("Легенда №17 (2013).mkv").Title})");
+        Numbered(["Calm Sign", "Calm Sign №5.mkv"], "Calm Sign", null, 5);
         // A volume isn't a season.
         Numbered(["Harbor Vol", "Vol 2", "Harbor Vol - 04.mkv"], "Harbor Vol", 1, 4);
         Numbered(["Harbor Vol", "Season 1", "Vol 2", "Harbor Vol - 05.mkv"], "Harbor Vol", 1, 5);

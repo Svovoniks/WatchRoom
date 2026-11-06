@@ -1073,6 +1073,22 @@ public static partial class FileNames
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
     }
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, bool), (DateTime Written, bool Several)> SeveralShows = new();
+    private static bool HoldsSeveralShows(string dir, bool seriesContext)
+    {
+        try
+        {
+            var written = Directory.GetLastWriteTimeUtc(dir);
+            if (SeveralShows.TryGetValue((dir, seriesContext), out var cached) && cached.Written == written) return cached.Several;
+            var several = Directory.Exists(dir) && Directory.EnumerateFiles(dir).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file))).Take(400)
+                .Select(file => FilenameEpisodes.Read(file, seriesContext)?.Series).Where(show => !string.IsNullOrWhiteSpace(show)).Select(show => TitleWords(show!)).Distinct().Skip(1).Any();
+            if (SeveralShows.Count > 4096) SeveralShows.Clear();
+            SeveralShows[(dir, seriesContext)] = (written, several);
+            return several;
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
     public static MediaItem Parse(string path, string kind = "Mixed", string? libraryRoot = null)
     {
         path = System.IO.Path.GetFullPath(path);
@@ -1141,16 +1157,19 @@ public static partial class FileNames
             if (above.Length == 2) return false;
             if (!ownShow.Contains(above, StringComparison.Ordinal) && !above.Contains(ownShow, StringComparison.Ordinal)) return true;
             // "Star Trek\TV" with TNG and DS9 beside each other: each file is its own show.
-            return Directory.Exists(seriesDir) && Directory.EnumerateFiles(seriesDir).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file))).Take(400)
-                .Select(file => FilenameEpisodes.Read(file, seriesContext || seasonFolder.Success)?.Series).Where(show => !string.IsNullOrWhiteSpace(show)).Select(show => TitleWords(show!)).Distinct().Skip(1).Any();
+            return HoldsSeveralShows(seriesDir, seriesContext || seasonFolder.Success);
         }
+        var throughOva = false;
         while (!NamesShowInFolder(path, seriesDir) && !HoldsSeason() && System.IO.Path.GetDirectoryName(seriesDir) is { } parent && (IsReleaseDirectory(seriesDir) || FilenameFolders.IsContainer(System.IO.Path.GetFileName(seriesDir)) && !(FilenameFolders.IsLocation(System.IO.Path.GetFileName(seriesDir)) && OtherShowAbove(parent))) &&
             (libraryRoot is null || !string.Equals(System.IO.Path.GetFullPath(libraryRoot), seriesDir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
         {
             var part = Regex.Match(System.IO.Path.GetFileName(seriesDir), @"(?i)^Part\s*([0-9]{1,4})\s*$");
             if (part.Success) sourcePart = int.Parse(part.Groups[1].Value);
+            throughOva |= Regex.IsMatch(System.IO.Path.GetFileName(seriesDir), @"(?i)^(?:ova|oad|ona)$");
             seriesDir = parent;
         }
+        // "Show\OVA\Show Ultimate - 01" isn't the show's own episode 1: like its specials, a show's OVAs number apart, unless the file gives a season.
+        if (throughOva && filenameSeason is null && number is not null) season = 0;
         // A show's extras folder joins the show as bonus clips, whatever the file names say; an explicit S00 file there is a numbered special.
         var extraClip = showExtras && seriesDir != dir && numbering is not { ExplicitSeason: true, Season: 0 };
         if (extraClip) { bonus = true; series = IsLooseFolder(seriesDir, libraryRoot) ? NearestTitledFolder(extrasOwner!, libraryRoot) ?? reading.Title : FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(seriesDir)).Title; }
