@@ -133,6 +133,66 @@ static class FilenameReadingFixture
         Folder("Calm Subs", "note.txt"); Directory.CreateDirectory(Path.Combine(directory, "Calm Subs", "Subs"));
         Folder(Path.Combine("Calm Subs", "OVA"), "Calm Subs - 01.mkv");
         Numbered(["Calm Subs", "OVA", "Calm Subs - 01.mkv"], "Calm Subs", 1, 1);
+        // A clip in a show's OVA folder is the show's clip in a show library, and a clip with a title of its own is that title's.
+        Folder(Path.Combine("Calm Clip", "Season 1"), "Calm Clip - 01.mkv", "Calm Clip - 02.mkv");
+        Folder(Path.Combine("Calm Clip", "OVA"), "Calm Clip - NCED.mkv", "Calm Clip OVA.mkv");
+        Folder(Path.Combine("Calm Spin", "Season 1"), "Calm Spin - 01.mkv", "Calm Spin - 02.mkv");
+        Folder(Path.Combine("Calm Spin", "OVA"), "Calm Spin Ultimate - NCOP1.mkv");
+        foreach (var library in new[] { "Anime", "Show" })
+        {
+            foreach (var ovaClip in new[] { "Calm Clip - NCED.mkv", "Calm Clip OVA.mkv" })
+            {
+                var clipRead = FileNames.Parse(Path.Combine(directory, "Calm Clip", "OVA", ovaClip), library, directory);
+                check(clipRead is { Series: "Calm Clip", Season: 0, Episode: null }, $"{ovaClip} in a {library} library is a clip of the show (got {clipRead.Series} season {clipRead.Season} episode {clipRead.Episode} clip {clipRead.IsBonus})");
+            }
+            var spin = FileNames.Parse(Path.Combine(directory, "Calm Spin", "OVA", "Calm Spin Ultimate - NCOP1.mkv"), library, directory);
+            check(spin.Series == "Calm Spin Ultimate", $"a clip with its own title in a {library} library stays that title's (got {spin.Series} season {spin.Season} clip {spin.IsBonus})");
+        }
+        // A title holding nothing but a clip has no show for it to join, so it stays a title a lookup can find.
+        Folder(Path.Combine("Calm Delta", "OVA"), "Calm Delta OVA.mkv");
+        Folder(Path.Combine("Calm Gamma", "OVA"), "Calm Gamma - NCED.mkv");
+        foreach (var library in new[] { "Anime", "Show" })
+            foreach (var (folder, lone) in new[] { ("Calm Delta", "Calm Delta OVA.mkv"), ("Calm Gamma", "Calm Gamma - NCED.mkv") })
+            {
+                var loneRead = FileNames.Parse(Path.Combine(directory, folder, "OVA", lone), library, directory);
+                check(loneRead is { IsBonus: false } && loneRead.Series == folder, $"{lone} alone in a {library} library is a title to look up, not a clip (got {loneRead.Series} clip {loneRead.IsBonus})");
+            }
+        // Nor does a folder holding only other clips, or a film, have episodes to join.
+        Folder("Calm Iota", "Calm Iota - NCOP.mkv"); Folder(Path.Combine("Calm Iota", "OVA"), "Calm Iota OVA.mkv");
+        Folder(Path.Combine("Calm Kappa", "Season 1"), "Calm Kappa - NCOP.mkv"); Folder(Path.Combine("Calm Kappa", "OVA"), "Calm Kappa OVA.mkv");
+        Folder("Calm Zeta", "Calm Zeta.mkv"); Folder(Path.Combine("Calm Zeta", "OVA"), "Calm Zeta OVA.mkv");
+        foreach (var library in new[] { "Anime", "Show" })
+            foreach (var noEpisodes in new[] { "Calm Iota", "Calm Kappa", "Calm Zeta" })
+            {
+                var noneRead = FileNames.Parse(Path.Combine(directory, noEpisodes, "OVA", noEpisodes + " OVA.mkv"), library, directory);
+                check(noneRead is { IsBonus: false }, $"{noEpisodes} OVA in a {library} library has no episodes to join, so a lookup can find it (got {noneRead.Series} clip {noneRead.IsBonus})");
+            }
+        // Numbered files the scan reads as another show, or as a title, aren't this show's episodes either.
+        Folder(Path.Combine("Calm Nu", "Calm Nu TV"), "Calm Nu - 01.mkv", "Calm Nu - 02.mkv"); Folder(Path.Combine("Calm Nu", "OVA"), "Calm Nu - NCOP.mkv");
+        Folder(Path.Combine("Calm Xi", "[Group] Calm Xi [1080p]"), "[Group] Calm Xi - 01 [1080p].mkv", "[Group] Calm Xi - 02 [1080p].mkv"); Folder(Path.Combine("Calm Xi", "OVA"), "[Group] Calm Xi - NCOP [1080p].mkv");
+        Folder(Path.Combine("Calm Pi", "Other Thing"), "Other Thing - 01.mkv", "Other Thing - 02.mkv"); Folder(Path.Combine("Calm Pi", "OVA"), "Calm Pi OVA.mkv");
+        Folder("Calm Rho", "Calm Rho.mkv", "Deleted Scene 1.mkv"); Folder(Path.Combine("Calm Rho", "OVA"), "Calm Rho OVA.mkv");
+        foreach (var library in new[] { "Anime", "Show" })
+            foreach (var (folder, otherFile) in new[] { ("Calm Nu", "Calm Nu - NCOP.mkv"), ("Calm Xi", "[Group] Calm Xi - NCOP [1080p].mkv"), ("Calm Pi", "Calm Pi OVA.mkv"), ("Calm Rho", "Calm Rho OVA.mkv") })
+            {
+                var otherRead = FileNames.Parse(Path.Combine(directory, folder, "OVA", otherFile), library, directory);
+                check(otherRead is { IsBonus: false }, $"{otherFile} in a {library} library has none of this show's episodes to join (got {otherRead.Series} clip {otherRead.IsBonus})");
+            }
+        // Nor are samples and trailers, which the scan never lists.
+        Folder("Calm Tau", "Calm Tau.S01E01.sample.mkv"); Folder(Path.Combine("Calm Tau", "OVA"), "Calm Tau OVA.mkv");
+        Folder("Calm Phi", "Calm Phi - 01 trailer.mkv"); Folder(Path.Combine("Calm Phi", "OVA"), "Calm Phi OVA.mkv");
+        foreach (var library in new[] { "Anime", "Show" })
+            foreach (var unlisted in new[] { "Calm Tau", "Calm Phi" })
+            {
+                var unlistedRead = FileNames.Parse(Path.Combine(directory, unlisted, "OVA", unlisted + " OVA.mkv"), library, directory);
+                check(unlistedRead is { IsBonus: false }, $"{unlisted} OVA in a {library} library has only unlisted files beside it, so a lookup can find it (got {unlistedRead.Series} clip {unlistedRead.IsBonus})");
+            }
+        // Numbered files beside it in the same folder are a show to join.
+        Folder(Path.Combine("Calm Omega", "OVA"), "Calm Omega - 01.mkv", "Calm Omega - 02.mkv", "Calm Omega - NCED.mkv");
+        check(FileNames.Parse(Path.Combine(directory, "Calm Omega", "OVA", "Calm Omega - NCED.mkv"), "Anime", directory) is { IsBonus: true, Series: "Calm Omega" } besideOva && besideOva.ShowId == FileNames.Parse(Path.Combine(directory, "Calm Omega", "OVA", "Calm Omega - 01.mkv"), "Anime", directory).ShowId, "a clip beside numbered files in an OVA folder joins them");
+        // A film library has no shows for a clip to join.
+        Folder(Path.Combine("Calm Eta", "OVA", "Season 1"), "Calm Eta - NCED.mkv"); Folder(Path.Combine("Calm Eta", "TV"), "Calm Eta - 01.mkv", "Calm Eta - 02.mkv");
+        check(FileNames.Parse(Path.Combine(directory, "Calm Eta", "OVA", "Season 1", "Calm Eta - NCED.mkv"), "Movie", directory).Kind == "Movie", $"a clip in a film library stays a film (got {FileNames.Parse(Path.Combine(directory, "Calm Eta", "OVA", "Season 1", "Calm Eta - NCED.mkv"), "Movie", directory).Kind})");
         Folder(Path.Combine("Calm Beedy", "BD"), "Calm Beedy - 01.mkv", "Calm Beedy - 02.mkv");
         Folder(Path.Combine("Calm Beedy", "OVA"), "Calm Beedy - 01.mkv");
         Numbered(["Calm Beedy", "OVA", "Calm Beedy - 01.mkv"], "Calm Beedy", 0, 1);
@@ -649,6 +709,16 @@ static class FilenameReadingFixture
         reopened.Save(read[filmPath] with { Title = "Provider Title", MetadataProvider = "tvmaze", MetadataId = 9, MetadataType = "movie" });
         await reopened.ScanAsync([new(mediaRoot)]);
         check(reopened.All().Single(x => x.Path == filmPath) is { MetadataId: 9 } after && after.Title == "Provider Title", "later scans merge as usual");
+        // A film a provider identified stays a film when a clip word in its folder would make it a clip.
+        var filmClipRoot = Path.Combine(directory, "Film Clip Library"); var filmClipShow = Path.Combine(filmClipRoot, "Calm Alpha");
+        Directory.CreateDirectory(Path.Combine(filmClipShow, "Season 1")); Directory.CreateDirectory(Path.Combine(filmClipShow, "OVA"));
+        await File.WriteAllBytesAsync(Path.Combine(filmClipShow, "Season 1", "Calm Alpha - 01.mkv"), [0]); await File.WriteAllBytesAsync(Path.Combine(filmClipShow, "Season 1", "Calm Alpha - 02.mkv"), [0]);
+        var filmClipPath = Path.Combine(filmClipShow, "OVA", "Calm Alpha OVA.mkv"); await File.WriteAllBytesAsync(filmClipPath, [0]);
+        var filmClipStore = new LibraryStore(Path.Combine(directory, "Film Clip Data"));
+        filmClipStore.Save(new MediaItem(FileNames.Parse(filmClipPath, "Show", filmClipRoot).Id, filmClipPath, "Calm Alpha OVA", "Movie", MetadataProvider: "tmdb", MetadataId: 91, MetadataType: "movie", ProviderIds: new() { ["tmdb"] = "91" }, Overview: "The film's plot", MetadataFetchedAt: 5000));
+        await filmClipStore.ScanAsync([new(filmClipRoot, "Show")]);
+        var filmClip = filmClipStore.All().Single(x => x.Path == filmClipPath);
+        check(filmClip is { IsBonus: false, MetadataId: 91, Series: null, Overview: "The film's plot", EpisodeTitle: null, SeriesPath: null }, $"an identified film isn't made a clip, nor does it take the clip's title or folder (got clip {filmClip.IsBonus} id {filmClip.MetadataId} series {filmClip.Series} title {filmClip.EpisodeTitle} path {filmClip.SeriesPath})");
         var offline = Path.Combine(directory, "Offline"); Directory.CreateDirectory(offline);
         var offlineStore = new LibraryStore(offline); offlineStore.Save(FileNames.Parse(Path.Combine(offline, "Calm.Waters.2019.mkv")));
         FromBeforeReader(offline);

@@ -905,6 +905,8 @@ public sealed partial class LibraryStore
                 item = item with { EpisodeEnd = null };
         }
         var bonus = previous?.Matched == true || previous is not null && LibraryIdentity.Locked(previous, "Episode") ? previous.IsBonus : parsed.IsBonus;
+        // A film a provider identified stays a film, whatever a clip word in its name suggests: as a clip it would drop out of refreshes and wanted titles.
+        if (previous is { MetadataType: "movie" } && parsed.IsBonus && parsed.ExtraOf is null) { bonus = previous.IsBonus; item = item with { EpisodeTitle = previous.EpisodeTitle, SeriesPath = previous.SeriesPath }; }
         // A film's clip stays with its film, including one an earlier scan had filed under a show of its own.
         if (parsed.ExtraOf is not null && (previous is null || CanRepairGrouping(previous)))
         { item = item with { ExtraOf = parsed.ExtraOf, Title = parsed.Title, Kind = parsed.Kind, Series = null, ShowId = null, SeasonId = null, SeriesPath = null, Season = null, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, Year = null }; bonus = true; }
@@ -1077,13 +1079,36 @@ public static partial class FileNames
         catch (UnauthorizedAccessException) { return false; }
     }
     private static bool OvaFolder(string name) => Regex.IsMatch(name, @"(?i)^(?:ova|oad|ona)$");
-    // Whether a show's folder holds episodes of its own, beside any OVA, specials, films or extras folders.
+    private static bool HoldsEpisodeFiles(string name) => !Regex.IsMatch(name, @"(?i)^(?:ova|oad|ona|specials?|movies?|films?)$") && !Regex.IsMatch(name, ExtrasFolders);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, string, string?), (DateTime Written, bool Holds)> NumberedEpisodes = new();
+    // Whether the scan reads a file in a show's folder, or one level down, as a listed, numbered episode of that show. Asking the scan itself means a folder
+    // that's a show of its own, a name that's only a title, and a sample it never lists don't count. A clip further down can bring this back here for a folder
+    // nearer the root, which always ends. The answer is kept until one of those folders changes, so many clips cost one read.
+    private static bool HoldsNumberedEpisodes(string show, string kind, string? libraryRoot)
+    {
+        try
+        {
+            if (!Directory.Exists(show)) return false;
+            var folders = new[] { show }.Concat(Directory.EnumerateDirectories(show).Where(child => HoldsEpisodeFiles(System.IO.Path.GetFileName(child)))).ToArray();
+            var written = folders.Max(Directory.GetLastWriteTimeUtc);
+            if (NumberedEpisodes.TryGetValue((show, kind, libraryRoot), out var known) && known.Written == written) return known.Holds;
+            var holds = folders.SelectMany(folder => Directory.EnumerateFiles(folder).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file))).Take(50))
+                .Any(file => Parse(file, kind, libraryRoot) is { IsBonus: false, IsExtra: false, Season: not 0, SeriesPath: { } home } found && (found.Episode is not null || found.AirDate is not null) &&
+                    string.Equals(home, show, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+            if (NumberedEpisodes.Count > 4096) NumberedEpisodes.Clear();
+            NumberedEpisodes[(show, kind, libraryRoot)] = (written, holds);
+            return holds;
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+    // Whether a show's folder holds videos of its own, beside any OVA, specials, films or extras folders.
     private static bool HoldsOwnEpisodes(string show)
     {
         try
         {
             return Directory.Exists(show) && (Directory.EnumerateFiles(show).Any(file => Extensions.Contains(System.IO.Path.GetExtension(file))) ||
-                Directory.EnumerateDirectories(show).Any(child => System.IO.Path.GetFileName(child) is { } name && !Regex.IsMatch(name, @"(?i)^(?:ova|oad|ona|specials?|movies?|films?)$") && !Regex.IsMatch(name, ExtrasFolders) &&
+                Directory.EnumerateDirectories(show).Any(child => HoldsEpisodeFiles(System.IO.Path.GetFileName(child)) &&
                     Directory.EnumerateFiles(child).Any(file => Extensions.Contains(System.IO.Path.GetExtension(file)))));
         }
         catch (IOException) { return false; }
@@ -1173,7 +1198,12 @@ public static partial class FileNames
             if (above.Length == 2) return false;
             // "Show\OVA\Show Ultimate - 01", "Show Ultimate OVA 01" and "Show Ultimate - S01E01" have a title of their own, and providers list them apart.
             // "Show OAD - S00E01" only says what it is, and "Show Two - S02E01" gives a later season, so both are the show's. Extras stay with whatever holds them.
-            if (OvaFolder(System.IO.Path.GetFileName(seriesDir)) && filenameSeason is null or 0 or 1 && !showExtras) return TitleWords(Regex.Replace(numbering?.Series ?? "", @"(?i)(?<![\p{L}\p{N}])(?:ova|oad|ona)(?![\p{L}\p{N}])", " ")) != above;
+            if (OvaFolder(System.IO.Path.GetFileName(seriesDir)) && filenameSeason is null or 0 or 1 && !showExtras)
+            {
+                if (TitleWords(Regex.Replace(ownShow, @"(?i)(?<![\p{L}\p{N}])(?:ova|oad|ona)(?![\p{L}\p{N}])", " ")) != above) return true;
+                // A clip only joins a show with episodes. A title holding only clips or a film has to stay one a lookup can find, and a film library has no shows.
+                return numbering is null && (sourceKind == "Movie" || besideEpisodes is null && !HoldsNumberedEpisodes(parent, sourceKind, libraryRoot));
+            }
             if (!ownShow.Contains(above, StringComparison.Ordinal) && !above.Contains(ownShow, StringComparison.Ordinal)) return true;
             // "Star Trek\TV" with TNG and DS9 beside each other: each file is its own show.
             return HoldsSeveralShows(seriesDir, seriesContext || seasonFolder.Success);
