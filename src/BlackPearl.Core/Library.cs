@@ -934,7 +934,7 @@ public static partial class FileNames
     private const string ShortExtras = @"(?:bd |dvd )?(?:extra|bonus)|sps|nc|nc ?op-?ed|ncops?|nceds?|creditless(?: ops?)?(?: ?& ?eds?)?|(?:bd |web )?menus?|(?:web )?pvs?|cms?|interviews.*";
     private const string ExtrasFolders = @"(?i)^(?:" + PlainExtras + "|" + ShortExtras + ")$";
     // "(S01-S07+Movies)" and "[Season 1 + 2]" hold several seasons, so neither is a season folder.
-    private const string SeasonFolder = @"(?i)(?:^|\s|\(|\[)(?:(?:Season|Сезон|Saison|Temporada|Staffel|Stagione)\s*|S)([0-9]{1,2}|(?:19|20)[0-9]{2})(?![0-9]|E[0-9])\b(?!\s*[-+~,&–]\s*(?:S|Season\s*)?[0-9])|^([0-9]{1,3})\s*(?:сезон|sezon)\b|^(?:T|Vol\s*|Volume\s*)?([0-9]{1,2})(?:\s+-\s+\w+)?$|^Specials$";
+    private const string SeasonFolder = @"(?i)(?:^|\s|\(|\[)(?:(?:Season|Сезон|Saison|Temporada|Staffel|Stagione)\s*|S)([0-9]{1,2}|(?:19|20)[0-9]{2})(?![0-9]|E[0-9])\b(?!\s*[-+~,&–]\s*(?:S|Season\s*)?[0-9])|^([0-9]{1,3})\s*(?:сезон|sezon)\b|^T?([0-9]{1,2})(?:\s+-\s+\w+)?$|^Specials$";
     private static string[] Parts(string path) => path.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
     private static bool IsSeasonFolder(string name) => Regex.IsMatch(Regex.Replace(name, @"[._]+", " "), SeasonFolder);
     private static int? SeasonNumber(string name) => Regex.Match(Regex.Replace(name, @"[._]+", " "), SeasonFolder) is { Success: true } match
@@ -1102,7 +1102,7 @@ public static partial class FileNames
         var bonus = reading.Clip is not null && !reading.Film && (seriesContext || seasonFolder.Success);
         // "Azumanga Daioh - XX - Original Opening Sequence" beside the show's numbered episodes is one of its clips, not a film.
         // "One Piece - 492A" is half of an episode, so it stays where its folder put it.
-        var besideEpisodes = numbering is null && !bonus && sourceKind != "Movie" && filmExtra is null && !showExtras && !IsExtra(path, libraryRoot) &&
+        var besideEpisodes = numbering is null && sourceKind != "Movie" && filmExtra is null && !showExtras && !IsExtra(path, libraryRoot) &&
             !Regex.IsMatch(name, @"(?i)(?:^|\s-\s)\d{1,4}[a-z]\b")
             ? EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success) : null;
         if (besideEpisodes is not null) { bonus = true; series = besideEpisodes; }
@@ -1120,7 +1120,8 @@ public static partial class FileNames
         {
             season = filenameSeason ?? folderSeason ?? 0;
             if (string.IsNullOrWhiteSpace(series) || series == seasonFolderName)
-                series = FilenameEpisodes.AnalyzeFolder(seasonFolderName).Title is { Length: > 0 } own ? own : FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(dir)!)).Title;
+                // "Doctor Who\Specials" holds the show's specials, and says nothing of its own.
+                series = FilenameEpisodes.AnalyzeFolder(seasonFolderName).Title is { Length: > 0 } own && !FilenameFolders.IsContainer(seasonFolderName) ? own : FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(dir)!)).Title;
         }
         // A file named only by its number with no folder to name it has only its own remaining words.
         if (numbering is not null && string.IsNullOrWhiteSpace(series) && (NamesShowInFolder(path, dir) || IsNumberedShow(dir, libraryRoot))) series = System.IO.Path.GetFileName(dir);
@@ -1131,12 +1132,17 @@ public static partial class FileNames
         bool HoldsSeason() => seriesDir != dir && string.IsNullOrWhiteSpace(numbering?.Series) && Regex.IsMatch(System.IO.Path.GetFileName(seriesDir), @"^[0-9]{1,4}$") && IsSeasonFolder(System.IO.Path.GetFileName(dir));
         // "Shelf\TV\Show - 03" names its own show, so a folder that says where files are doesn't pass it up to Shelf. "Show\OVA\Show Part Two 01" is the same show's.
         // A folder that describes its files, "Show\DVDRip.AVI.640x480", is still inside the show.
-        var ownShow = MetadataTitles.Normalize(!string.IsNullOrWhiteSpace(numbering?.Series) ? numbering.Series : bonus ? reading.Title : "");
+        var ownShow = TitleWords(!string.IsNullOrWhiteSpace(numbering?.Series) ? numbering.Series : bonus ? reading.Title : "");
         bool OtherShowAbove(string parent)
         {
-            if (ownShow.Length == 0) return false;
-            var above = MetadataTitles.Normalize(FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(parent)).Title);
-            return above.Length == 0 || !ownShow.Contains(above) && !above.Contains(ownShow);
+            if (ownShow.Length == 2) return false;
+            var above = TitleWords(FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(parent)).Title);
+            // A folder above that says nothing, like "Season 1", isn't another show.
+            if (above.Length == 2) return false;
+            if (!ownShow.Contains(above, StringComparison.Ordinal) && !above.Contains(ownShow, StringComparison.Ordinal)) return true;
+            // "Star Trek\TV" with TNG and DS9 beside each other: each file is its own show.
+            return Directory.Exists(seriesDir) && Directory.EnumerateFiles(seriesDir).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file))).Take(400)
+                .Select(file => FilenameEpisodes.Read(file, seriesContext || seasonFolder.Success)?.Series).Where(show => !string.IsNullOrWhiteSpace(show)).Select(show => TitleWords(show!)).Distinct().Skip(1).Any();
         }
         while (!NamesShowInFolder(path, seriesDir) && !HoldsSeason() && System.IO.Path.GetDirectoryName(seriesDir) is { } parent && (IsReleaseDirectory(seriesDir) || FilenameFolders.IsContainer(System.IO.Path.GetFileName(seriesDir)) && !(FilenameFolders.IsLocation(System.IO.Path.GetFileName(seriesDir)) && OtherShowAbove(parent))) &&
             (libraryRoot is null || !string.Equals(System.IO.Path.GetFullPath(libraryRoot), seriesDir, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
@@ -1248,6 +1254,8 @@ public static partial class FileNames
         var rest = text[match.Length..].Trim(' ', '-', '–', ':', '.', '_');
         return !clip || rest.Length > 0 && !Regex.IsMatch(rest, @"^\(?(?:19|20)\d{2}(?!\d)");
     }
+    // " star trek tng ": a title's words, so one title can be looked for inside another on whole words.
+    private static string TitleWords(string title) => " " + string.Join(' ', Regex.Split(Fold(title).ToLowerInvariant(), @"[^\p{L}\p{N}]+").Where(word => word.Length > 0)) + " ";
     private static string? EpisodeFolderSeries(string dir, string name, string? libraryRoot, bool seriesContext)
     {
         (string Series, int Count)[] shows;

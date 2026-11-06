@@ -76,7 +76,7 @@ internal static class FilenameEpisodes
     private static readonly Regex Film = Rx(@"(?<![\p{L}\p{N}])(?:(?:the[ -]+)?(?:movie|film)(?:[ #-]*\d{1,2})?|gekijou-?ban|劇場版)(?![\p{L}\p{N}])");
     private static readonly Regex ShortClip = new(@"(?<![\p{L}\p{N}])(?:NC[ -]?(?:OP|ED)|(?:S\d{1,2})?NC(?:OP|ED)|OP|ED|PV|CM|SPOT)[ -]?\d{0,2}(?:v\d+|[a-z])?(?![\p{L}\p{N}])", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
     private static readonly Regex WordClip = Rx(@"(?<![\p{L}\p{N}])(?:(?:creditless|clean|textless|non-?credit)[ -]*(?:op|ed|opening|ending)?[ -]*\d{0,2}|opening(?:[ -]?(?:sequence|theme))?[ -]*\d{0,2}|ending(?:[ -]?(?:sequence|theme))?[ -]*\d{0,2}|closing[ -]?sequence|ova|oav|oad|ona|sp|specials?|preview[ -]*\d{0,2}|trailers?[ -]*\d{0,2}|teasers?[ -]*\d{0,2}|promos?[ -]*\d{0,2}|(?:bd |dvd |usa bd )?menu[ -]*\d{0,2}|commercials?|interviews?|art[ -]?gallery|gallery|storyboards?|outtakes|bloopers|featurette|music[ -]video|mv|extras?[ -]*\d{0,2}|bonus|recaps?[ -]*(?:\d{1,3}(?:-\d{1,3})?)?|summary|résumé|cm[ -]collection|pilot[ -]film|ncop|nced)(?![\p{L}\p{N}])");
-    private static readonly Regex TitleEndingWord = Rx(@"^(?:ending|opening|gallery|specials?|interviews?|commercials?|summary|menu)$");
+    private static readonly Regex OrdinaryWord = Rx(@"^(?:ending|opening|gallery|specials?|interviews?|commercials?|summary|menu|bonus)$");
     private static readonly Regex TitleNumberedWord = Rx(@"^(?:gallery|interviews?|commercials?|summary)$");
     private static readonly Regex CjkClip = new(@"ノンクレジット|テロップ無し|映像特典|告知|特報|番宣|予告|メニュー|アイキャッチ|キャラクター設定|オープニング|エンディング|(?<=[\p{IsHiragana}\p{IsKatakana}\p{IsCJKUnifiedIdeographs}])PV|CM集", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
     private static readonly Regex DateForward = new(@"(?<!\d)(?<y>19\d{2}|20\d{2})[ .\-](?<m>0[1-9]|1[0-2])[ .\-](?<d>0[1-9]|[12]\d|3[01])(?!\d)", RegexOptions.CultureInvariant | RegexOptions.Compiled, Limit);
@@ -255,9 +255,9 @@ internal static class FilenameEpisodes
                 // "Opening 01 - Song" numbers a clip.
                 var numbered = match.Value.Any(char.IsDigit) || rest.Length > 0 && char.IsDigit(rest[0]) && !EndsWithYear.IsMatch(rest);
                 if (!joined && (article || !numbered && before.Length == 0 && (EndsWithYear.IsMatch(rest) || rest.Any(char.IsLetter)))) return;
-                // "Hollywood Ending (2002)", "National Gallery": one closing a plain name is part of its title, unless the words before it name the folder.
-                var plain = before.Length > 0 && !joined && !SetApartByDash(text, match.Index) && !SeasonOnly.IsMatch(before) && !evidence.NamesFolder(before);
-                if (plain && TitleEndingWord.IsMatch(match.Value.Trim()) && OnlyYear(rest)) return;
+                // "Hollywood Ending (2002)", "The Never Ending Story", "Secret Menu 2": an ordinary word later in a plain name is part of its title,
+                // unless a dash sets it apart or the words before it name the folder. Beside a show's episodes the file still joins them as a clip.
+                if (before.Length > 0 && !joined && !SetApartByDash(text, match.Index) && !SeasonOnly.IsMatch(before) && !evidence.NamesFolder(before) && OrdinaryWord.IsMatch(Regex.Replace(match.Value, @"[ -]*\d+$", "", RegexOptions.None, Limit).Trim())) return;
             }
             results.Add(new() { Form = Form.Clip, Start = match.Index, End = match.Index + match.Length, Clip = Trim(match.Value), ShortClip = isShort, LeadingTag = leadingTag });
             Take(match.Index, match.Index + match.Length);
@@ -307,7 +307,7 @@ internal static class FilenameEpisodes
 
         var seasons = new List<(int Start, int End, int Season)>();
         foreach (Match match in SeasonOnly.Matches(text))
-            if (Clear(match.Index) && Free(match.Index, match.Index + match.Length)) { seasons.Add((match.Index, match.Index + match.Length, int.Parse(match.Groups["s"].Value))); Take(match.Index, match.Index + match.Length); }
+            if (Clear(match.Index) && Free(match.Index, match.Index + match.Length) && !SeasonWordIsPlain(scan, match, results)) { seasons.Add((match.Index, match.Index + match.Length, int.Parse(match.Groups["s"].Value))); Take(match.Index, match.Index + match.Length); }
         // "Ranma S02 (2025) - E05": a season marker before a labelled episode belongs to it.
         foreach (var labelled in results.Where(r => r.Form == Form.Label))
             if (seasons.LastOrDefault(s => s.End <= labelled.Start) is { End: > 0 } season) { labelled.Season = season.Season; labelled.SeasonStart = season.Start; labelled.Explicit = true; }
@@ -398,8 +398,7 @@ internal static class FilenameEpisodes
                 results.Add(new() { Form = Form.Bare, Start = match.Index, End = match.Index + match.Length, Episode = value, Digits = match.Groups["n"].Value, Glued = true, Ranged = last is not null, EpisodeEnd = last > value ? last : null });
             }
         // A season marker with nothing numbered after it still shapes the title of a season pack.
-        // "Calm Season 2 (2008)": outside a show's location, a season's word with only a year after it is part of a plain title.
-        if (seasons.Count > 0 && !(!evidence.Series && SeasonWordInTitle(scan, seasons[0].Start, seasons[0].End)))
+        if (seasons.Count > 0)
         {
             var none = results[0];
             none.Season = seasons[0].Season; none.SeasonStart = seasons[0].Start;
@@ -446,10 +445,13 @@ internal static class FilenameEpisodes
         // A file that's only a number can be an episode of the show its folder names, up to the numbers titles rarely are.
         return rest.Length > 0 || !opens || !evidence.HasFolder || evidence.OwnFolder || digits.Length >= 3;
     }
-    private static bool SeasonWordInTitle(FilenameScan scan, int start, int end) =>
-        start > scan.CoreStart && scan.Text[start..].TakeWhile(char.IsLetter).Count() > 2 && scan.BracketAt(start) is null && !SetApartByDash(scan.Text, start) &&
-        (end >= scan.CoreEnd || OnlyYear(scan.Slice(end, scan.CoreEnd)));
-    private static bool OnlyYear(string rest) => rest.Length == 0 || EndsWithYear.IsMatch(rest) && rest.Trim('(', ')', ' ').Length == 4;
+    // "The Final Season 01", "Open Season 2 (2008)": a season's word after a title, with no number after it for the season to hold, isn't naming a season.
+    // Its number is the episode's or the title's. "S02", "TV-2", "(Season 2)", "Show - Season 2" and a labelled episode still mark one.
+    private static bool SeasonWordIsPlain(FilenameScan scan, Match match, List<Hypothesis> results)
+    {
+        if (match.Index <= scan.CoreStart || scan.Text[match.Index..].TakeWhile(char.IsLetter).Count() <= 2 || scan.BracketAt(match.Index) is not null || SetApartByDash(scan.Text, match.Index) || results.Any(r => r.Form == Form.Label)) return false;
+        return !Regex.Matches(scan.Slice(match.Index + match.Length, scan.CoreEnd), @"\d+", RegexOptions.None, Limit).Any(number => !(number.Length == 4 && IsYear(int.Parse(number.Value))));
+    }
     // "Show - 5" sets the number apart. "Catch-22" joins it to the word before.
     private static bool SetApartByDash(string text, int index)
     {
@@ -717,7 +719,7 @@ internal static class FilenameEpisodes
     internal static bool SameTitle(string a, string b) => MetadataTitles.Normalize(a) == MetadataTitles.Normalize(b);
 
     internal sealed record FolderReading(string Title, string[] Alternates, int? Year, int? Season);
-    private static readonly Regex FolderStop = new(@"(?<![\p{L}\p{N}])(?:(?:tv|ep?|episodes?|ova|oav|vol|volume)[ .]*)?(?<a>[0-9]{1,4})\s*[-~+]\s*(?:ep?[ .]*)?(?<b>[0-9]{1,4})(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:the\s+)?complete(?:\s+(?:series|collection|batch))?(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:batch|box[ -]?set|seasons?'?s?)(?![\p{L}\p{N}])|\+\s*(?:ova|oav|movies?|specials?|extras?)|(?<![\p{L}\p{N}])(?:vol(?:ume)?|disc|disk|box|bd|dvd)[ .]*[0-9]{1,2}(?![\p{L}\p{N}])", Options, Limit);
+    private static readonly Regex FolderStop = new(@"(?<![\p{L}\p{N}])(?:(?:tv|ep?|episodes?|ova|oav|vol|volume)[ .]*)?(?<a>[0-9]{1,4})\s*[-~+]\s*(?:ep?[ .]*)?(?<b>[0-9]{1,4})(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:the\s+)?complete(?:\s+(?:series|collection|batch))?(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:batch|box[ -]?set|seasons'?|season(?=[ .#_-]*[0-9]))(?![\p{L}\p{N}])|\+\s*(?:ova|oav|movies?|specials?|extras?)|(?<![\p{L}\p{N}])(?:vol(?:ume)?|disc|disk|box|bd|dvd)[ .]*[0-9]{1,2}(?![\p{L}\p{N}])", Options, Limit);
 
     // A folder name is read like a release title: what comes before its season, range or release terms is its title.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, FolderReading> FolderReadings = new();

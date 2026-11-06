@@ -94,6 +94,39 @@ static class FilenameReadingFixture
         Numbered(["Harbor Lights - 14 (S02E02).mkv"], "Harbor Lights", 2, 2);
         Numbered(["Harbor Lights 05 (S01E05).mkv"], "Harbor Lights", 1, 5);
         Numbered(["Harbor Lights 13v2 (S01E13).mkv"], "Harbor Lights", 1, 13);
+        // A clip word anywhere in a plain name stays in the title; a season's word needs another number after it to name a season.
+        Film(["Calm Never Ending Story (1984).mkv"], "Calm Never Ending Story", 1984);
+        Film(["One Special Harbor (1999).mkv"], "One Special Harbor", 1999);
+        Film(["Calm Gallery of Art (2011).mkv"], "Calm Gallery of Art", 2011);
+        Film(["Signing Bonus (2018).mkv"], "Signing Bonus", 2018);
+        Film(["Stuff", "Secret Menu 2.mkv"], "Secret Menu 2", null);
+        Film(["Calm Season 2 Extended Cut.mkv"], "Calm Season 2 Extended Cut", null);
+        Run("a final season's episodes in dots", ["Final Dots"], n => $"Calm.Harbor.The.Final.Season.{n}.1080p.WEB-DL", Span(60, 75), "Calm Harbor The Final Season");
+        Run("a final season's episodes in its season folder", ["TV", "Calm Titan", "Season 4"], n => $"Calm Titan The Final Season {n:00}", Span(1, 16), "Calm Titan", 4);
+        Run("a third season's episodes", ["Third Set"], n => $"[Grp] Calm Haiku Third Season {n:00}", Span(1, 10), "Calm Haiku Third Season");
+        foreach (var n in Span(1, 6)) { Folder("Show Library", $"Calm Open Season {n:00}.mkv"); }
+        foreach (var n in Span(1, 6)) check(FileNames.Parse(Path.Combine(directory, "Show Library", $"Calm Open Season {n:00}.mkv"), "Show", Path.Combine(directory, "Show Library")) is { Episode: var found, Series: "Calm Open Season" } && found == n, $"Calm Open Season {n:00} in a show library is episode {n} (got {FileNames.Parse(Path.Combine(directory, "Show Library", $"Calm Open Season {n:00}.mkv"), "Show", Path.Combine(directory, "Show Library")).Series} {FileNames.Parse(Path.Combine(directory, "Show Library", $"Calm Open Season {n:00}.mkv"), "Show", Path.Combine(directory, "Show Library")).Episode})");
+        // A folder's title keeps a season's word with no number.
+        Numbered(["Calm Harbor The Final Season", "Calm Harbor The Final Season - 03.mkv"], "Calm Harbor The Final Season", null, 3);
+        Numbered(["Calm Hunting Season", "Season 1", "02.mkv"], "Calm Hunting Season", 1, 2);
+        // A show's specials folder stays in that show.
+        check(Read("TV", "Calm Doctor", "Specials", "The Day of the Calm.mkv") is { Series: "Calm Doctor", Season: 0 } specialOne && Read("TV", "Calm Sherlock", "Specials", "The Calm Bride.mkv") is { Series: "Calm Sherlock", Season: 0 } specialTwo && specialOne.ShowId != specialTwo.ShowId, $"each show keeps its own specials (got {Read("TV", "Calm Doctor", "Specials", "The Day of the Calm.mkv").Series} and {Read("TV", "Calm Sherlock", "Specials", "The Calm Bride.mkv").Series})");
+        // A volume isn't a season.
+        Numbered(["Harbor Vol", "Vol 2", "Harbor Vol - 04.mkv"], "Harbor Vol", 1, 4);
+        Numbered(["Harbor Vol", "Season 1", "Vol 2", "Harbor Vol - 05.mkv"], "Harbor Vol", 1, 5);
+        Numbered(["Harbor Tide", "Season 1", "Vol 2", "Harbor Tide - 05.mkv"], "Harbor Tide", 1, 5);
+        // Clips beside a show's episodes stay clips where no folder names the show.
+        Folder("Tv", "Calm Flat - 01.mkv", "Calm Flat - 02.mkv", "Calm Flat Opening.mkv");
+        check(FileNames.Parse(Path.Combine(directory, "Tv", "Calm Flat Opening.mkv"), "Mixed", directory) is { IsBonus: true, Series: "Calm Flat" }, $"a clip beside episodes directly in TV is a clip (got {FileNames.Parse(Path.Combine(directory, "Tv", "Calm Flat Opening.mkv"), "Mixed", directory).Series} bonus {FileNames.Parse(Path.Combine(directory, "Tv", "Calm Flat Opening.mkv"), "Mixed", directory).IsBonus})");
+        Folder("Anime Clips", "[Grp] Calm Anime - 01.mkv", "[Grp] Calm Anime - 02.mkv", "[Grp] Calm Anime Special.mkv");
+        check(FileNames.Parse(Path.Combine(directory, "Anime Clips", "[Grp] Calm Anime Special.mkv"), "Anime", Path.Combine(directory, "Anime Clips")) is { IsBonus: true, Series: "Calm Anime" }, $"a clip beside episodes in an anime library is a clip (got {FileNames.Parse(Path.Combine(directory, "Anime Clips", "[Grp] Calm Anime Special.mkv"), "Anime", Path.Combine(directory, "Anime Clips")).Series} bonus {FileNames.Parse(Path.Combine(directory, "Anime Clips", "[Grp] Calm Anime Special.mkv"), "Anime", Path.Combine(directory, "Anime Clips")).IsBonus})");
+        Folder("Calm Lone Season 2", "Calm Lone S02E01.mkv", "Calm Lone S02E02.mkv", "OP.mkv");
+        check(Read("Calm Lone Season 2", "OP.mkv") is { IsBonus: true, Series: "Calm Lone" }, $"a clip beside episodes in a show's season folder is a clip (got {Read("Calm Lone Season 2", "OP.mkv").Series} bonus {Read("Calm Lone Season 2", "OP.mkv").IsBonus})");
+        // Two shows in a location folder stay two shows, and a name only joins the folder above on whole words.
+        Folder(Path.Combine("Calm Trek", "TV"), "Calm Trek TNG S01E01.mkv", "Calm Trek DS9 S01E01.mkv");
+        check(Read("Calm Trek", "TV", "Calm Trek TNG S01E01.mkv").Series == "Calm Trek TNG" && Read("Calm Trek", "TV", "Calm Trek DS9 S01E01.mkv").Series == "Calm Trek DS9", $"two shows in a location folder stay apart (got {Read("Calm Trek", "TV", "Calm Trek TNG S01E01.mkv").Series} and {Read("Calm Trek", "TV", "Calm Trek DS9 S01E01.mkv").Series})");
+        Folder(Path.Combine("Art", "TV"), "Arthur Show - 01.mkv", "Arthur Show - 02.mkv");
+        Numbered(["Art", "TV", "Arthur Show - 01.mkv"], "Arthur Show", null, 1);
         // A folder's number that isn't a usable part number is ignored.
         foreach (var part in new[] { "Part \u0663", "Part 99999999999" }) Numbered(["Calm Parts", part, "Calm Parts - 01.mkv"], "Calm Parts", null, 1);
         // What still marks an episode: a list number and a season before it.
