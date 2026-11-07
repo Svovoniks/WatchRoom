@@ -131,6 +131,9 @@ public static class LocalMetadata
         return LibraryIdentity.Ensure(item with { ProviderIds = ids, LocalMetadataFields = fields.ToArray() });
     }
 
+    // A sidecar saying the file is a film, as opposed to the episode NFO an export writes.
+    internal static bool IsFilmNfo(string path) => string.Equals(Read(path)?.Root?.Name.LocalName, "movie", StringComparison.OrdinalIgnoreCase);
+
     public static void Export(MediaItem item)
     {
         if (item.IsVirtual) return;

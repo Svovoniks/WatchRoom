@@ -753,6 +753,22 @@ static class FilenameReadingFixture
         check(halfRead[identifiedPath] is { Kind: "Movie", Series: null, MetadataId: 92, EpisodeTitle: null }, $"an identified film stays in Movies when its name reads as a half-episode (got {halfRead[identifiedPath].Kind} {halfRead[identifiedPath].Series} {halfRead[identifiedPath].EpisodeTitle})");
         foreach (var nfoFilm in new[] { movieNfoPath, sidecarPath })
             check(halfRead[nfoFilm] is { Kind: "Movie", Series: null, Title: "Calm Nfo Film", Year: 1991 }, $"{Path.GetFileName(nfoFilm)} beside a film's NFO stays that film (got {halfRead[nfoFilm].Kind} {halfRead[nfoFilm].Series} {halfRead[nfoFilm].Title} {halfRead[nfoFilm].Year})");
+        // Starting from a stored half-episode: exporting its NFO keeps it a show, on later scans and on a fresh one, and a film's NFO added later makes it that film.
+        var storedRoot = Path.Combine(directory, "Half Stored Library"); var exportedPath = Path.Combine(storedRoot, "Exported", "Calm Exported - 06.5.mkv"); var laterPath = Path.Combine(storedRoot, "Later", "Calm Later - 06.5.mkv");
+        foreach (var file in new[] { exportedPath, laterPath }) { Directory.CreateDirectory(Path.GetDirectoryName(file)!); await File.WriteAllBytesAsync(file, [0]); }
+        var storedStore = new LibraryStore(Path.Combine(directory, "Half Stored Data"));
+        await storedStore.ScanAsync([new(storedRoot)]);
+        check(storedStore.All().Single(x => x.Path == exportedPath) is { Kind: "Show", Series: "Calm Exported" } && storedStore.All().Single(x => x.Path == laterPath) is { Kind: "Show", Series: "Calm Later" }, "stored half-episodes start as shows");
+        LocalMetadata.Export(storedStore.All().Single(x => x.Path == exportedPath));
+        await File.WriteAllTextAsync(Path.Combine(storedRoot, "Later", "movie.nfo"), filmNfo);
+        foreach (var pass in new[] { "first", "second" })
+        {
+            await storedStore.ScanAsync([new(storedRoot)]);
+            var exported = storedStore.All().Single(x => x.Path == exportedPath); var later = storedStore.All().Single(x => x.Path == laterPath);
+            check(exported is { Kind: "Show", Series: "Calm Exported", IsBonus: false }, $"a half-episode stays a show after exporting its NFO, {pass} scan (got {exported.Kind} {exported.Series} clip {exported.IsBonus})");
+            check(later is { Kind: "Movie", Series: null, Title: "Calm Nfo Film", Year: 1991, MetadataType: "movie" } && later.ProviderIds?.GetValueOrDefault("tmdb") == "77", $"a film's NFO added later makes a stored half-episode that film, {pass} scan (got {later.Kind} {later.Series} {later.Title} {later.Year} {later.MetadataType})");
+        }
+        check(FileNames.Parse(exportedPath, "Mixed", storedRoot) is { Kind: "Show", Series: "Calm Exported" }, $"a fresh read agrees (got {FileNames.Parse(exportedPath, "Mixed", storedRoot).Kind} {FileNames.Parse(exportedPath, "Mixed", storedRoot).Series})");
         var offline = Path.Combine(directory, "Offline"); Directory.CreateDirectory(offline);
         var offlineStore = new LibraryStore(offline); offlineStore.Save(FileNames.Parse(Path.Combine(offline, "Calm.Waters.2019.mkv")));
         FromBeforeReader(offline);
