@@ -888,8 +888,8 @@ public sealed partial class LibraryStore
         if (parsed.AbsoluteEpisodeEnd is not null && previous is not null && CanRepairGrouping(previous) && previous.AbsoluteEpisode is null && previous.NumberingOrder != "dvd")
             item = item with { NumberingOrder = parsed.NumberingOrder };
         // A film's own NFO, added since, says the same as a film's kind does.
-        var filmSidecar = parsed.MetadataType == "movie" && previous?.Kind != "Movie";
-        if (filmSidecar && parsed.Series is null && parsed.Episode is null && previous is not null && CanRepairGrouping(previous) && previous.MetadataType is null) item = item with { Kind = parsed.Kind };
+        var filmSidecar = previous?.Kind != "Movie" && parsed.Series is null && parsed.Episode is null && (parsed.MetadataType == "movie" || LocalMetadata.SaysFilm(parsed.Path));
+        if (filmSidecar && previous is not null && CanRepairGrouping(previous) && previous.MetadataType is null) item = item with { Kind = parsed.Kind };
         if (parsed.Series is null && parsed.Episode is null && previous is not null && CanRepairGrouping(previous) && previous.MetadataType is null &&
             (previous.Kind == "Movie" || filmSidecar || parsed.Year is >= 1900 && previous.Episode == parsed.Year))
             item = item with { Title = parsed.Title, Series = null, ShowId = null, SeasonId = null, SeriesPath = null,
@@ -1176,7 +1176,7 @@ public static partial class FileNames
         // "Show - 06.5" alone says it's part of a show, though there's no whole number to file it under: it stays a show a lookup can find, named by its number.
         // A film's own NFO beside it says otherwise.
         var loneHalf = reading is { Kind: "Bare", Clip: not null, Film: false } && numbering is null && !bonus && sourceKind != "Movie" && filmExtra is null && !showExtras && !string.IsNullOrWhiteSpace(reading.Title) &&
-            !File.Exists(System.IO.Path.Combine(dir, "movie.nfo")) && !LocalMetadata.IsFilmNfo(System.IO.Path.ChangeExtension(path, ".nfo"));
+            !LocalMetadata.SaysFilm(path);
         if (loneHalf) series = reading.Title;
         // "OP.mkv" loose in a library, with no folder to name a show, has no show to belong to.
         if (bonus && string.IsNullOrWhiteSpace(series) && IsLooseFolder(dir, libraryRoot) && NearestTitledFolder(dir, libraryRoot) is null) { bonus = false; series = null; }

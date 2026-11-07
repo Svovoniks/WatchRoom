@@ -769,6 +769,19 @@ static class FilenameReadingFixture
             check(later is { Kind: "Movie", Series: null, Title: "Calm Nfo Film", Year: 1991, MetadataType: "movie" } && later.ProviderIds?.GetValueOrDefault("tmdb") == "77", $"a film's NFO added later makes a stored half-episode that film, {pass} scan (got {later.Kind} {later.Series} {later.Title} {later.Year} {later.MetadataType})");
         }
         check(FileNames.Parse(exportedPath, "Mixed", storedRoot) is { Kind: "Show", Series: "Calm Exported" }, $"a fresh read agrees (got {FileNames.Parse(exportedPath, "Mixed", storedRoot).Kind} {FileNames.Parse(exportedPath, "Mixed", storedRoot).Series})");
+        // A film's NFO can be only a link. And a movie.nfo beside real episodes doesn't touch them.
+        var linkRoot = Path.Combine(directory, "Half Link Library"); var linkPath = Path.Combine(linkRoot, "Own Link", "Calm Link - 8.5.mkv"); var laterLinkPath = Path.Combine(linkRoot, "Later Link", "Calm Late - 8.5.mkv"); var episodePathNfo = Path.Combine(linkRoot, "Calm Episodes", "Calm Episodes - 01.mkv");
+        foreach (var file in new[] { linkPath, laterLinkPath, episodePathNfo, Path.Combine(linkRoot, "Calm Episodes", "Calm Episodes - 02.mkv") }) { Directory.CreateDirectory(Path.GetDirectoryName(file)!); await File.WriteAllBytesAsync(file, [0]); }
+        await File.WriteAllTextAsync(Path.ChangeExtension(linkPath, ".nfo"), "https://www.imdb.com/title/tt0056801/");
+        var linkStore = new LibraryStore(Path.Combine(directory, "Half Link Data"));
+        await linkStore.ScanAsync([new(linkRoot)]);
+        check(linkStore.All().Single(x => x.Path == linkPath) is { Kind: "Movie", Series: null } ownLink && ownLink.ProviderIds?.GetValueOrDefault("imdb") == "tt0056801", $"a film's own link NFO keeps a half-episode name a film (got {linkStore.All().Single(x => x.Path == linkPath).Kind} {linkStore.All().Single(x => x.Path == linkPath).Series})");
+        check(linkStore.All().Single(x => x.Path == laterLinkPath) is { Kind: "Show", Series: "Calm Late" }, "a half-episode with no NFO starts as a show");
+        await File.WriteAllTextAsync(Path.Combine(linkRoot, "Later Link", "movie.nfo"), "https://www.imdb.com/title/tt0056802/");
+        await File.WriteAllTextAsync(Path.Combine(linkRoot, "Calm Episodes", "movie.nfo"), filmNfo);
+        await linkStore.ScanAsync([new(linkRoot)]);
+        check(linkStore.All().Single(x => x.Path == laterLinkPath) is { Kind: "Movie", Series: null } lateLink && lateLink.ProviderIds?.GetValueOrDefault("imdb") == "tt0056802", $"a film's link NFO added later makes a stored half-episode that film (got {linkStore.All().Single(x => x.Path == laterLinkPath).Kind} {linkStore.All().Single(x => x.Path == laterLinkPath).Series})");
+        check(linkStore.All().Single(x => x.Path == episodePathNfo) is { Series: "Calm Episodes", Episode: 1 }, $"a movie.nfo beside numbered episodes leaves them (got {linkStore.All().Single(x => x.Path == episodePathNfo).Series} {linkStore.All().Single(x => x.Path == episodePathNfo).Episode})");
         var offline = Path.Combine(directory, "Offline"); Directory.CreateDirectory(offline);
         var offlineStore = new LibraryStore(offline); offlineStore.Save(FileNames.Parse(Path.Combine(offline, "Calm.Waters.2019.mkv")));
         FromBeforeReader(offline);
