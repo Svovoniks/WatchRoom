@@ -131,6 +131,15 @@ public static class LocalMetadata
         return LibraryIdentity.Ensure(item with { ProviderIds = ids, LocalMetadataFields = fields.ToArray() });
     }
 
+    // Whether a sidecar says the file is a film: a movie.nfo beside it, or its own NFO holding a <movie> or only a link. The episode NFO an export writes doesn't.
+    internal static bool SaysFilm(string path)
+    {
+        if (File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "movie.nfo"))) return true;
+        var own = Path.ChangeExtension(path, ".nfo");
+        if (!File.Exists(own)) return false;
+        return Read(own)?.Root is not { } root || string.Equals(root.Name.LocalName, "movie", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static void Export(MediaItem item)
     {
         if (item.IsVirtual) return;

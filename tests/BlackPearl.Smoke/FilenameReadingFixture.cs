@@ -207,6 +207,24 @@ static class FilenameReadingFixture
         Film(["Stuff", "Палата №6.mkv"], "Палата №6", null);
         check(Read("Легенда №17 (2013).mkv").Title == "Легенда №17", $"a film's number sign stays as written (got {Read("Легенда №17 (2013).mkv").Title})");
         Numbered(["Calm Sign", "Calm Sign №5.mkv"], "Calm Sign", null, 5);
+        // Half an episode: its number can't be stored, and it mustn't take the whole episode's.
+        foreach (var lone in new[] { "[SubsPlease] Calm Half - 06.5 (1080p) [85FA2045].mkv", "Calm Half - 12.5.mkv", "[Grp] Calm Half - 07.5v2 [1080p].mkv" })
+        {
+            var half = Read("Half Loose", lone);
+            check(half is { Series: "Calm Half", Episode: null, IsBonus: false, Kind: not "Movie" }, $"{lone} alone is a show a lookup can find (got {half.Series} {half.Title} episode {half.Episode} clip {half.IsBonus} kind {half.Kind})");
+        }
+        check(Read("Half Loose", "Calm Half - 12.5.mkv").EpisodeTitle == "12.5", $"a half episode alone is named by its number (got {Read("Half Loose", "Calm Half - 12.5.mkv").EpisodeTitle})");
+        check(Read("Half Loose", "Calm Dated - 06.5 (2023).mkv").EpisodeTitle == "06.5", $"a half episode's name is only its number (got {Read("Half Loose", "Calm Dated - 06.5 (2023).mkv").EpisodeTitle})");
+        Folder("Half Beside", "[Grp] Calm Beside - 01.mkv", "[Grp] Calm Beside - 02.mkv", "[Grp] Calm Beside - 03.mkv", "[Grp] Calm Beside - 02.5.mkv", "[Grp] Calm Beside - 02.5v2.mkv");
+        foreach (var beside in new[] { "[Grp] Calm Beside - 02.5.mkv", "[Grp] Calm Beside - 02.5v2.mkv" })
+            check(Read("Half Beside", beside) is { Series: "Calm Beside", Season: 0, Episode: null, IsBonus: true }, $"{beside} beside episodes is a clip, not episode 2 (got {Read("Half Beside", beside).Season}x{Read("Half Beside", beside).Episode} clip {Read("Half Beside", beside).IsBonus})");
+        Numbered(["Half Beside", "[Grp] Calm Beside - 02.mkv"], "Calm Beside", null, 2);
+        // A version on a whole number is still that number, and a decimal in a title stays in it.
+        Numbered(["Half Versions", "[Grp] Calm Version - 07v2 [1080p].mkv"], "Calm Version", null, 7);
+        Film(["Calm 13.5.mkv"], "Calm 13.5", null);
+        Film(["Stuff", "Calm Gun 2.5 (1991).mkv"], "Calm Gun 2.5", 1991);
+        Numbered(["Half Titles", "[Lil] 2.5-jigen no Calm - 06 (1080p).mkv"], "2.5-jigen no Calm", null, 6);
+        Numbered(["Half Titles", "[GLORY] Calm Automata Ver1.1a - 04 [1080p HEVC].mkv"], "Calm Automata Ver1.1a", null, 4);
         // A volume isn't a season.
         Numbered(["Harbor Vol", "Vol 2", "Harbor Vol - 04.mkv"], "Harbor Vol", 1, 4);
         Numbered(["Harbor Vol", "Season 1", "Vol 2", "Harbor Vol - 05.mkv"], "Harbor Vol", 1, 5);
@@ -719,6 +737,51 @@ static class FilenameReadingFixture
         await filmClipStore.ScanAsync([new(filmClipRoot, "Show")]);
         var filmClip = filmClipStore.All().Single(x => x.Path == filmClipPath);
         check(filmClip is { IsBonus: false, MetadataId: 91, Series: null, Overview: "The film's plot", EpisodeTitle: null, SeriesPath: null }, $"an identified film isn't made a clip, nor does it take the clip's title or folder (got clip {filmClip.IsBonus} id {filmClip.MetadataId} series {filmClip.Series} title {filmClip.EpisodeTitle} path {filmClip.SeriesPath})");
+        // A name that now reads as a half-episode doesn't move a stored film out of Movies, or stop a film's own sidecar applying.
+        var halfRoot = Path.Combine(directory, "Half Film Library"); Directory.CreateDirectory(halfRoot);
+        async Task<string> HalfFile(string folder, string file) { Directory.CreateDirectory(Path.Combine(halfRoot, folder)); var filePath = Path.Combine(halfRoot, folder, file); await File.WriteAllBytesAsync(filePath, [0]); return filePath; }
+        var correctedPath = await HalfFile("Corrected", "Calm Fellini - 8.5.mkv"); var identifiedPath = await HalfFile("Identified", "Calm Marked - 2.5.mkv");
+        var movieNfoPath = await HalfFile("Movie Nfo", "Calm Nfo - 2.5.mkv"); var sidecarPath = await HalfFile("Sidecar", "Calm Side - 2.5.mkv");
+        var filmNfo = """<movie><title>Calm Nfo Film</title><year>1991</year><uniqueid type="tmdb">77</uniqueid></movie>""";
+        await File.WriteAllTextAsync(Path.Combine(halfRoot, "Movie Nfo", "movie.nfo"), filmNfo); await File.WriteAllTextAsync(Path.ChangeExtension(sidecarPath, ".nfo"), filmNfo);
+        var halfStore = new LibraryStore(Path.Combine(directory, "Half Film Data"));
+        halfStore.Save(new MediaItem(FileNames.Parse(correctedPath, "Mixed", halfRoot).Id, correctedPath, "8 1/2", "Movie", Matched: true));
+        halfStore.Save(new MediaItem(FileNames.Parse(identifiedPath, "Mixed", halfRoot).Id, identifiedPath, "Calm Marked", "Movie", MetadataProvider: "tmdb", MetadataId: 92, MetadataType: "movie", ProviderIds: new() { ["tmdb"] = "92" }));
+        await halfStore.ScanAsync([new(halfRoot)]);
+        var halfRead = halfStore.All().Where(x => !x.IsVirtual).ToDictionary(x => x.Path);
+        check(halfRead[correctedPath] is { Kind: "Movie", Series: null, Title: "8 1/2", EpisodeTitle: null }, $"a corrected film stays in Movies when its name reads as a half-episode (got {halfRead[correctedPath].Kind} {halfRead[correctedPath].Series} {halfRead[correctedPath].Title} {halfRead[correctedPath].EpisodeTitle})");
+        check(halfRead[identifiedPath] is { Kind: "Movie", Series: null, MetadataId: 92, EpisodeTitle: null }, $"an identified film stays in Movies when its name reads as a half-episode (got {halfRead[identifiedPath].Kind} {halfRead[identifiedPath].Series} {halfRead[identifiedPath].EpisodeTitle})");
+        foreach (var nfoFilm in new[] { movieNfoPath, sidecarPath })
+            check(halfRead[nfoFilm] is { Kind: "Movie", Series: null, Title: "Calm Nfo Film", Year: 1991 }, $"{Path.GetFileName(nfoFilm)} beside a film's NFO stays that film (got {halfRead[nfoFilm].Kind} {halfRead[nfoFilm].Series} {halfRead[nfoFilm].Title} {halfRead[nfoFilm].Year})");
+        // Starting from a stored half-episode: exporting its NFO keeps it a show, on later scans and on a fresh one, and a film's NFO added later makes it that film.
+        var storedRoot = Path.Combine(directory, "Half Stored Library"); var exportedPath = Path.Combine(storedRoot, "Exported", "Calm Exported - 06.5.mkv"); var laterPath = Path.Combine(storedRoot, "Later", "Calm Later - 06.5.mkv");
+        foreach (var file in new[] { exportedPath, laterPath }) { Directory.CreateDirectory(Path.GetDirectoryName(file)!); await File.WriteAllBytesAsync(file, [0]); }
+        var storedStore = new LibraryStore(Path.Combine(directory, "Half Stored Data"));
+        await storedStore.ScanAsync([new(storedRoot)]);
+        check(storedStore.All().Single(x => x.Path == exportedPath) is { Kind: "Show", Series: "Calm Exported" } && storedStore.All().Single(x => x.Path == laterPath) is { Kind: "Show", Series: "Calm Later" }, "stored half-episodes start as shows");
+        LocalMetadata.Export(storedStore.All().Single(x => x.Path == exportedPath));
+        await File.WriteAllTextAsync(Path.Combine(storedRoot, "Later", "movie.nfo"), filmNfo);
+        foreach (var pass in new[] { "first", "second" })
+        {
+            await storedStore.ScanAsync([new(storedRoot)]);
+            var exported = storedStore.All().Single(x => x.Path == exportedPath); var later = storedStore.All().Single(x => x.Path == laterPath);
+            check(exported is { Kind: "Show", Series: "Calm Exported", IsBonus: false }, $"a half-episode stays a show after exporting its NFO, {pass} scan (got {exported.Kind} {exported.Series} clip {exported.IsBonus})");
+            check(later is { Kind: "Movie", Series: null, Title: "Calm Nfo Film", Year: 1991, MetadataType: "movie" } && later.ProviderIds?.GetValueOrDefault("tmdb") == "77", $"a film's NFO added later makes a stored half-episode that film, {pass} scan (got {later.Kind} {later.Series} {later.Title} {later.Year} {later.MetadataType})");
+        }
+        check(FileNames.Parse(exportedPath, "Mixed", storedRoot) is { Kind: "Show", Series: "Calm Exported" }, $"a fresh read agrees (got {FileNames.Parse(exportedPath, "Mixed", storedRoot).Kind} {FileNames.Parse(exportedPath, "Mixed", storedRoot).Series})");
+        // A film's NFO can be only a link. And a movie.nfo beside real episodes doesn't touch them.
+        var linkRoot = Path.Combine(directory, "Half Link Library"); var linkPath = Path.Combine(linkRoot, "Own Link", "Calm Link - 8.5.mkv"); var laterLinkPath = Path.Combine(linkRoot, "Later Link", "Calm Late - 8.5.mkv"); var episodePathNfo = Path.Combine(linkRoot, "Calm Episodes", "Calm Episodes - 01.mkv");
+        foreach (var file in new[] { linkPath, laterLinkPath, episodePathNfo, Path.Combine(linkRoot, "Calm Episodes", "Calm Episodes - 02.mkv") }) { Directory.CreateDirectory(Path.GetDirectoryName(file)!); await File.WriteAllBytesAsync(file, [0]); }
+        await File.WriteAllTextAsync(Path.ChangeExtension(linkPath, ".nfo"), "https://www.imdb.com/title/tt0056801/");
+        var linkStore = new LibraryStore(Path.Combine(directory, "Half Link Data"));
+        await linkStore.ScanAsync([new(linkRoot)]);
+        check(linkStore.All().Single(x => x.Path == linkPath) is { Kind: "Movie", Series: null } ownLink && ownLink.ProviderIds?.GetValueOrDefault("imdb") == "tt0056801", $"a film's own link NFO keeps a half-episode name a film (got {linkStore.All().Single(x => x.Path == linkPath).Kind} {linkStore.All().Single(x => x.Path == linkPath).Series})");
+        check(linkStore.All().Single(x => x.Path == laterLinkPath) is { Kind: "Show", Series: "Calm Late" }, "a half-episode with no NFO starts as a show");
+        await File.WriteAllTextAsync(Path.Combine(linkRoot, "Later Link", "movie.nfo"), "https://www.imdb.com/title/tt0056802/");
+        await File.WriteAllTextAsync(Path.Combine(linkRoot, "Calm Episodes", "movie.nfo"), filmNfo);
+        await linkStore.ScanAsync([new(linkRoot)]);
+        check(linkStore.All().Single(x => x.Path == laterLinkPath) is { Kind: "Movie", Series: null } lateLink && lateLink.ProviderIds?.GetValueOrDefault("imdb") == "tt0056802", $"a film's link NFO added later makes a stored half-episode that film (got {linkStore.All().Single(x => x.Path == laterLinkPath).Kind} {linkStore.All().Single(x => x.Path == laterLinkPath).Series})");
+        check(linkStore.All().Single(x => x.Path == episodePathNfo) is { Series: "Calm Episodes", Episode: 1 }, $"a movie.nfo beside numbered episodes leaves them (got {linkStore.All().Single(x => x.Path == episodePathNfo).Series} {linkStore.All().Single(x => x.Path == episodePathNfo).Episode})");
         var offline = Path.Combine(directory, "Offline"); Directory.CreateDirectory(offline);
         var offlineStore = new LibraryStore(offline); offlineStore.Save(FileNames.Parse(Path.Combine(offline, "Calm.Waters.2019.mkv")));
         FromBeforeReader(offline);
