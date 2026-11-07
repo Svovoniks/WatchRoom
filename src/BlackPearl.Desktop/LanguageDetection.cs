@@ -157,8 +157,9 @@ public static class LanguageDetection
                 media.AddOption(":no-sout-video");
                 media.AddOption(":no-sout-spu");
                 // VLC's own Matroska demuxer stops feeding some Opus tracks to the transcoder minutes in. FFmpeg's numbers
-                // Matroska and MP4 tracks by position too, so the same track ids select the same tracks.
-                if (Path.GetExtension(path).ToLowerInvariant() is ".mkv" or ".mka" or ".webm" or ".mp4" or ".m4v" or ".m4a" or ".mov")
+                // Matroska and MP4 tracks by position too, so the same track ids select the same tracks. VLC's own AVI demuxer
+                // turns AC3 declared as a byte stream into silence (see PlayLocalItem); FFmpeg numbers AVI tracks the same way.
+                if (Path.GetExtension(path).ToLowerInvariant() is ".mkv" or ".mka" or ".webm" or ".mp4" or ".m4v" or ".m4a" or ".mov" or ".avi")
                     media.AddOption(":demux=avformat,any");
                 media.AddOption(":sout=#duplicate{dst=\"transcode{acodec=s16l,channels=1,samplerate=" + SampleRate +
                     "}:std{access=file,mux=wav,dst='" + wav + "'}\",select=\"es=" + trackId.ToString(CultureInfo.InvariantCulture) + "\"}");

@@ -87,6 +87,14 @@ static class LanguageDetectionChecks
                 $"speech in an untagged audio track is identified as {spoken[i].Language}");
         if (spoken.Count == 0) Check(await LanguageDetection.SpokenAsync(path, 0, 0, CancellationToken.None) is null, "silence claims no spoken language");
 
+        // An AVI declaring AC3 as a byte stream decoded to silence through VLC's AVI demuxer, so its speech was never heard.
+        var ac3Avi = Path.Combine(directory, "ac3-byte-stream.avi");
+        LocalAviAudioChecks.WriteAc3Avi(ac3Avi, 4);
+        var decode = typeof(LanguageDetection).GetMethod("DecodeAsync", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var ac3Samples = await (Task<float[]?>)decode.Invoke(null, [ac3Avi, 1, 3d, CancellationToken.None, null])!;
+        var ac3Audible = ac3Samples is null || ac3Samples.Length == 0 ? 0 : (double)ac3Samples.Count(sample => Math.Abs(sample) > .002f) / ac3Samples.Length;
+        Check(ac3Audible > .5, $"language detection hears AC3 audio in an AVI ({ac3Samples?.Length ?? 0} samples, {ac3Audible:P0} audible)");
+
         Core.Initialize();
         using var engine = new LibVLC("--quiet", "--vout=dummy", "--aout=dummy");
         using var player = new MediaPlayer(engine);
