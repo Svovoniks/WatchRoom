@@ -133,7 +133,8 @@ internal sealed class FilenameScan
         var right = i + 1; while (right < raw.Length && char.IsDigit(raw[right])) right++;
         if (i - left - 1 > 2 || right - i - 1 != 1) return false;
         if (left >= 0 && raw[left] == '.') return false;
-        if (right < raw.Length && char.IsLetter(raw[right])) return false;
+        // "Show 1.1a" isn't a decimal, but "Show - 07.5v2" is a version of one.
+        if (right < raw.Length && char.IsLetter(raw[right]) && !(raw[right] is 'v' or 'V' && right + 1 < raw.Length && char.IsDigit(raw[right + 1]))) return false;
         return right >= raw.Length || raw[right] != '.' || right + 1 >= raw.Length || !char.IsDigit(raw[right + 1]);
     }
 

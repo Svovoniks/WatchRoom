@@ -1163,6 +1163,9 @@ public static partial class FileNames
             !Regex.IsMatch(name, @"(?i)(?:^|\s-\s)\d{1,4}[a-z]\b")
             ? EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success) : null;
         if (besideEpisodes is not null) { bonus = true; series = besideEpisodes; }
+        // "Show - 06.5" alone says it's part of a show, though there's no whole number to file it under: it stays a show a lookup can find, named by its number.
+        var loneHalf = reading is { Kind: "Bare", Clip: not null, Film: false } && numbering is null && !bonus && sourceKind != "Movie" && filmExtra is null && !showExtras && !string.IsNullOrWhiteSpace(reading.Title);
+        if (loneHalf) series = reading.Title;
         // "One Piece - Egghead SP4" beside "One Piece - 1100" is a One Piece special, not a show called "One Piece - Egghead".
         // "OVA 1" to "OVA 3" read alone as a run of a show called OVA, which only says what they are.
         else if (numbering is { ExplicitSeason: true, Season: 0 } && EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success) is { } owner &&
@@ -1243,7 +1246,7 @@ public static partial class FileNames
         var seasonPoster = series is null ? null : Artwork(dir, "poster", "folder", "cover") ?? Artwork(seriesDir, $"season{season ?? 1:00}-poster", $"season{season ?? 1}-poster");
         var result = new MediaItem(id, path, title, kind == "Mixed" ? (series is null ? "Movie" : "Show") : kind,
             titleYear, series, season, number, localPoster ?? seriesPoster,
-            SeriesPoster: seriesPoster, SeasonPoster: seasonPoster, EpisodeTitle: numbering?.Name, AirDate: numbering?.AirDate,
+            SeriesPoster: seriesPoster, SeasonPoster: seasonPoster, EpisodeTitle: numbering?.Name ?? (loneHalf ? reading.Clip : null), AirDate: numbering?.AirDate,
             EpisodeEnd: numbering?.End, NumberingConflict: numbering?.Conflict);
         // Structured show folders own membership, regardless of aliases in individual filenames.
         var parentName = System.IO.Path.GetFileName(seriesDir);

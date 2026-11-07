@@ -207,6 +207,23 @@ static class FilenameReadingFixture
         Film(["Stuff", "Палата №6.mkv"], "Палата №6", null);
         check(Read("Легенда №17 (2013).mkv").Title == "Легенда №17", $"a film's number sign stays as written (got {Read("Легенда №17 (2013).mkv").Title})");
         Numbered(["Calm Sign", "Calm Sign №5.mkv"], "Calm Sign", null, 5);
+        // Half an episode: its number can't be stored, and it mustn't take the whole episode's.
+        foreach (var lone in new[] { "[SubsPlease] Calm Half - 06.5 (1080p) [85FA2045].mkv", "Calm Half - 12.5.mkv", "[Grp] Calm Half - 07.5v2 [1080p].mkv" })
+        {
+            var half = Read("Half Loose", lone);
+            check(half is { Series: "Calm Half", Episode: null, IsBonus: false, Kind: not "Movie" }, $"{lone} alone is a show a lookup can find (got {half.Series} {half.Title} episode {half.Episode} clip {half.IsBonus} kind {half.Kind})");
+        }
+        check(Read("Half Loose", "Calm Half - 12.5.mkv").EpisodeTitle == "12.5", $"a half episode alone is named by its number (got {Read("Half Loose", "Calm Half - 12.5.mkv").EpisodeTitle})");
+        Folder("Half Beside", "[Grp] Calm Beside - 01.mkv", "[Grp] Calm Beside - 02.mkv", "[Grp] Calm Beside - 03.mkv", "[Grp] Calm Beside - 02.5.mkv", "[Grp] Calm Beside - 02.5v2.mkv");
+        foreach (var beside in new[] { "[Grp] Calm Beside - 02.5.mkv", "[Grp] Calm Beside - 02.5v2.mkv" })
+            check(Read("Half Beside", beside) is { Series: "Calm Beside", Season: 0, Episode: null, IsBonus: true }, $"{beside} beside episodes is a clip, not episode 2 (got {Read("Half Beside", beside).Season}x{Read("Half Beside", beside).Episode} clip {Read("Half Beside", beside).IsBonus})");
+        Numbered(["Half Beside", "[Grp] Calm Beside - 02.mkv"], "Calm Beside", null, 2);
+        // A version on a whole number is still that number, and a decimal in a title stays in it.
+        Numbered(["Half Versions", "[Grp] Calm Version - 07v2 [1080p].mkv"], "Calm Version", null, 7);
+        Film(["Calm 13.5.mkv"], "Calm 13.5", null);
+        Film(["Stuff", "Calm Gun 2.5 (1991).mkv"], "Calm Gun 2.5", 1991);
+        Numbered(["Half Titles", "[Lil] 2.5-jigen no Calm - 06 (1080p).mkv"], "2.5-jigen no Calm", null, 6);
+        Numbered(["Half Titles", "[GLORY] Calm Automata Ver1.1a - 04 [1080p HEVC].mkv"], "Calm Automata Ver1.1a", null, 4);
         // A volume isn't a season.
         Numbered(["Harbor Vol", "Vol 2", "Harbor Vol - 04.mkv"], "Harbor Vol", 1, 4);
         Numbered(["Harbor Vol", "Season 1", "Vol 2", "Harbor Vol - 05.mkv"], "Harbor Vol", 1, 5);
