@@ -1052,6 +1052,9 @@ public partial class MainWindow : Window
         var generation = loadGeneration;
         localResume = !WasWatched(item.Id) && !item.IsMusic && long.TryParse(library.Setting("position:" + item.Id), out var saved) ? saved : 0;
         using var media = new Media(vlc!, item.Path, FromType.FromPath);
+        // AVIs often declare AC3 as a byte stream. VLC's AVI demuxer then splits its frames, and the bundled libVLC has
+        // no AC3 packetizer to rejoin them, so the audio plays as silence. Files avformat cannot open still fall back.
+        if (Path.GetExtension(item.Path).Equals(".avi", StringComparison.OrdinalIgnoreCase)) media.AddOption(":demux=avformat,any");
         ready = false; RoomHeading.Text = PlaybackTitle(item); RoomSubtitle.Text = item.Caption;
         ConnectionStatus.Text = "Local playback";
         ShowKnownMusic();

@@ -9,7 +9,7 @@ public sealed partial class LibraryStore
 {
     private const string TrackLanguagePrefix = "trackLanguage:", TrackLanguageFilePrefix = "trackLanguageFile:";
     // Part of every file key: raising it when detection improves makes earlier results stale, so files are identified again.
-    private const int DetectionVersion = 4;
+    private const int DetectionVersion = 5;
 
     public static string? TrackLanguageFile(string path)
     {

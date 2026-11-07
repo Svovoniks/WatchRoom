@@ -355,6 +355,7 @@ static class Program
                 RenameChecks.Run(Check);
                 await PictureInPictureChecks.Run(window, Check);
                 await EndedSeekChecks.Run(window, Check);
+                await LocalAviAudioChecks.Run(window, Check);
                 await CheckBackNavigation(window, Check);
                 PlayerInteractionChecks.Run(window, Check);
                 UnavailableLibraryChecks.Run(window, activeStore, directory, Check);
