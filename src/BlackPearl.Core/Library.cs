@@ -904,6 +904,8 @@ public sealed partial class LibraryStore
                 parsed.NumberingSource == "filename" && parsed.EpisodeEnd is null && parsed.Season == previous.Season && parsed.Episode == previous.Episode)
                 item = item with { EpisodeEnd = null };
         }
+        // A name read as a show's, on a file that stays a film, doesn't move it out of Movies or give it an episode title.
+        if (previous is not null && item.Series is null && parsed.Series is not null) item = item with { Kind = previous.Kind, EpisodeTitle = previous.EpisodeTitle };
         var bonus = previous?.Matched == true || previous is not null && LibraryIdentity.Locked(previous, "Episode") ? previous.IsBonus : parsed.IsBonus;
         // A film a provider identified stays a film, whatever a clip word in its name suggests: as a clip it would drop out of refreshes and wanted titles.
         if (previous is { MetadataType: "movie" } && parsed.IsBonus && parsed.ExtraOf is null) { bonus = previous.IsBonus; item = item with { EpisodeTitle = previous.EpisodeTitle, SeriesPath = previous.SeriesPath }; }
@@ -1163,14 +1165,16 @@ public static partial class FileNames
             !Regex.IsMatch(name, @"(?i)(?:^|\s-\s)\d{1,4}[a-z]\b")
             ? EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success) : null;
         if (besideEpisodes is not null) { bonus = true; series = besideEpisodes; }
-        // "Show - 06.5" alone says it's part of a show, though there's no whole number to file it under: it stays a show a lookup can find, named by its number.
-        var loneHalf = reading is { Kind: "Bare", Clip: not null, Film: false } && numbering is null && !bonus && sourceKind != "Movie" && filmExtra is null && !showExtras && !string.IsNullOrWhiteSpace(reading.Title);
-        if (loneHalf) series = reading.Title;
         // "One Piece - Egghead SP4" beside "One Piece - 1100" is a One Piece special, not a show called "One Piece - Egghead".
         // "OVA 1" to "OVA 3" read alone as a run of a show called OVA, which only says what they are.
         else if (numbering is { ExplicitSeason: true, Season: 0 } && EpisodeFolderSeries(dir, name, libraryRoot, seriesContext || seasonFolder.Success) is { } owner &&
             !(string.IsNullOrWhiteSpace(numbering.Series) && name.StartsWith(owner, StringComparison.OrdinalIgnoreCase))) series = owner;
         else if (bonus && string.IsNullOrWhiteSpace(series)) series = reading.Title;
+        // "Show - 06.5" alone says it's part of a show, though there's no whole number to file it under: it stays a show a lookup can find, named by its number.
+        // A film's own NFO beside it says otherwise.
+        var loneHalf = reading is { Kind: "Bare", Clip: not null, Film: false } && numbering is null && !bonus && sourceKind != "Movie" && filmExtra is null && !showExtras && !string.IsNullOrWhiteSpace(reading.Title) &&
+            !File.Exists(System.IO.Path.Combine(dir, "movie.nfo")) && !File.Exists(System.IO.Path.ChangeExtension(path, ".nfo"));
+        if (loneHalf) series = reading.Title;
         // "OP.mkv" loose in a library, with no folder to name a show, has no show to belong to.
         if (bonus && string.IsNullOrWhiteSpace(series) && IsLooseFolder(dir, libraryRoot) && NearestTitledFolder(dir, libraryRoot) is null) { bonus = false; series = null; }
         if (numbering is not null && !numbering.ExplicitSeason && number is not null && kind == "Mixed" && reading.LeadingGroup) kind = "Anime";
@@ -1246,7 +1250,7 @@ public static partial class FileNames
         var seasonPoster = series is null ? null : Artwork(dir, "poster", "folder", "cover") ?? Artwork(seriesDir, $"season{season ?? 1:00}-poster", $"season{season ?? 1}-poster");
         var result = new MediaItem(id, path, title, kind == "Mixed" ? (series is null ? "Movie" : "Show") : kind,
             titleYear, series, season, number, localPoster ?? seriesPoster,
-            SeriesPoster: seriesPoster, SeasonPoster: seasonPoster, EpisodeTitle: numbering?.Name ?? (loneHalf ? reading.Clip : null), AirDate: numbering?.AirDate,
+            SeriesPoster: seriesPoster, SeasonPoster: seasonPoster, EpisodeTitle: numbering?.Name ?? (loneHalf ? Regex.Match(reading.Clip!, @"^[0-9]+\.[0-9]").Value : null), AirDate: numbering?.AirDate,
             EpisodeEnd: numbering?.End, NumberingConflict: numbering?.Conflict);
         // Structured show folders own membership, regardless of aliases in individual filenames.
         var parentName = System.IO.Path.GetFileName(seriesDir);
