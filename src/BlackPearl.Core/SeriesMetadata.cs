@@ -9,8 +9,9 @@ public static class SeriesMetadata
     private const string MissingChecked = "missing-episodes-checked";
     // Shows fetched before file titles could choose a numbering order are checked once, rather than when their refresh comes due.
     private const string OrderChecked = "episode-order-checked", OrderCheckVersion = "1";
-    // Whether every show has had its episode order weighed against its files' titles since orders could be chosen that way.
-    internal static bool OrdersChecked(LibraryStore library) => library.Setting(OrderChecked) == OrderCheckVersion;
+    // The order a show's files' titles were last weighed to, recorded once that weighing completed. Copies of a season combine only when it holds.
+    private static string OrderWeighedKey(string show) => "episode-order-weighed:" + show;
+    internal static string? OrderWeighed(LibraryStore library, string show) => library.Setting(OrderWeighedKey(show));
     private static string? Text(JsonElement value, string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
     private static int? Number(JsonElement value, string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.Number && field.TryGetInt32(out var number) ? number : null;
     private static string? Plain(string? html) => html is null ? null : WebUtility.HtmlDecode(Regex.Replace(Regex.Replace(html, @"(?i)</p>|<br\s*/?>", "\n"), "<[^>]*>", "")).Trim();
@@ -136,8 +137,10 @@ public static class SeriesMetadata
                     // Files that name their own episodes choose between the provider's numbering orders, and say when the match can't be their show.
                     var evidence = mode == MetadataRefresh.RetryArtwork ? [] : EpisodeOrder.Collect(entries);
                     var alternatives = new List<MetadataSeason[]>();
+                    var weighed = false;
                     if (provider == "tmdb" && evidence.Length >= EpisodeOrder.MinimumEvidence && EpisodeOrder.CanChoose(entries))
                     {
+                        weighed = true;
                         var currentOrder = order ?? item.NumberingOrder;
                         var agreement = EpisodeOrder.Agreement(evidence, details);
                         if (!EpisodeOrder.Fits(agreement))
@@ -164,7 +167,8 @@ public static class SeriesMetadata
                             if (provider == "tmdb") lists.Add(await tmdb!.SeasonsAsync(id.Value, ct));
                             var presence = EpisodeOrder.Presence(evidence, details, lists);
                             // A show's NFO that names this ID would bring it back on the next read, so that match stays.
-                            if (EpisodeOrder.Contradicts(presence, fit) && !LocalMetadata.NamesShow(item, provider, id.Value))
+                            if (EpisodeOrder.Contradicts(presence, fit) && !entries.DistinctBy(x => x.SeriesPath ?? Path.GetDirectoryName(x.Path), StringComparer.OrdinalIgnoreCase)
+                                .Any(x => LocalMetadata.NamesShow(x, provider, id.Value)))
                             {
                                 MetadataDiagnostics.Outcome("episode-titles-contradict-match");
                                 MetadataDiagnostics.Record("metadata-candidate-rejected", new { Provider = provider, Id = id, Reason = "episode-titles-contradict-match", presence.Found, presence.Compared, fit.Misfits, fit.Regular });
@@ -298,6 +302,7 @@ public static class SeriesMetadata
                         episodes += episodeList.Length;
                     }
                     matched = true;
+                    if (weighed && !superseded) library.Setting(OrderWeighedKey(LibraryIdentity.ShowKey(item)), order ?? item.NumberingOrder);
                     seasons += details.Count(s => entries.Any(e => e.Season == s.Number));
                     if (mode != MetadataRefresh.RetryArtwork) ReconcileMissing(library, directory, item, details, provider, id.Value, options);
                     break;

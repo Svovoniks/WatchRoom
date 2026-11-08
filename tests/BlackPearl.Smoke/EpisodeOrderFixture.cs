@@ -80,13 +80,39 @@ static class EpisodeOrderFixture
             copyPair.Save(TmdbRetention.Record(plainFile, plainFile with { EpisodeTitle = airedTitle, EpisodeOverview = "Plot of " + airedTitle, MetadataFetchedAt = Wire.Now }, "tmdb", "episodeTitle", "episodeOverview"));
         }
         copyPair.GroupShowsByProvider();
-        check(copyPair.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 2, "copies of a season stay apart before the library's orders are checked");
+        check(copyPair.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 2, "copies of a season stay apart before the titled copy's order is weighed");
         await Fetch(copyPair, directory, handler, force: false);
         copyPair.GroupShowsByProvider();
         var plainCopy = copyPair.All().Where(x => !x.IsVirtual && x.ShowId == "show-" + LibraryIdentity.Hash("copy-plain")).ToArray();
         var plainSeventh = plainCopy.Single(x => x.Season == 2 && x.Episode == 1);
         check(plainCopy.All(x => x.NumberingOrder == "aired") && copyPair.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 2 && plainSeventh is { EpisodeTitle: "Seventh", EpisodeOverview: "Plot of Seventh" },
             $"an untitled copy keeps its aired episodes when the titled copy moves to another order (got {plainSeventh.NumberingOrder}, {plainSeventh.EpisodeTitle}, {plainSeventh.EpisodeOverview})");
+
+        // A weighing that fails, here the episode-group list on a dropped connection, leaves the titled copy unsettled, so the copies stay
+        // apart and the untitled one keeps its aired episodes.
+        var failing = new OrderHandler();
+        failing.Add("/3/tv/10/season/1", Season(1, aired1)); failing.Add("/3/tv/10/season/2", Season(2, aired2));
+        failing.Add("/3/tv/10", """{"id":10,"name":"Parts Show","seasons":[{"season_number":1},{"season_number":2}]}""");
+        failing.Break("/3/tv/10/episode_groups");
+        var failedPair = Store(Path.Combine(directory, "copy-pair-failed"));
+        foreach (var (s, e, title) in files) failedPair.Save(Episode(directory, "copy-titled", "Parts Show", 10, s, e, title) with { MetadataFetchedAt = Wire.Now });
+        foreach (var (s, e, airedTitle) in new[] { (1, 1, "Pilot"), (2, 1, "Seventh") })
+        {
+            var plainFile = Episode(directory, "copy-plain", "Parts Show", 10, s, e, "Untitled") with { EpisodeTitle = null };
+            failedPair.Save(TmdbRetention.Record(plainFile, plainFile with { EpisodeTitle = airedTitle, EpisodeOverview = "Plot of " + airedTitle, MetadataFetchedAt = Wire.Now }, "tmdb", "episodeTitle", "episodeOverview"));
+        }
+        await Fetch(failedPair, directory, failing, force: false);
+        failedPair.GroupShowsByProvider();
+        check(failedPair.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 2, "a titled copy whose order couldn't be weighed stays apart from another copy");
+        // Copies whose titles both fit the aired list are weighed to it, and then combine as versions.
+        var fitting = Store(Path.Combine(directory, "copy-fit"));
+        foreach (var set in new[] { "fit-a", "fit-b" })
+            foreach (var (s, e, title) in new[] { (1, 1, "Pilot"), (1, 2, "Second"), (1, 3, "Third") }) fitting.Save(Episode(directory, set, "Parts Show", 10, s, e, title));
+        fitting.GroupShowsByProvider();
+        check(fitting.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 2, "titled copies wait apart until their titles are weighed");
+        await Fetch(fitting, directory, handler);
+        fitting.GroupShowsByProvider();
+        check(fitting.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 1, "titled copies weighed to the same order combine after the fetch");
 
         // Files that agree with the aired list never cost a group lookup.
         var aired = Store(Path.Combine(directory, "aired"));
@@ -435,6 +461,7 @@ static class EpisodeOrderFixture
         private readonly HashSet<string> broken = [];
         // A search that fails as a dropped connection would.
         public void Break(string path, string query) => broken.Add(path + "|" + query.ToLowerInvariant());
+        public void Break(string path) => broken.Add(path);
         public void Add(string path, string body) => routes[path] = body;
         // A search answered by what it searched for: "/3/search/movie?query=Pink Pajamas".
         public void Search(string type, string query, string body) => routes[$"/3/search/{type}|{query.ToLowerInvariant()}"] = body;
@@ -444,7 +471,7 @@ static class EpisodeOrderFixture
             if (request.RequestUri.Host == "image.tmdb.org") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(ArtworkFixture.Png) });
             if (TmdbDown && request.RequestUri.Host == "api.themoviedb.org") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
             var query = System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["query"];
-            if (query is not null && broken.Contains(path + "|" + query.ToLowerInvariant())) throw new HttpRequestException("Connection reset");
+            if (broken.Contains(path) || query is not null && broken.Contains(path + "|" + query.ToLowerInvariant())) throw new HttpRequestException("Connection reset");
             if (query is not null && routes.TryGetValue(path + "|" + query.ToLowerInvariant(), out var searched))
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(searched, Encoding.UTF8, "application/json") });
             return Task.FromResult(routes.TryGetValue(path, out var body)

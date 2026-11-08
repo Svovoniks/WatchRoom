@@ -275,19 +275,12 @@ static class MetadataPipelineFixture
         var copies = new LibraryStore(Path.Combine(directory, "copies-db"));
         foreach (var part in new[] { Part("c1", "copy-one", 1, 1), Part("c2", "copy-two", 1, 2), Part("c3", "copy-two", 2, 1) }) copies.Save(part);
         copies.GroupShowsByProvider();
-        check(copies.All().Select(x => x.ShowId).Distinct().Count() == 2, "copies of a season wait apart until their episodes are fetched, which settles each one's order");
-        foreach (var part in copies.All()) copies.Save(part with { MetadataFetchedAt = Wire.Now });
-        copies.GroupShowsByProvider();
-        check(copies.All().Select(x => x.ShowId).Distinct().Count() == 2, "copies of a season wait apart until the library's orders were checked against their titles");
-        copies.Setting("episode-order-checked", "1");
-        copies.GroupShowsByProvider();
         var joined = copies.All();
         check(joined.Select(x => x.ShowId).Distinct().Count() == 1 && copies.Shows().Count == 1, "copies of a season numbered the same way combine into one show");
         var copy = joined.Single(x => x.Id == "c1");
         check(LibraryCatalog.Versions(joined, copy).Length == 1, "copies holding different episodes of a season add episodes rather than versions");
         var twoReleases = new LibraryStore(Path.Combine(directory, "releases-db"));
-        foreach (var part in new[] { Part("r1", "release-one", 1, 1), Part("r2", "release-one", 1, 2), Part("s1", "release-two", 1, 1), Part("s2", "release-two", 1, 2) }) twoReleases.Save(part with { MetadataFetchedAt = Wire.Now });
-        twoReleases.Setting("episode-order-checked", "1");
+        foreach (var part in new[] { Part("r1", "release-one", 1, 1), Part("r2", "release-one", 1, 2), Part("s1", "release-two", 1, 1), Part("s2", "release-two", 1, 2) }) twoReleases.Save(part);
         twoReleases.GroupShowsByProvider();
         var released = twoReleases.All();
         var releaseOne = released.Single(x => x.Id == "r1");
@@ -295,13 +288,11 @@ static class MetadataPipelineFixture
             "two releases of the same season become versions of each episode");
         check(LibraryCatalog.Browse(released, LibraryIdentity.ShowKey(releaseOne), null, 1).Count == 2, "a season with two releases lists each episode once");
         var orders = new LibraryStore(Path.Combine(directory, "orders-db"));
-        foreach (var part in new[] { Part("o1", "order-aired", 1, 1), Part("o2", "order-dvd", 1, 1) with { NumberingOrder = "dvd" } }) orders.Save(part with { MetadataFetchedAt = Wire.Now });
-        orders.Setting("episode-order-checked", "1");
+        foreach (var part in new[] { Part("o1", "order-aired", 1, 1), Part("o2", "order-dvd", 1, 1) with { NumberingOrder = "dvd" } }) orders.Save(part);
         orders.GroupShowsByProvider();
         check(orders.All().Select(x => x.ShowId).Distinct().Count() == 2, "copies of a season in different episode orders stay apart");
         var running = new LibraryStore(Path.Combine(directory, "running-db"));
-        foreach (var part in new[] { Part("n1", "running-numbers", 1, 1) with { NumberingOrder = "absolute", AbsoluteEpisode = 1 }, Part("n2", "release-seasons", 1, 1), Part("n3", "release-seasons", 2, 1) }) running.Save(part with { MetadataFetchedAt = Wire.Now });
-        running.Setting("episode-order-checked", "1");
+        foreach (var part in new[] { Part("n1", "running-numbers", 1, 1) with { NumberingOrder = "absolute", AbsoluteEpisode = 1 }, Part("n2", "release-seasons", 1, 1), Part("n3", "release-seasons", 2, 1) }) running.Save(part);
         running.GroupShowsByProvider();
         check(running.All().Select(x => x.ShowId).Distinct().Count() == 2 && running.Get("n3")!.NumberingOrder == "aired",
             "a release in running numbers and one in seasons stay apart, so the seasons keep their own order");
