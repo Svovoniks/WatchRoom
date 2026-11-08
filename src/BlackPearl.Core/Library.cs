@@ -173,7 +173,7 @@ public sealed partial class LibraryStore
             {
                 Season = parsed.Season, Episode = parsed.Episode, EpisodeEnd = parsed.EpisodeEnd, AbsoluteEpisode = parsed.AbsoluteEpisode, AbsoluteEpisodeEnd = parsed.AbsoluteEpisodeEnd,
                 SourcePart = parsed.SourcePart, SourcePartEpisode = parsed.SourcePartEpisode, SourcePartEpisodeEnd = parsed.SourcePartEpisodeEnd,
-                NumberingOrder = item.NumberingOrder == "dvd" ? "dvd" : parsed.NumberingOrder,
+                NumberingOrder = EpisodeOrder.ProviderDefined(item.NumberingOrder) ? item.NumberingOrder : parsed.NumberingOrder,
                 // These described the episode the old reading pointed at.
                 EpisodeTitle = parsed.EpisodeTitle, EpisodeOverview = null, EpisodePoster = null, EpisodePosterQualityPath = null, AirDate = parsed.AirDate, EpisodeSource = null, MetadataFetchedAt = 0,
                 SeasonTitle = item.Season == parsed.Season ? item.SeasonTitle : null, SeasonOverview = item.Season == parsed.Season ? item.SeasonOverview : null, SeasonSource = item.Season == parsed.Season ? item.SeasonSource : null
@@ -555,7 +555,9 @@ public sealed partial class LibraryStore
         var previous = prior.ExecuteScalar() is string old ? Wire.Read<MediaItem>(old) : null;
         var identityChanged = previous is not null && (previous.MetadataType != item.MetadataType && item.MetadataType is not null ||
             previous.MetadataKind != item.MetadataKind && item.MetadataKind is not null ||
-            previous.MetadataProvider == item.MetadataProvider && previous.MetadataId is not null && item.MetadataId is not null && previous.MetadataId != item.MetadataId);
+            previous.MetadataProvider == item.MetadataProvider && previous.MetadataId is not null && item.MetadataId is not null && previous.MetadataId != item.MetadataId ||
+            // A dropped match takes its show's plot, poster and IDs with it, or the show would keep describing the wrong title.
+            previous.MetadataProvider is not null && item.MetadataProvider is null && item.MetadataId is null && (item.ProviderIds?.Count ?? 0) == 0);
         c.CommandText = "INSERT INTO media VALUES($id,$path,$json) ON CONFLICT(id) DO UPDATE SET path=$path, json=$json";
         c.Parameters.AddWithValue("$id", item.Id); c.Parameters.AddWithValue("$path", item.Path); c.Parameters.AddWithValue("$json", Wire.Serialize(item)); c.ExecuteNonQuery();
         if (item.ShowId is { } showId && item.SeasonId is { } seasonId)
@@ -646,7 +648,7 @@ public sealed partial class LibraryStore
                 var ids = group.Select(LibraryIdentity.ShowKey).Distinct().OrderByDescending(wanted.Contains).ThenBy(x => x, StringComparer.Ordinal).ToArray();
                 if (ids.Length < 2) continue;
                 var members = items.Where(x => ids.Contains(LibraryIdentity.ShowKey(x))).ToArray();
-                if (SharesSeason(members)) continue;
+                if (SharesSeason(members) && !SameNumbering(members)) continue;
                 foreach (var entry in members) { Save(entry with { ShowId = ids[0] }); merged = true; }
                 RemoveVirtual(RedundantPlaceholders(members, provider));
             }
@@ -654,10 +656,14 @@ public sealed partial class LibraryStore
         }
         CleanHierarchy();
     }
-    // Two folders holding the same season may be another release or a wrong match rather than parts of one show, so they stay apart.
-    private static bool SharesSeason(IEnumerable<MediaItem> members) => members
-        .Where(x => !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Season > 0)
+    private static IEnumerable<MediaItem> NumberedEpisodes(IEnumerable<MediaItem> members) => members.Where(x => !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Season > 0);
+    private static bool SharesSeason(IEnumerable<MediaItem> members) => NumberedEpisodes(members)
         .GroupBy(x => x.Season).Any(season => season.Select(LibraryIdentity.ShowKey).Distinct().Count() > 1);
+    // Two folders holding the same season are copies of it, such as another release, and become versions of one show's episodes.
+    // That needs their numbers to mean the same episodes, so copies in different orders, such as aired and DVD, stay apart.
+    // Absolute numbers are placed by the aired order.
+    private static bool SameNumbering(IEnumerable<MediaItem> members) => NumberedEpisodes(members)
+        .Select(x => x.NumberingOrder == "absolute" ? "aired" : x.NumberingOrder).Distinct(StringComparer.Ordinal).Count() == 1;
     // Each folder listed the others' episodes as missing. Once combined, an episode with a file isn't missing, and one that is needs listing once.
     private static IEnumerable<string> RedundantPlaceholders(IReadOnlyCollection<MediaItem> members, string provider)
     {
@@ -866,6 +872,13 @@ public sealed partial class LibraryStore
     // retention tracks. Other providers' aren't tracked, so anything they looked up counts as theirs.
     private static bool EpisodeTitleFromProvider(MediaItem item) => item.TmdbFields?.ContainsKey("episodeTitle") == true ||
         item.EpisodeSource is { } source && !source.Contains("themoviedb.org", StringComparison.OrdinalIgnoreCase);
+    // The show name the scan gave a file, before a provider's title replaced it.
+    private static string? ReadSeries(MediaItem item)
+    {
+        if (item.TmdbFields?.TryGetValue("series", out var tracked) != true) return item.Series;
+        try { return System.Text.Json.JsonSerializer.Deserialize<string?>(tracked!.Original) ?? item.Series; }
+        catch (System.Text.Json.JsonException) { return item.Series; }
+    }
     private static MediaItem MergeScanned(MediaItem parsed, MediaItem? previous)
     {
         var item = previous is not null ? previous with { Path = parsed.Path, Available = true, Year = previous.Matched || previous.MetadataType is not null ? previous.Year : parsed.Year, Kind = previous.MetadataKind ?? (previous.ShowId is not null && previous.ShowId != parsed.ShowId ? previous.Kind : parsed.Kind), Series = previous.MetadataType == "movie" ? null : previous.MetadataType == "tv" || previous.Matched ? previous.Series : parsed.Series ?? previous.Series, Season = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Season : parsed.Season ?? previous.Season, Episode = previous.MetadataType == "movie" ? null : previous.AbsoluteEpisode is not null ? previous.Episode : parsed.Episode ?? previous.Episode, SeriesPoster = parsed.SeriesPoster ?? previous.SeriesPoster, SeasonPoster = parsed.SeasonPoster ?? previous.SeasonPoster, Poster = previous.Matched && File.Exists(previous.Poster) ? previous.Poster : parsed.Poster ?? (File.Exists(previous.Poster) ? previous.Poster : null) } : parsed;
@@ -882,10 +895,10 @@ public sealed partial class LibraryStore
         var sourceNumbering = parsed.NumberingSource is "filename" or "season-folder";
         if (previous is not null && CanRepairGrouping(previous) && previous.MetadataType is null && parsed.Series is not null && !LibraryIdentity.Locked(previous, "Title"))
             item = item with { Title = parsed.Title };
-        if (sourceNumbering && previous is not null && CanRepairGrouping(previous) && previous.NumberingOrder != "dvd")
+        if (sourceNumbering && previous is not null && CanRepairGrouping(previous) && !EpisodeOrder.ProviderDefined(previous.NumberingOrder))
             item = item with { Season = parsed.Season, Episode = parsed.Episode, EpisodeEnd = parsed.EpisodeEnd,
                 AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, NumberingOrder = "aired" };
-        if (parsed.AbsoluteEpisodeEnd is not null && previous is not null && CanRepairGrouping(previous) && previous.AbsoluteEpisode is null && previous.NumberingOrder != "dvd")
+        if (parsed.AbsoluteEpisodeEnd is not null && previous is not null && CanRepairGrouping(previous) && previous.AbsoluteEpisode is null && !EpisodeOrder.ProviderDefined(previous.NumberingOrder))
             item = item with { NumberingOrder = parsed.NumberingOrder };
         // A film's own NFO, added since, says the same as a film's kind does.
         var filmSidecar = previous?.Kind != "Movie" && parsed.Series is null && parsed.Episode is null && (parsed.MetadataType == "movie" || LocalMetadata.SaysFilm(parsed.Path));
@@ -917,6 +930,13 @@ public sealed partial class LibraryStore
         { item = item with { ExtraOf = parsed.ExtraOf, Title = parsed.Title, Kind = parsed.Kind, Series = null, ShowId = null, SeasonId = null, SeriesPath = null, Season = null, Episode = null, EpisodeEnd = null, AbsoluteEpisode = null, AbsoluteEpisodeEnd = null, Year = null }; bonus = true; }
         // A clip's home season comes from its folder, so a rescan places clips indexed before seasons were recorded.
         if (bonus && parsed.IsBonus && parsed.AirsAfterSeason is not null) item = item with { AirsAfterSeason = parsed.AirsAfterSeason };
+        // A folder that no longer names its files' show, because they name unrelated shows of their own, lets them go: the file takes the
+        // show its name gives, and the match it shared with the folder is looked up again. A file someone matched or locked stays.
+        if (previous is { SeriesPath: { } heldBy } && !string.Equals(parsed.SeriesPath, heldBy, StringComparison.OrdinalIgnoreCase) && parsed.Series is { } ownShow && CanRepairGrouping(previous) &&
+            !LibraryIdentity.Locked(previous, "Series") && MetadataTitles.Normalize(ownShow) != MetadataTitles.Normalize(ReadSeries(previous) ?? ""))
+            item = AutomaticArtwork.ResetIdentity(TmdbRetention.Revert(item)) with { Title = parsed.Title, Series = ownShow, Kind = parsed.Kind, Year = parsed.Year,
+                ShowId = parsed.ShowId, SeasonId = parsed.SeasonId, SeriesPath = null, MetadataKind = null, MetadataType = null, ProviderIds = null, ArtworkFetchedAt = 0,
+                Season = parsed.Season, Episode = parsed.Episode, EpisodeEnd = parsed.EpisodeEnd, EpisodeTitle = parsed.EpisodeTitle, NumberingOrder = parsed.NumberingOrder };
         return LocalMetadata.Apply(item with { IsBonus = bonus, BonusKind = bonus ? parsed.IsBonus ? parsed.BonusKind : previous?.BonusKind : null, NumberingSource = parsed.NumberingSource,
             SourceLibraryKind = parsed.SourceLibraryKind, IsExtra = false });
     }
@@ -942,7 +962,9 @@ public static partial class FileNames
     private const string PlainExtras = @"(?:bd |dvd )?extras|trailers|featurettes|behind the scenes";
     // These are also ordinary names for a person, a show or a film, so they only count inside a folder that holds a title's videos or seasons.
     private const string ShortExtras = @"(?:bd |dvd )?(?:extra|bonus)|sps|nc|nc ?op-?ed|ncops?|nceds?|creditless(?: ops?)?(?: ?& ?eds?)?|(?:bd |web )?menus?|(?:web )?pvs?|cms?|interviews.*";
-    private const string ExtrasFolders = @"(?i)^(?:" + PlainExtras + "|" + ShortExtras + ")$";
+    // "Extras2" and "Extras-handbraked" are still extras folders; a short name like "Bonus" stays exact, since "Bonus-Track" names a title.
+    private const string PlainExtrasFolder = @"(?:" + PlainExtras + @")\d{0,2}(?:[-_. ]+[\p{L}\p{N}]+)?";
+    private const string ExtrasFolders = @"(?i)^(?:" + PlainExtrasFolder + "|" + ShortExtras + ")$";
     // "(S01-S07+Movies)" and "[Season 1 + 2]" hold several seasons, so neither is a season folder.
     private const string SeasonFolder = @"(?i)(?:^|\s|\(|\[)(?:(?:Season|Сезон|Saison|Temporada|Staffel|Stagione)\s*|S)([0-9]{1,2}|(?:19|20)[0-9]{2})(?![0-9]|E[0-9])\b(?!\s*[-+~,&–]\s*(?:S|Season\s*)?[0-9])|^([0-9]{1,3})\s*(?:сезон|sezon)\b|^T?([0-9]{1,2})(?:\s+-\s+\w+)?$|^Specials$";
     private static string[] Parts(string path) => path.Split(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
@@ -964,7 +986,7 @@ public static partial class FileNames
         var first = within ? depth : 1;
         for (var index = first; index < parts.Length - 1; index++)
         {
-            if (Regex.IsMatch(parts[index], "(?i)^(?:" + PlainExtras + ")$")) return index;
+            if (Regex.IsMatch(parts[index], "(?i)^(?:" + PlainExtrasFolder + ")$")) return index;
             if (Regex.IsMatch(parts[index], "(?i)^(?:" + ShortExtras + ")$") && (within ? index > first : index == parts.Length - 2) && HoldsTitle(string.Join(System.IO.Path.DirectorySeparatorChar, parts[..index]))) return index;
         }
         return -1;
@@ -1082,6 +1104,54 @@ public static partial class FileNames
         }
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
+    }
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Stamp, bool Several)> NamedShows = new(StringComparer.OrdinalIgnoreCase);
+    // "Desktop\hand_brake\Season 1-handbraked" holding Villainess S01E01-E12 and Komi S01E01-E12 side by side: the same episodes under two
+    // unrelated show names are two shows, so the folder above can't name them all. Copies of one show under two spellings ("Ushio to Tora"
+    // and "Ushitora", "Tetsujin 28-go FX" and "Iron Hero 28 FX") share a word or a start, or sit in separate release folders, and stay together.
+    private static bool HoldsSeveralNamedShows(string dir)
+    {
+        try
+        {
+            if (!Directory.Exists(dir)) return false;
+            var folders = Directory.EnumerateDirectories(dir).Take(64).Prepend(dir).ToArray();
+            var stamp = string.Join("|", folders.Select(folder => Directory.GetLastWriteTimeUtc(folder).Ticks));
+            if (NamedShows.TryGetValue(dir, out var cached) && cached.Stamp == stamp) return cached.Several;
+            var folderTitle = FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(dir)).Title;
+            var several = false;
+            foreach (var folder in folders)
+            {
+                var episodes = new Dictionary<(int, int), HashSet<string>>();
+                foreach (var file in Directory.EnumerateFiles(folder).Where(file => Extensions.Contains(System.IO.Path.GetExtension(file))).Take(400))
+                {
+                    var reading = FilenameEpisodes.Analyze(file, true);
+                    if (reading.Numbering is not { Season: > 0, Episode: { } episode } numbering || string.IsNullOrWhiteSpace(numbering.Series)) continue;
+                    var key = (numbering.Season!.Value, episode);
+                    if (!episodes.TryGetValue(key, out var names)) episodes[key] = names = new(StringComparer.OrdinalIgnoreCase);
+                    names.Add(numbering.Series);
+                }
+                // It takes two episodes held under two names that share nothing, neither of them the folder's own name.
+                var clashes = episodes.Values.Count(names => names.Any(a => names.Any(b => Unrelated(a, b) && (folderTitle.Length == 0 || Unrelated(a, folderTitle) && Unrelated(b, folderTitle)))));
+                if (clashes >= 2) { several = true; break; }
+            }
+            if (NamedShows.Count > 4096) NamedShows.Clear();
+            NamedShows[dir] = (stamp, several);
+            return several;
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+    // Two names share nothing when no word of three letters or two digits is common to both and they don't start alike.
+    private static bool Unrelated(string left, string right)
+    {
+        static string[] Words(string title) => Regex.Split(Fold(title).ToLowerInvariant(), @"[^\p{L}\p{N}]+")
+            .Where(word => word.Length >= 3 || word.Length == 2 && word.All(char.IsDigit)).Where(word => word is not ("the" or "and")).ToArray();
+        var a = Words(left); var b = Words(right);
+        if (a.Length == 0 || b.Length == 0 || a.Intersect(b).Any()) return false;
+        var x = string.Concat(a); var y = string.Concat(b);
+        var common = 0;
+        while (common < Math.Min(x.Length, y.Length) && x[common] == y[common]) common++;
+        return common < 4;
     }
     private static bool OvaFolder(string name) => Regex.IsMatch(name, @"(?i)^(?:ova|oad|ona)$");
     private static bool HoldsEpisodeFiles(string name) => !Regex.IsMatch(name, @"(?i)^(?:ova|oad|ona|specials?|movies?|films?)$") && !Regex.IsMatch(name, ExtrasFolders);
@@ -1233,7 +1303,9 @@ public static partial class FileNames
         if (apartFromShow) season = 0;
         // A show's extras folder joins the show as bonus clips, whatever the file names say; an explicit S00 file there is a numbered special.
         var extraClip = showExtras && seriesDir != dir && numbering is not { ExplicitSeason: true, Season: 0 };
-        if (extraClip) { bonus = true; series = IsLooseFolder(seriesDir, libraryRoot) ? NearestTitledFolder(extrasOwner!, libraryRoot) ?? reading.Title : FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(seriesDir)).Title; }
+        // Beside several shows, a clip belongs to the one its own name gives rather than to the folder holding them all.
+        if (extraClip) { bonus = true; series = !string.IsNullOrWhiteSpace(reading.Title) && HoldsSeveralNamedShows(seriesDir) ? reading.Title :
+            IsLooseFolder(seriesDir, libraryRoot) ? NearestTitledFolder(extrasOwner!, libraryRoot) ?? reading.Title : FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(seriesDir)).Title; }
         if (extraClip && string.IsNullOrWhiteSpace(series)) series = System.IO.Path.GetFileName(seriesDir);
         // Dates in an episode title are not the premiere year of the entire series.
         var title = series ?? reading.Title;
@@ -1258,7 +1330,8 @@ public static partial class FileNames
         // Structured show folders own membership, regardless of aliases in individual filenames.
         var parentName = System.IO.Path.GetFileName(seriesDir);
         // A folder of many different titles is a collection, and a name like "UHD" or "Video" isn't a show at all.
-        var collection = !File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) && (IsLooseFolder(seriesDir, libraryRoot) && !HoldsSeason() && !(numbering is not null && string.IsNullOrWhiteSpace(numbering.Series) && IsNumberedShow(seriesDir, libraryRoot)) || HoldsManyTitles(seriesDir, seriesContext || seasonFolder.Success) || HoldsManyTitles(dir, seriesContext || seasonFolder.Success));
+        var collection = !File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) && (IsLooseFolder(seriesDir, libraryRoot) && !HoldsSeason() && !(numbering is not null && string.IsNullOrWhiteSpace(numbering.Series) && IsNumberedShow(seriesDir, libraryRoot)) || HoldsManyTitles(seriesDir, seriesContext || seasonFolder.Success) || HoldsManyTitles(dir, seriesContext || seasonFolder.Success) ||
+            seriesDir != dir && HoldsSeveralNamedShows(seriesDir));
         // "Backup\1\Harbor S01E05": the file names its show, and the folders above only hold it.
         var heldElsewhere = Regex.IsMatch(System.IO.Path.GetFileName(dir), @"^\d{1,3}$") && System.IO.Path.GetDirectoryName(dir) is { } holder && NamesOtherShow(path, holder);
         var structured = File.Exists(System.IO.Path.Combine(seriesDir, "tvshow.nfo")) || !heldElsewhere && (numbering is not null || bonus) && (seasonFolder.Success || seriesContext || seriesDir != dir) &&

@@ -275,7 +275,22 @@ static class MetadataPipelineFixture
         var copies = new LibraryStore(Path.Combine(directory, "copies-db"));
         foreach (var part in new[] { Part("c1", "copy-one", 1, 1), Part("c2", "copy-two", 1, 2), Part("c3", "copy-two", 2, 1) }) copies.Save(part);
         copies.GroupShowsByProvider();
-        check(copies.All().Select(x => x.ShowId).Distinct().Count() == 2, "folders holding the same season stay apart");
+        var joined = copies.All();
+        check(joined.Select(x => x.ShowId).Distinct().Count() == 1 && copies.Shows().Count == 1, "copies of a season numbered the same way combine into one show");
+        var copy = joined.Single(x => x.Id == "c1");
+        check(LibraryCatalog.Versions(joined, copy).Length == 1, "copies holding different episodes of a season add episodes rather than versions");
+        var twoReleases = new LibraryStore(Path.Combine(directory, "releases-db"));
+        foreach (var part in new[] { Part("r1", "release-one", 1, 1), Part("r2", "release-one", 1, 2), Part("s1", "release-two", 1, 1), Part("s2", "release-two", 1, 2) }) twoReleases.Save(part);
+        twoReleases.GroupShowsByProvider();
+        var released = twoReleases.All();
+        var releaseOne = released.Single(x => x.Id == "r1");
+        check(released.Select(x => x.ShowId).Distinct().Count() == 1 && LibraryCatalog.Versions(released, releaseOne).Select(x => x.Id).SequenceEqual(["r1", "s1"]),
+            "two releases of the same season become versions of each episode");
+        check(LibraryCatalog.Browse(released, LibraryIdentity.ShowKey(releaseOne), null, 1).Count == 2, "a season with two releases lists each episode once");
+        var orders = new LibraryStore(Path.Combine(directory, "orders-db"));
+        foreach (var part in new[] { Part("o1", "order-aired", 1, 1), Part("o2", "order-dvd", 1, 1) with { NumberingOrder = "dvd" } }) orders.Save(part);
+        orders.GroupShowsByProvider();
+        check(orders.All().Select(x => x.ShowId).Distinct().Count() == 2, "copies of a season in different episode orders stay apart");
         using(var handler=new PipelineHandler()) using(var tmdb=new MetadataClient("fixture",handler))
         {
             var dvd=await tmdb.DvdSeasonsAsync(1,default);

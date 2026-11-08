@@ -18,7 +18,7 @@ public static class MetadataTitles
     }
     public static bool IsAnimeSource(MediaItem item) => item.Kind == "Anime" || item.SourceLibraryKind == "Anime" ||
         item.Path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Any(part => part.Equals("Anime", StringComparison.OrdinalIgnoreCase));
-    public static bool IsUnverifiedCompilation(MediaItem item) => !item.Matched && item.NumberingOrder != "dvd" &&
+    public static bool IsUnverifiedCompilation(MediaItem item) => !item.Matched && !EpisodeOrder.ProviderDefined(item.NumberingOrder) &&
         !LibraryIdentity.Locked(item, "Episode") && item.NumberingSource is not ("filename" or "season-folder") &&
         Regex.IsMatch(Path.GetFileNameWithoutExtension(item.Path), @"(?i)\b(?:Collection|Compilation)\b") &&
         !Regex.IsMatch(Path.GetFileNameWithoutExtension(item.Path), @"(?i)\bS\d{1,2}[ ._-]*E\d{1,3}\b|\b\d{1,2}x\d{1,3}\b");
@@ -70,8 +70,8 @@ public static class MetadataTitles
             var clean = Regex.Replace(item.Title, @"^\d{1,2}\s+(.+?)\s+-\s+(?:Comedy|Action|Drama|Horror|Thriller)\b.*$", "$1", RegexOptions.IgnoreCase);
             Add(clean);
             if (clean != item.Title && clean.EndsWith(" 1")) Add(clean[..^2]);
-            // "Hyakuemu - Movie" labels the film; providers list it as "Hyakuemu".
-            Add(Regex.Replace(clean, @"\s+[-–:]\s+(?:The\s+)?Movie$", "", RegexOptions.IgnoreCase));
+            // "Hyakuemu - Movie" labels the film; providers list it as "Hyakuemu". "- Movie 01" numbers a film series the same way.
+            Add(Regex.Replace(clean, @"\s+[-–:]\s+(?:The\s+)?Movie(?:\s+\d{1,2})?$", "", RegexOptions.IgnoreCase));
         }
         if (item.SeriesPath is { } folder)
         {
@@ -115,6 +115,10 @@ public static class MetadataTitles
         }
         if (!item.IsVirtual)
             foreach (var alias in FilenameEpisodes.SearchAliases(item.Path, item.Series is not null, item.SeriesPath is not null)) Add(alias);
+        // A show's later season often carries its number in the name ("2nd Stage", "TV 2", "Nevskij-3", "Yami Shibai 11"), where
+        // providers list it as a season of the show. Searched last, so a sequel listed on its own is found by its full name first.
+        if (item.Series is not null && item.Episode is not null)
+            foreach (var title in titles.ToArray()) Add(SeasonlessTitle(title));
         foreach (var title in titles.ToArray())
             if (RussianSearchAlias(title) is { } alias)
             {
@@ -124,6 +128,14 @@ public static class MetadataTitles
                     Add(RussianSearchAlias(Regex.Replace(title, "ch", "shch", RegexOptions.IgnoreCase)));
             }
         return titles.Take(12).ToArray();
+    }
+    internal static string? SeasonlessTitle(string title)
+    {
+        var plain = Regex.Replace(title, @"(?ix)
+            (?:\s*[-–:]\s*|\s+)(?:\d{1,2}(?:st|nd|rd|th)\s+(?:stage|season|cour|part)|(?:season|part|cour)\s*\d{1,2}|(?:tv|s)[\s-]?\d{1,2})$
+            | -\d{1,2}$
+            | (?<=\p{L})\s+\d{1,2}$", "").Trim(' ', '-', ':');
+        return plain.Length >= 3 && plain != title ? plain : null;
     }
     public static int? NumberedMoviePart(MediaItem item)
     {
@@ -171,10 +183,7 @@ public static class MetadataTitles
     {
         var name = Path.GetFileName(Path.GetDirectoryName(item.Path));
         var year = Regex.Match(name ?? "", @"(?:^|[ _.(-])((?:19|20)\d{2})(?:$|[ _.)-])");
-        if (!year.Success) return null;
-        // After a later season's number the year dates that season, as in Show.S03.2018, so it says nothing about when the show began.
-        if (item.Season is > 1 && Regex.IsMatch(name![..year.Index], $@"(?i)(?:^|[ _.(-])(?:s|season[ _.-]*)?0*{item.Season}[ _.(-]*$")) return null;
-        return int.Parse(year.Groups[1].Value);
+        return year.Success ? int.Parse(year.Groups[1].Value) : null;
     }
     public static MediaItem WithSplitIdentity(MediaItem item, IEnumerable<MediaItem> library)
     {

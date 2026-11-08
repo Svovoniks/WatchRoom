@@ -52,6 +52,7 @@ public static class AutomaticArtwork
             // Deferred until WithSplitIdentity actually needs sibling evidence.
             foreach (var sibling in library.ByIds(folderIds[Path.GetDirectoryName(item.Path) ?? ""])) yield return sibling;
         }
+        var known = new KnownShows(snapshot);
         var numberedGroups = new Dictionary<string, string>();
         foreach (var folder in snapshot.GroupBy(x => Path.GetDirectoryName(x.Path)))
         {
@@ -66,17 +67,20 @@ public static class AutomaticArtwork
         // for runs to the end; either way, a locale counts as fetched only if it stayed chosen.
         var automatic = !force && refresh is null;
         var issues = new List<object>();
+        var rechecking = mode != MetadataRefresh.RetryArtwork && tmdb is not null && MetadataFetchPolicy.RecheckPending(library); var recheckFailed = false;
         foreach (var group in groups)
         {
             ct.ThrowIfCancellationRequested();
+            var recheck = rechecking && group.All(MetadataFetchPolicy.AutomaticMatch) && group.Select(x => (x.MetadataType, x.MetadataId)).Distinct().Count() == 1;
             // Complete cached groups need neither provider lookups nor another
             // full-library read for each title during startup.
-            if (mode == MetadataRefresh.FillMissing && group.All(x => x.MetadataKind is not null && x.ArtworkFetchedAt > 0 &&
+            if (mode == MetadataRefresh.FillMissing && !recheck && group.All(x => x.MetadataKind is not null && x.ArtworkFetchedAt > 0 &&
                 !string.IsNullOrWhiteSpace(x.Overview) && (ArtworkCache.IsUsable(x.SeriesPoster) || ArtworkCache.IsUsable(x.Poster)) &&
                 (options.RefreshDays <= 0 || x.ArtworkFetchedAt >= Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds))) continue;
             if (automatic && MetadataOptions.LocaleChanged(library, options)) { superseded = true; break; }
             var ids = group.Select(x => x.Id).ToHashSet();
             var entries = library.ByIds(ids).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && !x.MetadataLocked).ToArray();
+            recheck = recheck && entries.All(MetadataFetchPolicy.AutomaticMatch);
             if (entries.Length == 0 || entries.Select(LibraryIdentity.ShowKey).Distinct().Count() != 1 &&
                 MetadataTitles.NumberedMovieGroup(entries[0], entries).Length != entries.Length) continue;
             var existingOverview = entries.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Overview))?.Overview;
@@ -104,8 +108,8 @@ public static class AutomaticArtwork
                     if (updated != entry) library.Save(updated);
                     return updated;
                 }).ToArray();
-            if (!needsOverview && !needsPoster && !needsClassification) continue;
-            if (!force && refresh is null && MetadataFetchPolicy.Deferred(library, "title", entries, options, token))
+            if (!needsOverview && !needsPoster && !needsClassification && !recheck) continue;
+            if (!force && refresh is null && !recheck && MetadataFetchPolicy.Deferred(library, "title", entries, options, token))
             { deferred++; MetadataDiagnostics.Record("metadata-fetch-deferred", new { Stage = "title", entries[0].Title, RetryAt = MetadataFetchPolicy.RetryAt(library, "title", entries[0].Id) }); continue; }
             // A title identified through TMDB stays with it when this build has no TMDB key; another provider would replace its identity.
             if (tmdb is null && mode != MetadataRefresh.RetryArtwork && entries.Any(x => x.MetadataProvider == "tmdb")) continue;
@@ -116,7 +120,11 @@ public static class AutomaticArtwork
             try
             {
                 string? poster = null, source = null, overview = null;
-                var resolved = await ResolveAsync(http, tmdb, MetadataTitles.WithSplitIdentity(item, CurrentSiblings(item)), relocalize ? KnownProviders(item, options) : options, directory, ct, entries);
+                // A recheck reads the title as the files give it, before the stored match renamed it, and keeps that match unless the new lookup ranks another higher.
+                var lookup = recheck ? TmdbRetention.Revert(item) : item;
+                var resolved = await ResolveAsync(http, tmdb, MetadataTitles.WithSplitIdentity(lookup, CurrentSiblings(item)), relocalize ? KnownProviders(item, options) : options, directory, ct,
+                    recheck ? entries.Select(TmdbRetention.Revert).ToArray() : entries, MetadataRejections.For(library, item), known.For(lookup),
+                    recheck ? (item.MetadataType ?? (item.Series is null ? "movie" : "tv"), item.MetadataId!.Value) : null);
                 attemptUnmatched = resolved is null;
                 var currentEntries = library.ByIds(ids).ToDictionary(x => x.Id);
                 if (entries.Any(x => !currentEntries.TryGetValue(x.Id, out var current) || !SameFetchIdentity(x, current)))
@@ -135,7 +143,10 @@ public static class AutomaticArtwork
                     {
                         needsOverview = true;
                         needsPoster = true;
-                        entries = entries.Select(entry => ResetIdentity(entry)).ToArray();
+                        // A rechecked match that changes starts again from the files' reading, keeping the episode titles they give.
+                        entries = entries.Select(entry => recheck ? ResetIdentity(TmdbRetention.Revert(entry)) with { MetadataKind = null, MetadataType = null, ProviderIds = null,
+                            EpisodeTitle = LibraryIdentity.Locked(entry, "EpisodeTitle") ? entry.EpisodeTitle : EpisodeOrder.OwnTitle(entry) } : ResetIdentity(entry)).ToArray();
+                        if (recheck) MetadataDiagnostics.Record("metadata-recheck-switched", new { From = item.MetadataId, To = found.Id });
                     }
                     if (mode != MetadataRefresh.RetryArtwork) Classify(found.Kind, found.Type, found.Provider, found.Id, found.Title, found.Year, found.Details?.NumberedSeries == true);
                     overview = found.Overview; source = found.ImageSource ?? found.Source;
@@ -214,7 +225,7 @@ public static class AutomaticArtwork
             }
             catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or XmlException or InvalidOperationException or KeyNotFoundException or TaskCanceledException && !ct.IsCancellationRequested)
             {
-                attemptFailed = true; failed++; error = FailureReason(ex);
+                attemptFailed = true; failed++; error = FailureReason(ex); recheckFailed |= recheck;
                 issues.Add(new { Title = item.DisplayTitle, Code = "provider-failure", Detail = error, Error = MetadataDiagnostics.Error(ex) });
                 outstanding.Set(mode == MetadataRefresh.RetryArtwork ? "title-artwork" : "title", item, "provider-failure", error, ex);
                 MetadataDiagnostics.Failure("title", item.DisplayTitle, null, ex);
@@ -222,6 +233,8 @@ public static class AutomaticArtwork
             }
             MetadataFetchPolicy.Record(library, "title", library.ByIds(ids), options, token, attemptFailed, attemptUnmatched);
         }
+        // The recheck counts as done once every automatic match was looked up; a provider failure or a stop leaves it for next time.
+        if (rechecking && !superseded && !recheckFailed) MetadataFetchPolicy.RecordRecheck(library);
         if (mode != MetadataRefresh.RetryArtwork) library.GroupShowsByProvider();
         var seriesReport = superseded ? MetadataOptions.LocaleStopped : await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, followRefresh,
             automatic ? () => superseded = true : null);
@@ -296,13 +309,16 @@ public static class AutomaticArtwork
             RuntimeMinutes = item.Series is null && match.RuntimeMinutes is > 0 && !LibraryIdentity.Locked(item, "RuntimeMinutes") ? match.RuntimeMinutes : item.RuntimeMinutes },
             match.Provider, item.Series is null ? [.. TmdbRetention.TitleFields, "runtimeMinutes"] : TmdbRetention.TitleFields);
     }
-    internal static async Task<Resolved?> ResolveAsync(HttpClient http, MetadataClient? tmdb, MediaItem item, MetadataOptions options, string directory, CancellationToken ct, MediaItem[]? entries = null)
+    internal static async Task<Resolved?> ResolveAsync(HttpClient http, MetadataClient? tmdb, MediaItem item, MetadataOptions options, string directory, CancellationToken ct, MediaItem[]? entries = null,
+        IReadOnlySet<string>? rejected = null, IReadOnlySet<string>? known = null, (string Type, int Id)? recheck = null)
     {
         if (item.Year is null && !LibraryIdentity.Locked(item, "Year") && MetadataTitles.FolderYear(item) is { } folderYear) item = item with { Year = folderYear };
         Exception? failure = null; Resolved? best = null;
         var queries = MetadataTitles.Queries(item, entries);
         bool Accept(Resolved candidate)
         {
+            // A match this show's files contradicted before stays out.
+            if (candidate.Id is { } id && rejected?.Contains(MetadataRejections.Key(candidate.Provider, candidate.Type, id)) == true) return false;
             if (best is null) best = candidate;
             else if (candidate.Type == best.Type && candidate.Title is not null && best.Title is not null &&
                 MetadataTitles.Normalize(candidate.Title) == MetadataTitles.Normalize(best.Title) && candidate.Kind == best.Kind &&
@@ -322,13 +338,13 @@ public static class AutomaticArtwork
             {
                 if (provider == "tmdb" && tmdb is not null)
                 {
-                    var match = await tmdb.MatchAsync(item, ct, queries, entries);
+                    var match = await tmdb.MatchAsync(item, ct, queries, entries, rejected, known, recheck);
                     if (match is null && MetadataTitles.IsAnimeSource(item))
                         foreach (var alias in await AnimeTitles.AliasesAsync(http, directory, item.DisplayTitle, ct))
-                        { match = await tmdb.MatchAsync(item with { Title = alias, Series = item.Series is null ? null : alias }, ct); if (match is not null) break; }
+                        { match = await tmdb.MatchAsync(item with { Title = alias, Series = item.Series is null ? null : alias }, ct, rejected: rejected); if (match is not null) break; }
                     // Weakest evidence last: one side of a dashed title can name a parent show.
                     if (match is null) foreach (var part in MetadataTitles.PartQueries(item))
-                    { var source = MetadataTitles.AsPart(item, part); match = await tmdb.MatchAsync(source, ct, [part], entries); if (match is not null) break; }
+                    { var source = MetadataTitles.AsPart(item, part); match = await tmdb.MatchAsync(source, ct, [part], entries, rejected); if (match is not null) break; }
                     if (match is not null && Accept(new(match.Poster, $"https://www.themoviedb.org/{match.Type}/{match.Id}", match.Overview,
                         match.Kind ?? (match.Type == "tv" ? "Show" : "Movie"), match.Type, provider, match.Id, match.Title, match,
                         Year: int.TryParse(match.Year, out var year) ? year : null, Animated: match.Animated))) return best;
@@ -383,7 +399,8 @@ public static class AutomaticArtwork
         var matches = candidates.ToArray();
         MetadataMatch Candidate(JsonElement value) => new(value.GetProperty("id").GetInt32(), "tv", value.GetProperty("name").GetString()!,
             value.TryGetProperty("premiered", out var premiered) && premiered.ValueKind == JsonValueKind.String && premiered.GetString()?.Length >= 4 ? premiered.GetString()![..4] : null,
-            null, "", MetadataClassification.Tvmaze(value), Provider: "tvmaze", Animated: value.TryGetProperty("type", out var type) ? type.GetString() == "Animation" : null);
+            null, "", MetadataClassification.Tvmaze(value), Provider: "tvmaze", Animated: value.TryGetProperty("type", out var type) ? type.GetString() == "Animation" : null,
+            Ended: value.TryGetProperty("ended", out var ended) && ended.ValueKind == JsonValueKind.String ? ended.GetString() : null);
         if ((knownId is > 0 || external is not null) && matches.Length == 1 && !MetadataMatching.Compatible(item, Candidate(matches[0])))
         {
             knownId = null; external = null;

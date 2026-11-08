@@ -670,11 +670,14 @@ public partial class MainWindow
                 var choice = new MenuItem { Header = order == "dvd" ? "DVD order (TMDB)" : order == "absolute" ? "Absolute numbering" : "Aired order", IsCheckable = true, IsChecked = card.Media.NumberingOrder == order };
                 choice.Click += async (_, _) => await Guard(async () =>
                 {
-                    foreach (var item in items.Where(x => LibraryIdentity.SameShow(x, card.Media)).ToArray()) library.Save(item with { NumberingOrder = order, MetadataFetchedAt = 0 });
+                    foreach (var item in items.Where(x => LibraryIdentity.SameShow(x, card.Media)).ToArray()) library.Save(item with { NumberingOrder = order, MetadataFetchedAt = 0, LockedFields = (item.LockedFields ?? []).Append("NumberingOrder").Distinct().ToArray() });
                     await FetchArtwork(lifetime.Token, true); await RefreshLibrary();
                 });
                 ordering.Items.Add(choice);
             }
+            // An order chosen because the files' own episode titles match it; picking another one above replaces it.
+            if (card.Media.NumberingOrder.StartsWith("group:", StringComparison.Ordinal))
+                ordering.Items.Insert(0, new MenuItem { Header = "Order matching the file titles (TMDB)", IsCheckable = true, IsChecked = true, IsEnabled = false });
             menu.Items.Add(ordering);
         }
         if (card.Level is "movie" or "episode")

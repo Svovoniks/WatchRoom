@@ -29,7 +29,20 @@ public static class MetadataMatching
     public static bool HasMovieEvidence(MediaItem item) => item.Episode is null && item.AbsoluteEpisode is null && item.SourcePartEpisode is null &&
         (item.MetadataType == "movie" || item.SourceLibraryKind == "Movie" || item.Path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             .Any(part => System.Text.RegularExpressions.Regex.IsMatch(part, @"(?i)^(?:Movies?|Films?|Фильмы)$")));
-    public static MetadataMatch? Choose(IEnumerable<MetadataMatch> results, MediaItem item)
+    public static MetadataMatch? Choose(IEnumerable<MetadataMatch> results, MediaItem item) =>
+        Choose(Admissible(results, item), item.DisplayTitle, item.Year, MetadataTitles.IsAnimeSource(item) ? "Anime" : null, LaterSeason(item));
+    // A file from a show's second season or later: any year its name or folders give may be the year that season aired,
+    // wherever it sits in the name, so it can't tell against a show that began earlier.
+    internal static bool LaterSeason(MediaItem item) => item.Series is not null && item.Season is > 1;
+    // Candidates the name alone can't separate: two to four shows that tie at the top with a confident title score.
+    internal static MetadataMatch[] Tied(IEnumerable<MetadataMatch> results, MediaItem item)
+    {
+        var ranked = Ranked(Admissible(results, item, record: false), item.DisplayTitle, item.Year, MetadataTitles.IsAnimeSource(item) ? "Anime" : null, LaterSeason(item));
+        if (ranked.Length < 2 || ranked[0].Score < 6 || ranked[0].Spelled && !ranked[1].Spelled) return [];
+        var top = ranked.TakeWhile(x => x.Rank == ranked[0].Rank && x.Spelled == ranked[0].Spelled).Select(x => x.Match).ToArray();
+        return top.Length is >= 2 and <= 4 ? top : [];
+    }
+    private static List<MetadataMatch> Admissible(IEnumerable<MetadataMatch> results, MediaItem item, bool record = true)
     {
         var compatible = new List<MetadataMatch>();
         foreach (var match in results)
@@ -37,11 +50,11 @@ public static class MetadataMatching
             var rejection = !Compatible(item, match) ? "live-action-in-anime" : !item.Matched && !item.MetadataLocked &&
                 (item.Episode is not null || item.SourcePartEpisode is not null ? match.Type != "tv" : HasMovieEvidence(item) && match.Type != "movie") ? "media-type" : null;
             if (rejection is null) compatible.Add(match);
-            else MetadataDiagnostics.Record("metadata-candidate-rejected", new { match.Provider, match.Id, match.Title, match.Year, Reason = rejection });
+            else if (record) MetadataDiagnostics.Record("metadata-candidate-rejected", new { match.Provider, match.Id, match.Title, match.Year, Reason = rejection });
         }
-        return Choose(compatible, item.DisplayTitle, item.Year, MetadataTitles.IsAnimeSource(item) ? "Anime" : null);
+        return compatible;
     }
-    public static int Score(string title, int? year, string candidate, string? original, int? candidateYear)
+    public static int Score(string title, int? year, string candidate, string? original, int? candidateYear, bool laterSeason = false, int? candidateEnded = null)
     {
         static int Title(string a, string b)
         {
@@ -57,16 +70,29 @@ public static class MetadataMatching
                     (a.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length >= 4 && left.Length >= 20 ? 6 : 4) : 0;
         }
         var score = Math.Max(Title(title, candidate), Title(title, original ?? ""));
-        if (year is { } expected && candidateYear is { } actual) score += Math.Abs(expected - actual) switch { 0 => 2, 1 => 1, _ => -4 };
+        // A show can't have begun after a file of it. For a later season, one that began well before the year isn't contradicted by it either,
+        // as long as it was still on air then: "Rage.2025.S02" isn't a season of a 1987 show that ended decades before.
+        if (year is { } expected && candidateYear is { } actual)
+            score += Math.Abs(expected - actual) switch { 0 => 2, 1 => 1, _ => laterSeason && actual < expected && !(candidateEnded < expected - 1) ? 0 : -4 };
         return score;
     }
-    public static MetadataMatch? Choose(IEnumerable<MetadataMatch> results, string title, int? year, string? preferredKind = null)
-    {
-        var ranked = results.DistinctBy(x => (x.Provider, x.Type, x.Id)).Select(x => (Match: x,
-            Score: CandidateScore(x, title, year)))
+    private static (MetadataMatch Match, int Score, int Rank, bool Spelled)[] Ranked(IEnumerable<MetadataMatch> results, string title, int? year, string? preferredKind, bool laterSeason = false) =>
+        results.DistinctBy(x => (x.Provider, x.Type, x.Id)).Select(x => (Match: x,
+            Score: CandidateScore(x, title, year, laterSeason)))
             .Select(x => (x.Match, x.Score, Rank: x.Score + (preferredKind is not null && (x.Match.Kind == preferredKind || preferredKind == "Anime" && x.Match.Animated == true) ? 2 : 0),
                 Spelled: new[] { x.Match.Title, x.Match.OriginalTitle ?? "" }.Concat(x.Match.Aliases ?? []).Contains(title, StringComparer.Ordinal)))
             .OrderByDescending(x => x.Rank).ThenByDescending(x => x.Spelled).ToArray();
+    // Whether a lookup for this reading would put one candidate strictly above another.
+    internal static bool Outranks(MetadataMatch winner, MetadataMatch other, MediaItem item)
+    {
+        var ranked = Ranked([winner, other], item.DisplayTitle, item.Year, MetadataTitles.IsAnimeSource(item) ? "Anime" : null, LaterSeason(item));
+        if (ranked.Length != 2) return false;
+        var (top, next) = (ranked[0], ranked[1]);
+        return top.Match.Type == winner.Type && top.Match.Id == winner.Id && (top.Rank > next.Rank || top.Spelled && !next.Spelled);
+    }
+    public static MetadataMatch? Choose(IEnumerable<MetadataMatch> results, string title, int? year, string? preferredKind = null, bool laterSeason = false)
+    {
+        var ranked = Ranked(results, title, year, preferredKind, laterSeason);
         // Keep conservative automatic matching: weak or tied results require Identify. Titles that differ only in capitals
         // aren't really tied, so "Sherlock" is the show spelled that way and not "SHErlock".
         var winner = ranked.Length > 0 && ranked[0].Score >= 6 && (ranked.Length == 1 || ranked[0].Rank > ranked[1].Rank || ranked[0].Spelled && !ranked[1].Spelled) ? ranked[0].Match : null;
@@ -76,9 +102,10 @@ public static class MetadataMatching
             Candidates = ranked.Select(x => new { x.Match.Provider, x.Match.Id, x.Match.Type, x.Match.Title, x.Match.Year, x.Match.Animated, x.Score, x.Rank }).ToArray() });
         return winner;
     }
-    private static int CandidateScore(MetadataMatch match, string title, int? year) =>
+    private static int CandidateScore(MetadataMatch match, string title, int? year, bool laterSeason = false) =>
         new[] { match.Title, match.OriginalTitle ?? "" }.Concat(match.Aliases ?? [])
-            .Max(alias => Score(title, year, alias, null, int.TryParse(match.Year, out var y) ? y : null));
+            .Max(alias => Score(title, year, alias, null, int.TryParse(match.Year, out var y) ? y : null, laterSeason,
+                match.Ended?.Length >= 4 && int.TryParse(match.Ended[..4], out var ended) ? ended : null));
 
     internal static async Task<MetadataMatch?> ChooseWithAliasesAsync(IEnumerable<MetadataMatch> results, MediaItem item,
         Func<MetadataMatch, CancellationToken, Task<string[]>> aliases, CancellationToken ct, Action<MetadataMatch[]?>? unresolved = null)
@@ -89,7 +116,7 @@ public static class MetadataMatching
         // Do not truncate a crowded result set and hide an unchecked competitor.
         var shortlist = candidates.Where(x => Compatible(item, x) &&
             (item.Episode is null && item.Series is null || x.Type == "tv") && (!HasMovieEvidence(item) || x.Type == "movie") &&
-            (item.Year is null || !int.TryParse(x.Year, out var year) || Math.Abs(item.Year.Value - year) <= 1)).ToArray();
+            (item.Year is null || !int.TryParse(x.Year, out var year) || Math.Abs(item.Year.Value - year) <= 1 || LaterSeason(item) && year < item.Year.Value)).ToArray();
         if (shortlist.Length == 0) return null;
         if (shortlist.Length > 4) { unresolved?.Invoke(null); return null; }
         try

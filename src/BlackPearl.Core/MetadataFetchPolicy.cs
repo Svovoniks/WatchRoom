@@ -4,11 +4,14 @@ namespace BlackPearl.Core;
 // result must not pretend that a title was matched, or force another startup lookup.
 internal static class MetadataFetchPolicy
 {
+    // Raised when a matcher change can choose differently: titles it left unmatched are looked up again, and so, once, are automatic matches.
+    internal const int MatcherVersion = 6;
+    private const string RecheckKey = "metadata-matcher-rechecked";
     private sealed record Attempt(string Fingerprint, long RetryAt);
     private static string Key(string stage, MediaItem item) => "metadata-retry:" + stage + ":" + item.Id;
     private static string Fingerprint(MediaItem item, MetadataOptions options, string? token) => LibraryIdentity.Hash(Wire.Serialize(new
     {
-        MatcherVersion = 3,
+        MatcherVersion,
         item.Path, item.Title, item.Series, item.Kind, item.Year, item.ShowId, item.Season, item.Episode, item.EpisodeEnd,
         item.AbsoluteEpisode, item.NumberingOrder, item.SourcePart, item.SourcePartEpisode, item.SourcePartEpisodeEnd,
         item.AirDate, item.NumberingSource,
@@ -20,6 +23,12 @@ internal static class MetadataFetchPolicy
         options.ProviderOrder, options.Language, options.Country, options.RefreshDays,
         Credential = LibraryIdentity.Hash(TmdbCredentials.Resolve(token) ?? "")
     }));
+    // A match an earlier matcher made by itself is looked up once more with this one; one someone chose, locked, or read from an NFO stays.
+    public static bool RecheckPending(LibraryStore library) => library.Setting(RecheckKey) != MatcherVersion.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public static void RecordRecheck(LibraryStore library) => library.Setting(RecheckKey, MatcherVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    public static bool AutomaticMatch(MediaItem item) => !item.Matched && !item.MetadataLocked && item.MetadataProvider == "tmdb" && item.MetadataId is > 0 &&
+        item.TmdbFields?.TryGetValue("providerIds.tmdb", out var found) == true && found.Original == "null" && LibraryIdentity.ProviderId(item, "tmdb") == item.MetadataId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) &&
+        !new[] { "ProviderIds", "MetadataType", "Title", "Year" }.Any(field => LibraryIdentity.Locked(item, field));
     public static bool Deferred(LibraryStore library, string stage, MediaItem[] entries, MetadataOptions options, string? token)
     {
         return entries.All(item =>

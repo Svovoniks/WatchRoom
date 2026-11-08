@@ -12,11 +12,11 @@ public static class LibraryCatalog
     public const int Music = 6, Unmatched = 7;
     // Shows and films with no match yet. Every title starts here and lists under Unmatched rather than Shows, Anime or Movies
     // until something identifies one of its files. Bonus clips are never looked up on their own, so they don't count, and a
-    // title someone locked by hand is settled.
+    // title someone locked by hand is settled. So is a folder of shorts whose files were each identified as a film of their own.
     public static HashSet<string> UnmatchedTitles(IEnumerable<MediaItem> items) => items
         .Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && !x.IsMusic)
         .GroupBy(LibraryIdentity.ShowKey)
-        .Where(title => title.All(x => !x.Matched && !x.MetadataLocked && x.MetadataId is null && (x.ProviderIds?.Count ?? 0) == 0))
+        .Where(title => title.All(x => !x.Matched && !x.MetadataLocked && x.MetadataId is null && (x.ProviderIds?.Count ?? 0) == 0 && x.EpisodeSource is null))
         .Select(title => title.Key).ToHashSet();
     public static Task<List<LibraryCard>> SearchAsync(IEnumerable<MediaItem> source, string query, int filter = 0,
         string? series = null, string? kind = null, int? season = null, CancellationToken cancellation = default, bool displaySpecials = false, string? preferVersion = null) => Task.Run(() =>

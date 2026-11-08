@@ -221,6 +221,14 @@ if (args.FirstOrDefault() == "--grouping-audit")
     Console.WriteLine($"{checks} grouping audit checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--episode-order")
+{
+    var checks = 0;
+    await EpisodeOrderFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/episode-order"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} episode order checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--metadata-pipeline")
 {
     var checks = 0;
@@ -407,6 +415,7 @@ await ReadAheadFixture.Run(Check);
 await BridgeShutdownFixture.Run(Check);
 await LibrarySearchFixture.Run(Check);
 await MetadataPipelineFixture.Run(Path.Combine(root, "metadata-pipeline"), Check);
+await EpisodeOrderFixture.Run(Path.Combine(root, "episode-order"), Check);
 await MetadataRecoveryFixture.Run(Path.Combine(root, "metadata-recovery"), Check);
 await MetadataEvidenceFixture.Run(Path.Combine(root, "metadata-evidence"), Check);
 await MetadataCacheFixture.Run(Path.Combine(root, "metadata-cache"), Check);

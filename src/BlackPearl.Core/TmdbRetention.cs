@@ -74,6 +74,8 @@ public static class TmdbRetention
         foreach (var entry in incoming ?? []) result[entry.Key] = entry.Value;
         return result.Count == 0 ? null : result;
     }
+    // Every downloaded field back to what it was before the provider set it, as when a match turns out to be the wrong title.
+    internal static MediaItem Revert(MediaItem item) => item.TmdbFields is { Count: > 0 } ? Wire.Read<MediaItem>(Expire(Wire.Serialize(item), long.MaxValue, out _)) : item;
     internal static string Expire(string json, long now, out bool changed)
     {
         var node = JsonNode.Parse(json)!.AsObject(); changed = false;

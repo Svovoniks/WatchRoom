@@ -119,4 +119,50 @@ public sealed partial class MetadataClient
         }
         return null;
     }
+
+    // Shows that share a name, where nothing in the name tells them apart: the seasons the files reach can. A show with fewer seasons than
+    // the files hold isn't theirs, and one left standing is the match. Air dates aren't used: a same-named show the search didn't return
+    // ("Галилео" for "Galileo") would leave whichever returned show was on air then looking like the only fit.
+    private async Task<MetadataMatch?> MatchEpisodeEvidenceAsync(MediaItem item, IEnumerable<MediaItem>? entries,
+        IReadOnlyList<(MediaItem Item, MetadataMatch[] Candidates)> searches, CancellationToken ct)
+    {
+        if (item.Series is null || item.Matched || LibraryIdentity.Locked(item, "MetadataType") || LibraryIdentity.Locked(item, "ProviderIds")) return null;
+        var files = (entries ?? []).Append(item).Where(x => !x.IsBonus && !x.IsVirtual && !x.IsExtra && LibraryIdentity.SameShow(item, x)).DistinctBy(x => x.Id).ToArray();
+        var lastSeason = files.Where(x => x.AbsoluteEpisode is null && x.SourcePart is null && x.NumberingSource is "filename" or "season-folder")
+            .Select(x => x.Season).OfType<int>().DefaultIfEmpty(0).Max();
+        if (lastSeason < 2) return null;
+        foreach (var (source, candidates) in searches)
+        {
+            var tied = MetadataMatching.Tied(candidates.Where(x => x.Type == "tv"), source);
+            if (tied.Length < 2) continue;
+            var fitting = new List<MetadataMatch>();
+            foreach (var candidate in tied)
+            {
+                using var json = await Get($"tv/{candidate.Id}", ct);
+                var root = json.RootElement;
+                int? seasons = root.TryGetProperty("number_of_seasons", out var count) && count.ValueKind == System.Text.Json.JsonValueKind.Number ? count.GetInt32() : null;
+                if (seasons is null || seasons >= lastSeason) fitting.Add(candidate);
+            }
+            MetadataDiagnostics.Record("metadata-tie-evidence", new { Query = source.DisplayTitle, LastSeason = lastSeason, Tied = tied.Select(x => x.Id).ToArray(), Fitting = fitting.Select(x => x.Id).ToArray() });
+            if (fitting.Count != 1) return null;
+            MetadataDiagnostics.Outcome("matched");
+            return fitting[0] with { Evidence = "Only one show of this name has as many seasons as the files" };
+        }
+        return null;
+    }
+    private static MetadataMatch? MatchKnownShow(MediaItem item, IReadOnlyList<(MediaItem Item, MetadataMatch[] Candidates)> searches, IReadOnlySet<string> known)
+    {
+        if (item.Series is null || item.Matched || LibraryIdentity.Locked(item, "MetadataType") || LibraryIdentity.Locked(item, "ProviderIds")) return null;
+        foreach (var (source, candidates) in searches)
+        {
+            var tied = MetadataMatching.Tied(candidates.Where(x => x.Type == "tv"), source);
+            if (tied.Length < 2) continue;
+            var hits = tied.Where(x => known.Contains(MetadataRejections.Key("tmdb", "tv", x.Id))).ToArray();
+            MetadataDiagnostics.Record("metadata-tie-library", new { Query = source.DisplayTitle, Tied = tied.Select(x => x.Id).ToArray(), Known = hits.Select(x => x.Id).ToArray() });
+            if (hits.Length != 1) return null;
+            MetadataDiagnostics.Outcome("matched");
+            return hits[0] with { Evidence = "Another copy of this show in the library is matched to it" };
+        }
+        return null;
+    }
 }
