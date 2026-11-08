@@ -15,6 +15,12 @@ internal static class ShortFilms
         var titled = entries.Where(x => !x.IsBonus && !x.IsVirtual && !x.IsExtra && x.Series is not null)
             .Select(x => (Item: x, Title: EpisodeOrder.OwnTitle(x))).Where(x => x.Title is { } title && EpisodeOrder.Words(title).Length > 0).ToArray();
         if (titled.Length < MinimumFiles) return 0;
+        // A folder is searched once for its files as they are. Later passes keep that answer until the files change or a refresh replaces text.
+        var key = "short-films-checked:" + LibraryIdentity.ShowKey(titled[0].Item);
+        var fingerprint = LibraryIdentity.Hash(Wire.Serialize(new { MetadataFetchPolicy.MatcherVersion,
+            Files = titled.Select(x => new { x.Item.Id, x.Title, Year = Year(x.Item), x.Item.FileRuntimeMinutes, x.Item.DurationSeconds }).OrderBy(x => x.Id, StringComparer.Ordinal).ToArray() }));
+        if (!replaceText && library.Setting(key) == fingerprint)
+            return entries.Count(x => x.EpisodeSource?.StartsWith("https://www.themoviedb.org/movie/", StringComparison.Ordinal) == true);
         var found = new List<(MediaItem Item, MetadataMatch Film)>();
         foreach (var (item, title) in titled)
         {
@@ -36,6 +42,7 @@ internal static class ShortFilms
             if (fitting.Count == 1) found.Add((item, fitting[0]));
         }
         MetadataDiagnostics.Record("metadata-short-films", new { Files = titled.Length, Found = found.Count });
+        library.Setting(key, fingerprint);
         // Most of the folder has to be films found this way, or its titles were episodes after all.
         if (found.Count < MinimumFiles || found.Count * 10 < titled.Length * 6) return 0;
         var posters = Path.Combine(directory, "posters");

@@ -291,6 +291,11 @@ static class MetadataPipelineFixture
         foreach (var part in new[] { Part("o1", "order-aired", 1, 1), Part("o2", "order-dvd", 1, 1) with { NumberingOrder = "dvd" } }) orders.Save(part);
         orders.GroupShowsByProvider();
         check(orders.All().Select(x => x.ShowId).Distinct().Count() == 2, "copies of a season in different episode orders stay apart");
+        var running = new LibraryStore(Path.Combine(directory, "running-db"));
+        foreach (var part in new[] { Part("n1", "running-numbers", 1, 1) with { NumberingOrder = "absolute", AbsoluteEpisode = 1 }, Part("n2", "release-seasons", 1, 1), Part("n3", "release-seasons", 2, 1) }) running.Save(part);
+        running.GroupShowsByProvider();
+        check(running.All().Select(x => x.ShowId).Distinct().Count() == 2 && running.Get("n3")!.NumberingOrder == "aired",
+            "a release in running numbers and one in seasons stay apart, so the seasons keep their own order");
         using(var handler=new PipelineHandler()) using(var tmdb=new MetadataClient("fixture",handler))
         {
             var dvd=await tmdb.DvdSeasonsAsync(1,default);

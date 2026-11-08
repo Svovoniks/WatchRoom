@@ -43,7 +43,12 @@ static class EpisodeOrderFixture
         // A library fetched before titles could choose orders is checked once, and the moved files lose the text their old numbers gave them.
         var upgraded = Store(Path.Combine(directory, "upgraded"));
         foreach (var (s, e, title) in files) upgraded.Save(Episode(directory, "upgraded", "Parts Show", 10, s, e, title) with { MetadataFetchedAt = Wire.Now, EpisodeOverview = "Old plot", EpisodeSource = "https://www.themoviedb.org/tv/10/season/" + s + "/episode/" + e });
+        // An untitled file whose title the aired list gave: the old order's S02E03 is "Ninth", the group's is "Sixth".
+        var untitled = upgraded.All().Single(x => x.Season == 2 && x.Episode == 3);
+        upgraded.Save(TmdbRetention.Record(untitled with { EpisodeTitle = null }, untitled with { EpisodeTitle = "Ninth", EpisodeOverview = "Plot of Ninth" }, "tmdb", "episodeTitle", "episodeOverview"));
         await Fetch(upgraded, directory, handler, force: false);
+        var retitled = upgraded.All().Single(x => !x.IsVirtual && x.Season == 2 && x.Episode == 3);
+        check(retitled is { EpisodeTitle: "Sixth", EpisodeOverview: "Plot of Sixth" }, $"a moved file whose title the provider gave takes its new episode's title with its plot (got {retitled.EpisodeTitle}, {retitled.EpisodeOverview})");
         var moved = upgraded.All().Single(x => !x.IsVirtual && x.Season == 2 && x.Episode == 1);
         check(moved.NumberingOrder == "group:parts" && moved.EpisodeOverview == "Plot of Fourth" && moved.EpisodeTitle == "Fourth",
             $"an existing library's shows are checked once after the update and moved files get their own episode's text (got {moved.NumberingOrder}, {moved.EpisodeOverview})");
@@ -99,6 +104,13 @@ static class EpisodeOrderFixture
         check(contradicted.Setting("metadata-rejected:" + LibraryIdentity.ShowKey(dropped[0])) is { } rejectedJson && rejectedJson.Contains("tmdb:tv:20"),
             "the dropped match is remembered for the show");
         check(contradicted.Setting("metadata-outstanding-v2")?.Contains("episode-titles-contradict-match") == true, "the dropped match is reported as an issue");
+
+        // A show whose tvshow.nfo names it keeps that match: the next read of the NFO would only bring it back.
+        var sidecar = Store(Path.Combine(directory, "wrong-nfo"));
+        for (var i = 0; i < shorts.Length; i++) sidecar.Save(Episode(directory, "wrong-nfo", "The Pink Panther", 20, 1, i + 1, shorts[i]));
+        await File.WriteAllTextAsync(Path.Combine(directory, "wrong-nfo-files", "tvshow.nfo"), "https://www.themoviedb.org/tv/20");
+        await Fetch(sidecar, directory, wrong);
+        check(sidecar.All().Where(x => !x.IsVirtual).All(x => x.MetadataId == 20), "a match a show's NFO file gives isn't dropped for its titles");
 
         // The next lookup leaves the dropped match out and takes the next candidate.
         var search = new OrderHandler();
@@ -267,6 +279,9 @@ static class EpisodeOrderFixture
         }
         await Fetch(plain, directory, featureApi);
         check(plain.All().All(x => x.EpisodeSource is null && x.EpisodeOverview is null), "episode titles that name unrelated films don't turn a show's episodes into those films");
+        featureApi.Requests.Clear();
+        await Fetch(plain, directory, featureApi, force: false);
+        check(!featureApi.Requests.Contains("/3/search/movie"), "a folder whose titles weren't films isn't searched film by film again until its files change");
 
         // Once per matcher version, an automatic match is looked up again from the files' own reading. It changes only
         // when that lookup sees the stored match and ranks another above it.
@@ -312,6 +327,16 @@ static class EpisodeOrderFixture
         recheckApi.Requests.Clear();
         await Refresh();
         check(!recheckApi.Requests.Any(x => x.StartsWith("/3/search", StringComparison.Ordinal)), "the next fetch doesn't look the matches up again");
+        // While TMDB is down, a recheck keeps the match and waits for the next fetch; another provider's title search can't replace it.
+        var outage = new OrderHandler { TmdbDown = true };
+        outage.Add("/search/shows", """[{"score":1,"show":{"id":900,"name":"Example Film","type":"Scripted","premiered":"2020-01-01","summary":"Another show","image":{"medium":"https://static.tvmaze.com/900.jpg"}}}]""");
+        var outageStore = Store(Path.Combine(directory, "recheck-outage"));
+        var stored = Film("outage", "Example Film", 700, 2015); outageStore.Save(stored);
+        new MetadataOptions(Providers: ["tmdb", "tvmaze"]).Save(outageStore);
+        using (var down = new MetadataClient("fixture", outage)) using (var downHttp = new HttpClient(outage))
+            await AutomaticArtwork.FetchAsync(outageStore, Path.Combine(directory, "recheck-outage-data"), "fixture", null, default, downHttp, metadata: down);
+        check(outageStore.Get(stored.Id) is { MetadataProvider: "tmdb", MetadataId: 700 } && !outage.Requests.Contains("/search/shows"), "a recheck during a TMDB outage asks no other provider and keeps the match");
+        check(MetadataFetchPolicy.RecheckPending(outageStore), "a recheck that couldn't reach TMDB runs again next time");
 
         // A match someone chose stays, whatever the files say.
         var chosen = Store(Path.Combine(directory, "chosen"));
@@ -361,6 +386,7 @@ static class EpisodeOrderFixture
     {
         private readonly Dictionary<string, string> routes = [];
         public List<string> Requests { get; } = [];
+        public bool TmdbDown { get; init; }
         public void Add(string path, string body) => routes[path] = body;
         // A search answered by what it searched for: "/3/search/movie?query=Pink Pajamas".
         public void Search(string type, string query, string body) => routes[$"/3/search/{type}|{query.ToLowerInvariant()}"] = body;
@@ -368,6 +394,7 @@ static class EpisodeOrderFixture
         {
             var path = request.RequestUri!.AbsolutePath; Requests.Add(path);
             if (request.RequestUri.Host == "image.tmdb.org") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(ArtworkFixture.Png) });
+            if (TmdbDown && request.RequestUri.Host == "api.themoviedb.org") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
             var query = System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["query"];
             if (query is not null && routes.TryGetValue(path + "|" + query.ToLowerInvariant(), out var searched))
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(searched, Encoding.UTF8, "application/json") });

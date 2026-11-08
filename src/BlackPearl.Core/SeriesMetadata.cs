@@ -153,7 +153,8 @@ public static class SeriesMetadata
                         }
                     }
                     // A match the files contradict twice over is dropped, and the next lookup leaves it out. A match someone chose stays.
-                    if (evidence.Length >= 5 && item.MetadataProvider == provider && !entries.Any(x => x.Matched || LibraryIdentity.Locked(x, "ProviderIds") || LibraryIdentity.Locked(x, "MetadataType") || LibraryIdentity.Locked(x, "Title")))
+                    if (evidence.Length >= 5 && item.MetadataProvider == provider && !entries.Any(x => x.Matched || LibraryIdentity.Locked(x, "ProviderIds") || LibraryIdentity.Locked(x, "MetadataType") || LibraryIdentity.Locked(x, "Title")) &&
+                        !entries.Any(LocalMetadata.HasShowSidecar))
                     {
                         var fit = EpisodeOrder.Fit(entries, details);
                         if (fit.Misfits >= 3 && fit.Misfits * 10 >= fit.Regular * 3)
@@ -249,12 +250,15 @@ public static class SeriesMetadata
                         var episodeList = season?.Episodes.Where(e => LibraryIdentity.EpisodeNumbers(current).Contains(e.Number)).OrderBy(e => e.Number).ToArray() ?? [];
                         var first = episodeList.FirstOrDefault();
                         string? Merge(string field, string? value, string? old) => mode == MetadataRefresh.RetryArtwork || LibraryIdentity.Locked(current, field) || string.IsNullOrWhiteSpace(value) ? old :
-                            !replaceText && !(reordered && field != "EpisodeTitle") && !string.IsNullOrWhiteSpace(old) ? old : value;
+                            !replaceText && !reordered && !string.IsNullOrWhiteSpace(old) ? old : value;
+                        // A moved file keeps the title its own name gives. A title the provider gave it named the episode its number had before.
+                        var retitle = reordered && mode != MetadataRefresh.RetryArtwork && !LibraryIdentity.Locked(current, "EpisodeTitle");
                         if (season is null) { library.Save(current); continue; }
                         current = current with
                         {
                             SeasonTitle = Merge("SeasonTitle", season.Title, current.SeasonTitle), SeasonOverview = Merge("SeasonOverview", season.Overview, current.SeasonOverview),
-                            EpisodeTitle = Merge("EpisodeTitle", string.Join(" / ", episodeList.Select(e => e.Title).Where(t => !string.IsNullOrWhiteSpace(t))), current.EpisodeTitle),
+                            EpisodeTitle = retitle && EpisodeOrder.OwnTitle(entry) is { Length: > 0 } own ? own :
+                                Merge("EpisodeTitle", string.Join(" / ", episodeList.Select(e => e.Title).Where(t => !string.IsNullOrWhiteSpace(t))), retitle ? null : current.EpisodeTitle),
                             EpisodeOverview = Merge("EpisodeOverview", string.Join("\n\n", episodeList.Select(e => e.Overview).Where(t => !string.IsNullOrWhiteSpace(t))), current.EpisodeOverview),
                             AirDate = Merge("AirDate", first?.AirDate, current.AirDate),
                             RuntimeMinutes = mode == MetadataRefresh.RetryArtwork || LibraryIdentity.Locked(current, "RuntimeMinutes") ? current.RuntimeMinutes :

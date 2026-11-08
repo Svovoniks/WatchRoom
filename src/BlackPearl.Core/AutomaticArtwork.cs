@@ -67,7 +67,7 @@ public static class AutomaticArtwork
         // for runs to the end; either way, a locale counts as fetched only if it stayed chosen.
         var automatic = !force && refresh is null;
         var issues = new List<object>();
-        var rechecking = mode != MetadataRefresh.RetryArtwork && tmdb is not null && MetadataFetchPolicy.RecheckPending(library); var recheckFailed = false;
+        var rechecking = mode != MetadataRefresh.RetryArtwork && tmdb is not null && options.ProviderOrder.Contains("tmdb") && MetadataFetchPolicy.RecheckPending(library); var recheckFailed = false;
         foreach (var group in groups)
         {
             ct.ThrowIfCancellationRequested();
@@ -122,7 +122,9 @@ public static class AutomaticArtwork
                 string? poster = null, source = null, overview = null;
                 // A recheck reads the title as the files give it, before the stored match renamed it, and keeps that match unless the new lookup ranks another higher.
                 var lookup = recheck ? TmdbRetention.Revert(item) : item;
-                var resolved = await ResolveAsync(http, tmdb, MetadataTitles.WithSplitIdentity(lookup, CurrentSiblings(item)), relocalize ? KnownProviders(item, options) : options, directory, ct,
+                // It asks TMDB alone: another provider's title search knows nothing of the stored match, and a TMDB failure must not hand the title to it.
+                var resolved = await ResolveAsync(http, tmdb, MetadataTitles.WithSplitIdentity(lookup, CurrentSiblings(item)),
+                    recheck ? options with { Providers = ["tmdb"] } : relocalize ? KnownProviders(item, options) : options, directory, ct,
                     recheck ? entries.Select(TmdbRetention.Revert).ToArray() : entries, MetadataRejections.For(library, item), known.For(lookup),
                     recheck ? (item.MetadataType ?? (item.Series is null ? "movie" : "tv"), item.MetadataId!.Value) : null);
                 attemptUnmatched = resolved is null;

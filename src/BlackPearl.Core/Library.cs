@@ -660,10 +660,10 @@ public sealed partial class LibraryStore
     private static bool SharesSeason(IEnumerable<MediaItem> members) => NumberedEpisodes(members)
         .GroupBy(x => x.Season).Any(season => season.Select(LibraryIdentity.ShowKey).Distinct().Count() > 1);
     // Two folders holding the same season are copies of it, such as another release, and become versions of one show's episodes.
-    // That needs their numbers to mean the same episodes, so copies in different orders, such as aired and DVD, stay apart.
-    // Absolute numbers are placed by the aired order.
+    // That needs their numbers to mean the same episodes, and the combined show keeps one order for all its files, so copies in
+    // different orders, such as aired and DVD or running numbers and seasons, stay apart.
     private static bool SameNumbering(IEnumerable<MediaItem> members) => NumberedEpisodes(members)
-        .Select(x => x.NumberingOrder == "absolute" ? "aired" : x.NumberingOrder).Distinct(StringComparer.Ordinal).Count() == 1;
+        .Select(x => x.NumberingOrder).Distinct(StringComparer.Ordinal).Count() == 1;
     // Each folder listed the others' episodes as missing. Once combined, an episode with a file isn't missing, and one that is needs listing once.
     private static IEnumerable<string> RedundantPlaceholders(IReadOnlyCollection<MediaItem> members, string provider)
     {
@@ -1105,7 +1105,8 @@ public static partial class FileNames
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
     }
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Stamp, bool Several)> NamedShows = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Stamp, bool Several, long Checked)> NamedShows = new(StringComparer.OrdinalIgnoreCase);
+    private const long NamedShowsFresh = 10_000;
     // "Desktop\hand_brake\Season 1-handbraked" holding Villainess S01E01-E12 and Komi S01E01-E12 side by side: the same episodes under two
     // unrelated show names are two shows, so the folder above can't name them all. Copies of one show under two spellings ("Ushio to Tora"
     // and "Ushitora", "Tetsujin 28-go FX" and "Iron Hero 28 FX") share a word or a start, or sit in separate release folders, and stay together.
@@ -1113,10 +1114,12 @@ public static partial class FileNames
     {
         try
         {
+            // Every file of a season folder asks about the same folder in turn, so an answer seconds old stands without stamping its subfolders again.
+            if (NamedShows.TryGetValue(dir, out var cached) && Environment.TickCount64 - cached.Checked < NamedShowsFresh) return cached.Several;
             if (!Directory.Exists(dir)) return false;
             var folders = Directory.EnumerateDirectories(dir).Take(64).Prepend(dir).ToArray();
             var stamp = string.Join("|", folders.Select(folder => Directory.GetLastWriteTimeUtc(folder).Ticks));
-            if (NamedShows.TryGetValue(dir, out var cached) && cached.Stamp == stamp) return cached.Several;
+            if (cached.Stamp == stamp) { NamedShows[dir] = cached with { Checked = Environment.TickCount64 }; return cached.Several; }
             var folderTitle = FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(dir)).Title;
             var several = false;
             foreach (var folder in folders)
@@ -1135,7 +1138,7 @@ public static partial class FileNames
                 if (clashes >= 2) { several = true; break; }
             }
             if (NamedShows.Count > 4096) NamedShows.Clear();
-            NamedShows[dir] = (stamp, several);
+            NamedShows[dir] = (stamp, several, Environment.TickCount64);
             return several;
         }
         catch (IOException) { return false; }

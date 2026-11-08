@@ -131,6 +131,9 @@ public static class LocalMetadata
         return LibraryIdentity.Ensure(item with { ProviderIds = ids, LocalMetadataFields = fields.ToArray() });
     }
 
+    // Whether a show's tvshow.nfo sits above the file. It can name the show's provider IDs, which the next read brings back.
+    internal static bool HasShowSidecar(MediaItem item) => item.Series is not null &&
+        File.Exists(Path.Combine(item.SeriesPath ?? Path.GetDirectoryName(item.Path)!, "tvshow.nfo"));
     // Whether a sidecar says the file is a film: a movie.nfo beside it, or its own NFO holding a <movie> or only a link. The episode NFO an export writes doesn't.
     internal static bool SaysFilm(string path)
     {
