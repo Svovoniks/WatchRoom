@@ -240,6 +240,8 @@ public static class AutomaticArtwork
         if (mode != MetadataRefresh.RetryArtwork) library.GroupShowsByProvider();
         var seriesReport = superseded ? MetadataOptions.LocaleStopped : await SeriesMetadata.FetchAsync(library, directory, token, progress, ct, http, force, tmdb, followRefresh,
             automatic ? () => superseded = true : null);
+        // Copies of a season combine once their episodes are fetched, which settles each one's order.
+        if (!superseded && mode != MetadataRefresh.RetryArtwork) library.GroupShowsByProvider();
         if (!superseded && mode != MetadataRefresh.RetryArtwork) await WantedTitles.RefreshAsync(library, directory, token, progress, ct, followRefresh is MetadataRefresh.RefreshText, metadata: tmdb, client: http);
         // A refresh counts for its locale only if that locale stayed chosen throughout and TMDB, when chosen, could be asked.
         if (mode is MetadataRefresh.RefreshText or MetadataRefresh.ReplaceArtwork && !superseded && !MetadataOptions.LocaleChanged(library, options) &&

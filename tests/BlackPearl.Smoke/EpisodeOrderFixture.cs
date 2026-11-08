@@ -69,6 +69,25 @@ static class EpisodeOrderFixture
         await rescanStore.ScanAsync([new(partsRoot, "Show")]);
         check(rescanStore.All().Single().NumberingOrder == "group:parts", "a rescan keeps an order chosen from the provider's groups");
 
+        // Two copies of the show, stored in aired order before orders could be chosen: one titled and numbered by the Parts group, one untitled
+        // and aired. They stay apart until their orders are settled, then by those orders, so the untitled copy keeps its aired episodes.
+        var copyPair = Store(Path.Combine(directory, "copy-pair"));
+        foreach (var (s, e, title) in files) copyPair.Save(Episode(directory, "copy-titled", "Parts Show", 10, s, e, title) with { MetadataFetchedAt = Wire.Now });
+        foreach (var (s, e, airedTitle) in new[] { (1, 1, "Pilot"), (2, 1, "Seventh") })
+        {
+            // Fetched before the update: its titles came from the aired list, not its file names.
+            var plainFile = Episode(directory, "copy-plain", "Parts Show", 10, s, e, "Untitled") with { EpisodeTitle = null };
+            copyPair.Save(TmdbRetention.Record(plainFile, plainFile with { EpisodeTitle = airedTitle, EpisodeOverview = "Plot of " + airedTitle, MetadataFetchedAt = Wire.Now }, "tmdb", "episodeTitle", "episodeOverview"));
+        }
+        copyPair.GroupShowsByProvider();
+        check(copyPair.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 2, "copies of a season stay apart before the library's orders are checked");
+        await Fetch(copyPair, directory, handler, force: false);
+        copyPair.GroupShowsByProvider();
+        var plainCopy = copyPair.All().Where(x => !x.IsVirtual && x.ShowId == "show-" + LibraryIdentity.Hash("copy-plain")).ToArray();
+        var plainSeventh = plainCopy.Single(x => x.Season == 2 && x.Episode == 1);
+        check(plainCopy.All(x => x.NumberingOrder == "aired") && copyPair.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 2 && plainSeventh is { EpisodeTitle: "Seventh", EpisodeOverview: "Plot of Seventh" },
+            $"an untitled copy keeps its aired episodes when the titled copy moves to another order (got {plainSeventh.NumberingOrder}, {plainSeventh.EpisodeTitle}, {plainSeventh.EpisodeOverview})");
+
         // Files that agree with the aired list never cost a group lookup.
         var aired = Store(Path.Combine(directory, "aired"));
         foreach (var (s, e, title) in new[] { (1, 1, "Pilot"), (1, 2, "Second"), (1, 3, "Third"), (1, 4, "Fourth") }) aired.Save(Episode(directory, "aired", "Parts Show", 10, s, e, title));
@@ -111,6 +130,11 @@ static class EpisodeOrderFixture
         await File.WriteAllTextAsync(Path.Combine(directory, "wrong-nfo-files", "tvshow.nfo"), "https://www.themoviedb.org/tv/20");
         await Fetch(sidecar, directory, wrong);
         check(sidecar.All().Where(x => !x.IsVirtual).All(x => x.MetadataId == 20), "a match a show's NFO file gives isn't dropped for its titles");
+        var exported = Store(Path.Combine(directory, "wrong-exported"));
+        for (var i = 0; i < shorts.Length; i++) exported.Save(Episode(directory, "wrong-exported", "The Pink Panther", 20, 1, i + 1, shorts[i]));
+        await File.WriteAllTextAsync(Path.Combine(directory, "wrong-exported-files", "tvshow.nfo"), "<tvshow><title>The Pink Panther</title><displayorder>aired</displayorder></tvshow>");
+        await Fetch(exported, directory, wrong);
+        check(exported.All().Where(x => !x.IsVirtual).All(x => x.MetadataId is null), "an NFO that names no ID, like one the app saves, doesn't keep a match the titles contradict");
 
         // The next lookup leaves the dropped match out and takes the next candidate.
         var search = new OrderHandler();
@@ -251,6 +275,27 @@ static class EpisodeOrderFixture
             await AutomaticArtwork.FetchAsync(datedShorts, Path.Combine(directory, "shorts-data"), "fixture", null, default, againHttp, force: true, metadata: again);
         check(datedShorts.All().Where(x => !x.IsVirtual).All(x => x.Series == "Pink Shorts" && x.MetadataType is null && x.Episode is not null && x.EpisodeSource?.Contains("/movie/") == true),
             $"a full fetch keeps the shorts one title of separate films (got {string.Join(", ", datedShorts.All().Select(x => x.MetadataType + "/" + x.Series).Distinct())})");
+        // A film search that fails mid-folder is that folder's provider failure; the next show still gets its episodes, and the folder is searched again later.
+        var brokenApi = new OrderHandler();
+        brokenApi.Add("/3/search/tv", """{"results":[]}"""); brokenApi.Add("/3/search/movie", """{"results":[]}""");
+        for (var i = 0; i < cartoons.Length; i++)
+        {
+            brokenApi.Search("movie", cartoons[i], $$"""{"results":[{"id":{{300 + i}},"title":"{{cartoons[i]}}","release_date":"1965-01-01"}]}""");
+            brokenApi.Add($"/3/movie/{300 + i}", $$"""{"id":{{300 + i}},"title":"{{cartoons[i]}}","release_date":"1965-01-01","runtime":7,"overview":"Short {{i}}"}""");
+        }
+        brokenApi.Break("/3/search/movie", cartoons[2]);
+        brokenApi.Add("/3/tv/10/season/1", Season(1, aired1)); brokenApi.Add("/3/tv/10/season/2", Season(2, aired2));
+        brokenApi.Add("/3/tv/10", """{"id":10,"name":"Parts Show","seasons":[{"season_number":1},{"season_number":2}]}"""); brokenApi.Add("/3/tv/10/episode_groups", """{"results":[]}""");
+        var brokenShorts = Store(Path.Combine(directory, "shorts-broken"));
+        for (var i = 0; i < cartoons.Length; i++) brokenShorts.Save(Cartoon("shorts-broken", i + 1, $"{cartoons[i]} (Jan 1, 1965)"));
+        brokenShorts.Save(Episode(directory, "after-broken", "Parts Show", 10, 1, 1, "Pilot") with { NumberingSource = "filename" });
+        var aborted = false;
+        try { await Fetch(brokenShorts, directory, brokenApi); } catch (HttpRequestException) { aborted = true; }
+        check(!aborted && brokenShorts.All().Single(x => x.Series == "Parts Show" && !x.IsVirtual && x.Episode == 1 && x.Season == 1).EpisodeOverview == "Plot of Pilot",
+            "a failed film search doesn't stop the fetch for the shows after it");
+        check(!brokenShorts.All().Any(x => x.EpisodeSource?.Contains("/movie/") == true) && brokenShorts.Setting("short-films-checked:show-" + LibraryIdentity.Hash("shorts-broken")) is null,
+            "a folder whose film search failed is searched again next time");
+
         // Without years, the files' length picks the short over the feature that shares its name.
         var undated = Store(Path.Combine(directory, "shorts-undated"));
         for (var i = 0; i < cartoons.Length; i++) undated.Save(Cartoon("shorts-undated", i + 1, cartoons[i]));
@@ -387,6 +432,9 @@ static class EpisodeOrderFixture
         private readonly Dictionary<string, string> routes = [];
         public List<string> Requests { get; } = [];
         public bool TmdbDown { get; init; }
+        private readonly HashSet<string> broken = [];
+        // A search that fails as a dropped connection would.
+        public void Break(string path, string query) => broken.Add(path + "|" + query.ToLowerInvariant());
         public void Add(string path, string body) => routes[path] = body;
         // A search answered by what it searched for: "/3/search/movie?query=Pink Pajamas".
         public void Search(string type, string query, string body) => routes[$"/3/search/{type}|{query.ToLowerInvariant()}"] = body;
@@ -396,6 +444,7 @@ static class EpisodeOrderFixture
             if (request.RequestUri.Host == "image.tmdb.org") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(ArtworkFixture.Png) });
             if (TmdbDown && request.RequestUri.Host == "api.themoviedb.org") return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
             var query = System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["query"];
+            if (query is not null && broken.Contains(path + "|" + query.ToLowerInvariant())) throw new HttpRequestException("Connection reset");
             if (query is not null && routes.TryGetValue(path + "|" + query.ToLowerInvariant(), out var searched))
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(searched, Encoding.UTF8, "application/json") });
             return Task.FromResult(routes.TryGetValue(path, out var body)

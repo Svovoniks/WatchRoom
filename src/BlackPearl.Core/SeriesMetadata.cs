@@ -9,6 +9,8 @@ public static class SeriesMetadata
     private const string MissingChecked = "missing-episodes-checked";
     // Shows fetched before file titles could choose a numbering order are checked once, rather than when their refresh comes due.
     private const string OrderChecked = "episode-order-checked", OrderCheckVersion = "1";
+    // Whether every show has had its episode order weighed against its files' titles since orders could be chosen that way.
+    internal static bool OrdersChecked(LibraryStore library) => library.Setting(OrderChecked) == OrderCheckVersion;
     private static string? Text(JsonElement value, string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
     private static int? Number(JsonElement value, string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.Number && field.TryGetInt32(out var number) ? number : null;
     private static string? Plain(string? html) => html is null ? null : WebUtility.HtmlDecode(Regex.Replace(Regex.Replace(html, @"(?i)</p>|<br\s*/?>", "\n"), "<[^>]*>", "")).Trim();
@@ -153,8 +155,7 @@ public static class SeriesMetadata
                         }
                     }
                     // A match the files contradict twice over is dropped, and the next lookup leaves it out. A match someone chose stays.
-                    if (evidence.Length >= 5 && item.MetadataProvider == provider && !entries.Any(x => x.Matched || LibraryIdentity.Locked(x, "ProviderIds") || LibraryIdentity.Locked(x, "MetadataType") || LibraryIdentity.Locked(x, "Title")) &&
-                        !entries.Any(LocalMetadata.HasShowSidecar))
+                    if (evidence.Length >= 5 && item.MetadataProvider == provider && !entries.Any(x => x.Matched || LibraryIdentity.Locked(x, "ProviderIds") || LibraryIdentity.Locked(x, "MetadataType") || LibraryIdentity.Locked(x, "Title")))
                     {
                         var fit = EpisodeOrder.Fit(entries, details);
                         if (fit.Misfits >= 3 && fit.Misfits * 10 >= fit.Regular * 3)
@@ -162,7 +163,8 @@ public static class SeriesMetadata
                             var lists = new List<MetadataSeason[]>(alternatives);
                             if (provider == "tmdb") lists.Add(await tmdb!.SeasonsAsync(id.Value, ct));
                             var presence = EpisodeOrder.Presence(evidence, details, lists);
-                            if (EpisodeOrder.Contradicts(presence, fit))
+                            // A show's NFO that names this ID would bring it back on the next read, so that match stays.
+                            if (EpisodeOrder.Contradicts(presence, fit) && !LocalMetadata.NamesShow(item, provider, id.Value))
                             {
                                 MetadataDiagnostics.Outcome("episode-titles-contradict-match");
                                 MetadataDiagnostics.Record("metadata-candidate-rejected", new { Provider = provider, Id = id, Reason = "episode-titles-contradict-match", presence.Found, presence.Compared, fit.Misfits, fit.Regular });
@@ -307,8 +309,13 @@ public static class SeriesMetadata
             if (!matched && !superseded && !attemptFailed && tmdb is not null && mode != MetadataRefresh.RetryArtwork &&
                 !entries.Any(x => x.Matched || LibraryIdentity.Locked(x, "ProviderIds") || LibraryIdentity.Locked(x, "MetadataType")))
             {
-                var shorts = await ShortFilms.IdentifyAsync(library, tmdb, directory, library.ByIds(entries.Select(x => x.Id)).ToArray(), replaceText, ct);
-                if (shorts > 0) { matched = true; rejected = false; episodes += shorts; outstanding.Clear("episodes", item); outstanding.Clear("title", item); }
+                try
+                {
+                    var shorts = await ShortFilms.IdentifyAsync(library, tmdb, directory, library.ByIds(entries.Select(x => x.Id)).ToArray(), replaceText, ct);
+                    if (shorts > 0) { matched = true; rejected = false; episodes += shorts; outstanding.Clear("episodes", item); outstanding.Clear("title", item); }
+                }
+                catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidOperationException or KeyNotFoundException or TaskCanceledException && !ct.IsCancellationRequested)
+                { MetadataDiagnostics.Failure("short-films", item.DisplayTitle, "tmdb", ex); providerFailure = ex; attemptFailed = true; failed++; progress?.Report("Short film metadata unavailable · " + item.DisplayTitle); }
             }
             if (!matched)
             {

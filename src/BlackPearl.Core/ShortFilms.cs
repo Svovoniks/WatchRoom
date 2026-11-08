@@ -42,9 +42,8 @@ internal static class ShortFilms
             if (fitting.Count == 1) found.Add((item, fitting[0]));
         }
         MetadataDiagnostics.Record("metadata-short-films", new { Files = titled.Length, Found = found.Count });
-        library.Setting(key, fingerprint);
         // Most of the folder has to be films found this way, or its titles were episodes after all.
-        if (found.Count < MinimumFiles || found.Count * 10 < titled.Length * 6) return 0;
+        if (found.Count < MinimumFiles || found.Count * 10 < titled.Length * 6) { library.Setting(key, fingerprint); return 0; }
         var posters = Path.Combine(directory, "posters");
         string? cardPoster = null;
         foreach (var (item, film) in found)
@@ -74,6 +73,7 @@ internal static class ShortFilms
         if (cardPoster is not null)
             foreach (var entry in library.ByIds(entries.Select(x => x.Id)).Where(x => !LibraryIdentity.Locked(x, "Poster") && !ArtworkCache.IsUsable(x.SeriesPoster) && !ArtworkCache.IsUsable(x.Poster)))
                 library.Save(TmdbRetention.Record(entry, entry with { Poster = cardPoster, SeriesPoster = cardPoster, PosterSource = null }, "tmdb", TmdbRetention.PosterFields));
+        library.Setting(key, fingerprint);
         return found.Count;
     }
 

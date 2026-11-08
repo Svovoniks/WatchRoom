@@ -648,7 +648,7 @@ public sealed partial class LibraryStore
                 var ids = group.Select(LibraryIdentity.ShowKey).Distinct().OrderByDescending(wanted.Contains).ThenBy(x => x, StringComparer.Ordinal).ToArray();
                 if (ids.Length < 2) continue;
                 var members = items.Where(x => ids.Contains(LibraryIdentity.ShowKey(x))).ToArray();
-                if (SharesSeason(members) && !SameNumbering(members)) continue;
+                if (SharesSeason(members) && !(SameNumbering(members) && OrdersSettled(members))) continue;
                 foreach (var entry in members) { Save(entry with { ShowId = ids[0] }); merged = true; }
                 RemoveVirtual(RedundantPlaceholders(members, provider));
             }
@@ -664,6 +664,14 @@ public sealed partial class LibraryStore
     // different orders, such as aired and DVD or running numbers and seasons, stay apart.
     private static bool SameNumbering(IEnumerable<MediaItem> members) => NumberedEpisodes(members)
         .Select(x => x.NumberingOrder).Distinct(StringComparer.Ordinal).Count() == 1;
+    // A copy's titles can still move it to another order until its episodes are fetched, which weighs that, so the copies wait until then:
+    // an order chosen for one copy would otherwise be the combined show's, and renumber the other.
+    private bool OrdersSettled(IEnumerable<MediaItem> members)
+    {
+        var numbered = NumberedEpisodes(members).ToArray();
+        var shared = numbered.GroupBy(x => x.Season).Where(season => season.Select(LibraryIdentity.ShowKey).Distinct().Count() > 1).Select(season => season.Key).ToHashSet();
+        return SeriesMetadata.OrdersChecked(this) && numbered.Where(x => shared.Contains(x.Season)).All(x => x.MetadataFetchedAt > 0);
+    }
     // Each folder listed the others' episodes as missing. Once combined, an episode with a file isn't missing, and one that is needs listing once.
     private static IEnumerable<string> RedundantPlaceholders(IReadOnlyCollection<MediaItem> members, string provider)
     {
@@ -735,6 +743,7 @@ public sealed partial class LibraryStore
     public async Task<List<MediaItem>> ScanAsync(IEnumerable<LibraryFolder> folders, IProgress<string>? progress = null, CancellationToken cancellation = default, IEnumerable<string>? exclusions = null)
     {
         var roots = folders.ToArray(); var excluded = exclusions?.ToArray() ?? []; var mixedMusic = MixedFoldersListMusic;
+        Interlocked.Increment(ref FileNames.ScanGeneration);
         return await Task.Run(() =>
         {
             var changes = Prune(roots, excluded);
@@ -1105,8 +1114,10 @@ public static partial class FileNames
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
     }
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Stamp, bool Several, long Checked)> NamedShows = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Stamp, bool Several, long Checked, int Scan)> NamedShows = new(StringComparer.OrdinalIgnoreCase);
     private const long NamedShowsFresh = 10_000;
+    // Counts scans, so a folder answer reused without stamping its subfolders never outlives the scan that made it.
+    internal static int ScanGeneration;
     // "Desktop\hand_brake\Season 1-handbraked" holding Villainess S01E01-E12 and Komi S01E01-E12 side by side: the same episodes under two
     // unrelated show names are two shows, so the folder above can't name them all. Copies of one show under two spellings ("Ushio to Tora"
     // and "Ushitora", "Tetsujin 28-go FX" and "Iron Hero 28 FX") share a word or a start, or sit in separate release folders, and stay together.
@@ -1115,11 +1126,11 @@ public static partial class FileNames
         try
         {
             // Every file of a season folder asks about the same folder in turn, so an answer seconds old stands without stamping its subfolders again.
-            if (NamedShows.TryGetValue(dir, out var cached) && Environment.TickCount64 - cached.Checked < NamedShowsFresh) return cached.Several;
+            if (NamedShows.TryGetValue(dir, out var cached) && cached.Scan == Volatile.Read(ref ScanGeneration) && Environment.TickCount64 - cached.Checked < NamedShowsFresh) return cached.Several;
             if (!Directory.Exists(dir)) return false;
             var folders = Directory.EnumerateDirectories(dir).Take(64).Prepend(dir).ToArray();
             var stamp = string.Join("|", folders.Select(folder => Directory.GetLastWriteTimeUtc(folder).Ticks));
-            if (cached.Stamp == stamp) { NamedShows[dir] = cached with { Checked = Environment.TickCount64 }; return cached.Several; }
+            if (cached.Stamp == stamp) { NamedShows[dir] = cached with { Checked = Environment.TickCount64, Scan = Volatile.Read(ref ScanGeneration) }; return cached.Several; }
             var folderTitle = FilenameEpisodes.AnalyzeFolder(System.IO.Path.GetFileName(dir)).Title;
             var several = false;
             foreach (var folder in folders)
@@ -1138,7 +1149,7 @@ public static partial class FileNames
                 if (clashes >= 2) { several = true; break; }
             }
             if (NamedShows.Count > 4096) NamedShows.Clear();
-            NamedShows[dir] = (stamp, several, Environment.TickCount64);
+            NamedShows[dir] = (stamp, several, Environment.TickCount64, Volatile.Read(ref ScanGeneration));
             return several;
         }
         catch (IOException) { return false; }
