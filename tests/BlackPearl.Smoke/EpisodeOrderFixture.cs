@@ -114,6 +114,36 @@ static class EpisodeOrderFixture
         fitting.GroupShowsByProvider();
         check(fitting.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 1, "titled copies weighed to the same order combine after the fetch");
 
+        // A copy that gains titled files after it combined: the combined show holds copies of a season, so its order stays, and the
+        // untitled copy keeps its aired episodes.
+        var grown = Store(Path.Combine(directory, "copy-grown"));
+        foreach (var (s, e, title) in new[] { (1, 1, "Pilot"), (1, 2, "Second"), (1, 3, "Third") }) grown.Save(Episode(directory, "grown-titled", "Parts Show", 10, s, e, title));
+        foreach (var (s, e) in new[] { (1, 1), (1, 4), (2, 1), (2, 2) }) grown.Save(Episode(directory, "grown-plain", "Parts Show", 10, s, e, "Untitled") with { EpisodeTitle = null });
+        await Fetch(grown, directory, handler);
+        grown.GroupShowsByProvider();
+        var combinedShow = grown.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().ToArray();
+        check(combinedShow.Length == 1, "a titled copy weighed to aired combines with an untitled aired copy");
+        foreach (var (s, e, title) in new[] { (2, 1, "Fourth"), (2, 2, "Fifth"), (2, 3, "Sixth") })
+            grown.Save(Episode(directory, "grown-titled", "Parts Show", 10, s, e, title) with { ShowId = combinedShow[0] });
+        await Fetch(grown, directory, handler);
+        grown.GroupShowsByProvider();
+        var grownPlain = grown.All().Where(x => !x.IsVirtual && x.Path.Contains("grown-plain")).ToArray();
+        check(grown.All().Where(x => !x.IsVirtual).All(x => x.NumberingOrder == "aired") && grownPlain.Single(x => x.Season == 2 && x.Episode == 1).EpisodeTitle == "Seventh",
+            $"titled files added to a combined copy don't move the other copy to another order (got {string.Join(",", grown.All().Select(x => x.NumberingOrder).Distinct())}, {grownPlain.Single(x => x.Season == 2 && x.Episode == 1).EpisodeTitle})");
+        // Titled files added to a copy before it combines are weighed first: the copy that now fits the Parts group stays apart.
+        var growing = Store(Path.Combine(directory, "copy-growing"));
+        foreach (var (s, e, title) in new[] { (1, 1, "Pilot"), (1, 2, "Second"), (1, 3, "Third") }) growing.Save(Episode(directory, "growing-titled", "Parts Show", 10, s, e, title));
+        await Fetch(growing, directory, handler);
+        foreach (var (s, e, title) in new[] { (2, 1, "Fourth"), (2, 2, "Fifth"), (2, 3, "Sixth") }) growing.Save(Episode(directory, "growing-titled", "Parts Show", 10, s, e, title));
+        foreach (var (s, e) in new[] { (1, 1), (2, 1) }) growing.Save(Episode(directory, "growing-plain", "Parts Show", 10, s, e, "Untitled") with { EpisodeTitle = null });
+        growing.GroupShowsByProvider();
+        check(growing.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 2, "a copy whose new titled files weren't weighed yet waits apart");
+        await Fetch(growing, directory, handler);
+        growing.GroupShowsByProvider();
+        var growingPlain = growing.All().Single(x => !x.IsVirtual && x.Path.Contains("growing-plain") && x.Season == 2);
+        check(growing.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 2 && growingPlain is { NumberingOrder: "aired", EpisodeTitle: "Seventh" },
+            $"once weighed to another order, the grown copy stays apart and the untitled copy keeps its aired episodes (got {growingPlain.NumberingOrder}, {growingPlain.EpisodeTitle})");
+
         // Files that agree with the aired list never cost a group lookup.
         var aired = Store(Path.Combine(directory, "aired"));
         foreach (var (s, e, title) in new[] { (1, 1, "Pilot"), (1, 2, "Second"), (1, 3, "Third"), (1, 4, "Fourth") }) aired.Save(Episode(directory, "aired", "Parts Show", 10, s, e, title));

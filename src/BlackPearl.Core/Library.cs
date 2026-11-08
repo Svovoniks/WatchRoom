@@ -664,14 +664,15 @@ public sealed partial class LibraryStore
     // different orders, such as aired and DVD or running numbers and seasons, stay apart.
     private static bool SameNumbering(IEnumerable<MediaItem> members) => NumberedEpisodes(members)
         .Select(x => x.NumberingOrder).Distinct(StringComparer.Ordinal).Count() == 1;
-    // A copy whose own episode titles can move it to another order waits until a fetch has weighed them to the order it holds: an order
-    // chosen for one copy afterwards would be the combined show's, and renumber the other. Titles too few to choose, or an order that
-    // titles don't change, leave a copy as it is. A weighing that failed, or never ran, keeps the copies apart.
-    private bool OrdersSettled(IEnumerable<MediaItem> members) => NumberedEpisodes(members).GroupBy(LibraryIdentity.ShowKey).All(copy =>
+    // A copy whose own episode titles can move it to another order waits until a fetch has weighed exactly those titles to the order it
+    // holds; titled files added since need weighing too. Titles too few to choose, or an order titles don't change, leave a copy as it
+    // is. A weighing that failed, or never ran, keeps the copies apart. Once combined, the show keeps its order (EpisodeOrder.HoldsCopies).
+    // Only files a fetch weighs count: ones that are available and not locked.
+    private bool OrdersSettled(IEnumerable<MediaItem> members) => NumberedEpisodes(members).Where(x => x.Available && !x.MetadataLocked).GroupBy(LibraryIdentity.ShowKey).All(copy =>
     {
-        var files = copy.ToArray();
-        return !EpisodeOrder.CanChoose(files) || EpisodeOrder.Collect(files).Length < EpisodeOrder.MinimumEvidence ||
-            SeriesMetadata.OrderWeighed(this, copy.Key) == files[0].NumberingOrder;
+        var files = copy.ToArray(); var evidence = EpisodeOrder.Collect(files);
+        return !EpisodeOrder.CanChoose(files) || evidence.Length < EpisodeOrder.MinimumEvidence ||
+            SeriesMetadata.OrderWeighed(this, copy.Key) == EpisodeOrder.Weighed(files[0].NumberingOrder, evidence);
     });
     // Each folder listed the others' episodes as missing. Once combined, an episode with a file isn't missing, and one that is needs listing once.
     private static IEnumerable<string> RedundantPlaceholders(IReadOnlyCollection<MediaItem> members, string provider)

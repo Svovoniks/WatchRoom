@@ -9,7 +9,8 @@ public static class SeriesMetadata
     private const string MissingChecked = "missing-episodes-checked";
     // Shows fetched before file titles could choose a numbering order are checked once, rather than when their refresh comes due.
     private const string OrderChecked = "episode-order-checked", OrderCheckVersion = "1";
-    // The order a show's files' titles were last weighed to, recorded once that weighing completed. Copies of a season combine only when it holds.
+    // The order a show's files' titles were last weighed to, and which titles those were, recorded once that weighing completed.
+    // Copies of a season combine only when it still describes the copy.
     private static string OrderWeighedKey(string show) => "episode-order-weighed:" + show;
     internal static string? OrderWeighed(LibraryStore library, string show) => library.Setting(OrderWeighedKey(show));
     private static string? Text(JsonElement value, string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
@@ -302,7 +303,7 @@ public static class SeriesMetadata
                         episodes += episodeList.Length;
                     }
                     matched = true;
-                    if (weighed && !superseded) library.Setting(OrderWeighedKey(LibraryIdentity.ShowKey(item)), order ?? item.NumberingOrder);
+                    if (weighed && !superseded) library.Setting(OrderWeighedKey(LibraryIdentity.ShowKey(item)), EpisodeOrder.Weighed(order ?? item.NumberingOrder, evidence));
                     seasons += details.Count(s => entries.Any(e => e.Season == s.Number));
                     if (mode != MetadataRefresh.RetryArtwork) ReconcileMissing(library, directory, item, details, provider, id.Value, options);
                     break;
