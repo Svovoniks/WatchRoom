@@ -282,7 +282,8 @@ latest release its update installers were built against and is kept for 14 days.
 A version tag publishes that artifact when a passing pull request run has the
 tag's tree and the same latest release; otherwise it builds the installers itself,
 and runs the checks too unless a pull request run already passed them on the same
-tree. Manual runs check and package. Pushes to `master` only restore and build
+tree. Manual runs always package, and check unless a pull request run already
+passed on the same tree. Pushes to `master` only restore and build
 whatever the build caches lack, since pull requests can read master's caches but
 not each other's.
 

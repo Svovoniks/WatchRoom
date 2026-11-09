@@ -55,10 +55,11 @@ jobs:
           if [ "$latest" = none ] || { [ "$latest" != "$VERSION" ] && [ "$(printf '%s\n%s\n' "$latest" "$VERSION" | sort -V | tail -n 1)" = "$VERSION" ]; }; then unreleased=true; fi
           prebuilt=
           # A pull request run checks the head merged into master, which has the head's own tree when the head contains master.
+          # When GitHub fails to answer, nothing counts as checked or built, and this run checks and builds itself.
           if [ "$EVENT" != pull_request ]; then
             tree=$(git rev-parse 'HEAD^{tree}')
             runs=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" -f event=pull_request -f status=success -f per_page=100 \
-              --jq ".workflow_runs[] | select(.head_commit.tree_id == \"$tree\") | \"\(.id) \(.head_repository.full_name)\"")
+              --jq ".workflow_runs[] | select(.head_commit.tree_id == \"$tree\") | \"\(.id) \(.head_repository.full_name)\"") || runs=
             if [ -n "$runs" ]; then
               echo "Tree $tree already passed every check in run $(echo "$runs" | head -n 1 | cut -d ' ' -f 1)"
               echo "checked=true" >> "$GITHUB_OUTPUT"
@@ -68,7 +69,7 @@ jobs:
             if [ "$GITHUB_REF_TYPE" = tag ] && [ -n "$runs" ]; then
               while read -r id repository; do
                 [ "$repository" = "$GITHUB_REPOSITORY" ] || continue
-                found=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" -f name="$artifact" --jq '[.artifacts[] | select(.expired | not)] | length')
+                found=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" -f name="$artifact" --jq '[.artifacts[] | select(.expired | not)] | length') || found=0
                 if [ "$found" != 0 ]; then prebuilt=$id; break; fi
               done <<< "$runs"
             fi
