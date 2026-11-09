@@ -184,18 +184,29 @@ end;
 
 // The app starts its update installer and then closes. Its window goes at once, but the app can take several seconds
 // more to exit, much longer on a busy computer. Restart Manager can't close a program that has no window left, and a
-// silent setup then gives up and rolls back. So a silent setup first waits up to a minute for the app to exit.
+// silent setup then gives up and rolls back. So a silent setup first waits up to a minute for the app to exit. The app
+// runs its updates with /SILENT, which shows this window: the page animates while it waits, so the window keeps
+// responding instead of being reported as not responding after five seconds.
 procedure WaitForClosingApp;
 var
   Waited: Integer;
+  WaitPage: TOutputMarqueeProgressWizardPage;
 begin
   if not AppRunning then Exit;
   Log('Waiting for BlackPearl to finish closing.');
-  Waited := 0;
-  repeat
-    Sleep(250);
-    Waited := Waited + 250;
-  until (not AppRunning) or (Waited >= CLOSE_WAIT_MS);
+  WaitPage := CreateOutputMarqueeProgressPage('Updating BlackPearl', 'Setup is waiting for BlackPearl to close.');
+  WaitPage.SetText('Waiting for BlackPearl to close...', 'Your library and settings are kept.');
+  WaitPage.Show;
+  try
+    Waited := 0;
+    repeat
+      Sleep(100);
+      WaitPage.Animate;
+      Waited := Waited + 100;
+    until (not AppRunning) or (Waited >= CLOSE_WAIT_MS);
+  finally
+    WaitPage.Hide;
+  end;
   if AppRunning then Log(Format('BlackPearl was still running after %d ms.', [Waited]))
   else Log(Format('BlackPearl closed after about %d ms.', [Waited]));
 end;

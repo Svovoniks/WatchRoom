@@ -332,7 +332,8 @@ can take several seconds, longer on a busy computer. Restart Manager cannot
 close an app that has no window left, and a silent setup that finds its files
 in use rolls back. So a silent setup first waits up to a minute for
 `BlackPearl.exe` (or `Watchroom.exe`) in the installation folder to stop
-running, and logs that wait. Only the copy running from the installer-registered folder (or
+running, and logs that wait. With `/SILENT`, as the app runs it, setup's window
+shows a progress page while it waits and keeps responding. Only the copy running from the installer-registered folder (or
 the default folder when none is registered) updates itself; development builds and
 copied folders disable update checks so they cannot take over the installation.
 Library data, rooms, queues, and credentials remain outside the installation

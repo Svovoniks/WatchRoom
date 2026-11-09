@@ -29,6 +29,37 @@ function Test-SetupWaiting {
     $stream = [IO.File]::Open($Log, 'Open', 'Read', 'ReadWrite, Delete')
     try { return [IO.StreamReader]::new($stream).ReadToEnd() -match 'Waiting for BlackPearl to finish closing' } finally { $stream.Dispose() }
 }
+# Visible top-level windows of a running setup (the loader and the setup it starts), and how many of them Windows
+# reports as not responding: a window that hasn't handled messages for five seconds.
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class SetupWindows
+{
+    private delegate bool EnumProc(IntPtr window, IntPtr data);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr data);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool IsHungAppWindow(IntPtr window);
+    public static int[] Count(uint[] processes)
+    {
+        int visible = 0, hung = 0;
+        EnumWindows((window, data) =>
+        {
+            uint process; GetWindowThreadProcessId(window, out process);
+            if (Array.IndexOf(processes, process) >= 0 && IsWindowVisible(window)) { visible++; if (IsHungAppWindow(window)) hung++; }
+            return true;
+        }, IntPtr.Zero);
+        return new[] { visible, hung };
+    }
+}
+"@
+function Get-SetupWindows {
+    param([Diagnostics.Process]$Setup)
+    $ids = @([uint32]$Setup.Id) + @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Setup.Id)" | ForEach-Object { [uint32]$_.ProcessId })
+    $counts = [SetupWindows]::Count([uint32[]]$ids)
+    return [pscustomobject]@{ Visible = $counts[0]; Hung = $counts[1] }
+}
 $closing = $null
 try {
     $compiler = Get-InstallerCompiler $root
@@ -64,19 +95,22 @@ try {
     Check ((Get-Item $update.Path).Length -lt 4MB) "the update installer is small ($([Math]::Round((Get-Item $update.Path).Length / 1MB, 2)) MB, full fixture $([Math]::Round($full.Length / 1MB, 2)) MB)"
 
     $log = Join-Path $test 'update.log'
-    # As in the app, which starts its update installer and then closes: the app is still exiting when setup starts.
+    # As in the app, which starts its update installer with /SILENT and then closes: the app is still exiting when
+    # setup starts, and setup shows its window.
     $closed = Join-Path $test 'app-closed'
     $closing = Start-Program (Join-Path $installed 'BlackPearl.exe') @("`"$closed`"")
     Wait-AntivirusScan $update.Path
-    $setup = Start-Program $update.Path @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', "/LOG=`"$log`"", "/DIR=`"$installed`"")
+    $setup = Start-Program $update.Path @('/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', "/LOG=`"$log`"", "/DIR=`"$installed`"")
     $deadline = [datetime]::UtcNow.AddMinutes(2)
     while (!$setup.HasExited -and [datetime]::UtcNow -lt $deadline -and !(Test-SetupWaiting $log)) { Start-Sleep -Milliseconds 100 }
-    # Still waiting a moment later, not giving up: then the app finishes closing.
-    Start-Sleep -Seconds 1
+    # Still waiting seven seconds later, not giving up, with its window responding; then the app finishes closing.
+    Start-Sleep -Seconds 7
     $waiting = !$setup.HasExited -and (Test-SetupWaiting $log)
+    $windows = Get-SetupWindows $setup
     [IO.File]::WriteAllText($closed, 'closed')
     if (!$setup.WaitForExit(600000)) { $setup.Kill($true); throw 'The update did not finish in 10 minutes' }
     Check ($waiting -and $closing.WaitForExit(10000)) 'an update waits for the app to finish closing instead of giving up'
+    Check ($windows.Visible -gt 0 -and $windows.Hung -eq 0) "setup's window keeps responding while it waits ($($windows.Visible) shown, $($windows.Hung) not responding)"
     Check ($setup.ExitCode -eq 0) 'the update installs over the release it was built from'
     Assert-SameFiles $installed $new 'The update'
     Check $true 'the updated folder matches the new build exactly'
