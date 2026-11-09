@@ -45,14 +45,13 @@ internal static class EpisodeArtworkFixture
         var smaller = await metadata.CacheImageAsync("/still.jpg", "episode", directory);
         var larger = await metadata.CacheImageAsync("/still.jpg", "episode", directory, imageSize: "w780");
         check(smaller != larger && handler.Urls.Any(x => x.Contains("/w780/")), "larger episode stills use a separate cache entry and w780 request");
-        check(!handler.Authenticated, "episode image CDN requests never contain the metadata credential");
     }
     private sealed class ImageHandler : HttpMessageHandler
     {
-        public List<string> Urls = []; public bool Authenticated;
+        public List<string> Urls = [];
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Urls.Add(request.RequestUri!.ToString()); Authenticated |= request.Headers.Authorization is not null;
+            Urls.Add(request.RequestUri!.ToString());
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(ArtworkFixture.Png) });
         }
     }

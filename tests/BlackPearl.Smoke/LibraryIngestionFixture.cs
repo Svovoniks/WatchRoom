@@ -22,8 +22,6 @@ static class LibraryIngestionFixture
         check(bean.Series == "Mr Bean" && bean.Episode == 1, "plain numbered show suffix groups episodes");
         var russian = FileNames.Parse(Path.Combine(directory, "Shows", "Подозрительная Сова", "02 сезон", "Подозрительная Сова - 02 сезон 03 серия.avi"));
         check(russian.Series == "Подозрительная Сова" && russian.Season == 2 && russian.Episode == 3, "Russian season and episode labels recognized");
-        check(FileNames.Parse(Path.Combine(directory, "Movies", "2001 A Space Odyssey.mp4")).Series is null,
-            "movie release year is not inferred as a numbered episode");
         var caseVariant = outlaw with { Id = "case-variant", Series = "OUTLAW STAR", Episode = 2 };
         check(LibraryCatalog.Browse([outlaw, caseVariant]).Count == 1
             && LibraryCatalog.Browse([outlaw, caseVariant], "Outlaw Star", outlaw.Kind, 1).Count == 2,

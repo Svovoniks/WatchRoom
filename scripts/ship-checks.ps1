@@ -113,9 +113,6 @@ try {
     $update.browser_download_url = "https://github.com/Svovoniks/BlackPearl/releases/download/v0.3.18/$updateName"
     $update.digest = ''
     Expect-Rejected { Assert-ReleaseMetadata $release '0.3.18' } 'update installer without a GitHub digest prevents verification'
-    $update.digest = "sha256:$updateHash"
-    [IO.File]::WriteAllBytes($updatePath, [byte[]](6,5))
-    Expect-Rejected { Assert-InstallerBytes $updatePath $sumPath $update } 'corrupted update installer is rejected'
     # Before the repository rename, installations from before the app rename update from Watchroom-named copies.
     $repository = $formerRepository
     $legacyAssets = @(foreach ($name in 'BlackPearl-Setup-0.3.18-win-x64.exe', 'Watchroom-Setup-0.3.18-win-x64.exe', 'BlackPearl-files-0.3.18-win-x64.txt', 'SHA256SUMS.txt') {

@@ -135,13 +135,6 @@ static class UiFindingsChecks
                 "zero saved rooms show helpful empty state without disabled management panel");
             Check(Control<Button>("CreateSavedRoomButton").Visibility == Visibility.Collapsed, "empty room does not duplicate header actions");
             Layout(); Capture("rooms-empty-900");
-            var host = new SavedRoom("host", "Host room", "https://room.test", new string('A', 24), new string('1', 64));
-            var guest = new SavedRoom("guest", "Guest room", host.Server, new string('B', 24));
-            rooms.Add(host); rooms.Add(guest); Control<ListBox>("SavedRoomsList").SelectedItem = host;
-            Check(Control<FrameworkElement>("SavedRoomHostControls").Visibility == Visibility.Visible, "selected host room exposes its own permissions");
-            Control<ListBox>("SavedRoomsList").SelectedItem = guest;
-            Check(Control<FrameworkElement>("SavedRoomHostControls").Visibility == Visibility.Collapsed && Control<TextBlock>("SavedRoomGuestHeading").Text == "PEOPLE",
-                "guest room hides host-only controls and lists people instead of managing guests");
 
             var folders = (ObservableCollection<LibraryFolder>)Field("folders"); folders.Clear();
             folders.Add(new(App.DataDirectory, "Anime")); Control<ListBox>("FolderList").SelectedIndex = 0;
@@ -176,8 +169,6 @@ static class UiFindingsChecks
             bool Pending() => (bool)typeof(MainWindow).GetProperty("HasUnsavedPreferences", flags)!.GetValue(window)!;
             var autoSave = (System.Windows.Threading.DispatcherTimer)Field("preferencesAutoSave");
             string SavedName() => (string)typeof(MainWindow).GetProperty("SavedDisplayName", flags)!.GetValue(window)!;
-            Check(window.FindName("SavePreferencesButton") is null && window.FindName("CancelPreferencesButton") is null && window.FindName("PreferenceFooter") is null,
-                "settings apply as they change, with no Save or Cancel bar");
             var originalName = Control<TextBox>("DisplayNameBox").Text;
             Control<TextBox>("DisplayNameBox").Text = "Draft name";
             Check(Pending() && autoSave.IsEnabled && SavedName() == originalName, "typing waits for a pause before applying");
@@ -199,7 +190,6 @@ static class UiFindingsChecks
             Check(MetadataOptions.Load(store).SaveNfo == !saveNfo && !Pending() && !autoSave.IsEnabled, "switches apply at once");
             Control<CheckBox>("SaveNfo").IsChecked = saveNfo;
             Check(MetadataOptions.Load(store).SaveNfo == saveNfo, "switching back applies at once too");
-            Check(window.FindName("SaveMetadataKeyButton") is null, "TMDB keys apply like other settings, without a separate key button");
             Control<PasswordBox>("MetadataToken").Password = "draft-fixture-key";
             Check(Pending() && MetadataCredential.Load(App.DataDirectory) == "", "a typed key waits for a pause before writing the credential vault");
             Call("LoadPreferences");

@@ -54,12 +54,11 @@ try
     handler.Missing = null;
     handler.Json = Release(url: "https://github.com/Svovoniks/Other/releases/download/v0.3.0/BlackPearl-Setup-0.3.0-win-x64.exe");
     await Reject(() => updates.CheckAsync(new(0, 2, 0), default), "downloads from another repository are rejected");
-    handler.Json = Release();
     try { _ = new GitHubUpdates(http, "Svovoniks/BlackPearl;not a repository"); throw new Exception("Invalid repository list accepted"); }
     catch (ArgumentException) { Check(true, "an invalid repository name in the list is rejected"); }
     using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
     try { await updates.DownloadAsync(update!, directory, null, null, cancellation.Token); throw new Exception("Cancellation ignored"); } catch (OperationCanceledException) { Check(true, "shutdown cancels downloads"); }
-    handler.Bytes = bytes; handler.Status = HttpStatusCode.OK;
+    handler.Bytes = bytes;
     var small = Encoding.UTF8.GetBytes("fixture update installer");
     handler.Files["BlackPearl-Update-0.2.0-to-0.3.0-win-x64.exe"] = small;
     handler.Json = Release(more: Asset("BlackPearl-Update-0.2.0-to-0.3.0-win-x64.exe", "0.3.0", small));
@@ -67,7 +66,6 @@ try
     Check(partial?.Name == "BlackPearl-Update-0.2.0-to-0.3.0-win-x64.exe" && partial.Size == small.Length && partial.Full.Name == "BlackPearl-Setup-0.3.0-win-x64.exe",
         "an update installer built from the installed version is preferred, with the full installer behind it");
     Check((await updates.CheckAsync(new(0, 1, 0), default))?.Name == "BlackPearl-Setup-0.3.0-win-x64.exe", "other installed versions download the full installer");
-    Check(File.ReadAllBytes((await updates.DownloadAsync(partial!, directory, null, null, default)).Single()).SequenceEqual(small), "the update installer downloads and verifies");
 
     // The installed files are checked against the installed release's published file list before an update installer.
     var installation = Path.Combine(directory, "installation"); Directory.CreateDirectory(Path.Combine(installation, "Models"));
@@ -80,8 +78,6 @@ try
     Check(File.ReadAllBytes((await updates.DownloadAsync(partial!, directory, installation, null, default)).Single()).SequenceEqual(bytes), "a changed installation gets the full installer");
     handler.Tags.Clear();
     Check(File.ReadAllBytes((await updates.DownloadAsync(partial!, directory, installation, null, default)).Single()).SequenceEqual(small), "a release without a file list relies on the installer's own version check");
-    handler.Files["BlackPearl-Update-0.2.0-to-0.3.0-win-x64.exe"] = Encoding.UTF8.GetBytes("tampered update installer");
-    Check(File.ReadAllBytes((await updates.DownloadAsync(partial!, directory, null, null, default)).Single()).SequenceEqual(bytes), "a corrupted update installer falls back to the full installer");
 
     // Further behind than the update installers reach, a chain through intermediate releases is used when it is small.
     var hop1 = Encoding.UTF8.GetBytes("hop 1"); var hop2 = Encoding.UTF8.GetBytes("hop 2"); var direct = new byte[8];

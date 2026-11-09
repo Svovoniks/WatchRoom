@@ -115,6 +115,12 @@ jobs:
       - name: Player layout checks
         if: matrix.lane == 'desktop'
         run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --player-layout
+      - name: Metadata picker checks
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --metadata-picker
+      - name: Room playback status checks
+        if: matrix.lane == 'desktop'
+        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --room-playback-status
       - name: Track language detection checks
         if: matrix.lane == 'desktop'
         run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --language-detection

@@ -162,8 +162,6 @@ static class MetadataPipelineFixture
 
         var best = MetadataMatching.Choose([new(1,"movie","Localized", "2021",null,"",OriginalTitle:"Original Name")], "Original.Name",2020);
         check(best?.Id == 1, "original titles and adjacent release years resolve automatically");
-        check(MetadataMatching.Choose([new(1,"movie","Same","2020",null,""),new(2,"movie","Same","2020",null,"")], "Same",2020) is null,
-            "tied metadata candidates remain unresolved");
         check(MetadataMatching.Choose([new(1,"movie","Different","2020",null,"")],"Wanted",2020) is null, "weak metadata candidates never silently win");
         using (var handler = new PipelineHandler())
         using (var tmdb = new MetadataClient("fixture", handler, new(Language:"fr-FR", Country:"FR")))

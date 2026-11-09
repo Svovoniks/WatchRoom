@@ -219,7 +219,14 @@ app.Map("/room", async context =>
     catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
     {
         if (member is not null) { try { await member.SendAndWaitAsync(new("error", Text: ex.Message)); } catch (Exception) { } }
-        else if (socket.State == WebSocketState.Open) await SocketMessages.SendAsync(socket, new("error", Text: ex.Message), CancellationToken.None);
+        else if (socket.State == WebSocketState.Open)
+        {
+            await SocketMessages.SendAsync(socket, new("error", Text: ex.Message), CancellationToken.None);
+            // Close properly so the client reads why it was turned away; the connection reset that follows an unclosed
+            // socket can discard the unread error on the client's side.
+            try { using var closing = new CancellationTokenSource(TimeSpan.FromSeconds(2)); await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, null, closing.Token); }
+            catch (Exception) { }
+        }
     }
     catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or IOException) { }
     finally

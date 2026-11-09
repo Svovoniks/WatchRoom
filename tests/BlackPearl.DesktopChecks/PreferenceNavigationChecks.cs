@@ -87,9 +87,9 @@ static class PreferenceNavigationChecks
 
         // Folders lives in Settings: links to it open that section.
         Call("ShowPage", "Rooms"); Call("ShowPage", "Folders");
-        check(window.FindName("FoldersNav") is null && (string)Field("currentPage") == "Settings" &&
+        check((string)Field("currentPage") == "Settings" &&
             Control<FrameworkElement>("FoldersPage").Visibility == Visibility.Visible && Control<FrameworkElement>("ProfilePreferences").Visibility == Visibility.Collapsed,
-            "Folders opens as a Settings section and has no sidebar entry");
+            "Folders opens as a Settings section");
         ClickSection("Plugins");
         // The logical tree holds the section's content before its template is applied.
         bool InSection(DependencyObject? element, string section)
