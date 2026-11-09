@@ -22,6 +22,45 @@ function Copy-Fixture {
         if ($path -in $Changed) { [IO.File]::AppendAllText($target, "`nChanged in the new version.`n") }
     }
 }
+# True once a running setup's log, which it keeps open, says it is waiting for the app to close.
+function Test-SetupWaiting {
+    param([string]$Log)
+    if (!(Test-Path -LiteralPath $Log)) { return $false }
+    $stream = [IO.File]::Open($Log, 'Open', 'Read', 'ReadWrite, Delete')
+    try { return [IO.StreamReader]::new($stream).ReadToEnd() -match 'Waiting for BlackPearl to finish closing' } finally { $stream.Dispose() }
+}
+# Visible top-level windows of a running setup (the loader and the setup it starts), and how many of them Windows
+# reports as not responding: a window that hasn't handled messages for five seconds.
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class SetupWindows
+{
+    private delegate bool EnumProc(IntPtr window, IntPtr data);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr data);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool IsHungAppWindow(IntPtr window);
+    public static int[] Count(uint[] processes)
+    {
+        int visible = 0, hung = 0;
+        EnumWindows((window, data) =>
+        {
+            uint process; GetWindowThreadProcessId(window, out process);
+            if (Array.IndexOf(processes, process) >= 0 && IsWindowVisible(window)) { visible++; if (IsHungAppWindow(window)) hung++; }
+            return true;
+        }, IntPtr.Zero);
+        return new[] { visible, hung };
+    }
+}
+"@
+function Get-SetupWindows {
+    param([Diagnostics.Process]$Setup)
+    $ids = @([uint32]$Setup.Id) + @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Setup.Id)" | ForEach-Object { [uint32]$_.ProcessId })
+    $counts = [SetupWindows]::Count([uint32[]]$ids)
+    return [pscustomobject]@{ Visible = $counts[0]; Hung = $counts[1] }
+}
+$closing = $null
 try {
     $compiler = Get-InstallerCompiler $root
     $script = Join-Path $root 'packaging/BlackPearl.iss'
@@ -29,6 +68,16 @@ try {
     $kept = @{ 'app.md' = 'AGENTS.md'; 'ISPP.dll' = '.nuget/packages/tools.innosetup/7.1.0/tools/ISPP.dll'; 'Models\notices.md' = 'THIRD-PARTY-NOTICES.md'; 'sub dir\changed.md' = 'README.md' }
     Copy-Fixture $old ($kept + @{ 'gone\old.md' = 'UPDATES.md' })
     Copy-Fixture $new ($kept + @{ 'added\new {1}.md' = 'UPDATES.md' }) @('app.md', 'sub dir\changed.md')
+    # BlackPearl.exe stands in for the app while it closes: a program without a window, which Restart Manager can't
+    # close, running until the file its argument names appears. It is built with the .NET Framework compiler in Windows.
+    $closingSource = Join-Path $test 'closing-app'
+    New-Item -ItemType Directory -Force $closingSource | Out-Null
+    [IO.File]::WriteAllText((Join-Path $closingSource 'Closing.cs'), 'static class Closing { static void Main(string[] args) { var end = System.DateTime.UtcNow.AddMinutes(2); while (!System.IO.File.Exists(args[0]) && System.DateTime.UtcNow < end) System.Threading.Thread.Sleep(100); } }')
+    & (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe') /nologo /target:winexe "/out:$(Join-Path $closingSource 'BlackPearl.exe')" (Join-Path $closingSource 'Closing.cs')
+    if ($LASTEXITCODE -ne 0) { throw 'Closing app fixture compilation failed' }
+    Copy-Item -LiteralPath (Join-Path $closingSource 'BlackPearl.exe') -Destination $old
+    Copy-Item -LiteralPath (Join-Path $closingSource 'BlackPearl.exe') -Destination $new
+    [IO.File]::AppendAllText((Join-Path $new 'BlackPearl.exe'), "`nChanged in the new version.`n")
     & $compiler /Qp '/DAppVersion=0.0.1' "/DAppFiles=$old" "/DOutputFolder=$output" @defines $script
     if ($LASTEXITCODE -ne 0) { throw 'Fixture installer compilation failed' }
     Install-Silently (Join-Path $output 'BlackPearl-Setup-0.0.1-win-x64.exe') $installed (Join-Path $test 'install.log')
@@ -40,13 +89,29 @@ try {
     Assert-SameTable (Get-FileTable $installed) $published 'The installed fixture and its file list'
     Check (@($published.Values | Where-Object Path -eq 'sub dir\changed.md').Size -eq (Get-Item (Join-Path $old 'sub dir\changed.md')).Length) 'a published file list describes the installed release exactly'
     $update = New-UpdateInstaller $compiler $script '0.0.1' '0.0.2' $published $new (Join-Path $test 'stage') $output $defines
-    Check (((@($update.Changed) | Sort-Object) -join '|') -eq 'added\new {1}.md|app.md|sub dir\changed.md') 'only new and changed files go into the update'
+    Check (((@($update.Changed) | Sort-Object) -join '|') -eq 'added\new {1}.md|app.md|BlackPearl.exe|sub dir\changed.md') 'only new and changed files go into the update'
     Check ((@($update.Removed) -join '|') -eq 'gone\old.md') 'files the new version dropped are listed for deletion'
     $full = Get-Item (Join-Path $output 'BlackPearl-Setup-0.0.1-win-x64.exe')
     Check ((Get-Item $update.Path).Length -lt 4MB) "the update installer is small ($([Math]::Round((Get-Item $update.Path).Length / 1MB, 2)) MB, full fixture $([Math]::Round($full.Length / 1MB, 2)) MB)"
 
     $log = Join-Path $test 'update.log'
-    Check ((Invoke-Installer $update.Path @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$log`"", "/DIR=`"$installed`"")) -eq 0) 'the update installs over the release it was built from'
+    # As in the app, which starts its update installer with /SILENT and then closes: the app is still exiting when
+    # setup starts, and setup shows its window.
+    $closed = Join-Path $test 'app-closed'
+    $closing = Start-Program (Join-Path $installed 'BlackPearl.exe') @("`"$closed`"")
+    Wait-AntivirusScan $update.Path
+    $setup = Start-Program $update.Path @('/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS', "/LOG=`"$log`"", "/DIR=`"$installed`"")
+    $deadline = [datetime]::UtcNow.AddMinutes(2)
+    while (!$setup.HasExited -and [datetime]::UtcNow -lt $deadline -and !(Test-SetupWaiting $log)) { Start-Sleep -Milliseconds 100 }
+    # Still waiting seven seconds later, not giving up, with its window responding; then the app finishes closing.
+    Start-Sleep -Seconds 7
+    $waiting = !$setup.HasExited -and (Test-SetupWaiting $log)
+    $windows = Get-SetupWindows $setup
+    [IO.File]::WriteAllText($closed, 'closed')
+    if (!$setup.WaitForExit(600000)) { $setup.Kill($true); throw 'The update did not finish in 10 minutes' }
+    Check ($waiting -and $closing.WaitForExit(10000)) 'an update waits for the app to finish closing instead of giving up'
+    Check ($windows.Visible -gt 0 -and $windows.Hung -eq 0) "setup's window keeps responding while it waits ($($windows.Visible) shown, $($windows.Hung) not responding)"
+    Check ($setup.ExitCode -eq 0) 'the update installs over the release it was built from'
     Assert-SameFiles $installed $new 'The update'
     Check $true 'the updated folder matches the new build exactly'
     Check ((Get-ItemProperty $key).DisplayVersion -eq '0.0.2') 'the installation is registered as the new version'
@@ -91,6 +156,7 @@ try {
     Write-Host "$checks update installer checks passed."
 }
 finally {
+    if ($closing -and !$closing.HasExited) { $closing.Kill() }
     if (Test-Path $key) { Uninstall-Silently $installed }
     $resolved = [IO.Path]::GetFullPath($test)
     if ((Split-Path -Parent $resolved) -eq [IO.Path]::GetFullPath($artifacts) -and (Split-Path -Leaf $resolved) -match '^update-checks-[a-f0-9]{32}$') {

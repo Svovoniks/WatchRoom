@@ -95,23 +95,33 @@ function Wait-UpdateInstaller {
     $Update.Process.Dispose(); $Update.Process = $null
     Write-Host "Update from $($Update.From): $($Update.Changed.Count) changed files, $($Update.Removed.Count) removed, $([Math]::Round((Get-Item $Update.Path).Length / 1MB, 1)) MB"
 }
-function Invoke-Installer {
+# Antivirus products may deny or lock a program started the moment it is written, so those two errors are retried
+# for a minute.
+function Start-Program {
     param([string]$Path, [string[]]$Arguments)
-    # Waited on directly: some sandboxes refuse Start-Process -Wait, which needs a job object. Antivirus products may
-    # deny, lock or even quarantine an installer started the moment it is written, so a fresh one gets a few seconds
-    # for their scan first and the first two errors are retried for a minute.
-    $age = [datetime]::UtcNow - (Get-Item -LiteralPath $Path).LastWriteTimeUtc
-    if ($age -lt [TimeSpan]::FromSeconds(5)) { Start-Sleep -Milliseconds ([int](5000 - $age.TotalMilliseconds)) }
     $start = [Diagnostics.ProcessStartInfo]::new($Path, ($Arguments -join ' '))
     $deadline = [datetime]::UtcNow.AddMinutes(1)
     while ($true) {
-        try { $process = [Diagnostics.Process]::Start($start); break }
+        try { return [Diagnostics.Process]::Start($start) }
         catch {
             $failure = $_.Exception; while ($failure -and $failure -isnot [ComponentModel.Win32Exception]) { $failure = $failure.InnerException }
             if (!$failure -or $failure.NativeErrorCode -notin 5, 32 -or [datetime]::UtcNow -ge $deadline) { throw }
         }
         Start-Sleep -Seconds 2
     }
+}
+# Antivirus products may even quarantine an installer started the moment it is written, so a fresh one gets a few
+# seconds for their scan.
+function Wait-AntivirusScan {
+    param([string]$Path)
+    $age = [datetime]::UtcNow - (Get-Item -LiteralPath $Path).LastWriteTimeUtc
+    if ($age -lt [TimeSpan]::FromSeconds(5)) { Start-Sleep -Milliseconds ([int](5000 - $age.TotalMilliseconds)) }
+}
+function Invoke-Installer {
+    param([string]$Path, [string[]]$Arguments)
+    # Waited on directly: some sandboxes refuse Start-Process -Wait, which needs a job object.
+    Wait-AntivirusScan $Path
+    $process = Start-Program $Path $Arguments
     if (!$process.WaitForExit(600000)) { $process.Kill($true); throw "$(Split-Path -Leaf $Path) did not finish in 10 minutes" }
     return $process.ExitCode
 }
