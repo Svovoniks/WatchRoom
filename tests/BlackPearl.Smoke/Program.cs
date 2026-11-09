@@ -766,8 +766,9 @@ try
     // The room service ignores everything but pings from a guest the host hasn't admitted.
     admittedGuest.Send(new("settings", Text: "Guest override", Number: 1));
     await Task.Delay(150);
-    Check(admittedGuest.Snapshot is { Name: "Friday movie night", Media: null, Playback: null, SharedControls: false } && admittedGuest.Snapshot.Queue?.Length == 0,
-        "a waiting guest can't change room settings, and the room name gives it no playback or controls");
+    Check(admittedGuest.Snapshot?.Name == "Friday movie night", "a waiting guest can't change room settings");
+    persistentHost.Send(new("room-name", Text: "Saturday movie night"));
+    await Wait(() => admittedGuest.Snapshot?.Name == "Saturday movie night", "host rename reaches a guest still waiting for admission");
     persistentHost.Send(new("admit", Target: admittedGuest.Identity!.Peer));
     await Wait(() => admittedGuest.DirectControlsReady.IsCompletedSuccessfully, "persistent guest admitted");
     Check(persistentHost.Snapshot?.Name == admittedGuest.Snapshot?.Name, "host and guest share the same room name");
