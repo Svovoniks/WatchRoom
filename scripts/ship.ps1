@@ -116,14 +116,30 @@ function Resolve-ShipSdk {
     }
     return (Resolve-Path -LiteralPath $sdk).Path
 }
-# A run that was interrupted, or failed and is now checked again, leaves its copy of the commit behind; a new run of the
-# same commit removes it.
+# Removes a copy of a commit made for release checks. Git deletes what it can and forgets the worktree even when a file
+# is still in use; the rest goes once nothing holds it. Returns whether the copy is gone.
+function Remove-CheckCopy {
+    param([string]$Root, [string]$Path)
+    if (Test-Path -LiteralPath $Path) { & git -C $Root worktree remove --force $Path 2>$null }
+    $full = [IO.Path]::GetFullPath($Path)
+    # Only a folder this script made: blackpearl-ship-<guid> directly under the temp directory.
+    if ((Test-Path -LiteralPath $full) -and (Split-Path -Leaf $full) -match '^blackpearl-ship-[a-f0-9]{32}$' -and
+        [IO.Path]::GetFullPath((Split-Path -Parent $full)).TrimEnd('\', '/') -ieq [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')) {
+        Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    & git -C $Root worktree prune 2>$null
+    return !(Test-Path -LiteralPath $Path)
+}
+# A run that was interrupted or failed keeps its copy of the commit for investigation until the commit is checked again
+# or a newer commit of the branch replaces it. The record names the copy until it is gone.
 function Remove-StaleCheckCopy {
     param([string]$Root, [string]$RecordPath)
     $state = Get-CheckState $RecordPath
     if ($state.State -in 'missing', 'running' -or !$state.PSObject.Properties['Checkout'] -or !$state.Checkout) { return }
-    if (Test-Path -LiteralPath $state.Checkout) { & git -C $Root worktree remove --force $state.Checkout 2>$null }
-    & git -C $Root worktree prune 2>$null
+    if (!(Remove-CheckCopy $Root $state.Checkout)) { return }
+    $record = @{}; $state.PSObject.Properties | ForEach-Object { $record[$_.Name] = $_.Value }
+    $record.Remove('Checkout')
+    Write-CheckRecord $RecordPath $record
 }
 # Runs the release checks on a clean copy of the commit and records running, then passed or failed, for -Merge and
 # reviewers. It runs in its own process (ship.ps1 -CheckCommit), whose id the record keeps: in the background after a
@@ -170,20 +186,14 @@ function Stop-SupersededChecks {
         if ($state.State -ne 'running') {
             # The newer commit replaces this one, so it will not be checked again: drop the copy an interrupted or
             # failed run left behind.
-            if (!$state.PSObject.Properties['Checkout'] -or !$state.Checkout) { continue }
             Remove-StaleCheckCopy $Root $file.FullName
-            $record = @{}; $state.PSObject.Properties | ForEach-Object { $record[$_.Name] = $_.Value }
-            $record.Remove('Checkout')
-            Write-CheckRecord $file.FullName $record
             continue
         }
         try { [Diagnostics.Process]::GetProcessById([int]$state.Pid).Kill($true) } catch { }
         $null = Get-Process -Id $state.Pid -ErrorAction SilentlyContinue | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
-        if ($state.Checkout -and (Test-Path -LiteralPath $state.Checkout)) {
-            & git -C $Root worktree remove --force $state.Checkout 2>$null
-        }
         $record = @{}; $state.PSObject.Properties | ForEach-Object { $record[$_.Name] = $_.Value }
-        $record.State = 'superseded'; $record.Remove('Checkout')
+        $record.State = 'superseded'
+        if ($state.Checkout -and (Remove-CheckCopy $Root $state.Checkout)) { $record.Remove('Checkout') }
         Write-CheckRecord $file.FullName $record
         Write-Host "Stopped the release checks of $($state.Commit), which $Commit replaces."
     }

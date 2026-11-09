@@ -158,8 +158,9 @@ checkout, then `dotnet` from PATH. Pull requests, reviews, and merges use the Gi
 credential git already uses for pushes, read through `git credential fill`; it is
 never printed. Public release verification stays unauthenticated. No GitHub CLI is
 needed. `-TimeoutMinutes` defaults to 60. Verification records and downloaded
-installers remain under ignored `artifacts/`. Failed check copies are retained at
-the printed path for investigation. A failed workflow stops the script. It never
+installers remain under ignored `artifacts/`. A failed or interrupted check keeps
+its copy of the commit, named by `-Status`, for investigation until the commit is
+checked again or a newer commit of the branch replaces it. A failed workflow stops the script. It never
 rewrites a tag, overwrites a published installer, or installs the app locally.
 
 ### Manual fallback
