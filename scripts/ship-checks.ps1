@@ -173,6 +173,17 @@ try {
     Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = 4; ProcessStart = 1; Checkout = $staleCopy }
     Remove-StaleCheckCopy $copyRepo $recordPath
     Check (!(Test-Path -LiteralPath $staleCopy) -and @(Invoke-Native git @('-C', $copyRepo, 'worktree', 'list')).Count -eq 1) 'checking a commit again removes the copy an interrupted run left behind'
+    # A newer commit of the branch replaces older ones, whose failed or interrupted copies are then removed.
+    $copyRecords = Join-Path (Invoke-Native git @('-C', $copyRepo, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim() 'blackpearl-checks'
+    $otherCopy = Join-Path $testRoot 'other-branch-copy'
+    Invoke-Native git @('-C', $copyRepo, 'worktree', 'add', '--quiet', '--detach', $staleCopy, 'HEAD')
+    Invoke-Native git @('-C', $copyRepo, 'worktree', 'add', '--quiet', '--detach', $otherCopy, 'HEAD')
+    Write-CheckRecord (Join-Path $copyRecords "$headA.json") @{ Commit = $headA; Branch = 't3/fixture'; State = 'failed'; Error = 'fixture'; Checkout = $staleCopy }
+    Write-CheckRecord (Join-Path $copyRecords "$('c' * 40).json") @{ Commit = 'c' * 40; Branch = 't3/other'; State = 'failed'; Error = 'fixture'; Checkout = $otherCopy }
+    Stop-SupersededChecks $copyRepo 't3/fixture' $headB
+    $replaced = Get-CheckState (Join-Path $copyRecords "$headA.json")
+    Check (!(Test-Path -LiteralPath $staleCopy) -and $replaced.State -eq 'failed' -and !$replaced.PSObject.Properties['Checkout']) 'a newer commit of the branch removes the copy a failed run of an older one kept'
+    Check (Test-Path -LiteralPath $otherCopy) 'copies kept for other branches stay'
     # One list of checks: the workflow runs the shared script rather than its own copy of the suites.
     $workflow = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../.github/workflows/build.yml') -Raw
     Check ($workflow -match 'scripts/release-checks\.ps1 -Lane \$\{\{ matrix\.lane \}\}' -and $workflow -notmatch 'dotnet run --project tests/') 'the workflow runs the release checks from the shared list'

@@ -166,7 +166,17 @@ function Stop-SupersededChecks {
     if (!(Test-Path -LiteralPath $directory)) { return }
     foreach ($file in Get-ChildItem -LiteralPath $directory -Filter '*.json') {
         $state = Get-CheckState $file.FullName
-        if ($state.State -ne 'running' -or $state.Branch -cne $Branch -or $state.Commit -ceq $Commit) { continue }
+        if ($state.Branch -cne $Branch -or $state.Commit -ceq $Commit) { continue }
+        if ($state.State -ne 'running') {
+            # The newer commit replaces this one, so it will not be checked again: drop the copy an interrupted or
+            # failed run left behind.
+            if (!$state.PSObject.Properties['Checkout'] -or !$state.Checkout) { continue }
+            Remove-StaleCheckCopy $Root $file.FullName
+            $record = @{}; $state.PSObject.Properties | ForEach-Object { $record[$_.Name] = $_.Value }
+            $record.Remove('Checkout')
+            Write-CheckRecord $file.FullName $record
+            continue
+        }
         try { [Diagnostics.Process]::GetProcessById([int]$state.Pid).Kill($true) } catch { }
         $null = Get-Process -Id $state.Pid -ErrorAction SilentlyContinue | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
         if ($state.Checkout -and (Test-Path -LiteralPath $state.Checkout)) {
