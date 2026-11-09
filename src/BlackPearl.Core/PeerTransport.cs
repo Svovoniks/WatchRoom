@@ -377,12 +377,19 @@ public sealed class PeerTransport : IDisposable
         if (!IsControlOpen) throw new IOException("Room controls are not connected. Rejoin the room.");
         var text = serialized ?? Wire.Serialize(message);
         if (System.Text.Encoding.UTF8.GetByteCount(text) > 65536) throw new InvalidDataException("Room control message is too large");
-        if (message.Type is "library-item" or "library-page-end")
+        try
         {
-            if (catalogChannel?.IsOpen != true) throw new IOException("Guest library is not connected");
-            catalogChannel.Send(text);
+            if (message.Type is "library-item" or "library-page-end")
+            {
+                if (catalogChannel?.IsOpen != true) throw new IOException("Guest library is not connected");
+                catalogChannel.Send(text);
+            }
+            else controls!.Send(text);
         }
-        else controls!.Send(text);
+        // The peer can close the channel between the open check and the send; callers handle that as a lost connection.
+        // The library's exception types are internal, so they are recognised by namespace.
+        catch (Exception ex) when (ex.GetType().Namespace == "DataChannelDotnet.Exceptions")
+        { throw new IOException("Room controls closed while sending. Rejoin the room.", ex); }
     }
     private void SendReply(RangeReply reply) => channel?.Send(Wire.Serialize(new WireMessage("bytes", Data: Wire.Serialize(reply))));
     private async Task ServeAsync()

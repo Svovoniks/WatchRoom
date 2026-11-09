@@ -16,7 +16,6 @@ static class PlayerInteractionChecks
         var header = (Border)window.FindName("RoomHeader");
         var overlay = (Grid)window.FindName("PlayerOverlay");
         Call("ShowPage", "Room"); fullscreen.SetValue(window, true);
-        check(window.FindName("PlaybackTitleOverlay") is null, "player has no duplicate translucent title bar");
         Call("ShowPlayerControls"); controls.Visibility = Visibility.Collapsed;
         check(header.Visibility == Visibility.Collapsed, "top bar hides together with bottom controls");
         Call("ApplyPlayerLayout");

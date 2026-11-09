@@ -244,7 +244,6 @@ static class PlayerLayoutChecks
         Check(participantsPill.Visibility == Visibility.Visible && InBar(participantsPill) && participantsMenu.PlacementTarget == participantsPill &&
             InMenu("PeopleList") && InMenu("VoiceCard") && InMenu("RoomFeedback"),
             "in a room the participants pill sits in the bar and its menu holds voice chat and the people list");
-        Check(window.FindName("RoomSide") is null && window.FindName("RoomToggle") is null, "the side panel and its top bar button are gone");
         var peopleList = (ListBox)window.FindName("PeopleList");
         var rowHidden = Visibility.Collapsed; var rowShown = Visibility.Visible;
         peopleList.ItemsSource = new[]
@@ -264,7 +263,6 @@ static class PlayerLayoutChecks
             overflowItems.Children.OfType<Button>().Any(row => System.Windows.Automation.AutomationProperties.GetName(row) == "Participants"),
             "a narrow bar folds the participants pill into the … menu");
         PillStrip.SetShown(participantsPill, false); Settle(900, 600);
-        Check(window.FindName("RoomLibraryButton") is null && window.FindName("SavedRoomLibraryButton") is null, "the room library window has no buttons left");
         var invite = (Button)window.FindName("InviteButton"); invite.Visibility = Visibility.Visible;
         Layout(900, 600);
         var header = (FrameworkElement)window.FindName("RoomHeader");

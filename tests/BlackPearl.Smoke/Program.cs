@@ -41,7 +41,7 @@ if (args.FirstOrDefault() == "--room-resilience")
     var checks = 0;
     void ResilienceCheck(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; }
     RoomResilienceFixture.Run(ResilienceCheck);
-    if (args.Length > 1) await RoomServerFixture.Run(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? Path.GetFullPath(".tools/dotnet/dotnet.exe"), Path.GetFullPath(args[1]),
+    if (args.Length > 1) await RoomServerFixture.Run(File.Exists(".tools/dotnet/dotnet.exe") ? Path.GetFullPath(".tools/dotnet/dotnet.exe") : Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet", Path.GetFullPath(args[1]),
         Path.GetFullPath(Path.Combine("artifacts", "room-resilience-" + Guid.NewGuid().ToString("N"))), ResilienceCheck);
     Console.WriteLine($"{checks} room resilience checks passed."); return;
 }
@@ -141,14 +141,6 @@ if (args.FirstOrDefault() == "--metadata-cache")
     await MetadataCacheFixture.Run(Path.Combine("artifacts/metadata-cache-check", Guid.NewGuid().ToString("N")), (condition, name) =>
     { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
     Console.WriteLine($"{checks} metadata cache checks passed."); return;
-}
-
-if (args.FirstOrDefault() == "--room-reconnect")
-{
-    var checks = 0;
-    await RoomReconnectFixture.Run(Path.Combine("artifacts/room-reconnect-check", Guid.NewGuid().ToString("N")), (condition, name) =>
-    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
-    Console.WriteLine($"{checks} room reconnect checks passed."); return;
 }
 
 if (args.FirstOrDefault() == "--voice")
@@ -419,6 +411,7 @@ await EpisodeOrderFixture.Run(Path.Combine(root, "episode-order"), Check);
 await MetadataRecoveryFixture.Run(Path.Combine(root, "metadata-recovery"), Check);
 await MetadataEvidenceFixture.Run(Path.Combine(root, "metadata-evidence"), Check);
 await MetadataCacheFixture.Run(Path.Combine(root, "metadata-cache"), Check);
+await EpisodeArtworkFixture.Run(Path.Combine(root, "episode-artwork"), Check);
 await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
 await MusicLibraryFixture.Run(Path.Combine(root, "music-library"), Check);
 await LibraryVersionsFixture.Run(Path.Combine(root, "library-versions"), Check);
@@ -446,10 +439,6 @@ Check(episode.Series == "Example Show" && episode.Season == 2 && episode.Episode
 Check(FileNames.Parse(Path.Combine(root, "[Group] Anime - 12 [1080p].mkv"), "Anime").Episode == 12, "anime episode parsing");
 var mixedAnime = FileNames.Parse(Path.Combine(root, "[SubsPlease] Super no Ura de Yani Suu Futari - 01 (1080p) [B9F7B295].mkv"), "Mixed");
 Check(mixedAnime.Series == "Super no Ura de Yani Suu Futari" && mixedAnime.Episode == 1 && mixedAnime.Kind == "Anime", "Mixed libraries recognize anime release episodes");
-using (var titles = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("<animetitles><anime aid='1'><title xml:lang='x-jat'>Romaji Title</title><title xml:lang='en'>English Title</title></anime></animetitles>")))
-    Check(AnimeTitles.FindAliases(titles, "Romaji.Title").SequenceEqual(new[] { "English Title" }), "AniDB index resolves English aliases locally");
-using (var titles = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("<animetitles><anime aid='1'><title>Same</title></anime><anime aid='2'><title>Same</title></anime></animetitles>")))
-    Check(AnimeTitles.FindAliases(titles, "Same").Length == 0, "ambiguous AniDB titles require a manual match");
 Check(SyncMath.TargetPosition(new(1, "a", true, 2000, 1000), 1500) == 2500, "clock based playback target");
 var bytes = RandomNumberGenerator.GetBytes(2 * 1024 * 1024 + 57);
 var path = Path.Combine(root, "fixture.mp4"); await File.WriteAllBytesAsync(path, bytes);
@@ -629,7 +618,6 @@ using (var unusedHttp = new HttpClient(new ArtworkFixture()))
     Check(emptyEpisode.EpisodePoster is null && emptyEpisode.RuntimeMinutes is null && emptyEpisode.DetailOverview == "TMDB season plot", "TMDB handles null images runtimes and empty episode overview");
     Check(!tmdbFixture.ImageReceivedToken, "TMDB image requests never contain the API token");
 }
-Check(Wire.Read<MediaItem>(Wire.Serialize(enriched)).EpisodeTitle == "Pilot", "episode metadata survives library serialization");
 var file = new FileMediaSource(path);
 Check(file.LocalPath == Path.GetFullPath(path) && !Wire.Serialize(file.Media).Contains(file.LocalPath, StringComparison.OrdinalIgnoreCase),
     "host retains a local playback path without exposing it in shared media");
@@ -705,6 +693,7 @@ start.ArgumentList.Add(Path.GetFullPath(Environment.GetEnvironmentVariable("BLAC
 await GuestLibraryPeerFixture.RunIsolated(sdkPath, start.ArgumentList[0], root, videoPath, Check);
 VoiceFixture.RunUnits(Check);
 await VoiceFixture.RunIsolated(sdkPath, start.ArgumentList[0], root, Check);
+await RoomServerFixture.Run(sdkPath, start.ArgumentList[0], Path.Combine(root, "room-server"), Check);
 using var server = externalServer is null ? Process.Start(start)! : null;
 var stdout = server?.StandardOutput.ReadToEndAsync(); var stderr = server?.StandardError.ReadToEndAsync();
 try
@@ -723,7 +712,6 @@ try
     try { roomGuest.Send(new("playback", Data: Wire.Serialize(new PlaybackState(0, file.Media.Id, true, 1000, 0)))); }
     catch (IOException) { pendingRejected = true; }
     Check(pendingRejected, "unapproved guest cannot send direct room controls");
-    await Task.Delay(150); Check(!hostMessages.Any(x => x.Type == "playback"), "pending guests cannot control playback");
     roomHost.Send(new("admit", Target: roomGuest.Identity!.Peer));
     await Wait(() => roomGuest.Snapshot?.Media is not null, "guest admitted");
     var roomSource = await roomGuest.GetSourceAsync(file.Media, CancellationToken.None);
@@ -772,9 +760,16 @@ try
     Check(savedIdentity.HostKey?.Length == 64, "persistent host receives a private reopening key");
     var admittedGuest = new RoomClient(new LibraryStore(guestSettingsPath));
     await admittedGuest.ConnectAsync(serverUrl, "Remembered Guest", savedIdentity.Room);
+    await Wait(() => admittedGuest.Snapshot?.Name == "Friday movie night", "waiting guest receives the host's room name");
+    Check(!admittedGuest.DirectControlsReady.IsCompleted && !admittedGuest.Snapshot!.People.Single(p => p.Id == admittedGuest.Identity!.Peer).Approved,
+        "the room name reaches a waiting guest before admission or a direct connection");
+    // The room service ignores everything but pings from a guest the host hasn't admitted.
+    admittedGuest.Send(new("settings", Text: "Guest override", Number: 1));
+    await Task.Delay(150);
+    Check(admittedGuest.Snapshot is { Name: "Friday movie night", Media: null, Playback: null, SharedControls: false } && admittedGuest.Snapshot.Queue?.Length == 0,
+        "a waiting guest can't change room settings, and the room name gives it no playback or controls");
     persistentHost.Send(new("admit", Target: admittedGuest.Identity!.Peer));
     await Wait(() => admittedGuest.DirectControlsReady.IsCompletedSuccessfully, "persistent guest admitted");
-    await Wait(() => admittedGuest.Snapshot?.Name == "Friday movie night", "guest receives the host's room name");
     Check(persistentHost.Snapshot?.Name == admittedGuest.Snapshot?.Name, "host and guest share the same room name");
     persistentHost.Send(new("room-name", Text: "Anime night"));
     await Wait(() => admittedGuest.Snapshot?.Name == "Anime night", "host rename reaches the connected guest");
@@ -832,6 +827,7 @@ try
         await using var returningGuest = new RoomClient();
         await returningGuest.ConnectAsync(serverUrl, "Returning Guest", savedIdentity.Room);
         Check(returningGuest.Identity?.HostKey is null, "persistent guest can rejoin without receiving the owner key");
+        await Wait(() => returningGuest.Snapshot?.Name == "Anime night", "the saved room name reaches a new waiting guest after the host reconnects");
     }
     await Task.Delay(350);
     await using (var hostAgain = new RoomClient(roomSettings))

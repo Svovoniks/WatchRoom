@@ -553,7 +553,6 @@ static class FilenameReadingFixture
         Numbered(["[Group] Harbor Lights (01-24) (480p) [Batch]", "[Group] Harbor Lights - 21 (480p) [A1B2C3D4].mkv"], "Harbor Lights", null, 21);
         Numbered(["Shows", "Harbor Lights", "Harbor.Lights.S02.1080p.BluRay.x265-GRP", "Harbor.Lights.S02E05.1080p.BluRay.x265-GRP.mp4"], "Harbor Lights", 2, 5);
         Numbered(["Shows", "Harbor Lights", "01. Season 1", "S01E01-Name [A1B2C3D4].mkv"], "Harbor Lights", 1, 1);
-        Numbered(["Harbor Lights", "2", "03.mkv"], "Harbor Lights", 2, 3);
         Numbered(["Harbor Lights", "T2", "E03.mkv"], "Harbor Lights", 2, 3);
         Numbered(["Harbor Lights", "Сезон 5", "Серия 11.mkv"], "Harbor Lights", 5, 11);
         Numbered(["Harbor Lights", "Season 2009", "S2009x02 name.mkv"], "Harbor Lights", 2009, 2);

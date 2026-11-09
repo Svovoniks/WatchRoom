@@ -44,7 +44,6 @@ public static class AnimeTitles
         }
         return new(titles);
     }
-    public static string[] FindAliases(Stream xml, string title) => ReadIndex(xml).Find(title);
     public static async Task<string[]> AliasesAsync(HttpClient http, string directory, string title, CancellationToken ct)
     {
         var path = Path.GetFullPath(Path.Combine(directory, "anidb-titles.xml.gz"));
