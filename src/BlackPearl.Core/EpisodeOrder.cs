@@ -42,12 +42,15 @@ internal static class EpisodeOrder
 
     public static bool CanChoose(IReadOnlyCollection<MediaItem> entries) => entries.Count > 0 &&
         entries.All(x => x.NumberingOrder == "aired" || Group(x.NumberingOrder) is not null) &&
-        !entries.Any(x => LibraryIdentity.Locked(x, "NumberingOrder") || x.AbsoluteEpisode is not null || x.SourcePart is not null || x.NumberingSource == "date") &&
-        !HoldsCopies(entries);
+        !entries.Any(x => LibraryIdentity.Locked(x, "NumberingOrder") || x.AbsoluteEpisode is not null || x.SourcePart is not null || x.NumberingSource == "date");
     // A show combined from copies of a season keeps one order for all of them. One copy's titles can't speak for another copy's numbers,
-    // so the order stays as it was when they combined.
-    public static bool HoldsCopies(IEnumerable<MediaItem> entries) => entries.Where(x => !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Season is > 0)
-        .GroupBy(x => x.Season).Any(season => season.Select(x => x.SeriesPath ?? Path.GetDirectoryName(x.Path) ?? "").Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1);
+    // so the order stays as it was when they combined. Asked of all the show's files, offline ones too: a copy that is away still holds
+    // its numbers. Copies are two series folders holding one season, or one episode held in two places; files that sit one per folder
+    // with no series folder above them, as downloads often do, are one copy.
+    public static bool HoldsCopies(IEnumerable<MediaItem> files) => files.Where(x => !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Season is > 0)
+        .GroupBy(x => x.Season).Any(season =>
+            season.Select(x => x.SeriesPath).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1 ||
+            season.GroupBy(x => x.Episode).Any(episode => episode.Select(x => x.SeriesPath ?? Path.GetDirectoryName(x.Path) ?? "").Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1));
     // Which titles were weighed, so an order weighed before more titled files arrived isn't taken for theirs.
     public static string Weighed(string order, IEnumerable<Evidence> evidence) => order + "|" + LibraryIdentity.Hash(string.Join("\n",
         evidence.Select(x => $"{x.Season}:{x.Episode}:{MetadataTitles.Normalize(x.Title)}").Order(StringComparer.Ordinal)));

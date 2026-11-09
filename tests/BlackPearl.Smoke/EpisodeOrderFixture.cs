@@ -130,6 +130,41 @@ static class EpisodeOrderFixture
         var grownPlain = grown.All().Where(x => !x.IsVirtual && x.Path.Contains("grown-plain")).ToArray();
         check(grown.All().Where(x => !x.IsVirtual).All(x => x.NumberingOrder == "aired") && grownPlain.Single(x => x.Season == 2 && x.Episode == 1).EpisodeTitle == "Seventh",
             $"titled files added to a combined copy don't move the other copy to another order (got {string.Join(",", grown.All().Select(x => x.NumberingOrder).Distinct())}, {grownPlain.Single(x => x.Season == 2 && x.Episode == 1).EpisodeTitle})");
+        // The same growth while the untitled copy's drive is away: its files still hold their numbers, so the show still holds copies and
+        // keeps its order, and the copy finds its aired episodes when it is back.
+        var away = Store(Path.Combine(directory, "copy-away"));
+        foreach (var (s, e, title) in new[] { (1, 1, "Pilot"), (1, 2, "Second"), (1, 3, "Third") }) away.Save(Episode(directory, "away-titled", "Parts Show", 10, s, e, title));
+        foreach (var (s, e) in new[] { (1, 1), (1, 4), (2, 1), (2, 2) }) away.Save(Episode(directory, "away-plain", "Parts Show", 10, s, e, "Untitled") with { EpisodeTitle = null });
+        await Fetch(away, directory, handler);
+        away.GroupShowsByProvider();
+        var awayShow = away.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Single();
+        foreach (var file in away.All().Where(x => x.Path.Contains("away-plain"))) away.Save(file with { Available = false });
+        foreach (var (s, e, title) in new[] { (2, 1, "Fourth"), (2, 2, "Fifth"), (2, 3, "Sixth") })
+            away.Save(Episode(directory, "away-titled", "Parts Show", 10, s, e, title) with { ShowId = awayShow });
+        await Fetch(away, directory, handler);
+        foreach (var file in away.All().Where(x => x.Path.Contains("away-plain"))) away.Save(file with { Available = true });
+        await Fetch(away, directory, handler);
+        var awayPlain = away.All().Single(x => !x.IsVirtual && x.Path.Contains("away-plain") && x.Season == 2 && x.Episode == 1);
+        check(away.All().Where(x => !x.IsVirtual).All(x => x.NumberingOrder == "aired") && awayPlain.EpisodeTitle == "Seventh",
+            $"a copy that is offline while the other gains titles keeps its aired episodes (got {awayPlain.NumberingOrder}, {awayPlain.EpisodeTitle})");
+        // A titled copy that is offline was never weighed, so it doesn't count as settled and stays apart.
+        var offline = Store(Path.Combine(directory, "copy-offline"));
+        foreach (var (s, e) in new[] { (1, 1), (2, 1) }) offline.Save(Episode(directory, "offline-plain", "Parts Show", 10, s, e, "Untitled") with { EpisodeTitle = null });
+        foreach (var (s, e, title) in files) offline.Save(Episode(directory, "offline-titled", "Parts Show", 10, s, e, title) with { Available = false });
+        offline.GroupShowsByProvider();
+        check(offline.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 2, "a titled copy that is offline and never weighed stays apart");
+        // Files one per folder with no series folder above them are one copy, and their titles still choose the show's order.
+        var scene = Store(Path.Combine(directory, "scene"));
+        foreach (var (s, e, title) in files)
+        {
+            var folder = Path.Combine(directory, "scene-files", $"Parts.Show.S{s:00}E{e:00}.1080p"); Directory.CreateDirectory(folder);
+            var path = Path.Combine(folder, $"Parts Show - S{s:00}E{e:00} - {title}.mkv"); File.WriteAllBytes(path, [0]);
+            scene.Save(new MediaItem(LibraryIdentity.Hash(path), path, "Parts Show", "Show", Series: "Parts Show", Season: s, Episode: e, EpisodeTitle: title,
+                ShowId: "show-scene", MetadataProvider: "tmdb", MetadataId: 10, ProviderIds: new() { ["tmdb"] = "10" }, NumberingSource: "filename", MetadataType: "tv", MetadataKind: "Show"));
+        }
+        await Fetch(scene, directory, handler);
+        check(scene.All().Where(x => !x.IsVirtual).All(x => x.NumberingOrder == "group:parts"), "titles of files kept one per folder still choose the show's order");
+
         // Titled files added to a copy before it combines are weighed first: the copy that now fits the Parts group stays apart.
         var growing = Store(Path.Combine(directory, "copy-growing"));
         foreach (var (s, e, title) in new[] { (1, 1, "Pilot"), (1, 2, "Second"), (1, 3, "Third") }) growing.Save(Episode(directory, "growing-titled", "Parts Show", 10, s, e, title));

@@ -71,10 +71,13 @@ public static class SeriesMetadata
         var groups = (catalogChanged ? library.All() : catalog).Where(x => !x.IsMusic).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Series is not null && !x.MetadataLocked && !MetadataTitles.IsUnverifiedCompilation(x) &&
             (x.Matched || !MetadataMatching.HasMovieEvidence(x))).GroupBy(LibraryIdentity.ShowKey).ToArray();
         var known = new KnownShows(catalogChanged ? library.All() : catalog);
+        // Every file of each show, offline and locked ones too: whether a show holds copies of a season depends on all of them.
+        var showFiles = (catalogChanged ? library.All() : catalog).Where(x => !x.IsVirtual && x.Series is not null).ToLookup(LibraryIdentity.ShowKey);
         foreach (var group in groups)
         {
             ct.ThrowIfCancellationRequested();
-            var orderCheck = checkingOrders && EpisodeOrder.CanChoose(group.ToArray()) && EpisodeOrder.Collect(group).Length >= EpisodeOrder.MinimumEvidence;
+            var holdsCopies = EpisodeOrder.HoldsCopies(showFiles[group.Key]);
+            var orderCheck = checkingOrders && !holdsCopies && EpisodeOrder.CanChoose(group.ToArray()) && EpisodeOrder.Collect(group).Length >= EpisodeOrder.MinimumEvidence;
             if (mode == MetadataRefresh.FillMissing && !rechecking && !orderCheck && group.All(x => x.MetadataFetchedAt > 0 &&
                 (options.RefreshDays <= 0 || x.MetadataFetchedAt > Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds) &&
                 (!force && refresh is null || x.Episode is null || !string.IsNullOrWhiteSpace(x.EpisodeTitle)) &&
@@ -139,7 +142,7 @@ public static class SeriesMetadata
                     var evidence = mode == MetadataRefresh.RetryArtwork ? [] : EpisodeOrder.Collect(entries);
                     var alternatives = new List<MetadataSeason[]>();
                     var weighed = false;
-                    if (provider == "tmdb" && evidence.Length >= EpisodeOrder.MinimumEvidence && EpisodeOrder.CanChoose(entries))
+                    if (provider == "tmdb" && evidence.Length >= EpisodeOrder.MinimumEvidence && !holdsCopies && EpisodeOrder.CanChoose(entries))
                     {
                         weighed = true;
                         var currentOrder = order ?? item.NumberingOrder;

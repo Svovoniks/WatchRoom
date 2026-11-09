@@ -666,12 +666,12 @@ public sealed partial class LibraryStore
         .Select(x => x.NumberingOrder).Distinct(StringComparer.Ordinal).Count() == 1;
     // A copy whose own episode titles can move it to another order waits until a fetch has weighed exactly those titles to the order it
     // holds; titled files added since need weighing too. Titles too few to choose, or an order titles don't change, leave a copy as it
-    // is. A weighing that failed, or never ran, keeps the copies apart. Once combined, the show keeps its order (EpisodeOrder.HoldsCopies).
-    // Only files a fetch weighs count: ones that are available and not locked.
-    private bool OrdersSettled(IEnumerable<MediaItem> members) => NumberedEpisodes(members).Where(x => x.Available && !x.MetadataLocked).GroupBy(LibraryIdentity.ShowKey).All(copy =>
+    // is. A weighing that failed or never ran keeps the copies apart, and so does a titled file that is offline or locked, since a fetch
+    // weighs only available, unlocked files. Once combined, the show keeps its order (EpisodeOrder.HoldsCopies).
+    private bool OrdersSettled(IEnumerable<MediaItem> members) => NumberedEpisodes(members).GroupBy(LibraryIdentity.ShowKey).All(copy =>
     {
         var files = copy.ToArray(); var evidence = EpisodeOrder.Collect(files);
-        return !EpisodeOrder.CanChoose(files) || evidence.Length < EpisodeOrder.MinimumEvidence ||
+        return !EpisodeOrder.CanChoose(files) || EpisodeOrder.HoldsCopies(files) || evidence.Length < EpisodeOrder.MinimumEvidence ||
             SeriesMetadata.OrderWeighed(this, copy.Key) == EpisodeOrder.Weighed(files[0].NumberingOrder, evidence);
     });
     // Each folder listed the others' episodes as missing. Once combined, an episode with a file isn't missing, and one that is needs listing once.
