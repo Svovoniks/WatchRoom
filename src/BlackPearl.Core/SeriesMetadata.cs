@@ -68,15 +68,16 @@ public static class SeriesMetadata
                 outstanding.Set(stage, entry, "artwork-failure", AutomaticArtwork.FailureReason(failure), failure);
             return (null, true);
         }
-        var groups = (catalogChanged ? library.All() : catalog).Where(x => !x.IsMusic).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Series is not null && !x.MetadataLocked && !MetadataTitles.IsUnverifiedCompilation(x) &&
+        var snapshot = catalogChanged ? library.All() : catalog;
+        var groups = snapshot.Where(x => !x.IsMusic).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Series is not null && !x.MetadataLocked && !MetadataTitles.IsUnverifiedCompilation(x) &&
             (x.Matched || !MetadataMatching.HasMovieEvidence(x))).GroupBy(LibraryIdentity.ShowKey).ToArray();
-        var known = new KnownShows(catalogChanged ? library.All() : catalog);
+        var known = new KnownShows(snapshot);
         // Every file of each show, offline and locked ones too: whether a show holds copies of a season depends on all of them.
-        var showFiles = (catalogChanged ? library.All() : catalog).Where(x => !x.IsVirtual && x.Series is not null).ToLookup(LibraryIdentity.ShowKey);
+        var showFiles = snapshot.Where(x => !x.IsVirtual && x.Series is not null).ToLookup(LibraryIdentity.ShowKey);
         foreach (var group in groups)
         {
             ct.ThrowIfCancellationRequested();
-            var holdsCopies = EpisodeOrder.HoldsCopies(showFiles[group.Key]);
+            var holdsCopies = EpisodeOrder.MarkedCopies(library, group.Key) || EpisodeOrder.HoldsCopies(showFiles[group.Key]);
             var orderCheck = checkingOrders && !holdsCopies && EpisodeOrder.CanChoose(group.ToArray()) && EpisodeOrder.Collect(group).Length >= EpisodeOrder.MinimumEvidence;
             if (mode == MetadataRefresh.FillMissing && !rechecking && !orderCheck && group.All(x => x.MetadataFetchedAt > 0 &&
                 (options.RefreshDays <= 0 || x.MetadataFetchedAt > Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds) &&

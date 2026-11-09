@@ -147,6 +147,38 @@ static class EpisodeOrderFixture
         var awayPlain = away.All().Single(x => !x.IsVirtual && x.Path.Contains("away-plain") && x.Season == 2 && x.Episode == 1);
         check(away.All().Where(x => !x.IsVirtual).All(x => x.NumberingOrder == "aired") && awayPlain.EpisodeTitle == "Seventh",
             $"a copy that is offline while the other gains titles keeps its aired episodes (got {awayPlain.NumberingOrder}, {awayPlain.EpisodeTitle})");
+        // With real scans: a copy on another library folder goes offline for two scans while the other copy gains titled files. Its records
+        // stay, the show keeps its order, and the copy is back with its aired episodes and its own edits.
+        var scanned = Store(Path.Combine(directory, "copy-scanned"));
+        var rootA = Path.Combine(directory, "scan-a"); var rootB = Path.Combine(directory, "scan-b"); var rootAway = Path.Combine(directory, "scan-b-away");
+        string Put(string root, string show, int s, int e, string? title)
+        {
+            var folder = Path.Combine(root, show, $"Season {s}"); Directory.CreateDirectory(folder);
+            var path = Path.Combine(folder, title is null ? $"{show} - S{s:00}E{e:00}.mkv" : $"{show} - S{s:00}E{e:00} - {title}.mkv"); File.WriteAllBytes(path, [0]); return path;
+        }
+        foreach (var (s, e, title) in new[] { (1, 1, "Pilot"), (1, 2, "Second"), (1, 3, "Third") }) Put(rootA, "Parts Show", s, e, title);
+        foreach (var (s, e) in new[] { (1, 1), (1, 4), (2, 1), (2, 2) }) Put(rootB, "Parts Copy", s, e, null);
+        LibraryFolder[] scanRoots = [new(rootA, "Show"), new(rootB, "Show")];
+        async Task Identify() { foreach (var file in scanned.All().Where(x => !x.IsVirtual && x.MetadataId is null)) scanned.Save(file with { MetadataProvider = "tmdb", MetadataId = 10, ProviderIds = new() { ["tmdb"] = "10" }, MetadataType = "tv", MetadataKind = "Show" }); await Task.CompletedTask; }
+        await scanned.ScanAsync(scanRoots); await Identify();
+        await Fetch(scanned, directory, handler);
+        scanned.GroupShowsByProvider();
+        check(scanned.All().Where(x => !x.IsVirtual).Select(x => x.ShowId).Distinct().Count() == 1, "scanned copies whose orders are settled combine");
+        var edited = scanned.All().Single(x => x.Path.Contains("Parts Copy") && x.Season == 1 && x.Episode == 4);
+        scanned.Save(edited with { EpisodeTitle = "My own title", LockedFields = ["EpisodeTitle"] });
+        Directory.Move(rootB, rootAway);
+        foreach (var (s, e, title) in new[] { (2, 1, "Fourth"), (2, 2, "Fifth"), (2, 3, "Sixth") }) Put(rootA, "Parts Show", s, e, title);
+        await scanned.ScanAsync(scanRoots); await scanned.ScanAsync(scanRoots); await Identify();
+        check(scanned.All().Count(x => !x.IsVirtual && x.Path.Contains("Parts Copy")) == 4, "a scan keeps the records of a copy whose library folder is offline");
+        await Fetch(scanned, directory, handler);
+        Directory.Move(rootAway, rootB);
+        await scanned.ScanAsync(scanRoots);
+        await Fetch(scanned, directory, handler);
+        var back = scanned.All().Where(x => !x.IsVirtual && x.Path.Contains("Parts Copy")).ToArray();
+        check(back.All(x => x.NumberingOrder == "aired") && back.Single(x => x.Season == 2 && x.Episode == 1).EpisodeTitle == "Seventh" &&
+            back.Single(x => x.Season == 1 && x.Episode == 4).EpisodeTitle == "My own title",
+            $"a copy back from an offline drive keeps its aired episodes and its edits (got {string.Join(", ", back.OrderBy(x => x.Season).ThenBy(x => x.Episode).Select(x => $"{x.NumberingOrder}/{x.EpisodeTitle}"))})");
+
         // A titled copy that is offline was never weighed, so it doesn't count as settled and stays apart.
         var offline = Store(Path.Combine(directory, "copy-offline"));
         foreach (var (s, e) in new[] { (1, 1), (2, 1) }) offline.Save(Episode(directory, "offline-plain", "Parts Show", 10, s, e, "Untitled") with { EpisodeTitle = null });

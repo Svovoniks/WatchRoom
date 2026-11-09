@@ -301,7 +301,7 @@ public sealed partial class LibraryStore
     }
     // A file that went missing while another file of the same episode is still here was a replaced release, not a
     // lost episode: its record goes, and its watched flag and resume position pass to the file that remains.
-    private int DropReplacedReleases()
+    private int DropReplacedReleases(LibraryFolder[] roots)
     {
         var all = All();
         var available = all.Where(x => x.Available && !x.IsVirtual && !x.IsExtra && x.Series is not null && x.Season is not null && x.Episode is not null && x.NumberingConflict is null)
@@ -312,6 +312,8 @@ public sealed partial class LibraryStore
             var numbers = LibraryIdentity.EpisodeNumbers(gone).ToHashSet();
             var replacements = available[(LibraryIdentity.ShowKey(gone), gone.Season)].Where(x => LibraryIdentity.EpisodeNumbers(x).Any(numbers.Contains)).ToArray();
             if (replacements.Length == 0 || File.Exists(gone.Path)) continue;
+            // A file whose library folder is away, such as an unplugged drive, wasn't replaced; another copy holding its episode leaves it be.
+            if (roots.Where(r => IsWithin(gone.Path, r.Path)).OrderByDescending(r => r.Path.Length).FirstOrDefault() is { } root && !Directory.Exists(root.Path)) continue;
             lock (writeGate)
             {
                 if (Setting("watched:" + gone.Id) == "true" && !replacements.Any(x => Setting("watched:" + x.Id) == "true"))
@@ -633,7 +635,7 @@ public sealed partial class LibraryStore
     }
     public void GroupShowsByProvider()
     {
-        if (!MetadataOptions.Load(this).CombineShowFolders) return;
+        if (!MetadataOptions.Load(this).CombineShowFolders) { MarkShowsWithCopies(null); return; }
         MediaItem[]? items = null; var wanted = Wanted().Select(x => x.Id).ToHashSet();
         foreach (var provider in new[] { "tmdb", "tvdb", "imdb" })
         {
@@ -654,7 +656,13 @@ public sealed partial class LibraryStore
             }
             if (merged) items = null;
         }
+        MarkShowsWithCopies(items);
         CleanHierarchy();
+    }
+    private void MarkShowsWithCopies(MediaItem[]? items)
+    {
+        foreach (var show in (items ?? All().Where(x => x.Series is not null && !x.IsExtra && !x.IsMusic).ToArray()).GroupBy(LibraryIdentity.ShowKey))
+            if (EpisodeOrder.HoldsCopies(show)) EpisodeOrder.MarkCopies(this, show.Key);
     }
     private static IEnumerable<MediaItem> NumberedEpisodes(IEnumerable<MediaItem> members) => members.Where(x => !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Season > 0);
     private static bool SharesSeason(IEnumerable<MediaItem> members) => NumberedEpisodes(members)
@@ -671,8 +679,11 @@ public sealed partial class LibraryStore
     private bool OrdersSettled(IEnumerable<MediaItem> members) => NumberedEpisodes(members).GroupBy(LibraryIdentity.ShowKey).All(copy =>
     {
         var files = copy.ToArray(); var evidence = EpisodeOrder.Collect(files);
-        return !EpisodeOrder.CanChoose(files) || EpisodeOrder.HoldsCopies(files) || evidence.Length < EpisodeOrder.MinimumEvidence ||
-            SeriesMetadata.OrderWeighed(this, copy.Key) == EpisodeOrder.Weighed(files[0].NumberingOrder, evidence);
+        if (evidence.Length < EpisodeOrder.MinimumEvidence || EpisodeOrder.HoldsCopies(files) || EpisodeOrder.MarkedCopies(this, copy.Key)) return true;
+        // Whether titles can move the copy depends on the files a fetch weighs, as there.
+        var weighable = files.Where(x => x.Available && !x.MetadataLocked).ToArray();
+        if (weighable.Length > 0 && !EpisodeOrder.CanChoose(weighable)) return true;
+        return SeriesMetadata.OrderWeighed(this, copy.Key) == EpisodeOrder.Weighed(files[0].NumberingOrder, evidence);
     });
     // Each folder listed the others' episodes as missing. Once combined, an episode with a file isn't missing, and one that is needs listing once.
     private static IEnumerable<string> RedundantPlaceholders(IReadOnlyCollection<MediaItem> members, string provider)
@@ -824,7 +835,7 @@ public sealed partial class LibraryStore
                     var missing = stored with { IsExtra = extra, Available = extra && File.Exists(stored.Path) };
                     if (missing != stored) { Save(missing); changes++; }
                 }
-            changes += DropReplacedReleases();
+            changes += DropReplacedReleases(roots);
             AttachLooseReleases();
             MergeDuplicateShows();
             GroupShowsByProvider();

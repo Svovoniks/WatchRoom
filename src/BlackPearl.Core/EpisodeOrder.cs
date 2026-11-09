@@ -50,7 +50,11 @@ internal static class EpisodeOrder
     public static bool HoldsCopies(IEnumerable<MediaItem> files) => files.Where(x => !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Season is > 0)
         .GroupBy(x => x.Season).Any(season =>
             season.Select(x => x.SeriesPath).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1 ||
-            season.GroupBy(x => x.Episode).Any(episode => episode.Select(x => x.SeriesPath ?? Path.GetDirectoryName(x.Path) ?? "").Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1));
+            season.Where(x => x.Episode is not null).GroupBy(x => x.Episode).Any(episode => episode.Select(x => x.SeriesPath ?? Path.GetDirectoryName(x.Path) ?? "").Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1));
+    // A show once seen holding copies keeps that mark, so its order stays fixed even if a copy's records are later gone.
+    private static string CopiesKey(string show) => "show-holds-copies:" + show;
+    internal static bool MarkedCopies(LibraryStore library, string show) => library.Setting(CopiesKey(show)) is not null;
+    internal static void MarkCopies(LibraryStore library, string show) { if (!MarkedCopies(library, show)) library.Setting(CopiesKey(show), "1"); }
     // Which titles were weighed, so an order weighed before more titled files arrived isn't taken for theirs.
     public static string Weighed(string order, IEnumerable<Evidence> evidence) => order + "|" + LibraryIdentity.Hash(string.Join("\n",
         evidence.Select(x => $"{x.Season}:{x.Episode}:{MetadataTitles.Normalize(x.Title)}").Order(StringComparer.Ordinal)));
