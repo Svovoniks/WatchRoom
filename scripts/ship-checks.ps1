@@ -156,6 +156,8 @@ try {
     $finished.WaitForExit()
     Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = $finished.Id; ProcessStart = $finished.StartTime.ToUniversalTime().Ticks }
     Check ((Get-CheckState $recordPath).State -eq 'interrupted') 'checks whose process ended without a result were interrupted'
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = 4; ProcessStart = 1 }
+    Check ((Get-CheckState $recordPath).State -eq 'interrupted') 'a process id reused by a protected system process does not count as the running checks'
     Write-CheckRecord $recordPath @{ Commit = $headA; State = 'failed'; Error = 'fixture failure' }
     Check ((Get-CheckState $recordPath).State -eq 'failed') 'failed checks are reported as failed'
     Check (@(Get-ChildItem -LiteralPath (Split-Path -Parent $recordPath) -Filter '*.partial-*').Count -eq 0) 'check records are replaced whole'

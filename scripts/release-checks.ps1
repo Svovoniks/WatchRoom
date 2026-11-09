@@ -9,7 +9,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateSet('all', 'desktop', 'smoke-1', 'smoke-2')][string]$Lane,
-    [string]$Sdk = 'dotnet'
+    [string]$Sdk = 'dotnet',
+    # Receives the failing check's error, for the record ship.ps1 keeps.
+    [string]$FailureFile = ''
 )
 $ErrorActionPreference = 'Stop'
 
@@ -51,30 +53,36 @@ function Invoke-ShipScriptChecks {
     Invoke-Check 'Shipping script checks' $shell @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'ship-checks.ps1'))
 }
 
-switch ($Lane) {
-    'desktop' { Invoke-MainDesktopSuite; Invoke-DesktopSuites }
-    'smoke-1' {
-        Invoke-ShipScriptChecks
-        Invoke-Project 'Full smoke suite, part 1 of 2' 'BlackPearl.Smoke' @((New-SmokeDirectory), '--part', '1')
-    }
-    'smoke-2' { Invoke-Project 'Full smoke suite, part 2 of 2' 'BlackPearl.Smoke' @((New-SmokeDirectory), '--part', '2') }
-    'all' {
-        Invoke-MainDesktopSuite
-        # The whole smoke suite, the longest, then runs in the background beside everything else.
-        $smokeDirectory = New-SmokeDirectory
-        $smokeLog = "$smokeDirectory.log"
-        $smoke = Start-Process -FilePath $Sdk -ArgumentList @('run', '--project', 'tests/BlackPearl.Smoke', '-c', 'Release', '--no-build', '--', "`"$smokeDirectory`"") `
-            -WorkingDirectory $PWD.Path -RedirectStandardOutput $smokeLog -RedirectStandardError "$smokeLog.err" -NoNewWindow -PassThru
-        $null = $smoke.Handle # keeps the exit code readable after the process ends
-        try {
-            Invoke-DesktopSuites
+try {
+    switch ($Lane) {
+        'desktop' { Invoke-MainDesktopSuite; Invoke-DesktopSuites }
+        'smoke-1' {
             Invoke-ShipScriptChecks
-            Write-Host 'Waiting for the full smoke suite...'
-            $smoke.WaitForExit()
-            Get-Content -LiteralPath $smokeLog, "$smokeLog.err" -Tail 20 | Write-Host
-            if ($smoke.ExitCode -ne 0) { throw "The full smoke suite failed with exit code $($smoke.ExitCode). Output: $smokeLog" }
-            Write-Host 'Full smoke suite passed'
+            Invoke-Project 'Full smoke suite, part 1 of 2' 'BlackPearl.Smoke' @((New-SmokeDirectory), '--part', '1')
         }
-        finally { if (!$smoke.HasExited) { $smoke.Kill($true) } }
+        'smoke-2' { Invoke-Project 'Full smoke suite, part 2 of 2' 'BlackPearl.Smoke' @((New-SmokeDirectory), '--part', '2') }
+        'all' {
+            Invoke-MainDesktopSuite
+            # The whole smoke suite, the longest, then runs in the background beside everything else.
+            $smokeDirectory = New-SmokeDirectory
+            $smokeLog = "$smokeDirectory.log"
+            $smoke = Start-Process -FilePath $Sdk -ArgumentList @('run', '--project', 'tests/BlackPearl.Smoke', '-c', 'Release', '--no-build', '--', "`"$smokeDirectory`"") `
+                -WorkingDirectory $PWD.Path -RedirectStandardOutput $smokeLog -RedirectStandardError "$smokeLog.err" -NoNewWindow -PassThru
+            $null = $smoke.Handle # keeps the exit code readable after the process ends
+            try {
+                Invoke-DesktopSuites
+                Invoke-ShipScriptChecks
+                Write-Host 'Waiting for the full smoke suite...'
+                $smoke.WaitForExit()
+                Get-Content -LiteralPath $smokeLog, "$smokeLog.err" -Tail 20 | Write-Host
+                if ($smoke.ExitCode -ne 0) { throw "The full smoke suite failed with exit code $($smoke.ExitCode). Output: $smokeLog" }
+                Write-Host 'Full smoke suite passed'
+            }
+            finally { if (!$smoke.HasExited) { $smoke.Kill($true) } }
+        }
     }
+}
+catch {
+    if ($FailureFile) { "$_" | Set-Content -LiteralPath $FailureFile }
+    throw
 }

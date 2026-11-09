@@ -21,6 +21,7 @@ param(
     [switch]$VerifyOnly,
     [string]$CheckCommit = '',
     [string]$Branch = '',
+    [string]$CheckLog = '',
     [ValidateRange(1, 120)][int]$TimeoutMinutes = 60
 )
 $ErrorActionPreference = 'Stop'
@@ -90,10 +91,19 @@ function Invoke-ReleaseChecks {
         Save-BuildCache $Checkout
         # The same list of checks the workflow runs, from the checked commit itself.
         $shell = (Get-Process -Id $PID).Path
-        Invoke-Native $shell @('-NoProfile', '-File', (Join-Path $Checkout 'scripts/release-checks.ps1'), '-Lane', 'all', '-Sdk', $Sdk)
+        $failure = Join-Path ([IO.Path]::GetTempPath()) ('blackpearl-check-failure-' + [guid]::NewGuid().ToString('N') + '.txt')
+        try { Invoke-Native $shell @('-NoProfile', '-File', (Join-Path $Checkout 'scripts/release-checks.ps1'), '-Lane', 'all', '-Sdk', $Sdk, '-FailureFile', $failure) }
+        catch {
+            # Name the failing check rather than the script that ran it.
+            if (Test-Path -LiteralPath $failure) { throw (Get-Content -LiteralPath $failure -Raw).Trim() }
+            throw
+        }
         Invoke-Native git @('diff', '--exit-code')
     }
-    finally { Pop-Location }
+    finally {
+        if ($failure) { Remove-Item -LiteralPath $failure -ErrorAction SilentlyContinue }
+        Pop-Location
+    }
 }
 function Resolve-ShipSdk {
     param([string]$Root, [string]$Requested)
@@ -107,7 +117,8 @@ function Resolve-ShipSdk {
     return (Resolve-Path -LiteralPath $sdk).Path
 }
 # Runs the release checks on a clean copy of the commit and records running, then passed or failed, for -Merge and
-# reviewers. ship.ps1 runs this in a background process after pushing; -Merge runs it itself when that was interrupted.
+# reviewers. It runs in its own process (ship.ps1 -CheckCommit), whose id the record keeps: in the background after a
+# push, or in the foreground when -Merge finds the background run interrupted.
 function Invoke-CheckRun {
     param([string]$Root, [string]$Commit, [string]$Sdk, [string]$Branch = '', [string]$Log = '')
     $recordPath = Get-CheckRecordPath $Root $Commit
@@ -164,15 +175,15 @@ function Start-BackgroundChecks {
     New-Item -ItemType Directory -Path (Split-Path -Parent $recordPath) -Force | Out-Null
     Remove-Item -LiteralPath $recordPath -Force -ErrorAction SilentlyContinue
     $shell = (Get-Process -Id $PID).Path
-    # The checked commit's own copy of this script runs the checks, in a process that outlives this one.
+    # The branch's copy of this script runs the checks, in a process that outlives this one. cmd writes its output and
+    # errors to one log, in the order they happen.
     $script = Join-Path $Root 'scripts/ship.ps1'
-    $process = Start-Process -FilePath $shell -WindowStyle Hidden -PassThru -WorkingDirectory $Root `
-        -RedirectStandardOutput $log -RedirectStandardError "$log.err" `
-        -ArgumentList @('-NoProfile', '-File', "`"$script`"", '-CheckCommit', $Commit, '-Branch', "`"$Branch`"", '-Sdk', "`"$Sdk`"")
+    $command = "`"`"$shell`" -NoProfile -File `"$script`" -CheckCommit $Commit -Branch `"$Branch`" -Sdk `"$Sdk`" -CheckLog `"$log`" > `"$log`" 2>&1`""
+    $process = Start-Process -FilePath $env:ComSpec -ArgumentList @('/d', '/s', '/c', $command) -WindowStyle Hidden -PassThru -WorkingDirectory $Root
     $deadline = [datetime]::UtcNow.AddSeconds(60)
     while ((Get-CheckState $recordPath).State -eq 'missing') {
         if ($process.HasExited -or [datetime]::UtcNow -ge $deadline) {
-            $output = (Get-Content -LiteralPath $log, "$log.err" -Tail 20 -ErrorAction SilentlyContinue) -join "`n"
+            $output = (Get-Content -LiteralPath $log -Tail 20 -ErrorAction SilentlyContinue) -join "`n"
             throw "The background release checks did not start. $output"
         }
         Start-Sleep -Milliseconds 500
@@ -403,7 +414,7 @@ Push-Location $root
 try {
     if ($CheckCommit) {
         if ($CheckCommit -notmatch '^[a-f0-9]{40}$') { throw '-CheckCommit takes a full commit hash.' }
-        Invoke-CheckRun $root $CheckCommit (Resolve-ShipSdk $root $Sdk) $Branch ([IO.Path]::ChangeExtension((Get-CheckRecordPath $root $CheckCommit), '.log'))
+        Invoke-CheckRun $root $CheckCommit (Resolve-ShipSdk $root $Sdk) $Branch $CheckLog
         return
     }
     $remote = Invoke-Native git @('remote', 'get-url', 'origin')
@@ -428,7 +439,7 @@ try {
         $verdict = Get-ReviewVerdict (Get-PullRequestComments $pull.number)
         Write-Host "#$($pull.number) $($pull.title)"
         Write-Host "Head: $head"
-        Write-Host "Release checks: $($local.State)$(if ($local.State -eq 'running') { " since $($local.Started)" })"
+        Write-Host "Release checks: $($local.State)$(if ($local.State -eq 'running') { " since $(([datetimeoffset]$local.Started).ToLocalTime().ToString('yyyy-MM-dd HH:mm:ss zzz'))" })"
         if ($local.State -eq 'failed') {
             Write-Host "  $($local.Error)"
             Write-Host "  $(Format-CheckEvidence $local)"
@@ -453,8 +464,9 @@ try {
         Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', "pull/$number/head")
         if ((Invoke-Native git @('rev-parse', 'FETCH_HEAD')).Trim() -cne $head) { throw 'The pull request head changed while it was being read. Rerun -Merge.' }
         $localRecord = Get-CheckRecordPath $root $head
+        $checkFailureAdvice = 'Fix the failure, rerun ship.ps1, and request a re-review. If it is unrelated to this change, rerun ship.ps1 on the same head instead; the approval still covers it.'
         $local = Get-CheckState $localRecord
-        if ($local.State -eq 'failed') { throw "Release checks failed on ${head}: $($local.Error) $(Format-CheckEvidence $local)Fix the failure, rerun ship.ps1, and request a re-review." }
+        if ($local.State -eq 'failed') { throw "Release checks failed on ${head}: $($local.Error) $(Format-CheckEvidence $local)$checkFailureAdvice" }
         Write-Host "Release checks on ${head}: $($local.State)"
         & git merge-base --is-ancestor origin/master $head
         if ($LASTEXITCODE -ne 0) { throw 'master advanced since this pull request was checked. Merge origin/master into the branch, rerun ship.ps1, and request a re-review.' }
@@ -485,11 +497,13 @@ try {
             $local = Get-CheckState $localRecord
             if ($local.State -ne $lastLocal) { Write-Host "Release checks: $($local.State)"; $lastLocal = $local.State }
             if ($local.State -eq 'passed') { $localPassed = $true }
-            elseif ($local.State -eq 'failed') { throw "Release checks failed on ${head}: $($local.Error) $(Format-CheckEvidence $local)Fix the failure, rerun ship.ps1, and request a re-review." }
+            elseif ($local.State -eq 'failed') { throw "Release checks failed on ${head}: $($local.Error) $(Format-CheckEvidence $local)$checkFailureAdvice" }
             elseif ($local.State -ne 'running') {
                 Write-Host "Running the release checks on $head here..."
-                try { Invoke-CheckRun $root $head (Resolve-ShipSdk $root $Sdk) $pull.head.ref }
-                catch { throw "Release checks failed on ${head}: $_ Fix the failure, rerun ship.ps1, and request a re-review." }
+                # In a process of its own, so stopping it or a newer push of the branch cannot leave the record running.
+                & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $root 'scripts/ship.ps1') -CheckCommit $head -Branch $pull.head.ref -Sdk (Resolve-ShipSdk $root $Sdk)
+                $local = Get-CheckState $localRecord
+                if ($local.State -ne 'passed') { throw "Release checks failed on ${head}: $($local.Error) $(Format-CheckEvidence $local)$checkFailureAdvice" }
                 $localPassed = $true
             }
             if (!$checks) {

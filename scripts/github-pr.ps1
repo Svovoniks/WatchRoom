@@ -37,8 +37,10 @@ function Get-CheckState {
     $record = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     if (!$record.PSObject.Properties['State']) { $record | Add-Member State 'passed' }
     if ($record.State -eq 'running') {
-        $process = Get-Process -Id $record.Pid -ErrorAction SilentlyContinue
-        if (!$process -or $process.StartTime.ToUniversalTime().Ticks -ne [long]$record.ProcessStart) { $record.State = 'interrupted' }
+        # A process this user cannot open (a service that reused the id) has no start time, so it is not the checks.
+        $started = $null
+        try { $started = (Get-Process -Id $record.Pid -ErrorAction Stop).StartTime } catch { }
+        if (!$started -or $started.ToUniversalTime().Ticks -ne [long]$record.ProcessStart) { $record.State = 'interrupted' }
     }
     return $record
 }
