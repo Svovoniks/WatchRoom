@@ -153,20 +153,74 @@ begin
   Result := (ExpandConstant('{param:BLACKPEARLUPDATE|0}') = '1') or (ExpandConstant('{param:WATCHROOMUPDATE|0}') = '1');
 end;
 
-#ifdef UpdateFrom
-// An update installer carries only what changed since UpdateFrom, so it refuses any other installation.
+const
+  GENERIC_WRITE = $40000000;
+  SHARE_ALL = 7; // FILE_SHARE_READ, FILE_SHARE_WRITE and FILE_SHARE_DELETE
+  OPEN_EXISTING = 3;
+  ERROR_SHARING_VIOLATION = 32;
+  CLOSE_WAIT_MS = 60000;
+
+function CreateFile(FileName: String; Access, Share: DWORD; Security: INT_PTR; Disposition, Flags: DWORD; Template: INT_PTR): INT_PTR;
+  external 'CreateFileW@kernel32.dll stdcall';
+function CloseHandle(Handle: INT_PTR): BOOL;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+// True while a program runs from this file: Windows doesn't open a running program's file for writing.
+function ProgramRunning(const FileName: String): Boolean;
+var
+  Handle: INT_PTR;
+begin
+  Result := False;
+  if not FileExists(FileName) then Exit;
+  Handle := CreateFile(FileName, GENERIC_WRITE, SHARE_ALL, 0, OPEN_EXISTING, 0, 0);
+  if Handle <> -1 then CloseHandle(Handle)
+  else Result := DLLGetLastError = ERROR_SHARING_VIOLATION;
+end;
+
+function AppRunning: Boolean;
+begin
+  Result := ProgramRunning(ExpandConstant('{app}\BlackPearl.exe')) or ProgramRunning(ExpandConstant('{app}\Watchroom.exe'));
+end;
+
+// The app starts its update installer and then closes. Its window goes at once, but the app can take several seconds
+// more to exit, much longer on a busy computer. Restart Manager can't close a program that has no window left, and a
+// silent setup then gives up and rolls back. So a silent setup first waits up to a minute for the app to exit.
+procedure WaitForClosingApp;
+var
+  Waited: Integer;
+begin
+  if not AppRunning then Exit;
+  Log('Waiting for BlackPearl to finish closing.');
+  Waited := 0;
+  repeat
+    Sleep(250);
+    Waited := Waited + 250;
+  until (not AppRunning) or (Waited >= CLOSE_WAIT_MS);
+  if AppRunning then Log(Format('BlackPearl was still running after %d ms.', [Waited]))
+  else Log(Format('BlackPearl closed after about %d ms.', [Waited]));
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+#ifdef UpdateFrom
 var
   Key, Installed, Location: String;
+#endif
 begin
   Result := '';
+#ifdef UpdateFrom
+  // An update installer carries only what changed since UpdateFrom, so it refuses any other installation.
   Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{{#AppGuid}}_is1';
   if not RegQueryStringValue(HKCU, Key, 'DisplayVersion', Installed) then Installed := '';
   if not RegQueryStringValue(HKCU, Key, 'InstallLocation', Location) then Location := '';
   if (Installed <> '{#UpdateFrom}') or (CompareText(AddBackslash(Location), AddBackslash(ExpandConstant('{app}'))) <> 0) then
+  begin
     Result := 'This update applies to BlackPearl {#UpdateFrom} installed in this folder. Download the full installer from GitHub instead.';
-end;
+    Exit;
+  end;
 #endif
+  // Setup checks for files in use after this function returns.
+  if WizardSilent then WaitForClosingApp;
+end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode, Attempts: Integer;

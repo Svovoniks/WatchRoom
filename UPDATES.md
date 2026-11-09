@@ -301,8 +301,9 @@ uninstaller also removes the files it added; it refuses to run unless the
 registered installation is FROM in the target folder.
 `scripts/update-package-checks.ps1` exercises this offline with a fixture under
 a separate test identity, without file associations or shortcuts, in a scratch
-folder under `artifacts/`: file lists, a direct update, refusals, a two-step
-chain run the way the app runs it, and uninstalling.
+folder under `artifacts/`: file lists, a direct update started while the app
+is still closing, refusals, a two-step chain run the way the app runs it, and
+uninstalling.
 
 The Windows app checks GitHub's latest stable release 15 seconds after startup
 and every six hours. Settings offers **Check for updates** and a saved preference
@@ -326,7 +327,12 @@ back a fresh download briefly, which is retried, or remove it), the full
 installer is downloaded instead; update installers that ran without reaching a
 version are not offered for it again. The update card shows the download size. After successful verification,
 the per-user Inno Setup installer updates the installed app's directory, and
-reopens BlackPearl. Only the copy running from the installer-registered folder (or
+reopens BlackPearl. The app starts the installer and then closes, and closing
+can take several seconds, longer on a busy computer. Restart Manager cannot
+close an app that has no window left, and a silent setup that finds its files
+in use rolls back. So a silent setup first waits up to a minute for
+`BlackPearl.exe` (or `Watchroom.exe`) in the installation folder to stop
+running, and logs that wait. Only the copy running from the installer-registered folder (or
 the default folder when none is registered) updates itself; development builds and
 copied folders disable update checks so they cannot take over the installation.
 Library data, rooms, queues, and credentials remain outside the installation
