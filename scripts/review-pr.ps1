@@ -34,6 +34,8 @@ Invoke-Native git @('-C', $root, 'fetch', '--no-recurse-submodules', 'origin', '
 # A short temp path keeps SQLite fixture paths within legacy Windows limits.
 $checkout = Join-Path ([IO.Path]::GetTempPath()) "wr-review-$Pr-$($head.Substring(0, 8))-$([guid]::NewGuid().ToString('N').Substring(0, 6))"
 Invoke-Native git @('-C', $root, 'worktree', 'add', '--detach', $checkout, $head) | Out-Null
+# The voice libraries and models ship.ps1 cached, so building here does not compile or download them again.
+Restore-BuildCache $checkout
 $base = (Invoke-Native git @('-C', $checkout, 'merge-base', 'origin/master', $head)).Trim()
 $state = Get-HeadCheckState (Invoke-GitHub "/actions/runs?head_sha=$head&per_page=100").workflow_runs $head
 Write-Host "#$Pr $($pull.title)"
@@ -41,6 +43,8 @@ Write-Host $pull.html_url
 Write-Host "Head: $head (branch $($pull.head.ref))"
 Write-Host "Base: $base$(if ($base -cne (Invoke-Native git @('-C', $root, 'rev-parse', 'origin/master')).Trim()) { ' - behind origin/master; merging will require an update' })"
 Write-Host "CI: $($state.State) - $($state.Detail)"
+$local = Get-CheckState (Get-CheckRecordPath $root $head)
+Write-Host "Release checks on this computer: $($local.State)$(if ($local.State -eq 'failed') { " - $($local.Error) $(Format-CheckEvidence $local)" })"
 Write-Host "Review worktree: $checkout"
 Write-Host "Diff: git -C '$checkout' diff $base $head"
 Write-Host ''

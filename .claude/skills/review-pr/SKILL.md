@@ -27,8 +27,9 @@ temp directory, so the user's checkout stays unchanged:
 ./scripts/review-pr.ps1 -Pr <number>
 ```
 
-It prints the head commit, the CI state, the review worktree path, the diff command,
-the description, the changed files, and earlier verdicts. Work only inside that
+It prints the head commit, the CI state, the state of the author's release checks,
+the review worktree path, the diff command, the description, the changed files, and
+earlier verdicts. The worktree already has the cached voice libraries and models. Work only inside that
 worktree. If the head differs from the one in your brief, review the printed head and
 say so in the verdict.
 
@@ -81,8 +82,9 @@ them separately. They never block approval on their own.
 - Confirm a suspected bug before you report it. Trace the code path, write a quick
   check, or run the relevant test. Say which you did. If you could not confirm it, mark
   it unconfirmed and explain what would settle it.
-- CI and the author's release checks must pass. `ship.ps1` ran the full release suite
-  on the head before pushing. Run the checks for the area you are worried about in the
+- CI and the author's release checks must pass. `ship.ps1` runs the full release suite
+  on the head in the background while you review, and `-Merge` waits for it. If it
+  has already failed, say so in the verdict. Run the checks for the area you are worried about in the
   review worktree, such as `tests/BlackPearl.DesktopChecks -- --player-layout` or the
   smoke suite against a fresh temp directory. The commands are in UPDATES.md. A fresh
   worktree needs `dotnet build BlackPearl.slnx -c Release` first. Use

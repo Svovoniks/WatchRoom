@@ -142,6 +142,26 @@ try {
     Check ($run.id -eq 3) 'only the exact tag and commit workflow count as a release build'
     $script:mockConclusion = 'failure'
     Expect-Rejected { Wait-ReleaseBuild '0.3.18' 'fixture' ([datetime]::UtcNow.AddSeconds(5)) } 'failed tag workflow stops shipping'
+    # Release checks run in the background after the push; -Merge reads their record.
+    $recordPath = Join-Path $testRoot "checks/$headA.json"
+    Check ((Get-CheckState $recordPath).State -eq 'missing') 'a commit without a check record is reported as unchecked'
+    Write-CheckRecord $recordPath @{ Commit = $headA; Version = '0.3.18'; Checked = '2026-01-01T00:00:00Z' }
+    Check ((Get-CheckState $recordPath).State -eq 'passed') 'a record written before background checks means the checks passed'
+    $self = Get-Process -Id $PID
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = $PID; ProcessStart = $self.StartTime.ToUniversalTime().Ticks }
+    Check ((Get-CheckState $recordPath).State -eq 'running') 'checks whose process is alive are running'
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = $PID; ProcessStart = $self.StartTime.ToUniversalTime().Ticks - 1 }
+    Check ((Get-CheckState $recordPath).State -eq 'interrupted') 'a reused process id does not count as the running checks'
+    $finished = Start-Process -FilePath $self.Path -ArgumentList @('-NoProfile', '-Command', 'exit 0') -WindowStyle Hidden -PassThru
+    $finished.WaitForExit()
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = $finished.Id; ProcessStart = $finished.StartTime.ToUniversalTime().Ticks }
+    Check ((Get-CheckState $recordPath).State -eq 'interrupted') 'checks whose process ended without a result were interrupted'
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'failed'; Error = 'fixture failure' }
+    Check ((Get-CheckState $recordPath).State -eq 'failed') 'failed checks are reported as failed'
+    Check (@(Get-ChildItem -LiteralPath (Split-Path -Parent $recordPath) -Filter '*.partial-*').Count -eq 0) 'check records are replaced whole'
+    # One list of checks: the workflow runs the shared script rather than its own copy of the suites.
+    $workflow = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../.github/workflows/build.yml') -Raw
+    Check ($workflow -match 'scripts/release-checks\.ps1 -Lane \$\{\{ matrix\.lane \}\}' -and $workflow -notmatch 'dotnet run --project tests/') 'the workflow runs the release checks from the shared list'
     . (Join-Path $PSScriptRoot 'ship-sync-checks.ps1') -TestRoot $testRoot
     Write-Host "$checks shipping safety checks passed. No releases were created."
 }

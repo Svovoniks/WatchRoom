@@ -3,7 +3,8 @@ name: Build and release
 # then publishes those exact installers: ship.ps1 merges only heads that contain master and tags a squash commit with
 # the head's tree, so the tag run finds the passing pull request run with that tree and reuses its checks and
 # installers. A tag without such a run checks and builds itself. Pushes to master only keep the build caches warm for
-# pull requests, which cannot share their own caches.
+# pull requests, which cannot share their own caches. The checks come from scripts/release-checks.ps1, which ship.ps1
+# also runs on one machine.
 on:
   push:
     branches: [master]
@@ -120,53 +121,10 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           dotnet build BlackPearl.slnx -c Release --no-restore -p:Version=$env:APP_VERSION
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Update safety checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.UpdateChecks -c Release --no-build
-      - name: TMDB access and retention checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.Smoke -c Release --no-build -- --tmdb-access
-      - name: Desktop regression checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build
-      - name: Acquisition dialog layout checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --acquisition-layout
-      - name: Home regression checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --home
-      - name: UI findings regression checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --ui-findings
-      - name: Guest library layout checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --guest-library-layout
-      - name: Host library browsing checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --host-library-browse
-      - name: Player layout checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --player-layout
-      - name: Metadata picker checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --metadata-picker
-      - name: Room playback status checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --room-playback-status
-      - name: Track language detection checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --language-detection
-      - name: Voice processing checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --voice-processing
-      - name: Episode thumbnail checks
-        if: matrix.lane == 'desktop'
-        run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --video-frames
-      # The full smoke suite in two halves of about equal length; the second includes the metadata cache, shared
-      # library transport and room checks.
-      - name: Full playback and room checks (part ${{ matrix.lane == 'smoke-1' && '1' || '2' }} of 2)
-        if: matrix.lane != 'desktop'
-        run: dotnet run --project tests/BlackPearl.Smoke -c Release --no-build -- artifacts/release-smoke --part ${{ matrix.lane == 'smoke-1' && '1' || '2' }}
+      # The same list of checks ship.ps1 runs on one machine, split across the three runners.
+      - name: Release checks (${{ matrix.lane }})
+        shell: pwsh
+        run: ./scripts/release-checks.ps1 -Lane ${{ matrix.lane }}
 
   package:
     needs: plan

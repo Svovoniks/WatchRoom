@@ -1,4 +1,4 @@
-# Pull request helpers shared by ship.ps1 and review-pr.ps1. Dot-source only.
+# Pull request, check record and build cache helpers shared by ship.ps1 and review-pr.ps1. Dot-source only.
 # The repository was Svovoniks/WatchRoom before it became Svovoniks/BlackPearl. Use-Repository picks whichever name
 # exists, so the scripts work on both sides of the rename. GitHub redirects the old name for reads only.
 $repository = 'Svovoniks/BlackPearl'
@@ -15,6 +15,64 @@ function Invoke-Native {
     param([string]$Command, [string[]]$Arguments)
     & $Command @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Command failed (exit $LASTEXITCODE): $($Arguments -join ' ')" }
+}
+function Get-CheckRecordPath {
+    param([string]$Root, [string]$Commit)
+    # Shared by every worktree, so -Merge and reviewers can run anywhere and still see what was checked.
+    $common = (Invoke-Native git @('-C', $Root, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
+    return Join-Path $common "blackpearl-checks/$Commit.json"
+}
+function Write-CheckRecord {
+    param([string]$Path, [hashtable]$Record)
+    New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
+    $partial = "$Path.partial-$([guid]::NewGuid().ToString('N'))"
+    $Record | ConvertTo-Json | Set-Content -LiteralPath $partial
+    Move-Item -LiteralPath $partial -Destination $Path -Force
+}
+function Get-CheckState {
+    param([string]$Path)
+    # Release checks run in the background after a push. Their record says running, passed or failed; a record from
+    # before that has no state and means they passed. A running record whose process is gone was interrupted.
+    if (!(Test-Path -LiteralPath $Path)) { return [pscustomobject]@{ State = 'missing' } }
+    $record = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if (!$record.PSObject.Properties['State']) { $record | Add-Member State 'passed' }
+    if ($record.State -eq 'running') {
+        $process = Get-Process -Id $record.Pid -ErrorAction SilentlyContinue
+        if (!$process -or $process.StartTime.ToUniversalTime().Ticks -ne [long]$record.ProcessStart) { $record.State = 'interrupted' }
+    }
+    return $record
+}
+function Format-CheckEvidence {
+    param($State)
+    $parts = @()
+    if ($State.Log -and (Test-Path -LiteralPath $State.Log)) { $parts += "Log: $($State.Log)." }
+    if ($State.Checkout -and (Test-Path -LiteralPath $State.Checkout)) { $parts += "Checked copy kept at $($State.Checkout)." }
+    return $(if ($parts.Count) { ($parts -join ' ') + ' ' } else { '' })
+}
+# Voice libraries and models are fetched or built once per checkout (see BlackPearl.Desktop.csproj), and each check or
+# review copy is a fresh checkout. Like the CI cache, this keeps them between runs while their pinned inputs are unchanged.
+function Get-BuildCacheEntries {
+    param([string]$Checkout)
+    $common = (Invoke-Native git @('-C', $Checkout, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
+    $project = (Invoke-Native git @('-C', $Checkout, 'rev-parse', 'HEAD:src/BlackPearl.Desktop/BlackPearl.Desktop.csproj')).Trim()
+    $native = (Invoke-Native git @('-C', $Checkout, 'rev-parse', 'HEAD:src/native')).Trim()
+    return @(
+        [pscustomobject]@{ Path = Join-Path $Checkout '.tools/native'; Files = '*.dll'; Kind = 'native'; Cache = Join-Path $common "blackpearl-build-cache/native-$native-$project" },
+        [pscustomobject]@{ Path = Join-Path $Checkout '.tools/models'; Files = '*'; Kind = 'models'; Cache = Join-Path $common "blackpearl-build-cache/models-$project" })
+}
+function Restore-BuildCache {
+    param([string]$Checkout)
+    foreach ($entry in Get-BuildCacheEntries $Checkout) {
+        if (!(Test-Path -LiteralPath $entry.Cache)) { continue }
+        try {
+            New-Item -ItemType Directory -Force -Path $entry.Path | Out-Null
+            Copy-Item -Path (Join-Path $entry.Cache '*') -Destination $entry.Path -Recurse -Force
+        }
+        catch {
+            # Another run replaced the entry mid-copy; the build fetches everything again.
+            Remove-Item -LiteralPath $entry.Path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 function Use-Repository {
     $name = $repository

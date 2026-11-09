@@ -39,23 +39,25 @@ manual git, version, tag, and verification commands:
    description to a file outside the repository. Cover what changed and why, any
    intentional behavior changes, removals, or performance costs, and how you tested.
    Then run `./scripts/ship.ps1 -Message '<release note>' -BodyFile <path>`. It
-   bumps the version, runs the full release checks on a clean copy of the commit,
-   pushes the branch, and opens the pull request.
+   bumps the version, pushes the branch, opens the pull request, and starts the full
+   release checks on a clean copy of the commit in the background.
+   `./scripts/ship.ps1 -Status` shows them, the workflow, and the review verdict.
 2. Ask a separate agent with fresh context to review it, for example with
-   `delegate_task`, `Agent`, or `spawn_agent`. Do not use a fork of yourself. Give
-   it the PR number, the head commit, and the instruction to follow the `review-pr`
-   skill in `.claude/skills/review-pr/SKILL.md`. Do not include your conclusions
+   `delegate_task`, `Agent`, or `spawn_agent`. Do not use a fork of yourself. Ask
+   right away; the checks run during the review. Give it the PR number, the head
+   commit, and the instruction to follow the `review-pr` skill in
+   `.claude/skills/review-pr/SKILL.md`. Do not include your conclusions
    about the change.
-3. Fix every blocking finding in your worktree, commit, and rerun
-   `./scripts/ship.ps1`, which checks and pushes again and updates the same pull
-   request. Then ask for a re-review of the new head. Give the reviewer its earlier
-   findings and your reply to each one. If you dispute a finding, explain why in
+3. Fix every blocking finding, and any failed check, in your worktree, commit, and
+   rerun `./scripts/ship.ps1`, which pushes again, updates the same pull request,
+   and checks the new head. Then ask for a re-review of the new head. Give the
+   reviewer its earlier findings and your reply to each one. If you dispute a finding, explain why in
    that reply rather than ignoring it. Repeat until the reviewer approves. If you
    and the reviewer disagree on the same point twice, or there is no approval after
    five rounds, stop and ask the user.
 4. After approval, run `./scripts/ship.ps1 -Merge`. It merges only the approved
-   head, after CI passes on it, and only if it still contains `master`. Then it tags
-   the release, waits for the tag build, verifies the public release and the
+   head, after CI and the release checks pass on it, and only if it still contains
+   `master`. Then it tags the release, waits for the tag build, verifies the public release and the
    unauthenticated updater feed, and synchronizes the user's local `master`.
 
 If the user wants a change landed without a new release, pass `-NoRelease` to both

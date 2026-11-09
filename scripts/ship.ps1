@@ -1,9 +1,11 @@
 #Requires -Version 7.0
 # Ships an app update through a reviewed pull request; see UPDATES.md.
-#   ship.ps1 -Message ... -BodyFile ...   check the branch, push it, and open or update its pull request
-#   ship.ps1 -Merge                       merge the approved pull request, tag it, and verify the release
+#   ship.ps1 -Message ... -BodyFile ...   push the branch, open or update its pull request, and start the release checks
+#   ship.ps1 -Status                      show the pull request's release checks, CI and review verdict
+#   ship.ps1 -Merge                       merge the approved, checked pull request, tag it, and verify the release
 #   ship.ps1 -NoRelease [-Merge]          the same for a change the user does not want released: no version bump, tag, or release
 #   ship.ps1 -VerifyOnly -Version x.y.z   finish verifying an already pushed tag
+#   ship.ps1 -CheckCommit <sha>           run the release checks on a commit and record the result (started by ship.ps1)
 [CmdletBinding()]
 param(
     [string]$Message = '',
@@ -14,8 +16,11 @@ param(
     [int]$Pr = 0,
     [switch]$Plan,
     [switch]$Merge,
+    [switch]$Status,
     [switch]$NoRelease,
     [switch]$VerifyOnly,
+    [string]$CheckCommit = '',
+    [string]$Branch = '',
     [ValidateRange(1, 120)][int]$TimeoutMinutes = 60
 )
 $ErrorActionPreference = 'Stop'
@@ -61,37 +66,6 @@ function Assert-ShipPathName {
     }
     return $relative
 }
-function Get-CheckRecordPath {
-    param([string]$Root, [string]$Commit)
-    # Shared by every worktree, so -Merge can run anywhere and still see what was checked.
-    $common = (Invoke-Native git @('-C', $Root, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
-    return Join-Path $common "blackpearl-checks/$Commit.json"
-}
-# Voice libraries and models are fetched or built once per checkout (see BlackPearl.Desktop.csproj), and each check
-# copy is a fresh checkout. Like the CI cache, this keeps them between runs while their pinned inputs are unchanged.
-function Get-BuildCacheEntries {
-    param([string]$Checkout)
-    $common = (Invoke-Native git @('-C', $Checkout, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
-    $project = (Invoke-Native git @('-C', $Checkout, 'rev-parse', 'HEAD:src/BlackPearl.Desktop/BlackPearl.Desktop.csproj')).Trim()
-    $native = (Invoke-Native git @('-C', $Checkout, 'rev-parse', 'HEAD:src/native')).Trim()
-    return @(
-        [pscustomobject]@{ Path = Join-Path $Checkout '.tools/native'; Files = '*.dll'; Kind = 'native'; Cache = Join-Path $common "blackpearl-build-cache/native-$native-$project" },
-        [pscustomobject]@{ Path = Join-Path $Checkout '.tools/models'; Files = '*'; Kind = 'models'; Cache = Join-Path $common "blackpearl-build-cache/models-$project" })
-}
-function Restore-BuildCache {
-    param([string]$Checkout)
-    foreach ($entry in Get-BuildCacheEntries $Checkout) {
-        if (!(Test-Path -LiteralPath $entry.Cache)) { continue }
-        try {
-            New-Item -ItemType Directory -Force -Path $entry.Path | Out-Null
-            Copy-Item -Path (Join-Path $entry.Cache '*') -Destination $entry.Path -Recurse -Force
-        }
-        catch {
-            # Another run replaced the entry mid-copy; the build fetches everything again.
-            Remove-Item -LiteralPath $entry.Path -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
 function Save-BuildCache {
     param([string]$Checkout)
     foreach ($entry in Get-BuildCacheEntries $Checkout) {
@@ -114,31 +88,96 @@ function Invoke-ReleaseChecks {
         Invoke-Native $Sdk @('restore', 'BlackPearl.slnx', '--locked-mode', "-p:RestorePackagesPath=$PackagePath")
         Invoke-Native $Sdk @('build', 'BlackPearl.slnx', '-c', 'Release', '--no-restore', "-p:RestorePackagesPath=$PackagePath")
         Save-BuildCache $Checkout
-        # The main desktop suite's input responsiveness gates are timing-sensitive, so it runs alone first.
-        Invoke-Native $Sdk @('run', '--project', 'tests/BlackPearl.DesktopChecks', '-c', 'Release', '--no-build')
-        # The full smoke suite, the longest, then runs in the background beside the other checks. It includes the
-        # metadata cache and shared library transport checks. Some nested metadata fixtures create long SQLite backup
-        # filenames, so it gets a short directory under the temp folder.
-        $freshSmoke = Join-Path ([IO.Path]::GetTempPath()) ('wr-smoke-' + [guid]::NewGuid().ToString('N'))
-        $smokeLog = "$freshSmoke.log"
-        $smoke = Start-Process -FilePath $Sdk -ArgumentList @('run', '--project', 'tests/BlackPearl.Smoke', '-c', 'Release', '--no-build', '--', "`"$freshSmoke`"") `
-            -WorkingDirectory $Checkout -RedirectStandardOutput $smokeLog -RedirectStandardError "$smokeLog.err" -NoNewWindow -PassThru
-        $null = $smoke.Handle # keeps the exit code readable after the process ends
-        Invoke-Native $Sdk @('run', '--project', 'tests/BlackPearl.UpdateChecks', '-c', 'Release', '--no-build')
-        Invoke-Native $Sdk @('run', '--project', 'tests/BlackPearl.Smoke', '-c', 'Release', '--no-build', '--', '--tmdb-access')
-        foreach ($check in @('--acquisition-layout', '--home', '--ui-findings', '--ui-experience', '--guest-library-layout', '--host-library-browse', '--player-layout', '--metadata-picker', '--room-playback-status', '--language-detection', '--voice-processing')) {
-            Invoke-Native $Sdk @('run', '--project', 'tests/BlackPearl.DesktopChecks', '-c', 'Release', '--no-build', '--', $check)
-        }
-        Write-Host 'Waiting for the full smoke suite...'
-        $smoke.WaitForExit()
-        Get-Content -LiteralPath $smokeLog, "$smokeLog.err" -Tail 20 | Write-Host
-        if ($smoke.ExitCode -ne 0) { throw "The full smoke suite failed with exit code $($smoke.ExitCode). Output: $smokeLog" }
+        # The same list of checks the workflow runs, from the checked commit itself.
+        $shell = (Get-Process -Id $PID).Path
+        Invoke-Native $shell @('-NoProfile', '-File', (Join-Path $Checkout 'scripts/release-checks.ps1'), '-Lane', 'all', '-Sdk', $Sdk)
         Invoke-Native git @('diff', '--exit-code')
     }
-    finally {
-        if ($smoke -and !$smoke.HasExited) { $smoke.Kill($true) }
-        Pop-Location
+    finally { Pop-Location }
+}
+function Resolve-ShipSdk {
+    param([string]$Root, [string]$Requested)
+    $sdk = $Requested
+    if (!$sdk) {
+        $mainCheckout = Split-Path -Parent (Invoke-Native git @('-C', $Root, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
+        $sdk = @((Join-Path $Root '.tools/dotnet/dotnet.exe'), (Join-Path $mainCheckout '.tools/dotnet/dotnet.exe')) |
+            Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if (!$sdk) { $sdk = (Get-Command dotnet -ErrorAction Stop).Source }
     }
+    return (Resolve-Path -LiteralPath $sdk).Path
+}
+# Runs the release checks on a clean copy of the commit and records running, then passed or failed, for -Merge and
+# reviewers. ship.ps1 runs this in a background process after pushing; -Merge runs it itself when that was interrupted.
+function Invoke-CheckRun {
+    param([string]$Root, [string]$Commit, [string]$Sdk, [string]$Branch = '', [string]$Log = '')
+    $recordPath = Get-CheckRecordPath $Root $Commit
+    # A clean copy: untracked files in the worktree cannot affect the result, and SQLite fixture paths stay within
+    # legacy Windows limits under the temp directory.
+    $checkout = Join-Path ([IO.Path]::GetTempPath()) ('blackpearl-ship-' + [guid]::NewGuid().ToString('N'))
+    $record = @{
+        Commit = $Commit; Branch = $Branch; State = 'running'; Started = [datetime]::UtcNow.ToString('o'); Log = $Log; Checkout = $checkout
+        Pid = $PID; ProcessStart = (Get-Process -Id $PID).StartTime.ToUniversalTime().Ticks
+    }
+    Write-CheckRecord $recordPath $record
+    $originalPath = $env:PATH
+    try {
+        $env:PATH = (Split-Path -Parent $Sdk) + [IO.Path]::PathSeparator + $env:PATH
+        Invoke-Native git @('-C', $Root, 'worktree', 'add', '--detach', $checkout, $Commit)
+        $mainCheckout = Split-Path -Parent (Invoke-Native git @('-C', $Root, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
+        Invoke-ReleaseChecks $checkout $Sdk (Join-Path $mainCheckout '.nuget/packages')
+        Invoke-Native git @('-C', $Root, 'worktree', 'remove', '--force', $checkout)
+        $record.State = 'passed'; $record.Checked = [datetime]::UtcNow.ToString('o'); $record.Remove('Checkout')
+        Write-CheckRecord $recordPath $record
+        Write-Host "Release checks passed on $Commit."
+    }
+    catch {
+        $record.State = 'failed'; $record.Error = "$_"; $record.Checked = [datetime]::UtcNow.ToString('o')
+        if (!(Test-Path -LiteralPath $checkout)) { $record.Remove('Checkout') }
+        Write-CheckRecord $recordPath $record
+        throw
+    }
+    finally { $env:PATH = $originalPath }
+}
+# A newer push of the same branch makes checks of its older commits pointless; stop them so they do not slow the new run.
+function Stop-SupersededChecks {
+    param([string]$Root, [string]$Branch, [string]$Commit)
+    $directory = Split-Path -Parent (Get-CheckRecordPath $Root $Commit)
+    if (!(Test-Path -LiteralPath $directory)) { return }
+    foreach ($file in Get-ChildItem -LiteralPath $directory -Filter '*.json') {
+        $state = Get-CheckState $file.FullName
+        if ($state.State -ne 'running' -or $state.Branch -cne $Branch -or $state.Commit -ceq $Commit) { continue }
+        try { [Diagnostics.Process]::GetProcessById([int]$state.Pid).Kill($true) } catch { }
+        $null = Get-Process -Id $state.Pid -ErrorAction SilentlyContinue | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
+        if ($state.Checkout -and (Test-Path -LiteralPath $state.Checkout)) {
+            & git -C $Root worktree remove --force $state.Checkout 2>$null
+        }
+        $record = @{}; $state.PSObject.Properties | ForEach-Object { $record[$_.Name] = $_.Value }
+        $record.State = 'superseded'; $record.Remove('Checkout')
+        Write-CheckRecord $file.FullName $record
+        Write-Host "Stopped the release checks of $($state.Commit), which $Commit replaces."
+    }
+}
+function Start-BackgroundChecks {
+    param([string]$Root, [string]$Commit, [string]$Sdk, [string]$Branch)
+    $recordPath = Get-CheckRecordPath $Root $Commit
+    $log = [IO.Path]::ChangeExtension($recordPath, '.log')
+    New-Item -ItemType Directory -Path (Split-Path -Parent $recordPath) -Force | Out-Null
+    Remove-Item -LiteralPath $recordPath -Force -ErrorAction SilentlyContinue
+    $shell = (Get-Process -Id $PID).Path
+    # The checked commit's own copy of this script runs the checks, in a process that outlives this one.
+    $script = Join-Path $Root 'scripts/ship.ps1'
+    $process = Start-Process -FilePath $shell -WindowStyle Hidden -PassThru -WorkingDirectory $Root `
+        -RedirectStandardOutput $log -RedirectStandardError "$log.err" `
+        -ArgumentList @('-NoProfile', '-File', "`"$script`"", '-CheckCommit', $Commit, '-Branch', "`"$Branch`"", '-Sdk', "`"$Sdk`"")
+    $deadline = [datetime]::UtcNow.AddSeconds(60)
+    while ((Get-CheckState $recordPath).State -eq 'missing') {
+        if ($process.HasExited -or [datetime]::UtcNow -ge $deadline) {
+            $output = (Get-Content -LiteralPath $log, "$log.err" -Tail 20 -ErrorAction SilentlyContinue) -join "`n"
+            throw "The background release checks did not start. $output"
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    return $log
 }
 function Get-SyncTree {
     param([string]$Root, [string]$Base, [string]$Master, [string]$Local)
@@ -360,9 +399,13 @@ $root = Split-Path -Parent $PSScriptRoot
 # Records and sync backups go to the main checkout, which outlives agent worktrees.
 $mainRoot = Split-Path -Parent (Invoke-Native git @('-C', $root, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim()
 $originalPath = $env:PATH
-$checkout = $null
 Push-Location $root
 try {
+    if ($CheckCommit) {
+        if ($CheckCommit -notmatch '^[a-f0-9]{40}$') { throw '-CheckCommit takes a full commit hash.' }
+        Invoke-CheckRun $root $CheckCommit (Resolve-ShipSdk $root $Sdk) $Branch ([IO.Path]::ChangeExtension((Get-CheckRecordPath $root $CheckCommit), '.log'))
+        return
+    }
     $remote = Invoke-Native git @('remote', 'get-url', 'origin')
     Use-Repository
     if ($remote.Trim() -notmatch '^(https://github\.com/|git@github\.com:)Svovoniks/(?:BlackPearl|WatchRoom)(?:\.git)?$') { throw 'origin must be the public Svovoniks/BlackPearl repository (Svovoniks/WatchRoom before its rename).' }
@@ -371,6 +414,30 @@ try {
     if ($VerifyOnly) {
         if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw '-VerifyOnly requires -Version major.minor.patch.' }
         $commit = (Invoke-Native git @('rev-parse', "v$Version^{commit}")).Trim()
+    }
+    elseif ($Status) {
+        if ($Pr) { $pull = Invoke-GitHub "/pulls/$Pr" }
+        else {
+            $branch = (Invoke-Native git @('rev-parse', '--abbrev-ref', 'HEAD')).Trim()
+            $pull = Find-BranchPullRequest $branch
+            if (!$pull) { throw "No open pull request for branch $branch. Pass -Pr." }
+        }
+        $head = $pull.head.sha
+        $local = Get-CheckState (Get-CheckRecordPath $root $head)
+        $ci = Get-HeadCheckState (Invoke-GitHub "/actions/runs?head_sha=$head&per_page=100").workflow_runs $head
+        $verdict = Get-ReviewVerdict (Get-PullRequestComments $pull.number)
+        Write-Host "#$($pull.number) $($pull.title)"
+        Write-Host "Head: $head"
+        Write-Host "Release checks: $($local.State)$(if ($local.State -eq 'running') { " since $($local.Started)" })"
+        if ($local.State -eq 'failed') {
+            Write-Host "  $($local.Error)"
+            Write-Host "  $(Format-CheckEvidence $local)"
+            if ($local.Log -and (Test-Path -LiteralPath $local.Log)) { Get-Content -LiteralPath $local.Log -Tail 30 | ForEach-Object { Write-Host "  $_" } }
+        }
+        elseif ($local.State -in 'missing', 'interrupted', 'superseded') { Write-Host '  -Merge runs them itself, or rerun ship.ps1 to start them in the background.' }
+        Write-Host "Workflow: $($ci.State) - $($ci.Detail)"
+        Write-Host "Review: $(if (!$verdict) { 'none yet' } elseif ($verdict.Head -cne $head) { "covers an older head $($verdict.Head)" } else { "$($verdict.Verdict) ($($verdict.Url))" })"
+        return
     }
     elseif ($Merge) {
         if ($Pr) { $pull = Invoke-GitHub "/pulls/$Pr" }
@@ -385,9 +452,10 @@ try {
         $number = $pull.number; $head = $pull.head.sha
         Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', "pull/$number/head")
         if ((Invoke-Native git @('rev-parse', 'FETCH_HEAD')).Trim() -cne $head) { throw 'The pull request head changed while it was being read. Rerun -Merge.' }
-        if (!(Test-Path -LiteralPath (Get-CheckRecordPath $root $head))) {
-            throw "Release checks have not passed on $head. Rerun ship.ps1 from the pull request's worktree; it checks and pushes the branch."
-        }
+        $localRecord = Get-CheckRecordPath $root $head
+        $local = Get-CheckState $localRecord
+        if ($local.State -eq 'failed') { throw "Release checks failed on ${head}: $($local.Error) $(Format-CheckEvidence $local)Fix the failure, rerun ship.ps1, and request a re-review." }
+        Write-Host "Release checks on ${head}: $($local.State)"
         & git merge-base --is-ancestor origin/master $head
         if ($LASTEXITCODE -ne 0) { throw 'master advanced since this pull request was checked. Merge origin/master into the branch, rerun ship.ps1, and request a re-review.' }
         $approval = Assert-ReviewApproval (Get-PullRequestComments $number) $head
@@ -410,14 +478,29 @@ try {
             Write-Host "Merge #$number ($head) as BlackPearl $Version, approved in $($approval.Url)"
         }
         if ($Plan) { Write-Host 'Preview complete. Nothing was merged, tagged, or released.'; return }
-        $checks = $null
-        while (!$checks) {
-            $state = Get-HeadCheckState (Invoke-GitHub "/actions/runs?head_sha=$head&per_page=100").workflow_runs $head
-            if ($state.Detail -ne $lastState) { Write-Host "Pull request checks: $($state.Detail)"; $lastState = $state.Detail }
-            if ($state.State -eq 'failure') { throw "$($state.Detail). Fix the failure, or rerun the failed jobs only if the failure is unrelated to this change, then rerun -Merge." }
-            if ($state.State -eq 'success') { $checks = $state; break }
-            if ([datetime]::UtcNow -ge $deadline) { throw 'Timed out waiting for pull request checks. Rerun -Merge.' }
-            Start-Sleep -Seconds 30
+        # Wait for both the workflow and the local release checks on the head. Local checks that never finished, for
+        # example because the computer restarted, run here.
+        $checks = $null; $localPassed = $false; $lastState = ''; $lastLocal = ''
+        while ($true) {
+            $local = Get-CheckState $localRecord
+            if ($local.State -ne $lastLocal) { Write-Host "Release checks: $($local.State)"; $lastLocal = $local.State }
+            if ($local.State -eq 'passed') { $localPassed = $true }
+            elseif ($local.State -eq 'failed') { throw "Release checks failed on ${head}: $($local.Error) $(Format-CheckEvidence $local)Fix the failure, rerun ship.ps1, and request a re-review." }
+            elseif ($local.State -ne 'running') {
+                Write-Host "Running the release checks on $head here..."
+                try { Invoke-CheckRun $root $head (Resolve-ShipSdk $root $Sdk) $pull.head.ref }
+                catch { throw "Release checks failed on ${head}: $_ Fix the failure, rerun ship.ps1, and request a re-review." }
+                $localPassed = $true
+            }
+            if (!$checks) {
+                $state = Get-HeadCheckState (Invoke-GitHub "/actions/runs?head_sha=$head&per_page=100").workflow_runs $head
+                if ($state.Detail -ne $lastState) { Write-Host "Pull request checks: $($state.Detail)"; $lastState = $state.Detail }
+                if ($state.State -eq 'failure') { throw "$($state.Detail). Fix the failure, or rerun the failed jobs only if the failure is unrelated to this change, then rerun -Merge." }
+                if ($state.State -eq 'success') { $checks = $state }
+            }
+            if ($checks -and $localPassed) { break }
+            if ([datetime]::UtcNow -ge $deadline) { throw 'Timed out waiting for the pull request and release checks. Rerun -Merge.' }
+            Start-Sleep -Seconds 20
         }
         # Merge only the exact reviewed head, and only while it still contains master.
         Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', 'master')
@@ -493,15 +576,7 @@ try {
         Write-Host "$(if ($existing) { "Update #$($existing.number)" } else { 'Open a pull request' }) for $branch $(if ($NoRelease) { 'without a release' } else { "as BlackPearl $Version" }) with these files:"
         $changed | ForEach-Object { Write-Host "  $_" }
         if ($Plan) { Write-Host 'Preview complete. No files, commits, branches, or pull requests changed.'; return }
-        if (!$Sdk) {
-            $Sdk = Join-Path $root '.tools/dotnet/dotnet.exe'
-            if (!(Test-Path -LiteralPath $Sdk)) {
-                $Sdk = Join-Path (Split-Path -Parent $commonDir) '.tools/dotnet/dotnet.exe'
-                if (!(Test-Path -LiteralPath $Sdk)) { $Sdk = (Get-Command dotnet -ErrorAction Stop).Source }
-            }
-        }
-        $Sdk = (Resolve-Path -LiteralPath $Sdk).Path
-        $env:PATH = (Split-Path -Parent $Sdk) + [IO.Path]::PathSeparator + $env:PATH
+        $Sdk = Resolve-ShipSdk $root $Sdk
         if ($branchVersion -cne $Version) {
             $propsPath = Join-Path $root 'Directory.Build.props'
             $props = Get-Content -LiteralPath $propsPath -Raw
@@ -510,17 +585,8 @@ try {
             Invoke-Native git @('commit', '--quiet', '-m', "Set version $Version", '--', 'Directory.Build.props')
         }
         $head = (Invoke-Native git @('rev-parse', 'HEAD')).Trim()
-        # Check a clean copy of the commit: untracked files in the worktree cannot affect the result,
-        # and SQLite fixture paths stay within legacy Windows limits under the temp directory.
-        $checkout = Join-Path ([IO.Path]::GetTempPath()) ('blackpearl-ship-' + [guid]::NewGuid().ToString('N'))
-        Invoke-Native git @('worktree', 'add', '--detach', $checkout, $head)
-        Invoke-ReleaseChecks $checkout $Sdk (Join-Path (Split-Path -Parent $commonDir) '.nuget/packages')
-        Invoke-Native git @('fetch', '--no-recurse-submodules', 'origin', 'master')
-        & git merge-base --is-ancestor origin/master $head
-        if ($LASTEXITCODE -ne 0) { throw 'master advanced during checks. Merge origin/master into the branch and rerun.' }
-        $recordPath = Get-CheckRecordPath $root $head
-        New-Item -ItemType Directory -Path (Split-Path -Parent $recordPath) -Force | Out-Null
-        @{ Commit = $head; Version = $Version; Checked = [datetime]::UtcNow.ToString('o') } | ConvertTo-Json | Set-Content -LiteralPath $recordPath
+        # Push first, so the workflow and the review start at once; the release checks run here meanwhile and -Merge
+        # waits for them.
         Invoke-Native git @('push', '--set-upstream', 'origin', "HEAD:refs/heads/$branch")
         $summary = if ($BodyFile) { Get-Content -LiteralPath $BodyFile -Raw } else { Get-PullRequestSummary $existing.body }
         $note = if ($NoRelease) { 'Not released.' } elseif ($Message) { $Message } else { Get-ReleaseNote $existing.body }
@@ -528,11 +594,15 @@ try {
         $prTitle = if ($Title) { $Title } elseif ($existing) { $existing.title } elseif ($Message.Length -le 100) { $Message } else { $Message.Substring(0, 99) + '…' }
         $pull = if ($existing) { Invoke-GitHub "/pulls/$($existing.number)" -Method Patch -Body @{ title = $prTitle; body = $body } }
         else { Invoke-GitHub '/pulls' -Method Post -Body @{ title = $prTitle; head = $branch; base = 'master'; body = $body } }
-        Invoke-Native git @('worktree', 'remove', '--force', $checkout); $checkout = $null
+        Stop-SupersededChecks $root $branch $head
+        $local = Get-CheckState (Get-CheckRecordPath $root $head)
+        if ($local.State -in 'passed', 'running') { $checksNote = "release checks $($local.State) already" }
+        else { $checksNote = "release checks running in the background, log $(Start-BackgroundChecks $root $head $Sdk $branch)" }
         Write-Host "Pull request: $($pull.html_url)"
-        Write-Host "Head: $head ($(if ($NoRelease) { 'not released' } else { "BlackPearl $Version" }), release checks passed)"
-        Write-Host "Next: ask a separate reviewer agent to review #$($pull.number) at $head with the review-pr skill (.claude/skills/review-pr/SKILL.md)."
-        Write-Host "Fix what it finds and rerun this script until it approves, then run ship.ps1 -Merge$(if ($NoRelease) { ' -NoRelease' })."
+        Write-Host "Head: $head ($(if ($NoRelease) { 'not released' } else { "BlackPearl $Version" }); $checksNote)"
+        Write-Host "Next: ask a separate reviewer agent now to review #$($pull.number) at $head with the review-pr skill (.claude/skills/review-pr/SKILL.md)."
+        Write-Host 'The release checks and the workflow run during the review. ship.ps1 -Status shows them, the review verdict, and any failure.'
+        Write-Host "Fix what fails or what the reviewer finds and rerun this script until it approves, then run ship.ps1 -Merge$(if ($NoRelease) { ' -NoRelease' }); it waits for the checks."
         return
     }
     $record = Join-Path $mainRoot ('artifacts/ship-' + $Version + '-' + [guid]::NewGuid().ToString('N'))
@@ -554,7 +624,6 @@ try {
     Write-Host "Local master synchronized: $($result.LocalMaster.Commit)"
 }
 catch {
-    if ($checkout) { Write-Warning "Check checkout retained at $checkout for investigation." }
     if ($Merge -and $Version) { Write-Warning "If v$Version was pushed, recheck with -VerifyOnly -Version $Version. Never move a published tag." }
     throw
 }

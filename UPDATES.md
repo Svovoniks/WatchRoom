@@ -47,17 +47,29 @@ diff from `origin/master` touches anything other than release source paths:
 generated media, top-level dotfiles such as `.gitignore`, and `.github/` outside
 `workflows/` are refused. Change those by hand, outside this flow. It picks a version above both the latest public release
 and `master`, and commits `Set version X` on the branch if needed. A branch that
-already has such a version keeps it across review rounds. The script then runs the
-release checks below plus the full smoke suite against a fresh test directory. It
-runs them in a detached copy of the commit under the system temp directory, so
-untracked files cannot affect the result and SQLite paths stay within Windows
-limits. If the checks pass, it records the checked commit and pushes the branch. It
-creates the pull request, or updates the existing one's title, description, and
-release note. The release note is kept in the description under `### Release note`
-and becomes the release commit message and tag message.
+already has such a version keeps it across review rounds. The script pushes the
+branch and creates the pull request, or updates the existing one's title,
+description, and release note, so the workflow and the review start at once. The
+release note is kept in the description under `### Release note` and becomes the
+release commit message and tag message. It then starts the release checks in a
+background process that outlives the script, and returns. They run
+`scripts/release-checks.ps1 -Lane all`, the same list of checks the workflow
+splits across its runners, including the full smoke suite against a fresh test
+directory. They run in a detached copy of the commit under the system temp
+directory, so untracked files cannot affect the result and SQLite paths stay
+within Windows limits. Their record and log live in the repository's shared git
+directory, so every worktree sees them. Pushing a newer commit of the same branch
+stops the checks of the older one. A commit whose checks already passed or are
+still running is not checked again.
+
+**Status** (`-Status`, optionally `-Pr N`). Shows the head's release checks
+(running, passed, failed with the error and log, or interrupted), the workflow,
+and the review verdict.
 
 **Review.** `scripts/review-pr.ps1 -Pr N` checks out the head in a fresh temp
-worktree and prints the description, changed files, CI state, and earlier verdicts.
+worktree and prints the description, changed files, CI state, release check state,
+and earlier verdicts. It copies the cached voice libraries and models into the
+worktree, so building there does not compile or download them again.
 `-Verdict approve|changes -Head <sha> -BodyFile <path>` posts the verdict as a PR
 comment with a `blackpearl-review` marker for that exact commit. Every account here
 is the repository owner, and GitHub does not let authors approve their own pull
@@ -68,12 +80,14 @@ members, or collaborators count. The newest one wins.
 hold:
 
 - The pull request is open, not a draft, and from this repository into `master`.
-- The release checks passed locally on its exact head.
+- The release checks have not failed on its exact head.
 - The head contains the current `origin/master`.
 - The newest reviewer verdict approves that head.
 - Its version is higher than the latest release and has no tag.
 
-It waits for the `Build and release` workflow runs on the head to succeed. It then
+It waits for the `Build and release` workflow runs and the release checks on the
+head to succeed. Release checks that were interrupted, for example by a restart,
+or never started on this computer run in the foreground first. It then
 squash-merges with GitHub's head-SHA guard and the title `Release BlackPearl X:
 <release note>`. It confirms the merged tree is exactly the reviewed tree, then
 tags and pushes `vX`. It deletes the merged branch, waits for the tag workflow, and
@@ -110,10 +124,13 @@ so it can complete a previously interrupted ship.
 # Preview the branch's files and version without changing anything.
 ./scripts/ship.ps1 -Plan
 
-# Check, push, and open the pull request.
+# Push, open the pull request, and start the release checks in the background.
 ./scripts/ship.ps1 -Message 'Clarify playback language preferences' -BodyFile $env:TEMP/pr-body.md
 
-# After fixing review findings: check, push, and update the same pull request.
+# Release checks, workflow, and review verdict for the branch's pull request.
+./scripts/ship.ps1 -Status
+
+# After fixing review findings or a failed check: push, update the same pull request, and check again.
 ./scripts/ship.ps1
 
 # Reviewer: check out, then post a verdict for the exact reviewed head.
@@ -155,9 +172,10 @@ Use this only to recover when the scripts cannot run:
    `<Version>` in `Directory.Build.props` (the single source of the app version).
    Use three numeric components, such as `0.2.1`; the release tag must be exactly
    `v0.2.1`. The workflow rejects tags that disagree with the source version.
-3. Run the checks below from the worktree root and resolve failures. For playback
-   or room-networking changes, also run the full smoke suite against a fresh test
-   directory. Do not reuse previous smoke data.
+3. Build `BlackPearl.slnx` in Release and run `./scripts/release-checks.ps1 -Lane all`
+   from the worktree root, or at least the checks below, and resolve failures. For
+   playback or room-networking changes, also run the full smoke suite against a
+   fresh test directory. Do not reuse previous smoke data.
 4. Push the branch, open a pull request, and get the reviewer's approval as above.
    Merge only the approved head. Then tag that exact merge commit with an annotated
    tag and push the tag. Never force-push or move an existing release tag.
@@ -274,8 +292,9 @@ The logger keeps four files of up to 5 MiB each and writes asynchronously.
 ## Build and updater behavior
 
 GitHub Actions runs the checks on pull requests, split across three runners: the
-desktop suites and the two halves of the full smoke suite (`--part 1` and
-`--part 2`). A pull request from this repository whose version is above the latest
+desktop suites, and the two halves of the full smoke suite (`--part 1` and
+`--part 2`), the first with the shipping script checks (`scripts/ship-checks.ps1`).
+Both the workflow and `ship.ps1` take the list from `scripts/release-checks.ps1`. A pull request from this repository whose version is above the latest
 release also builds the Windows x64 app and installers on a fourth runner, from the
 head commit. Its artifact, `BlackPearl-windows-VERSION-after-LATEST`, names the
 latest release its update installers were built against and is kept for 14 days.
