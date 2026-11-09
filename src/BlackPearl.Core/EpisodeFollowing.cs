@@ -177,7 +177,8 @@ public sealed class EpisodeFollowing
             {
                 if (TmdbCredentials.Resolve(token) is null) continue;
                 using var tmdb = new MetadataClient(token, options: options);
-                details = member.NumberingOrder == "dvd" ? await tmdb.DvdSeasonsAsync(id, ct) : await tmdb.SeasonsAsync(id, ct);
+                details = member.NumberingOrder == "dvd" ? await tmdb.DvdSeasonsAsync(id, ct) : EpisodeOrder.Group(member.NumberingOrder) is { } group ? await tmdb.GroupSeasonsAsync(group, ct) : await tmdb.SeasonsAsync(id, ct);
+                if (details.Length == 0 && EpisodeOrder.Group(member.NumberingOrder) is not null) details = await tmdb.SeasonsAsync(id, ct);
             }
             else
             {

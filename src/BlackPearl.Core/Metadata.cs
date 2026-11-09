@@ -6,13 +6,15 @@ namespace BlackPearl.Core;
 public record MetadataMatch(int Id, string Type, string Title, string? Year, string? Poster, string Overview, string? Kind = null,
     string? OriginalTitle = null, Dictionary<string, string>? ProviderIds = null, string[]? Genres = null, string[]? Cast = null, double? Rating = null, bool? Animated = null,
     string[]? Aliases = null, string Provider = "tmdb", string? Source = null, string? Evidence = null,
-    int? RuntimeMinutes = null, int? EpisodeCount = null, int? SeasonCount = null, bool NumberedSeries = false, string? ReleaseDate = null)
+    int? RuntimeMinutes = null, int? EpisodeCount = null, int? SeasonCount = null, bool NumberedSeries = false, string? ReleaseDate = null, string? Ended = null)
 {
     public string Description => $"{Year ?? "Unknown year"} · {(Animated == true ? "Animation" : Type == "tv" && Animated == false ? "Live action" : Type == "tv" ? "Series" : "Film")} · {Provider}";
     public override string ToString() => $"{Title} · {Description}";
 }
-public record MetadataEpisode(int Number, string? Title, string? Overview, string? Image, string? AirDate, int? Runtime);
+// SourceSeason and SourceNumber: where an episode listed in another order sits in the provider's own aired numbering.
+public record MetadataEpisode(int Number, string? Title, string? Overview, string? Image, string? AirDate, int? Runtime, int? SourceSeason = null, int? SourceNumber = null);
 public record MetadataSeason(int Number, string? Title, string? Overview, string? Image, string? AirDate, MetadataEpisode[] Episodes);
+public record MetadataEpisodeGroup(string Id, int Type, string? Name);
 public sealed partial class MetadataClient : IDisposable
 {
     private readonly HttpClient http;
@@ -91,14 +93,25 @@ public sealed partial class MetadataClient : IDisposable
             EpisodeCount = root.TryGetProperty("number_of_episodes", out var episodes) && episodes.ValueKind == JsonValueKind.Number && episodes.TryGetInt32(out var count) ? count : null,
             SeasonCount = root.TryGetProperty("number_of_seasons", out var seasons) && seasons.ValueKind == JsonValueKind.Number && seasons.TryGetInt32(out var seasonCount) ? seasonCount : null };
     }
-    public async Task<MetadataMatch?> MatchAsync(MediaItem item, CancellationToken ct = default, IReadOnlyList<string>? queries = null, IEnumerable<MediaItem>? entries = null)
+    public async Task<MetadataMatch?> MatchAsync(MediaItem item, CancellationToken ct = default, IReadOnlyList<string>? queries = null, IEnumerable<MediaItem>? entries = null,
+        IReadOnlySet<string>? rejected = null, IReadOnlySet<string>? knownShows = null, (string Type, int Id)? recheck = null)
     {
+        bool Rejected(string type, int id) => rejected?.Contains(MetadataRejections.Key("tmdb", type, id)) == true;
+        // Rechecking an automatic match: the item is the files' own reading, and the stored match stays unless this lookup ranks another above it.
+        MetadataMatch? kept = null;
+        if (recheck is { } previous && !Rejected(previous.Type, previous.Id))
+            try
+            {
+                var details = await DetailsAsync(new(previous.Id, previous.Type, item.DisplayTitle, item.Year?.ToString(), null, item.Overview ?? ""), ct);
+                if (MetadataMatching.Compatible(item, details)) kept = details;
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound) { }
         if (item.Year is null && !LibraryIdentity.Locked(item, "Year") && MetadataTitles.FolderYear(item) is { } folderYear) item = item with { Year = folderYear };
         var known = System.Text.RegularExpressions.Regex.Match(item.PosterSource ?? "", @"^https://www\.themoviedb\.org/(tv|movie)/(\d+)");
         var knownType = item.MetadataType ?? (known.Success ? known.Groups[1].Value : null);
         var knownId = int.TryParse(LibraryIdentity.ProviderId(item, "tmdb"), out var stored) ? stored : known.Success ? int.Parse(known.Groups[2].Value) : (int?)null;
         knownType ??= item.Series is not null ? "tv" : "movie";
-        if (knownId is null && LibraryIdentity.ProviderId(item, "imdb") is null && LibraryIdentity.ProviderId(item, "tvdb") is null && LibraryIdentity.ProviderId(item, "tvmaze") is { } mazeId)
+        if (recheck is null && knownId is null && LibraryIdentity.ProviderId(item, "imdb") is null && LibraryIdentity.ProviderId(item, "tvdb") is null && LibraryIdentity.ProviderId(item, "tvmaze") is { } mazeId)
         {
             // This independent client must never forward TMDB credentials to TVmaze.
             using var bridge = imageHandler is null ? MetadataHttp.CreateClient() : new HttpClient(imageHandler, false);
@@ -116,7 +129,7 @@ public sealed partial class MetadataClient : IDisposable
             }
             catch (HttpRequestException) { }
         }
-        if (knownId is > 0 && knownType is "tv" or "movie")
+        if (recheck is null && knownId is > 0 && knownType is "tv" or "movie" && !Rejected(knownType, knownId.Value))
         {
             try
             {
@@ -127,10 +140,10 @@ public sealed partial class MetadataClient : IDisposable
         }
         foreach (var provider in new[] { "imdb", "tvdb" })
         {
-            if (LibraryIdentity.ProviderId(item, provider) is not { } externalId) continue;
+            if (recheck is not null || LibraryIdentity.ProviderId(item, provider) is not { } externalId) continue;
             using var found = await Get($"find/{Uri.EscapeDataString(externalId)}?external_source={provider}_id", ct);
             var list = found.RootElement.GetProperty(knownType == "tv" ? "tv_results" : "movie_results").EnumerateArray().ToArray();
-            if (list.Length == 1)
+            if (list.Length == 1 && !Rejected(knownType, list[0].GetProperty("id").GetInt32()))
             {
                 var details = await DetailsAsync(new(list[0].GetProperty("id").GetInt32(), knownType, item.DisplayTitle, item.Year?.ToString(), null, ""), ct);
                 if (MetadataMatching.Compatible(item, details)) return details;
@@ -145,7 +158,7 @@ public sealed partial class MetadataClient : IDisposable
         Exception? aliasFailure = null;
         async Task<MetadataMatch?> ChooseSearch(IEnumerable<MetadataMatch> candidates, MediaItem source)
         {
-            var rows = candidates.ToArray(); evidenceSearches.Add((source, rows));
+            var rows = await WithEndedAsync(candidates.Where(x => !Rejected(x.Type, x.Id)).ToArray(), source, ct); evidenceSearches.Add((source, rows));
             try
             {
                 var chosen = await MetadataMatching.ChooseWithAliasesAsync(rows, source, AlternativeTitlesAsync, ct, rows => typoSearches.Add((source, rows)));
@@ -162,7 +175,9 @@ public sealed partial class MetadataClient : IDisposable
             catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException)
             { aliasFailure = ex; typoSearches.Add((source, null)); return null; }
         }
-        var tv = movieEvidence ? [] : await SearchAsync(titleQuery, true, ct, item.Year);
+        // A later season's year may be when that season aired; filtering shows by it would leave out the show that began earlier.
+        var showYear = MetadataMatching.LaterSeason(item) ? null : item.Year;
+        var tv = movieEvidence ? [] : await SearchAsync(titleQuery, true, ct, showYear);
         var movies = item.Episode is not null || item.MetadataType == "tv" ? [] : await SearchAsync(titleQuery, false, ct, item.Year);
         var best = await ChooseSearch(tv.Concat(movies), queryItem);
         // A region's release year can differ; broaden the query without accepting tied matches.
@@ -185,24 +200,55 @@ public sealed partial class MetadataClient : IDisposable
         {
             foreach (var word in russian.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(x => x.Length >= 5).OrderByDescending(x => x.Length).Take(2))
             {
-                tv = movieEvidence ? [] : await SearchAsync(word, true, ct, item.Year);
+                tv = movieEvidence ? [] : await SearchAsync(word, true, ct, showYear);
                 movies = item.Episode is not null || item.MetadataType == "tv" ? [] : await SearchAsync(word, false, ct, item.Year);
                 var source = item with { Title = russian, Series = item.Series is null ? null : russian };
                 best = await ChooseSearch(tv.Concat(movies), source);
                 if (best is not null) break;
             }
         }
+        // Shows of the same name are told apart by the entry the library matched other copies to, then by the seasons the files hold.
+        if (best is null && knownShows is { Count: > 0 }) best = MatchKnownShow(item, evidenceSearches, knownShows);
+        if (best is null) best = await MatchEpisodeEvidenceAsync(item, entries, evidenceSearches, ct);
         var typoFallback = best is null;
         best ??= MetadataMatching.ChooseTypoFallback(typoSearches);
         if (best is null) best = await MatchMovieEvidenceAsync(item, evidenceSearches, ct);
         if (best is null) best = await MatchNumberedSeriesAsync(item, searchQueries, entries, ct);
+        if (best is not null && Rejected(best.Type, best.Id)) best = null;
+        if (kept is not null)
+        {
+            // Only a lookup that saw both and ranks the new one higher replaces the stored match; a tie-break or a fallback doesn't.
+            var switching = best is not null && (best.Type != kept.Type || best.Id != kept.Id) && evidenceSearches.Any(search =>
+                search.Candidates.FirstOrDefault(x => x.Type == kept.Type && x.Id == kept.Id) is { } stored &&
+                search.Candidates.FirstOrDefault(x => x.Type == best.Type && x.Id == best.Id) is { } found && MetadataMatching.Outranks(found, stored, search.Item));
+            MetadataDiagnostics.Record("metadata-recheck", new { Kept = kept.Id, kept.Type, Found = best?.Id, FoundType = best?.Type, Switched = switching });
+            if (!switching) return kept;
+        }
         if (best is null)
         {
             if (aliasFailure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(aliasFailure).Throw();
             return null;
         }
         var selected = await DetailsAsync(best, ct);
-        return MetadataMatching.Compatible(item, selected) && (!typoFallback || selected.Year == best.Year) ? selected : null;
+        return MetadataMatching.Compatible(item, selected) && (!typoFallback || selected.Year == best.Year) ? selected : kept;
+    }
+    // For a later season with a year, a show that began earlier stays in the running only if it was on air then, which search results don't say.
+    private async Task<MetadataMatch[]> WithEndedAsync(MetadataMatch[] rows, MediaItem source, CancellationToken ct)
+    {
+        if (!MetadataMatching.LaterSeason(source) || source.Year is not { } year) return rows;
+        var result = rows.ToArray();
+        for (var index = 0; index < result.Length; index++)
+        {
+            var row = result[index];
+            if (row.Type != "tv" || !int.TryParse(row.Year, out var began) || began >= year - 1 ||
+                MetadataMatching.Score(source.DisplayTitle, null, row.Title, row.OriginalTitle, null) < 6) continue;
+            using var json = await Get($"tv/{row.Id}", ct);
+            var root = json.RootElement;
+            // The last episode's date, even for a show still marked in production: "Rage" (1987) is listed as returning with nothing since 2007.
+            // A revival whose new season the provider hasn't listed yet stays unmatched until it does, rather than going to another show.
+            if (root.TryGetProperty("last_air_date", out var last) && last.ValueKind == JsonValueKind.String) result[index] = row with { Ended = last.GetString() };
+        }
+        return result;
     }
     private async Task<string[]> AlternativeTitlesAsync(MetadataMatch match, CancellationToken ct)
     {
@@ -246,14 +292,31 @@ public sealed partial class MetadataClient : IDisposable
     }
     public async Task<MetadataSeason[]> DvdSeasonsAsync(int showId, CancellationToken ct)
     {
+        var dvd = (await EpisodeGroupsAsync(showId, ct)).Where(g => g.Type == 3).ToArray();
+        return dvd.Length == 1 ? await GroupSeasonsAsync(dvd[0].Id, ct) : [];
+    }
+    // A show's alternative numbering orders: original air date 1, absolute 2, DVD 3, digital 4, story arc 5, production 6, TV 7.
+    public async Task<MetadataEpisodeGroup[]> EpisodeGroupsAsync(int showId, CancellationToken ct)
+    {
         using var groups = await Get($"tv/{showId}/episode_groups", ct);
-        var dvd = groups.RootElement.GetProperty("results").EnumerateArray().Where(g => g.TryGetProperty("type", out var type) && type.GetInt32() == 3).ToArray();
-        if (dvd.Length != 1) return [];
-        using var group = await Get("tv/episode_group/" + dvd[0].GetProperty("id").GetString(), ct);
+        return groups.RootElement.TryGetProperty("results", out var results) && results.ValueKind == JsonValueKind.Array
+            ? results.EnumerateArray().Where(g => g.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && g.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.Number)
+                .Select(g => new MetadataEpisodeGroup(g.GetProperty("id").GetString()!, g.GetProperty("type").GetInt32(), g.TryGetProperty("name", out var name) ? name.GetString() : null)).ToArray()
+            : [];
+    }
+    // A group's seasons numbered by their order in it, and its episodes from 1 in theirs.
+    public async Task<MetadataSeason[]> GroupSeasonsAsync(string groupId, CancellationToken ct)
+    {
+        JsonDocument document;
+        try { document = await Get("tv/episode_group/" + Uri.EscapeDataString(groupId), ct); }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound) { return []; }
+        using var group = document;
         return group.RootElement.GetProperty("groups").EnumerateArray().Select(s => new MetadataSeason(s.GetProperty("order").GetInt32(),
             s.GetProperty("name").GetString(), null, null, null, s.GetProperty("episodes").EnumerateArray().Select(e => new MetadataEpisode(
                 e.GetProperty("order").GetInt32() + 1, e.GetProperty("name").GetString(), e.TryGetProperty("overview", out var plot) ? plot.GetString() : null,
                 e.TryGetProperty("still_path", out var image) ? image.GetString() : null, e.TryGetProperty("air_date", out var date) ? date.GetString() : null,
-                e.TryGetProperty("runtime", out var runtime) && runtime.ValueKind == JsonValueKind.Number && runtime.TryGetInt32(out var minutes) ? minutes : null)).ToArray())).ToArray();
+                e.TryGetProperty("runtime", out var runtime) && runtime.ValueKind == JsonValueKind.Number && runtime.TryGetInt32(out var minutes) ? minutes : null,
+                e.TryGetProperty("season_number", out var aired) && aired.ValueKind == JsonValueKind.Number ? aired.GetInt32() : null,
+                e.TryGetProperty("episode_number", out var number) && number.ValueKind == JsonValueKind.Number ? number.GetInt32() : null)).ToArray())).ToArray();
     }
 }

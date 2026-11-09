@@ -131,6 +131,9 @@ public static class LocalMetadata
         return LibraryIdentity.Ensure(item with { ProviderIds = ids, LocalMetadataFields = fields.ToArray() });
     }
 
+    // Whether the show's own NFO names this provider ID. One BlackPearl exported without IDs doesn't.
+    internal static bool NamesShow(MediaItem item, string provider, int id) => item.Series is not null &&
+        Apply(item with { ProviderIds = [] }).ProviderIds?.TryGetValue(provider, out var named) == true && named == id.ToString(System.Globalization.CultureInfo.InvariantCulture);
     // Whether a sidecar says the file is a film: a movie.nfo beside it, or its own NFO holding a <movie> or only a link. The episode NFO an export writes doesn't.
     internal static bool SaysFilm(string path)
     {

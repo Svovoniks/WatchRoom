@@ -53,8 +53,19 @@ static class MetadataFixesFixture
         check(MetadataTitles.RussianSearchAlias("Policejskij s rublevki") == "полицейский с рублевки" && MetadataTitles.RussianSearchAlias("Policejskij s Rublyovki") == "полицейский с рублёвки" &&
             MetadataTitles.RussianSearchAlias("Novaja Zemlja") == "новая земля" && MetadataTitles.RussianSearchAlias("Mayor Gromov") == "майор громов", "Other romanizations of Russian reach the same Cyrillic title");
         static int? FolderYear(string folder, int season) => MetadataTitles.FolderYear(new("year", Path.Combine("library", folder, "episode.mkv"), "Show", "Show", Series: "Show", Season: season, Episode: 1));
-        check(FolderYear("Show.Name.03.2018.HDTV", 3) is null && FolderYear("Show.Name.S02.2017.HDTV", 2) is null && FolderYear("Show Name Season 4 (2019)", 4) is null, "a year after a later season's number doesn't date the show");
-        check(FolderYear("Battlestar.Galactica.2003.S02", 2) == 2003 && FolderYear("Show.Name.2016.HDTV", 1) == 2016 && FolderYear("Show.Name.S01.2016", 1) == 2016 && FolderYear("Show.1995.2018.HDTV", 3) == 1995, "a year ahead of the season number, or on a first season, dates the show");
+        check(FolderYear("Show.Name.03.2018.HDTV", 3) == 2018 && FolderYear("Battlestar.Galactica.2003.S02", 2) == 2003 && FolderYear("Show.1995.2018.HDTV", 3) == 1995, "a folder's year is read wherever it sits; matching decides what it dates");
+        // A later season's year may date that season or the show, wherever it sits in the name: a show that began earlier isn't
+        // contradicted by it, one that began that year is still preferred, and one that began after it can't be the files' show.
+        var vipCop = new MetadataMatch(65953, "tv", "VIP Cop", "2016", null, "", OriginalTitle: "Полицейский с Рублёвки");
+        var spinOff = new MetadataMatch(137290, "tv", "Полицейский с Рублёвки. Мы тебя найдём", "2018", null, "");
+        check(MetadataMatching.Choose([vipCop, spinOff], "Полицейский с Рублёвки", 2018, laterSeason: true)?.Id == 65953, "a later season's year doesn't hand the match to a spin-off that began that year");
+        check(MetadataMatching.Choose([new MetadataMatch(1, "tv", "Doctor Who", "1963", null, ""), new MetadataMatch(2, "tv", "Doctor Who", "2005", null, "")], "Doctor Who", 2005, laterSeason: true)?.Id == 2,
+            "a show that began in the named year still wins for a later season");
+        check(MetadataMatching.Choose([new MetadataMatch(3, "tv", "Show", "2020", null, "")], "Show", 2018, laterSeason: true) is null, "a show that began after a file's year still can't be its show");
+        var oldRage = new MetadataMatch(15106, "tv", "Rage", "1987", null, "", Ended: "1988-02-01");
+        var newRage = new MetadataMatch(280880, "tv", "Rage (Furia)", "2025", null, "", Aliases: ["Rage"]);
+        check(MetadataMatching.Choose([oldRage, newRage], "Rage", 2025, laterSeason: true)?.Id == 280880, "a show that had ended before a later season's year isn't that season's show");
+        check(MetadataMatching.Choose([vipCop with { Ended = null }, spinOff], "Полицейский с Рублёвки", 2018, laterSeason: true)?.Id == 65953, "a show still on air then keeps its later seasons");
         check(new[] { "John Wick Chapter 3 Parabellum", "Sherlock Holmes A Game Of Shadows", "The Hitchhikers Guide to the Galaxy" }.All(q => MetadataTitles.RussianSearchAlias(q) is null),
             "English ch and sh do not generate garbage Cyrillic aliases");
         check(MetadataTitles.Queries(new("clean", "film.mkv", "Example Movie HDDVDRip 1080p", "Movie")).First() == "Example Movie", "release noise is removed before the first provider query");

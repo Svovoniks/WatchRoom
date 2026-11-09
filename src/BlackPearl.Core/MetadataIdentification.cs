@@ -49,7 +49,7 @@ public static class MetadataIdentification
             MetadataTitles.Normalize(x.DisplayTitle) == MetadataTitles.Normalize(query)).ToArray();
         return new(matches.DistinctBy(x => (x.Provider, x.Type, x.Id)).Select(match => match with
             { Evidence = identified.Any(x => LibraryIdentity.ProviderId(x, match.Provider) == match.Id.ToString()) ? "Already identified in another local release" : null })
-            .OrderByDescending(x => x.Evidence is not null).ThenByDescending(x => MetadataMatching.Score(query, item.Year, x.Title, x.OriginalTitle, int.TryParse(x.Year, out var year) ? year : null))
+            .OrderByDescending(x => x.Evidence is not null).ThenByDescending(x => MetadataMatching.Score(query, item.Year, x.Title, x.OriginalTitle, int.TryParse(x.Year, out var year) ? year : null, MetadataMatching.LaterSeason(item)))
             .Take(30).ToList(), warnings.ToArray());
     }
     private static string? Text(JsonElement value, string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;

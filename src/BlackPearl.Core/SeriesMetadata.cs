@@ -7,6 +7,12 @@ namespace BlackPearl.Core;
 public static class SeriesMetadata
 {
     private const string MissingChecked = "missing-episodes-checked";
+    // Shows fetched before file titles could choose a numbering order are checked once, rather than when their refresh comes due.
+    private const string OrderChecked = "episode-order-checked", OrderCheckVersion = "1";
+    // The order a show's files' titles were last weighed to, and which titles those were, recorded once that weighing completed.
+    // Copies of a season combine only when it still describes the copy.
+    private static string OrderWeighedKey(string show) => "episode-order-weighed:" + show;
+    internal static string? OrderWeighed(LibraryStore library, string show) => library.Setting(OrderWeighedKey(show));
     private static string? Text(JsonElement value, string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
     private static int? Number(JsonElement value, string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.Number && field.TryGetInt32(out var number) ? number : null;
     private static string? Plain(string? html) => html is null ? null : WebUtility.HtmlDecode(Regex.Replace(Regex.Replace(html, @"(?i)</p>|<br\s*/?>", "\n"), "<[^>]*>", "")).Trim();
@@ -46,6 +52,7 @@ public static class SeriesMetadata
                 (DateOnly.TryParse(x.AirDate, out var date) && date > DateOnly.FromDateTime(DateTime.UtcNow) ? !options.ImportUpcoming : !options.ImportMissing))).Select(x => x.Id).ToArray();
             library.RemoveVirtual(stale); catalogChanged |= stale.Length > 0;
         }
+        var checkingOrders = mode != MetadataRefresh.RetryArtwork && library.Setting(OrderChecked) != OrderCheckVersion;
         int seasons = 0, episodes = 0, failed = 0, unmatched = 0, incomplete = 0, artworkFailed = 0, deferred = 0; var stopped = false;
         var failedImages = new Dictionary<string, Exception>();
         async Task<(string? Path, bool Failed)> Artwork(MediaItem entry, string stage, string image, Func<Task<string?>> fetch)
@@ -61,12 +68,18 @@ public static class SeriesMetadata
                 outstanding.Set(stage, entry, "artwork-failure", AutomaticArtwork.FailureReason(failure), failure);
             return (null, true);
         }
-        var groups = (catalogChanged ? library.All() : catalog).Where(x => !x.IsMusic).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Series is not null && !x.MetadataLocked && !MetadataTitles.IsUnverifiedCompilation(x) &&
+        var snapshot = catalogChanged ? library.All() : catalog;
+        var groups = snapshot.Where(x => !x.IsMusic).Where(x => x.Available && !x.IsVirtual && !x.IsExtra && !x.IsBonus && x.Series is not null && !x.MetadataLocked && !MetadataTitles.IsUnverifiedCompilation(x) &&
             (x.Matched || !MetadataMatching.HasMovieEvidence(x))).GroupBy(LibraryIdentity.ShowKey).ToArray();
+        var known = new KnownShows(snapshot);
+        // Every file of each show, offline and locked ones too: whether a show holds copies of a season depends on all of them.
+        var showFiles = snapshot.Where(x => !x.IsVirtual && x.Series is not null).ToLookup(LibraryIdentity.ShowKey);
         foreach (var group in groups)
         {
             ct.ThrowIfCancellationRequested();
-            if (mode == MetadataRefresh.FillMissing && !rechecking && group.All(x => x.MetadataFetchedAt > 0 &&
+            var holdsCopies = EpisodeOrder.MarkedCopies(library, group.Key) || EpisodeOrder.HoldsCopies(showFiles[group.Key]);
+            var orderCheck = checkingOrders && !holdsCopies && EpisodeOrder.CanChoose(group.ToArray()) && EpisodeOrder.Collect(group).Length >= EpisodeOrder.MinimumEvidence;
+            if (mode == MetadataRefresh.FillMissing && !rechecking && !orderCheck && group.All(x => x.MetadataFetchedAt > 0 &&
                 (options.RefreshDays <= 0 || x.MetadataFetchedAt > Wire.Now - (long)TimeSpan.FromDays(options.RefreshDays).TotalMilliseconds) &&
                 (!force && refresh is null || x.Episode is null || !string.IsNullOrWhiteSpace(x.EpisodeTitle)) &&
                 (x.SeasonPoster is null || ArtworkCache.IsUsable(x.SeasonPoster)) &&
@@ -74,7 +87,7 @@ public static class SeriesMetadata
             // An automatic fetch stops once the saved locale changes; the caller then leaves the locale unrecorded.
             if (stopOnLocaleChange is not null && MetadataOptions.LocaleChanged(library, options)) { stopOnLocaleChange(); stopped = true; break; }
             var entries = group.ToArray(); var item = entries[0];
-            if (!force && refresh is null && !rechecking && MetadataFetchPolicy.Deferred(library, "episodes", entries, options, token))
+            if (!force && refresh is null && !rechecking && !orderCheck && MetadataFetchPolicy.Deferred(library, "episodes", entries, options, token))
             { deferred++; MetadataDiagnostics.Record("metadata-fetch-deferred", new { Stage = "episodes", item.Title, RetryAt = MetadataFetchPolicy.RetryAt(library, "episodes", item.Id) }); continue; }
             if (mode == MetadataRefresh.RetryArtwork && entries.All(x => x.MetadataId is null && (x.ProviderIds?.Count ?? 0) == 0)) continue;
             var replaceText = mode != MetadataRefresh.RetryArtwork && (mode != MetadataRefresh.FillMissing || refresh is null && options.RefreshDays > 0 && entries.Any(x =>
@@ -82,10 +95,10 @@ public static class SeriesMetadata
             progress?.Report("Fetching seasons and episodes · " + item.DisplayTitle);
             using var context = MetadataDiagnostics.BeginItem("season-episode", item);
             MetadataDiagnostics.Record("metadata-episodes-start", new { item.NumberingOrder, Entries = entries.Length });
-            var matched = false; var attemptFailed = false; var superseded = false; var groupArtworkFailed = false; Exception? providerFailure = null;
+            var matched = false; var attemptFailed = false; var superseded = false; var groupArtworkFailed = false; var rejected = false; Exception? providerFailure = null;
             foreach (var provider in options.ProviderOrder.Where(p => p is "tmdb" or "tvmaze"))
             {
-                if (provider == "tmdb" && tmdb is null || provider == "tvmaze" && item.NumberingOrder == "dvd") continue;
+                if (provider == "tmdb" && tmdb is null || provider == "tvmaze" && EpisodeOrder.ProviderDefined(item.NumberingOrder)) continue;
                 // A show identified through TMDB waits for TMDB; another provider's numbering would replace its seasons and episodes.
                 if (provider != "tmdb" && tmdb is null && item.MetadataProvider == "tmdb") continue;
                 try
@@ -99,26 +112,86 @@ public static class SeriesMetadata
                     if (id is null || !item.Matched && MetadataTitles.IsAnimeSource(item))
                     {
                         if (mode == MetadataRefresh.RetryArtwork) continue;
-                        var resolved = await AutomaticArtwork.ResolveAsync(http, tmdb, item, options with { Providers = [provider] }, directory, ct, entries);
+                        var resolved = await AutomaticArtwork.ResolveAsync(http, tmdb, item, options with { Providers = [provider] }, directory, ct, entries, MetadataRejections.For(library, item), known.For(item));
                         id = resolved?.Id;
                     }
                     if (id is null) continue;
-                    MetadataSeason[] details;
+                    MetadataSeason[] details; string? order = null;
+                    async Task<MetadataSeason[]> AiredSeasons()
+                    {
+                        if (entries.Any(x => x.NumberingOrder == "absolute" || x.AbsoluteEpisode is not null || x.NumberingSource == "date") || options.ImportMissing || options.ImportUpcoming)
+                            return await tmdb!.SeasonsAsync(id.Value, ct);
+                        var result = new List<MetadataSeason>();
+                        foreach (var number in entries.Select(x => x.Season).OfType<int>().Distinct())
+                            if (await tmdb!.SeasonAsync(id.Value, number, ct) is { } season) result.Add(season);
+                        return result.ToArray();
+                    }
                     if (provider == "tmdb")
                     {
                         if (item.NumberingOrder == "dvd") details = await tmdb!.DvdSeasonsAsync(id.Value, ct);
-                        else if (entries.Any(x => x.NumberingOrder == "absolute" || x.AbsoluteEpisode is not null || x.NumberingSource == "date") || options.ImportMissing || options.ImportUpcoming)
-                            details = await tmdb!.SeasonsAsync(id.Value, ct);
-                        else
+                        else if (EpisodeOrder.Group(item.NumberingOrder) is { } groupId)
                         {
-                            var result = new List<MetadataSeason>();
-                            foreach (var number in entries.Select(x => x.Season).OfType<int>().Distinct())
-                                if (await tmdb!.SeasonAsync(id.Value, number, ct) is { } season) result.Add(season);
-                            details = result.ToArray();
+                            details = await tmdb!.GroupSeasonsAsync(groupId, ct);
+                            // An order the provider has since removed returns the show to its aired order.
+                            if (details.Length == 0) { order = "aired"; details = await AiredSeasons(); }
                         }
+                        else details = await AiredSeasons();
                     }
                     else details = await TvmazeSeasons(http, id.Value, ct);
                     if (details.Length == 0) continue;
+                    // Files that name their own episodes choose between the provider's numbering orders, and say when the match can't be their show.
+                    var evidence = mode == MetadataRefresh.RetryArtwork ? [] : EpisodeOrder.Collect(entries);
+                    var alternatives = new List<MetadataSeason[]>();
+                    var weighed = false;
+                    if (provider == "tmdb" && evidence.Length >= EpisodeOrder.MinimumEvidence && !holdsCopies && EpisodeOrder.CanChoose(entries))
+                    {
+                        weighed = true;
+                        var currentOrder = order ?? item.NumberingOrder;
+                        var agreement = EpisodeOrder.Agreement(evidence, details);
+                        if (!EpisodeOrder.Fits(agreement))
+                        {
+                            var candidates = new List<(string Order, MetadataSeason[] Seasons)>();
+                            if (currentOrder != "aired") candidates.Add(("aired", await AiredSeasons()));
+                            foreach (var episodeGroup in await tmdb!.EpisodeGroupsAsync(id.Value, ct))
+                                if (EpisodeOrder.GroupPrefix + episodeGroup.Id != currentOrder) candidates.Add((EpisodeOrder.GroupPrefix + episodeGroup.Id, await tmdb.GroupSeasonsAsync(episodeGroup.Id, ct)));
+                            alternatives.AddRange(candidates.Select(c => c.Seasons));
+                            if (EpisodeOrder.Best(evidence, agreement, candidates) is { } choice)
+                            {
+                                MetadataDiagnostics.Record("metadata-episode-order", new { From = currentOrder, To = choice.Order, choice.Agree, choice.Compared, Before = agreement.Agree, BeforeCompared = agreement.Compared });
+                                details = choice.Seasons; order = choice.Order;
+                            }
+                        }
+                    }
+                    // A match the files contradict twice over is dropped, and the next lookup leaves it out. A match someone chose stays.
+                    if (evidence.Length >= 5 && item.MetadataProvider == provider && !entries.Any(x => x.Matched || LibraryIdentity.Locked(x, "ProviderIds") || LibraryIdentity.Locked(x, "MetadataType") || LibraryIdentity.Locked(x, "Title")))
+                    {
+                        var fit = EpisodeOrder.Fit(entries, details);
+                        if (fit.Misfits >= 3 && fit.Misfits * 10 >= fit.Regular * 3)
+                        {
+                            var lists = new List<MetadataSeason[]>(alternatives);
+                            if (provider == "tmdb") lists.Add(await tmdb!.SeasonsAsync(id.Value, ct));
+                            var presence = EpisodeOrder.Presence(evidence, details, lists);
+                            // A show's NFO that names this ID would bring it back on the next read, so that match stays.
+                            if (EpisodeOrder.Contradicts(presence, fit) && !entries.DistinctBy(x => x.SeriesPath ?? Path.GetDirectoryName(x.Path), StringComparer.OrdinalIgnoreCase)
+                                .Any(x => LocalMetadata.NamesShow(x, provider, id.Value)))
+                            {
+                                MetadataDiagnostics.Outcome("episode-titles-contradict-match");
+                                MetadataDiagnostics.Record("metadata-candidate-rejected", new { Provider = provider, Id = id, Reason = "episode-titles-contradict-match", presence.Found, presence.Compared, fit.Misfits, fit.Regular });
+                                MetadataRejections.Add(library, item, MetadataRejections.Key(provider, "tv", id.Value));
+                                var saved = library.ByIds(entries.Select(x => x.Id)).ToArray();
+                                if (saved.Length == entries.Length && entries.All(x => saved.Any(c => c.Id == x.Id && AutomaticArtwork.SameFetchIdentity(x, c))))
+                                {
+                                    // The files keep the episode titles they give, which is what judges the next match.
+                                    foreach (var entry in saved) library.Save(AutomaticArtwork.ResetIdentity(TmdbRetention.Revert(entry)) with { MetadataKind = null, MetadataType = null, ProviderIds = null, ArtworkFetchedAt = 0,
+                                        EpisodeTitle = LibraryIdentity.Locked(entry, "EpisodeTitle") ? entry.EpisodeTitle : EpisodeOrder.OwnTitle(entry) });
+                                    // The wrong show's missing-episode placeholders go too, unless someone is following the show.
+                                    if (library.Wanted(LibraryIdentity.ShowKey(item)) is null) library.RemoveVirtual(library.InShow(item).Where(x => x.IsVirtual).Select(x => x.Id).ToArray());
+                                }
+                                rejected = true;
+                                break;
+                            }
+                        }
+                    }
                     if (mode != MetadataRefresh.RetryArtwork) outstanding.Clear("episodes", item);
                     var entryIds = entries.Select(x => x.Id).ToHashSet();
                     var latest = library.ByIds(entryIds).ToDictionary(x => x.Id);
@@ -138,6 +211,9 @@ public static class SeriesMetadata
                         var beforeDetails = latest[entry.Id];
                         ct.ThrowIfCancellationRequested();
                         var current = TmdbRetention.Record(entry, LibraryIdentity.WithProvider(entry, provider, id, !entry.Matched || entry.MetadataProvider == provider), provider, "metadataProvider", "metadataId");
+                        // A file the chosen order moves gets that episode's text and still, in place of the ones its number had.
+                        var reordered = order is not null && order != entry.NumberingOrder;
+                        if (order is not null) current = current with { NumberingOrder = order };
                         if (entry.NumberingConflict is FilenameEpisodes.InvalidRange or FilenameEpisodes.CrossSeasonRange)
                         { library.Save(current); continue; }
                         var dateNumbering = entry.NumberingSource == "date" && entry.AirDate is not null;
@@ -185,18 +261,22 @@ public static class SeriesMetadata
                         var episodeList = season?.Episodes.Where(e => LibraryIdentity.EpisodeNumbers(current).Contains(e.Number)).OrderBy(e => e.Number).ToArray() ?? [];
                         var first = episodeList.FirstOrDefault();
                         string? Merge(string field, string? value, string? old) => mode == MetadataRefresh.RetryArtwork || LibraryIdentity.Locked(current, field) || string.IsNullOrWhiteSpace(value) ? old :
-                            !replaceText && !string.IsNullOrWhiteSpace(old) ? old : value;
+                            !replaceText && !reordered && !string.IsNullOrWhiteSpace(old) ? old : value;
+                        // A moved file keeps the title its own name gives. A title the provider gave it named the episode its number had before.
+                        var retitle = reordered && mode != MetadataRefresh.RetryArtwork && !LibraryIdentity.Locked(current, "EpisodeTitle");
                         if (season is null) { library.Save(current); continue; }
                         current = current with
                         {
                             SeasonTitle = Merge("SeasonTitle", season.Title, current.SeasonTitle), SeasonOverview = Merge("SeasonOverview", season.Overview, current.SeasonOverview),
-                            EpisodeTitle = Merge("EpisodeTitle", string.Join(" / ", episodeList.Select(e => e.Title).Where(t => !string.IsNullOrWhiteSpace(t))), current.EpisodeTitle),
+                            EpisodeTitle = retitle && EpisodeOrder.OwnTitle(entry) is { Length: > 0 } own ? own :
+                                Merge("EpisodeTitle", string.Join(" / ", episodeList.Select(e => e.Title).Where(t => !string.IsNullOrWhiteSpace(t))), retitle ? null : current.EpisodeTitle),
                             EpisodeOverview = Merge("EpisodeOverview", string.Join("\n\n", episodeList.Select(e => e.Overview).Where(t => !string.IsNullOrWhiteSpace(t))), current.EpisodeOverview),
                             AirDate = Merge("AirDate", first?.AirDate, current.AirDate),
                             RuntimeMinutes = mode == MetadataRefresh.RetryArtwork || LibraryIdentity.Locked(current, "RuntimeMinutes") ? current.RuntimeMinutes :
                                 episodeList.Any(e => e.Runtime is not null) ? episodeList.Sum(e => e.Runtime ?? 0) : current.RuntimeMinutes,
-                            SeasonSource = provider == "tmdb" ? $"https://www.themoviedb.org/tv/{id}/season/{season.Number}" : $"https://www.tvmaze.com/shows/{id}",
-                            EpisodeSource = first is null ? current.EpisodeSource : provider == "tmdb" ? $"https://www.themoviedb.org/tv/{id}/season/{season.Number}/episode/{first.Number}" : $"https://www.tvmaze.com/shows/{id}"
+                            SeasonSource = provider == "tmdb" ? $"https://www.themoviedb.org/tv/{id}/season/{first?.SourceSeason ?? season.Number}" : $"https://www.tvmaze.com/shows/{id}",
+                            // An episode listed in another order links to its place in the provider's own numbering, which is what later still lookups read.
+                            EpisodeSource = first is null ? current.EpisodeSource : provider == "tmdb" ? $"https://www.themoviedb.org/tv/{id}/season/{first.SourceSeason ?? season.Number}/episode/{first.SourceNumber ?? first.Number}" : $"https://www.tvmaze.com/shows/{id}"
                         };
                         current = TmdbRetention.Record(beforeDetails, current, provider, TmdbRetention.EpisodeFields);
                         library.Save(current);
@@ -212,9 +292,9 @@ public static class SeriesMetadata
                             current = TmdbRetention.Record(current, current with { SeasonPoster = result.Path ?? current.SeasonPoster }, provider, "seasonPoster"); entryArtworkFailed |= result.Failed;
                         }
                         library.Save(current);
-                        if (!LibraryIdentity.Locked(current, "EpisodePoster") && (replace || !ArtworkCache.IsUsable(current.EpisodePoster)) && first?.Image is { } episodeImage)
+                        if (!LibraryIdentity.Locked(current, "EpisodePoster") && (replace || reordered || !ArtworkCache.IsUsable(current.EpisodePoster)) && first?.Image is { } episodeImage)
                         {
-                            var result = await Artwork(current, "episode-artwork", episodeImage, async () => provider == "tmdb" ? await tmdb!.CacheImageAsync(episodeImage, $"tv-{id}-s{season.Number}-e{first.Number}", Path.Combine(directory, "posters"), ct, replace, "w780")
+                            var result = await Artwork(current, "episode-artwork", episodeImage, async () => provider == "tmdb" ? await tmdb!.CacheImageAsync(episodeImage, $"tv-{id}-s{first.SourceSeason ?? season.Number}-e{first.SourceNumber ?? first.Number}", Path.Combine(directory, "posters"), ct, replace, "w780")
                                 : await AutomaticArtwork.Download(http, episodeImage, directory, ct, replace));
                             var afterImage = library.ByIds([current.Id]).FirstOrDefault();
                             if (afterImage is null || !AutomaticArtwork.SameFetchIdentity(current, afterImage)) { superseded = true; continue; }
@@ -227,6 +307,7 @@ public static class SeriesMetadata
                         episodes += episodeList.Length;
                     }
                     matched = true;
+                    if (weighed && !superseded) library.Setting(OrderWeighedKey(LibraryIdentity.ShowKey(item)), EpisodeOrder.Weighed(order ?? item.NumberingOrder, evidence));
                     seasons += details.Count(s => entries.Any(e => e.Season == s.Number));
                     if (mode != MetadataRefresh.RetryArtwork) ReconcileMissing(library, directory, item, details, provider, id.Value, options);
                     break;
@@ -234,11 +315,23 @@ public static class SeriesMetadata
                 catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidOperationException or KeyNotFoundException or TaskCanceledException && !ct.IsCancellationRequested)
                 { MetadataDiagnostics.Failure("season-episode", item.DisplayTitle, provider, ex); providerFailure = ex; attemptFailed = true; failed++; progress?.Report(provider + " season/episode metadata unavailable · " + item.DisplayTitle); }
             }
+            // A show no provider lists can be a folder of separately released shorts, each a film of its own.
+            if (!matched && !superseded && !attemptFailed && tmdb is not null && mode != MetadataRefresh.RetryArtwork &&
+                !entries.Any(x => x.Matched || LibraryIdentity.Locked(x, "ProviderIds") || LibraryIdentity.Locked(x, "MetadataType")))
+            {
+                try
+                {
+                    var shorts = await ShortFilms.IdentifyAsync(library, tmdb, directory, library.ByIds(entries.Select(x => x.Id)).ToArray(), replaceText, ct);
+                    if (shorts > 0) { matched = true; rejected = false; episodes += shorts; outstanding.Clear("episodes", item); outstanding.Clear("title", item); }
+                }
+                catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidOperationException or KeyNotFoundException or TaskCanceledException && !ct.IsCancellationRequested)
+                { MetadataDiagnostics.Failure("short-films", item.DisplayTitle, "tmdb", ex); providerFailure = ex; attemptFailed = true; failed++; progress?.Report("Short film metadata unavailable · " + item.DisplayTitle); }
+            }
             if (!matched)
             {
-                var knownIdentity = item.MetadataId is > 0 || (item.ProviderIds?.Count ?? 0) > 0;
+                var knownIdentity = !rejected && (item.MetadataId is > 0 || (item.ProviderIds?.Count ?? 0) > 0);
                 if (knownIdentity) incomplete++; else unmatched++;
-                outstanding.Set(mode == MetadataRefresh.RetryArtwork ? "episode-artwork" : "episodes", item, attemptFailed ? "provider-failure" : knownIdentity ? "episode-metadata-unavailable" : MetadataDiagnostics.MatchOutcome ?? "no-confident-match", error: providerFailure);
+                outstanding.Set(mode == MetadataRefresh.RetryArtwork ? "episode-artwork" : "episodes", item, rejected ? "episode-titles-contradict-match" : attemptFailed ? "provider-failure" : knownIdentity ? "episode-metadata-unavailable" : MetadataDiagnostics.MatchOutcome ?? "no-confident-match", error: providerFailure);
             }
             if (!superseded)
             {
@@ -248,6 +341,7 @@ public static class SeriesMetadata
         }
         // Placeholders count as redone only when every show was reached.
         if (recheck && !stopped) library.Setting(MissingChecked, missingState);
+        if (checkingOrders && !stopped) library.Setting(OrderChecked, OrderCheckVersion);
         if (stopped) return MetadataOptions.LocaleStopped;
         return $"Seasons: {seasons} · Episodes: {episodes} · {unmatched} shows need matching · {incomplete} shows missing episode metadata · {failed} metadata failures · {artworkFailed} artwork failures · {deferred} shows deferred.";
     }
