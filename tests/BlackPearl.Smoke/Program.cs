@@ -389,27 +389,40 @@ if (args.FirstOrDefault() == "--forward-buffer")
     });
     return;
 }
-var root = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/smoke");
+// "--part 1" runs the first half of the suite and "--part 2" the rest, each taking about half the time, so CI can run
+// them on two runners. Without it the whole suite runs.
+var partAt = Array.IndexOf(args, "--part");
+var part = partAt < 0 ? 0 : int.Parse(args[partAt + 1]);
+if (part is not (0 or 1 or 2)) throw new ArgumentException("--part must be 1 or 2");
+var root = Path.GetFullPath(args.Where((_, i) => partAt < 0 || (i != partAt && i != partAt + 1)).FirstOrDefault() ?? "artifacts/smoke");
 Directory.CreateDirectory(root);
 PlaybackDiagnostics.Initialize(Path.Combine(root, "session-logs"));
 int passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
-await MetadataDiagnosticsFixture.Run(Path.Combine(root, "metadata-diagnostics"), Check);
-await MetadataFixesFixture.Run(Path.Combine(root, "metadata-fixes"), Check);
-await MetadataLanguageFixture.Run(Path.Combine(root, "metadata-language"), Check);
-TrackLanguageFixture.Run(Check);
-EpisodePlaybackFixture.Run(Check);
-OpenedFileFixture.Run(Check);
-await DiagnosticLogFixture.Run(Path.Combine(root, "diagnostic-log"), Check);
-await RecoveryFixture.Run(Check);
-await MediaCacheFixture.Run(Check);
-await ReadAheadFixture.Run(Check);
-await BridgeShutdownFixture.Run(Check);
-await LibrarySearchFixture.Run(Check);
-await MetadataPipelineFixture.Run(Path.Combine(root, "metadata-pipeline"), Check);
-await EpisodeOrderFixture.Run(Path.Combine(root, "episode-order"), Check);
-await MetadataRecoveryFixture.Run(Path.Combine(root, "metadata-recovery"), Check);
-await MetadataEvidenceFixture.Run(Path.Combine(root, "metadata-evidence"), Check);
+if (part != 2)
+{
+    await MetadataDiagnosticsFixture.Run(Path.Combine(root, "metadata-diagnostics"), Check);
+    await MetadataFixesFixture.Run(Path.Combine(root, "metadata-fixes"), Check);
+    await MetadataLanguageFixture.Run(Path.Combine(root, "metadata-language"), Check);
+    TrackLanguageFixture.Run(Check);
+    EpisodePlaybackFixture.Run(Check);
+    OpenedFileFixture.Run(Check);
+    await DiagnosticLogFixture.Run(Path.Combine(root, "diagnostic-log"), Check);
+    await RecoveryFixture.Run(Check);
+    await MediaCacheFixture.Run(Check);
+    await ReadAheadFixture.Run(Check);
+    await BridgeShutdownFixture.Run(Check);
+    await LibrarySearchFixture.Run(Check);
+    await MetadataPipelineFixture.Run(Path.Combine(root, "metadata-pipeline"), Check);
+    await EpisodeOrderFixture.Run(Path.Combine(root, "episode-order"), Check);
+    await MetadataRecoveryFixture.Run(Path.Combine(root, "metadata-recovery"), Check);
+    await MetadataEvidenceFixture.Run(Path.Combine(root, "metadata-evidence"), Check);
+}
+if (part == 1)
+{
+    Console.WriteLine($"{passed} checks passed (part 1 of 2).");
+    return;
+}
 await MetadataCacheFixture.Run(Path.Combine(root, "metadata-cache"), Check);
 await EpisodeArtworkFixture.Run(Path.Combine(root, "episode-artwork"), Check);
 await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);

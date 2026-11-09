@@ -271,10 +271,10 @@ function Assert-ReleaseMetadata {
     # The file list lets later releases build update installers from this one and lets the app check its files.
     $files = @($Release.assets | Where-Object name -CEQ "BlackPearl-files-$ExpectedVersion-win-x64.txt")
     if ($files.Count -ne 1 -or $files[0].size -le 0 -or $files[0].digest -cnotmatch '^sha256:[a-f0-9]{64}$') { throw 'Missing file list, size, or SHA-256 digest.' }
-    # Until the repository is renamed, installations from before the app was renamed update from Watchroom-* copies of
-    # the installers; they must be the same files.
+    # Until the repository is renamed, installations from before the app was renamed update from a Watchroom-* copy of
+    # the full installer; it must be the same file.
     if ($repository -ceq $formerRepository) {
-        foreach ($asset in @($installer[0]) + $updates) {
+        foreach ($asset in @($installer[0])) {
             $legacy = @($Release.assets | Where-Object name -CEQ ($asset.name -creplace '^BlackPearl-', 'Watchroom-'))
             if ($legacy.Count -ne 1 -or $legacy[0].size -ne $asset.size -or $legacy[0].digest -cne $asset.digest) { throw "Missing Watchroom-named copy of $($asset.name)." }
             $files += $legacy[0]
@@ -293,9 +293,16 @@ function Assert-InstallerBytes {
     if ((Get-Item -LiteralPath $InstallerPath).Length -ne $Asset.size -or "sha256:$hash" -cne $Asset.digest) {
         throw 'Installer size or GitHub SHA-256 digest mismatch.'
     }
-    $pattern = '(?m)^' + [regex]::Escape($hash) + '\s+\*?' + [regex]::Escape($Asset.name) + '\s*$'
-    if ((Get-Content -LiteralPath $ChecksumPath -Raw) -notmatch $pattern) { throw 'SHA256SUMS.txt mismatch.' }
+    Assert-PublishedDigest $ChecksumPath $Asset
     return $hash
+}
+# The other assets are not downloaded: GitHub's SHA-256 of the stored file, which the app checks every download
+# against, must be the hash the build wrote to SHA256SUMS.txt.
+function Assert-PublishedDigest {
+    param([string]$ChecksumPath, $Asset)
+    if ($Asset.digest -cnotmatch '^sha256:([a-f0-9]{64})$') { throw "Missing SHA-256 digest for $($Asset.name)." }
+    $pattern = '(?m)^' + $Matches[1] + '\s+\*?' + [regex]::Escape($Asset.name) + '\s*$'
+    if ((Get-Content -LiteralPath $ChecksumPath -Raw) -notmatch $pattern) { throw "SHA256SUMS.txt mismatch for $($Asset.name)." }
 }
 function Wait-ReleaseBuild {
     param([string]$ExpectedVersion, [string]$Commit, [datetime]$Deadline)
@@ -315,7 +322,7 @@ function Wait-ReleaseBuild {
             if ($run.conclusion -ne 'success') { throw "Release build failed: $($run.html_url). Fix it before shipping a higher version; do not move the tag." }
             return $run
         }
-        Start-Sleep -Seconds 45
+        Start-Sleep -Seconds 20
     }
     throw "Timed out waiting for the tag build. Recheck with -VerifyOnly -Version $ExpectedVersion."
 }
@@ -331,15 +338,11 @@ function Test-PublishedRelease {
     $assets = Assert-ReleaseMetadata $release $ExpectedVersion
     $installerPath = Join-Path $Destination $assets.Installer.name
     $checksumPath = Join-Path $Destination 'SHA256SUMS.txt'
-    Invoke-WebRequest -Uri $assets.Checksums.browser_download_url -OutFile $checksumPath -TimeoutSec 600
+    Invoke-WebRequest -Uri $assets.Checksums.browser_download_url -OutFile $checksumPath -TimeoutSec 600 -MaximumRetryCount 4 -RetryIntervalSec 5
     Write-Host "Downloading $($assets.Installer.name) for verification…"
-    Invoke-WebRequest -Uri $assets.Installer.browser_download_url -OutFile $installerPath -TimeoutSec 600
+    Invoke-WebRequest -Uri $assets.Installer.browser_download_url -OutFile $installerPath -TimeoutSec 600 -MaximumRetryCount 4 -RetryIntervalSec 5
     $hash = Assert-InstallerBytes $installerPath $checksumPath $assets.Installer
-    foreach ($update in $assets.Updates) {
-        $updatePath = Join-Path $Destination $update.name
-        Invoke-WebRequest -Uri $update.browser_download_url -OutFile $updatePath -TimeoutSec 600
-        $null = Assert-InstallerBytes $updatePath $checksumPath $update
-    }
+    foreach ($update in $assets.Updates) { Assert-PublishedDigest $checksumPath $update }
     $url = "https://github.com/$repository/releases/tag/v$ExpectedVersion"
     $page = Invoke-WebRequest -Uri $url -TimeoutSec 60
     $links = Invoke-WebRequest -Uri "https://github.com/$repository/releases/expanded_assets/v$ExpectedVersion" -TimeoutSec 60
