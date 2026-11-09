@@ -116,12 +116,22 @@ function Resolve-ShipSdk {
     }
     return (Resolve-Path -LiteralPath $sdk).Path
 }
+# A run that was interrupted, or failed and is now checked again, leaves its copy of the commit behind; a new run of the
+# same commit removes it.
+function Remove-StaleCheckCopy {
+    param([string]$Root, [string]$RecordPath)
+    $state = Get-CheckState $RecordPath
+    if ($state.State -in 'missing', 'running' -or !$state.PSObject.Properties['Checkout'] -or !$state.Checkout) { return }
+    if (Test-Path -LiteralPath $state.Checkout) { & git -C $Root worktree remove --force $state.Checkout 2>$null }
+    & git -C $Root worktree prune 2>$null
+}
 # Runs the release checks on a clean copy of the commit and records running, then passed or failed, for -Merge and
 # reviewers. It runs in its own process (ship.ps1 -CheckCommit), whose id the record keeps: in the background after a
 # push, or in the foreground when -Merge finds the background run interrupted.
 function Invoke-CheckRun {
     param([string]$Root, [string]$Commit, [string]$Sdk, [string]$Branch = '', [string]$Log = '')
     $recordPath = Get-CheckRecordPath $Root $Commit
+    Remove-StaleCheckCopy $Root $recordPath
     # A clean copy: untracked files in the worktree cannot affect the result, and SQLite fixture paths stay within
     # legacy Windows limits under the temp directory.
     $checkout = Join-Path ([IO.Path]::GetTempPath()) ('blackpearl-ship-' + [guid]::NewGuid().ToString('N'))
@@ -173,6 +183,7 @@ function Start-BackgroundChecks {
     $recordPath = Get-CheckRecordPath $Root $Commit
     $log = [IO.Path]::ChangeExtension($recordPath, '.log')
     New-Item -ItemType Directory -Path (Split-Path -Parent $recordPath) -Force | Out-Null
+    Remove-StaleCheckCopy $Root $recordPath
     Remove-Item -LiteralPath $recordPath -Force -ErrorAction SilentlyContinue
     $shell = (Get-Process -Id $PID).Path
     # The branch's copy of this script runs the checks, in a process that outlives this one. cmd writes its output and
@@ -503,7 +514,8 @@ try {
                 # In a process of its own, so stopping it or a newer push of the branch cannot leave the record running.
                 & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $root 'scripts/ship.ps1') -CheckCommit $head -Branch $pull.head.ref -Sdk (Resolve-ShipSdk $root $Sdk)
                 $local = Get-CheckState $localRecord
-                if ($local.State -ne 'passed') { throw "Release checks failed on ${head}: $($local.Error) $(Format-CheckEvidence $local)$checkFailureAdvice" }
+                if ($local.State -eq 'failed') { throw "Release checks failed on ${head}: $($local.Error) $(Format-CheckEvidence $local)$checkFailureAdvice" }
+                if ($local.State -ne 'passed') { throw "Release checks on $head ended without a result ($($local.State)). Rerun -Merge to run them again." }
                 $localPassed = $true
             }
             if (!$checks) {

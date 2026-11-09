@@ -161,6 +161,18 @@ try {
     Write-CheckRecord $recordPath @{ Commit = $headA; State = 'failed'; Error = 'fixture failure' }
     Check ((Get-CheckState $recordPath).State -eq 'failed') 'failed checks are reported as failed'
     Check (@(Get-ChildItem -LiteralPath (Split-Path -Parent $recordPath) -Filter '*.partial-*').Count -eq 0) 'check records are replaced whole'
+    $copyRepo = Join-Path $testRoot 'check-copy-repo'
+    Invoke-Native git @('init', '--quiet', $copyRepo)
+    Invoke-Native git @('-C', $copyRepo, '-c', 'user.name=Shipping checks', '-c', 'user.email=checks@example.invalid', 'commit', '--quiet', '--allow-empty', '-m', 'fixture')
+    $staleCopy = Join-Path $testRoot 'stale-check-copy'
+    Invoke-Native git @('-C', $copyRepo, 'worktree', 'add', '--quiet', '--detach', $staleCopy, 'HEAD')
+    $self = Get-Process -Id $PID
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = $PID; ProcessStart = $self.StartTime.ToUniversalTime().Ticks; Checkout = $staleCopy }
+    Remove-StaleCheckCopy $copyRepo $recordPath
+    Check (Test-Path -LiteralPath $staleCopy) 'the copy of checks still running is kept'
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = 4; ProcessStart = 1; Checkout = $staleCopy }
+    Remove-StaleCheckCopy $copyRepo $recordPath
+    Check (!(Test-Path -LiteralPath $staleCopy) -and @(Invoke-Native git @('-C', $copyRepo, 'worktree', 'list')).Count -eq 1) 'checking a commit again removes the copy an interrupted run left behind'
     # One list of checks: the workflow runs the shared script rather than its own copy of the suites.
     $workflow = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../.github/workflows/build.yml') -Raw
     Check ($workflow -match 'scripts/release-checks\.ps1 -Lane \$\{\{ matrix\.lane \}\}' -and $workflow -notmatch 'dotnet run --project tests/') 'the workflow runs the release checks from the shared list'
