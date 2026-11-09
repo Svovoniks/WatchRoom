@@ -142,6 +142,56 @@ try {
     Check ($run.id -eq 3) 'only the exact tag and commit workflow count as a release build'
     $script:mockConclusion = 'failure'
     Expect-Rejected { Wait-ReleaseBuild '0.3.18' 'fixture' ([datetime]::UtcNow.AddSeconds(5)) } 'failed tag workflow stops shipping'
+    # Release checks run in the background after the push; -Merge reads their record.
+    $recordPath = Join-Path $testRoot "checks/$headA.json"
+    Check ((Get-CheckState $recordPath).State -eq 'missing') 'a commit without a check record is reported as unchecked'
+    Write-CheckRecord $recordPath @{ Commit = $headA; Version = '0.3.18'; Checked = '2026-01-01T00:00:00Z' }
+    Check ((Get-CheckState $recordPath).State -eq 'passed') 'a record written before background checks means the checks passed'
+    $self = Get-Process -Id $PID
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = $PID; ProcessStart = $self.StartTime.ToUniversalTime().Ticks }
+    Check ((Get-CheckState $recordPath).State -eq 'running') 'checks whose process is alive are running'
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = $PID; ProcessStart = $self.StartTime.ToUniversalTime().Ticks - 1 }
+    Check ((Get-CheckState $recordPath).State -eq 'interrupted') 'a reused process id does not count as the running checks'
+    $finished = Start-Process -FilePath $self.Path -ArgumentList @('-NoProfile', '-Command', 'exit 0') -WindowStyle Hidden -PassThru
+    $finished.WaitForExit()
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = $finished.Id; ProcessStart = $finished.StartTime.ToUniversalTime().Ticks }
+    Check ((Get-CheckState $recordPath).State -eq 'interrupted') 'checks whose process ended without a result were interrupted'
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = 4; ProcessStart = 1 }
+    Check ((Get-CheckState $recordPath).State -eq 'interrupted') 'a process id reused by a protected system process does not count as the running checks'
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'failed'; Error = 'fixture failure' }
+    Check ((Get-CheckState $recordPath).State -eq 'failed') 'failed checks are reported as failed'
+    Check (@(Get-ChildItem -LiteralPath (Split-Path -Parent $recordPath) -Filter '*.partial-*').Count -eq 0) 'check records are replaced whole'
+    $copyRepo = Join-Path $testRoot 'check-copy-repo'
+    Invoke-Native git @('init', '--quiet', $copyRepo)
+    Invoke-Native git @('-C', $copyRepo, '-c', 'user.name=Shipping checks', '-c', 'user.email=checks@example.invalid', 'commit', '--quiet', '--allow-empty', '-m', 'fixture')
+    $staleCopy = Join-Path $testRoot 'stale-check-copy'
+    Invoke-Native git @('-C', $copyRepo, 'worktree', 'add', '--quiet', '--detach', $staleCopy, 'HEAD')
+    $self = Get-Process -Id $PID
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = $PID; ProcessStart = $self.StartTime.ToUniversalTime().Ticks; Checkout = $staleCopy }
+    Remove-StaleCheckCopy $copyRepo $recordPath
+    Check (Test-Path -LiteralPath $staleCopy) 'the copy of checks still running is kept'
+    Write-CheckRecord $recordPath @{ Commit = $headA; State = 'running'; Pid = 4; ProcessStart = 1; Checkout = $staleCopy }
+    Remove-StaleCheckCopy $copyRepo $recordPath
+    Check (!(Test-Path -LiteralPath $staleCopy) -and @(Invoke-Native git @('-C', $copyRepo, 'worktree', 'list')).Count -eq 1) 'checking a commit again removes the copy an interrupted run left behind'
+    # A newer commit of the branch replaces older ones, whose failed or interrupted copies are then removed.
+    $copyRecords = Join-Path (Invoke-Native git @('-C', $copyRepo, 'rev-parse', '--path-format=absolute', '--git-common-dir')).Trim() 'blackpearl-checks'
+    $otherCopy = Join-Path $testRoot 'other-branch-copy'
+    Invoke-Native git @('-C', $copyRepo, 'worktree', 'add', '--quiet', '--detach', $staleCopy, 'HEAD')
+    Invoke-Native git @('-C', $copyRepo, 'worktree', 'add', '--quiet', '--detach', $otherCopy, 'HEAD')
+    Write-CheckRecord (Join-Path $copyRecords "$headA.json") @{ Commit = $headA; Branch = 't3/fixture'; State = 'failed'; Error = 'fixture'; Checkout = $staleCopy }
+    Write-CheckRecord (Join-Path $copyRecords "$('c' * 40).json") @{ Commit = 'c' * 40; Branch = 't3/other'; State = 'failed'; Error = 'fixture'; Checkout = $otherCopy }
+    Stop-SupersededChecks $copyRepo 't3/fixture' $headB
+    $replaced = Get-CheckState (Join-Path $copyRecords "$headA.json")
+    Check (!(Test-Path -LiteralPath $staleCopy) -and $replaced.State -eq 'failed' -and !$replaced.PSObject.Properties['Checkout']) 'a newer commit of the branch removes the copy a failed run of an older one kept'
+    Check (Test-Path -LiteralPath $otherCopy) 'copies kept for other branches stay'
+    Invoke-Native git @('-C', $copyRepo, 'worktree', 'add', '--quiet', '--detach', $staleCopy, 'HEAD')
+    Write-CheckRecord (Join-Path $copyRecords "$headA.json") @{ Commit = $headA; Branch = 't3/fixture'; State = 'running'; Pid = 4; ProcessStart = 1; Checkout = $staleCopy }
+    Stop-SupersededChecks $copyRepo 't3/fixture' $headB
+    $replaced = Get-CheckState (Join-Path $copyRecords "$headA.json")
+    Check (!(Test-Path -LiteralPath $staleCopy) -and $replaced.State -eq 'interrupted' -and !$replaced.PSObject.Properties['Checkout']) 'a newer commit of the branch removes the copy an interrupted run of an older one left'
+    # One list of checks: the workflow runs the shared script rather than its own copy of the suites.
+    $workflow = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../.github/workflows/build.yml') -Raw
+    Check ($workflow -match 'scripts/release-checks\.ps1 -Lane \$\{\{ matrix\.lane \}\}' -and $workflow -notmatch 'dotnet run --project tests/') 'the workflow runs the release checks from the shared list'
     . (Join-Path $PSScriptRoot 'ship-sync-checks.ps1') -TestRoot $testRoot
     Write-Host "$checks shipping safety checks passed. No releases were created."
 }
