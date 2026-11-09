@@ -5,7 +5,7 @@
 # recent release is always installed that way: its update installer is applied over it and must reproduce the new
 # build exactly, and the installation must match its published file list.
 # Releases from before the app was renamed from Watchroom name their assets Watchroom-*; later ones BlackPearl-*.
-param([string]$Version = '', [int]$Previous = 40, [int]$InstallLimit = 3, [string]$Repository = $(if ($env:GITHUB_REPOSITORY) { $env:GITHUB_REPOSITORY } else { 'Svovoniks/BlackPearl' }))
+param([string]$Version = '', [int]$Previous = 20, [int]$InstallLimit = 3, [string]$Repository = $(if ($env:GITHUB_REPOSITORY) { $env:GITHUB_REPOSITORY } else { 'Svovoniks/BlackPearl' }))
 $ErrorActionPreference = 'Stop'
 
 function Get-InstallerCompiler {
@@ -159,7 +159,8 @@ function Get-VerifiedAsset {
     param($Release, [string]$Name, [string]$Destination)
     $asset = @($Release.assets | Where-Object name -CEQ $Name)
     if ($asset.Count -ne 1 -or $asset[0].digest -cnotmatch '^sha256:[a-f0-9]{64}$') { return $null }
-    Invoke-WebRequest -Uri $asset[0].browser_download_url -OutFile $Destination -TimeoutSec 600
+    # GitHub sometimes answers a download with a 502 or 504; one lost the 0.3.111 release build.
+    Invoke-WebRequest -Uri $asset[0].browser_download_url -OutFile $Destination -TimeoutSec 600 -MaximumRetryCount 4 -RetryIntervalSec 5
     if ('sha256:' + (Get-FileHash $Destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $asset[0].digest) { throw "$Name does not match its published digest" }
     return $Destination
 }
@@ -178,7 +179,7 @@ $compiler = Get-InstallerCompiler $root
 $script = Join-Path $root 'packaging/BlackPearl.iss'
 $headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'BlackPearl-build' }
 if ($env:GH_TOKEN) { $headers.Authorization = "Bearer $env:GH_TOKEN" }
-$releases = Invoke-RestMethod "https://api.github.com/repos/$Repository/releases?per_page=100" -Headers $headers
+$releases = Invoke-RestMethod "https://api.github.com/repos/$Repository/releases?per_page=100" -Headers $headers -MaximumRetryCount 4 -RetryIntervalSec 5
 $earlier = @($releases | Where-Object { !$_.draft -and !$_.prerelease -and $_.tag_name -match '^v(\d+\.\d+\.\d+)$' -and [Version]$Matches[1] -lt $current } |
     Sort-Object { [Version]$_.tag_name.Substring(1) } -Descending | Select-Object -First $Previous)
 $scratch = Join-Path $output ('update-build-' + [Guid]::NewGuid().ToString('N'))

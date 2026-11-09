@@ -78,7 +78,8 @@ squash-merges with GitHub's head-SHA guard and the title `Release BlackPearl X:
 <release note>`. It confirms the merged tree is exactly the reviewed tree, then
 tags and pushes `vX`. It deletes the merged branch, waits for the tag workflow, and
 verifies the public release, updater feed, installer size, and SHA-256 against both
-GitHub and `SHA256SUMS.txt`. Finally, it pulls `master` into the checkout that owns
+GitHub and `SHA256SUMS.txt`. It downloads only the full installer; every other asset's
+GitHub digest must match its line in `SHA256SUMS.txt`. Finally, it pulls `master` into the checkout that owns
 that branch. If `master` has no checkout, it fast-forwards the local branch without
 switching any checkout.
 
@@ -161,10 +162,12 @@ Use this only to recover when the scripts cannot run:
    Merge only the approved head. Then tag that exact merge commit with an annotated
    tag and push the tag. Never force-push or move an existing release tag.
 5. Wait for the **tag's** `Build and release` Actions run to succeed. A branch or
-   pull request build does not publish a release. The tag workflow packages the
-   installers, uploads them to a draft release, then publishes it as the latest
-   release. It runs the checks first unless a pull request run already passed them
-   on the exact same tree, as it has for every merge from `ship.ps1`.
+   pull request build does not publish a release. The tag workflow uploads the
+   installers to a draft release, then publishes it as the latest release. A pull
+   request that raises the version builds them beside its checks, and the tag
+   publishes those exact files when that run passed on the same tree, as it has for
+   every merge from `ship.ps1`, and was built against the release that is still the
+   latest. Otherwise the tag workflow checks and packages the commit itself.
 6. Verify without authentication that `/releases/latest` returns the expected
    tag, `draft=false`, and `prerelease=false`. Check that the Windows installer has
    the exact expected filename, a nonzero size, and a `sha256:` digest. Download
@@ -189,7 +192,7 @@ When voice chat changes, also run `tests/BlackPearl.DesktopChecks -- --voice-pro
 the voice processing libraries once, which needs Visual Studio's C++ tools and Rust (`cargo`).
 
 When packaging or the updater changes, also run `./scripts/update-package-checks.ps1`.
-The release workflow runs it on every packaged build.
+CI runs it on every packaged build.
 
 Inspect Actions at https://github.com/Svovoniks/BlackPearl/actions and releases at
 https://github.com/Svovoniks/BlackPearl/releases. Public REST endpoints work without
@@ -270,19 +273,26 @@ The logger keeps four files of up to 5 MiB each and writes asynchronously.
 
 ## Build and updater behavior
 
-GitHub Actions runs the checks on pull requests, split across two runners: the
-desktop suites and the full smoke suite. Pushes to `master`, version tags, and
-manual runs build the Windows x64 app and installers, and skip the checks when a
-pull request run already passed them on the same tree; otherwise the checks run
-beside packaging and a tag publishes only after they pass. Successful builds
-retain installers as workflow artifacts for 14 days.
+GitHub Actions runs the checks on pull requests, split across three runners: the
+desktop suites and the two halves of the full smoke suite (`--part 1` and
+`--part 2`). A pull request from this repository whose version is above the latest
+release also builds the Windows x64 app and installers on a fourth runner, from the
+head commit. Its artifact, `BlackPearl-windows-VERSION-after-LATEST`, names the
+latest release its update installers were built against and is kept for 14 days.
+A version tag publishes that artifact when a passing pull request run has the
+tag's tree and the same latest release; otherwise it builds the installers itself,
+and runs the checks too unless a pull request run already passed them on the same
+tree. Manual runs always package, and check unless a pull request run already
+passed on the same tree. Pushes to `master` only restore and build
+whatever the build caches lack, since pull requests can read master's caches but
+not each other's.
 
 Push a version tag such as `v0.2.1` to publish a GitHub Release. Tags must use
 `vMAJOR.MINOR.PATCH`; the same version is embedded in the application and installer.
 The workflow uploads `BlackPearl-Setup-VERSION-win-x64.exe`, the file list
 `BlackPearl-files-VERSION-win-x64.txt` (SHA-256, size and path of every installed
 file), update installers `BlackPearl-Update-FROM-to-VERSION-win-x64.exe` from
-each of the 40 previous stable releases, and `SHA256SUMS.txt` covering all of
+each of the 20 previous stable releases, and `SHA256SUMS.txt` covering all of
 them. Only tagged builds publish releases. Do not replace an existing release
 with different bytes; publish a new version instead.
 
@@ -315,7 +325,7 @@ different release.
 progress, and verifies its length and GitHub-provided SHA-256 digest. Failed or
 interrupted downloads never launch an installer. When the release has an update
 installer from the running version, the updater downloads that one. An
-installation older than the last 40 releases chains update installers through
+installation older than the last 20 releases chains update installers through
 intermediate releases (the cheapest chain among the last 100 releases) when the
 chain is smaller than half the full installer; a short script in the `updates`
 folder runs them one after another once the app has closed, only the last one
@@ -368,7 +378,9 @@ and release assets are now BlackPearl. What existing installations rely on keeps
 - **Updates.** Watchroom 0.3.90 and older look only for `Watchroom-Setup-*` and
   `Watchroom-Update-*` assets, and accept downloads only from URLs under
   `Svovoniks/WatchRoom`. While the repository still has that name, the release workflow also
-  publishes each installer under its Watchroom name, and `ship.ps1` verifies those copies.
+  publishes the full installer under its Watchroom name, and `ship.ps1` verifies that copy.
+  Update installers are built only from the last 20 releases, all BlackPearl, so they have no
+  Watchroom copies and those installations take the full installer.
   BlackPearl tries `Svovoniks/BlackPearl` first, then `Svovoniks/WatchRoom`, and accepts
   downloads under either name.
 

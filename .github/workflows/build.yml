@@ -1,7 +1,9 @@
 name: Build and release
-# Pull requests run the checks on two runners at once. Pushes to master and release tags build the installers; they
-# skip the checks when a pull request run already passed them on the exact same tree, which is the case for every
-# merge from scripts/ship.ps1. A release is published only after the installers are built and the checks passed.
+# A pull request that raises the version runs the checks and builds the installers at once, on up to four runners. Its tag
+# then publishes those exact installers: ship.ps1 merges only heads that contain master and tags a squash commit with
+# the head's tree, so the tag run finds the passing pull request run with that tree and reuses its checks and
+# installers. A tag without such a run checks and builds itself. Pushes to master only keep the build caches warm for
+# pull requests, which cannot share their own caches.
 on:
   push:
     branches: [master]
@@ -22,7 +24,10 @@ jobs:
       actions: read
     outputs:
       version: ${{ steps.version.outputs.version }}
-      checked: ${{ steps.earlier.outputs.checked }}
+      checked: ${{ steps.plan.outputs.checked }}
+      package: ${{ steps.plan.outputs.package }}
+      artifact: ${{ steps.plan.outputs.artifact }}
+      prebuilt: ${{ steps.plan.outputs.prebuilt }}
     steps:
       - uses: actions/checkout@v4
       - name: Resolve version
@@ -33,23 +38,50 @@ jobs:
           if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") { throw 'Tag must match Version in Directory.Build.props' }
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Release tags must be vMAJOR.MINOR.PATCH' }
           "version=$version" >> $env:GITHUB_OUTPUT
-      # A pull request run checks the head merged into master. ship.ps1 merges only heads that contain master, so that
-      # merge has the head's own tree, and the squash commit it creates has that tree too.
-      - name: Find checks that already passed on this tree
-        id: earlier
-        if: github.event_name != 'pull_request'
+      # Update installers are built from every recent release up to the latest one, so the artifact name records which
+      # release that was. A tag reuses only installers built against the release that is still the latest.
+      - name: Plan checks and packaging
+        id: plan
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          EVENT: ${{ github.event_name }}
+          SAME_REPOSITORY: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          tree=$(git rev-parse 'HEAD^{tree}')
-          run=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" -f event=pull_request -f status=success -f per_page=100 \
-            --jq "[.workflow_runs[] | select(.head_commit.tree_id == \"$tree\") | .html_url] | first // empty")
-          if [ -n "$run" ]; then
-            echo "Tree $tree already passed every check in $run"
-            echo "checked=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No passing pull request run has tree $tree, so the checks run here."
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name | ltrimstr("v")' 2>/dev/null) || latest=none
+          artifact="BlackPearl-windows-$VERSION-after-$latest"
+          echo "artifact=$artifact" >> "$GITHUB_OUTPUT"
+          unreleased=false
+          if [ "$latest" = none ] || { [ "$latest" != "$VERSION" ] && [ "$(printf '%s\n%s\n' "$latest" "$VERSION" | sort -V | tail -n 1)" = "$VERSION" ]; }; then unreleased=true; fi
+          prebuilt=
+          # A pull request run checks the head merged into master, which has the head's own tree when the head contains master.
+          # When GitHub fails to answer, nothing counts as checked or built, and this run checks and builds itself.
+          if [ "$EVENT" != pull_request ]; then
+            tree=$(git rev-parse 'HEAD^{tree}')
+            runs=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" -f event=pull_request -f status=success -f per_page=100 \
+              --jq ".workflow_runs[] | select(.head_commit.tree_id == \"$tree\") | \"\(.id) \(.head_repository.full_name)\"") || runs=
+            if [ -n "$runs" ]; then
+              echo "Tree $tree already passed every check in run $(echo "$runs" | head -n 1 | cut -d ' ' -f 1)"
+              echo "checked=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "No passing pull request run has tree $tree, so the checks run here."
+            fi
+            if [ "$GITHUB_REF_TYPE" = tag ] && [ -n "$runs" ]; then
+              while read -r id repository; do
+                [ "$repository" = "$GITHUB_REPOSITORY" ] || continue
+                found=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" -f name="$artifact" --jq '[.artifacts[] | select(.expired | not)] | length') || found=0
+                if [ "$found" != 0 ]; then prebuilt=$id; break; fi
+              done <<< "$runs"
+            fi
           fi
+          case "$EVENT" in
+            pull_request) package=$([ "$SAME_REPOSITORY" = true ] && [ "$unreleased" = true ] && echo true || echo false) ;;
+            workflow_dispatch) package=true ;;
+            *) package=$([ "$GITHUB_REF_TYPE" = tag ] && [ -z "$prebuilt" ] && echo true || echo false) ;;
+          esac
+          if [ -n "$prebuilt" ]; then echo "Publishing $artifact from run $prebuilt"; echo "prebuilt=$prebuilt" >> "$GITHUB_OUTPUT"; fi
+          echo "Version $VERSION, latest release $latest, packaging here: $package"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
 
   checks:
     needs: plan
@@ -60,7 +92,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [desktop, smoke]
+        lane: [desktop, smoke-1, smoke-2]
     env:
       APP_VERSION: ${{ needs.plan.outputs.version }}
     steps:
@@ -130,20 +162,24 @@ jobs:
       - name: Episode thumbnail checks
         if: matrix.lane == 'desktop'
         run: dotnet run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --video-frames
-      # Includes the metadata cache and shared library transport checks.
-      - name: Full playback and room checks
-        if: matrix.lane == 'smoke'
-        run: dotnet run --project tests/BlackPearl.Smoke -c Release --no-build -- artifacts/release-smoke
+      # The full smoke suite in two halves of about equal length; the second includes the metadata cache, shared
+      # library transport and room checks.
+      - name: Full playback and room checks (part ${{ matrix.lane == 'smoke-1' && '1' || '2' }} of 2)
+        if: matrix.lane != 'desktop'
+        run: dotnet run --project tests/BlackPearl.Smoke -c Release --no-build -- artifacts/release-smoke --part ${{ matrix.lane == 'smoke-1' && '1' || '2' }}
 
   package:
     needs: plan
-    if: github.event_name != 'pull_request'
+    if: needs.plan.outputs.package == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
     env:
       APP_VERSION: ${{ needs.plan.outputs.version }}
     steps:
+      # The pull request head itself, not its merge into master: the tag reuses these installers for the head's tree.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
@@ -187,31 +223,77 @@ jobs:
           if ($installer.State -ne 'Completed') { throw 'Full installer compilation failed' }
       - uses: actions/upload-artifact@v4
         with:
-          name: BlackPearl-windows-${{ env.APP_VERSION }}
+          name: ${{ needs.plan.outputs.artifact }}
           path: |
             artifacts/BlackPearl-Setup-*-win-x64.exe
             artifacts/BlackPearl-Update-*-win-x64.exe
             artifacts/BlackPearl-files-*-win-x64.txt
           if-no-files-found: error
           retention-days: 14
+          # Installers are already compressed.
+          compression-level: 0
+
+  # Pull requests read caches saved on master but not each other's, so master keeps one of each. A cache that is
+  # already there is only looked up, not downloaded.
+  caches:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: nuget
+        with:
+          path: .nuget/packages
+          key: nuget-${{ hashFiles('**/packages.lock.json') }}
+          lookup-only: true
+      - uses: actions/cache@v4
+        id: models
+        with:
+          path: .tools/models
+          key: models-${{ hashFiles('src/BlackPearl.Desktop/BlackPearl.Desktop.csproj') }}
+          lookup-only: true
+      - uses: actions/cache@v4
+        id: native
+        with:
+          path: .tools/native/*.dll
+          key: voice-native-${{ hashFiles('src/native/**', 'src/BlackPearl.Desktop/BlackPearl.Desktop.csproj') }}
+          lookup-only: true
+      - uses: actions/setup-dotnet@v4
+        if: steps.nuget.outputs.cache-hit != 'true' || steps.models.outputs.cache-hit != 'true' || steps.native.outputs.cache-hit != 'true'
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore and build what is missing
+        if: steps.nuget.outputs.cache-hit != 'true' || steps.models.outputs.cache-hit != 'true' || steps.native.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          dotnet restore BlackPearl.slnx --locked-mode
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet build src/BlackPearl.Desktop -c Release --no-restore
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
   release:
     needs: [plan, checks, package]
-    # Runs after skipped checks only when the plan found that they already passed on this tree.
+    # Runs after skipped checks only when the plan found that they already passed on this tree, and after skipped
+    # packaging only when that passing run built the installers.
     if: >-
-      always() && startsWith(github.ref, 'refs/tags/') && needs.plan.result == 'success' && needs.package.result == 'success' &&
+      always() && startsWith(github.ref, 'refs/tags/') && needs.plan.result == 'success' &&
+      (needs.package.result == 'success' || (needs.package.result == 'skipped' && needs.plan.outputs.prebuilt != '')) &&
       (needs.checks.result == 'success' || (needs.checks.result == 'skipped' && needs.plan.outputs.checked == 'true'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
+      actions: read
     env:
       APP_VERSION: ${{ needs.plan.outputs.version }}
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: BlackPearl-windows-${{ env.APP_VERSION }}
+          name: ${{ needs.plan.outputs.artifact }}
           path: artifacts
+          run-id: ${{ needs.plan.outputs.prebuilt || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Publish GitHub release
         shell: pwsh
         env:
@@ -220,14 +302,15 @@ jobs:
         run: |
           $files = @("artifacts/BlackPearl-Setup-$env:APP_VERSION-win-x64.exe", "artifacts/BlackPearl-files-$env:APP_VERSION-win-x64.txt") +
             @(Get-ChildItem "artifacts/BlackPearl-Update-*-to-$env:APP_VERSION-win-x64.exe" | ForEach-Object { $_.FullName })
-          # Installations from before the rename look for Watchroom-Setup-* and Watchroom-Update-* and accept downloads only
-          # from Svovoniks/WatchRoom, so while the repository still has that name, the installers are also published under
-          # their old names for them to update to BlackPearl. After the rename those installations cannot update anyway.
+          # Installations from before the rename (Watchroom 0.3.90 and older) look for Watchroom-Setup-* and accept
+          # downloads only from Svovoniks/WatchRoom, so while the repository still has that name, the full installer is
+          # also published under its old name for them to update to BlackPearl. No update installer is built from a
+          # version that old any more, so they take the full installer. After the rename they cannot update anyway.
           if ($env:GH_REPO -ceq 'Svovoniks/WatchRoom') {
-            $files += @($files | Where-Object { (Split-Path $_ -Leaf) -match '^BlackPearl-(Setup|Update)-' } | ForEach-Object {
-              $legacy = Join-Path (Split-Path $_ -Parent) ((Split-Path $_ -Leaf) -replace '^BlackPearl-', 'Watchroom-')
-              Copy-Item $_ $legacy; $legacy
-            })
+            $setup = $files[0]
+            $legacy = Join-Path (Split-Path $setup -Parent) ((Split-Path $setup -Leaf) -replace '^BlackPearl-', 'Watchroom-')
+            Copy-Item $setup $legacy
+            $files += $legacy
           }
           $files | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $(Split-Path $_ -Leaf)" } | Set-Content artifacts/SHA256SUMS.txt
           gh release create $env:GITHUB_REF_NAME @files artifacts/SHA256SUMS.txt --verify-tag --draft --title "BlackPearl $env:APP_VERSION" --generate-notes
