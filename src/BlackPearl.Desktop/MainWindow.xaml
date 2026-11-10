@@ -10,7 +10,7 @@
      <Button x:Name="NowPlayingButton" Tag="Room" Click="Navigate" Visibility="Collapsed" Background="{DynamicResource AccentSoft}" HorizontalContentAlignment="Stretch" Padding="12,10" Margin="0,0,0,8" ToolTip="Return to the current video" AutomationProperties.Name="Return to player">
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
        <Border Width="30" Height="30" CornerRadius="15" Background="{DynamicResource Accent}" VerticalAlignment="Center"><TextBlock Text="&#xF5B0;" Style="{StaticResource Icon}" FontSize="11" Foreground="{DynamicResource AccentInk}" HorizontalAlignment="Center" Margin="2,0,0,0"/></Border>
-       <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="{Binding Visibility, ElementName=RailBrand}"><TextBlock Text="Return to player" FontWeight="SemiBold" FontSize="13"/><TextBlock x:Name="NowPlayingLabel" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource Muted}" Margin="0,2,0,0"/></StackPanel>
+       <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="{Binding Visibility, ElementName=RailBrandName}"><TextBlock Text="Return to player" FontWeight="SemiBold" FontSize="13"/><TextBlock x:Name="NowPlayingLabel" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource Muted}" Margin="0,2,0,0"/></StackPanel>
       </Grid>
      </Button>
      <Button x:Name="SettingsNav" Tag="Settings" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Settings"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Settings" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>
@@ -23,9 +23,10 @@
       <ScrollBar x:Name="PART_VerticalScrollBar" HorizontalAlignment="Right" Width="12" MinWidth="0" Minimum="0" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{TemplateBinding VerticalOffset}" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
      </Grid></ControlTemplate></ScrollViewer.Template>
      <StackPanel Margin="0,0,12,0">
-       <!-- The brand row sits in the caption area, so its toggle takes clicks from the window frame. A collapsed sidebar keeps only the toggle. -->
-       <Grid Margin="0,0,0,22" MinHeight="34">
-        <StackPanel x:Name="RailBrand" Orientation="Horizontal" Margin="10,0,0,0" VerticalAlignment="Center"><Image Source="Assets/BlackPearl.png" Width="26" Height="26"/><TextBlock Text="BlackPearl" FontSize="18" FontWeight="SemiBold" Margin="10,0,0,1" VerticalAlignment="Center"/></StackPanel>
+       <!-- The brand row sits in the caption area, so its toggle takes clicks from the window frame. A collapsed sidebar keeps
+            the logo and puts the toggle under it (SideRail.cs). -->
+       <Grid x:Name="RailHeader" Margin="0,0,0,22" MinHeight="34"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel x:Name="RailBrand" Orientation="Horizontal" Margin="10,0,0,0" VerticalAlignment="Center"><Image x:Name="RailLogo" Source="Assets/BlackPearl.png" Width="26" Height="26" AutomationProperties.Name="BlackPearl"/><TextBlock x:Name="RailBrandName" Text="BlackPearl" FontSize="18" FontWeight="SemiBold" Margin="10,0,0,1" VerticalAlignment="Center"/></StackPanel>
         <Button x:Name="RailToggle" Content="&#xE700;" Click="ToggleRailClick" Style="{StaticResource QuietIcon}" Width="36" Margin="0" HorizontalAlignment="Right" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Collapse sidebar (Ctrl+B)" AutomationProperties.Name="Collapse sidebar"/>
        </Grid>
        <Button x:Name="HomeNav" Tag="Home" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Home"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE80F;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Home" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>

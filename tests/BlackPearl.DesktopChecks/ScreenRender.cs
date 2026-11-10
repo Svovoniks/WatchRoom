@@ -63,11 +63,15 @@ static class ScreenRender
         var deadline = DateTime.UtcNow.AddSeconds(60);
         while (Field("libraryLoaded") is not true && DateTime.UtcNow < deadline) await Settle(200);
         var items = ((List<MediaItem>)Field("items")!).Where(item => item.Available && !item.IsExtra).ToList();
+        Call("SetRailCollapsed", false);
         foreach (var theme in new[] { "dark", "light" })
         {
             Set("light", theme == "light"); Call("ApplyTheme");
             Call("ShowPage", "Home"); await Capture($"{theme}-home");
             Call("NavigateLibrary", 0, null, null, null); await Capture($"{theme}-library");
+            // The sidebar folded into its strip of icons.
+            Call("SetRailCollapsed", true); await Capture($"{theme}-library-collapsed");
+            Call("ShowPage", "Home"); await Capture($"{theme}-home-collapsed"); Call("SetRailCollapsed", false);
             if (theme == "light") continue;
             Call("NavigateLibrary", 1, null, null, null); await Capture($"{theme}-movies");
             var episode = items.FirstOrDefault(item => item.Series is not null && item.Season > 0);

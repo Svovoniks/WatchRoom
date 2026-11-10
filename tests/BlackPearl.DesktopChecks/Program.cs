@@ -517,8 +517,13 @@ static class Program
         var expanded = content.ActualWidth;
         Call("SetRailCollapsed", true); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
         var iconLeft = icon.TranslatePoint(new Point(0, 0), home).X;
-        check(rail.ActualWidth == 64 && !label.IsVisible && ((FrameworkElement)window.FindName("RailBrand")).Visibility == Visibility.Collapsed,
+        var logo = (FrameworkElement)window.FindName("RailLogo");
+        var logoLeft = logo.TranslatePoint(new Point(0, 0), home).X;
+        check(rail.ActualWidth == 64 && !label.IsVisible && !((FrameworkElement)window.FindName("RailBrandName")).IsVisible,
             $"a collapsed sidebar is a strip of icons ({rail.ActualWidth:0.#} wide)");
+        check(logo.IsVisible && Math.Abs(logoLeft * 2 + logo.ActualWidth - home.ActualWidth) < 1 &&
+            logo.TranslatePoint(new Point(0, logo.ActualHeight), rail).Y <= ((FrameworkElement)window.FindName("RailToggle")).TranslatePoint(new Point(0, 0), rail).Y,
+            $"a collapsed sidebar keeps the logo, centred above its toggle ({logoLeft:0.#} in {home.ActualWidth:0.#})");
         check(Math.Abs(iconLeft * 2 + icon.ActualWidth - home.ActualWidth) < 1, $"a collapsed sidebar centres its icons ({iconLeft:0.#} in {home.ActualWidth:0.#})");
         check(Equals(home.ToolTip, "Home") && content.ActualWidth > expanded, "collapsed icons name themselves and the page gains the width");
         Call("SetRailCollapsed", false); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();

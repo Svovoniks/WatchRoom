@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Controls;
 
 namespace BlackPearl.Desktop;
 
@@ -44,7 +45,12 @@ public partial class MainWindow
     {
         SideRail.SetCollapsed(Rail, railCollapsed);
         if (Rail.Visibility == Visibility.Visible) RailWidth.Width = new GridLength(RailColumnWidth);
-        RailBrand.Visibility = railCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        // Folded, the logo stays at the top of the strip and the toggle moves under it; open, the toggle sits at the end of the brand row.
+        RailBrandName.Visibility = railCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        RailBrand.Margin = railCollapsed ? new Thickness(0, 4, 0, 0) : new Thickness(10, 0, 0, 0);
+        RailBrand.HorizontalAlignment = railCollapsed ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        Grid.SetRow(RailToggle, railCollapsed ? 1 : 0);
+        RailToggle.Margin = railCollapsed ? new Thickness(0, 12, 0, 0) : new Thickness(0);
         RailToggle.HorizontalAlignment = railCollapsed ? HorizontalAlignment.Center : HorizontalAlignment.Right;
         var label = railCollapsed ? "Expand sidebar" : "Collapse sidebar";
         RailToggle.ToolTip = label + " (Ctrl+B)"; AutomationProperties.SetName(RailToggle, label);
