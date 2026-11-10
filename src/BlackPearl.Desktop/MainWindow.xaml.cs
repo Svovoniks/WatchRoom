@@ -437,21 +437,18 @@ public partial class MainWindow : Window
     private void LibraryNavClick(object sender, RoutedEventArgs e)
     {
         if (!ConfirmPageNavigation("Library")) return;
-        // Search and Music are tabs of their own, so Library leaves them for All; from other pages it returns to where the library was.
+        // Search and Music are tabs of their own, so Library leaves them for All. On the library it returns to the top of the
+        // category; from other pages it returns to where the library was.
         if (librarySearch || libraryCategory == LibraryCatalog.Music) { NavigateLibrary(0); return; }
+        if (currentPage == "Library") { NavigateLibrary(libraryCategory); return; }
         ShowPage("Library"); UpdateBreadcrumbs();
     }
     /// <summary>
-    /// The library page's trail. The category bar already names the category, so the trail starts at it only once a show is
-    /// open, and is empty at a category's top. Music has no bar, so its trail is shown whole.
+    /// The library page's trail. The category bar already names the category, so the trail is empty at a category's top
+    /// and appears once a show is open. Music has no bar, so its trail is always shown.
     /// </summary>
-    private static IReadOnlyList<LibraryBreadcrumb> LibraryTrail(IReadOnlyList<LibraryBreadcrumb> crumbs)
-    {
-        if (crumbs.Count == 0 || crumbs[0].Category == LibraryCatalog.Music) return crumbs;
-        var category = crumbs.Count(crumb => crumb.Level == "category") - 1;
-        if (category == crumbs.Count - 1) return [];
-        return crumbs.Skip(category).Select((crumb, index) => index == 0 ? crumb with { Separator = "" } : crumb).ToArray();
-    }
+    private static IReadOnlyList<LibraryBreadcrumb> LibraryTrail(IReadOnlyList<LibraryBreadcrumb> crumbs) =>
+        crumbs.Count == 1 && crumbs[0].Category != LibraryCatalog.Music ? [] : crumbs;
     private void LibraryCategoryClick(object sender, RoutedEventArgs e) => NavigateLibrary(int.Parse((string)((Button)sender).Tag));
     private void NavigateLibrary(int category, string? series = null, string? kind = null, int? season = null)
     {
@@ -479,8 +476,8 @@ public partial class MainWindow : Window
         var show = detail?.Series is not null ? detail : browseSeries is null ? null : items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind));
         var category = detail is not null ? detail.Available || detail.IsVirtual ? CategoryFor(detail) : 4 : libraryCategory;
         // Music is its own section, so its trail starts at Music rather than at All videos.
-        var crumbs = new List<LibraryBreadcrumb> { category == LibraryCatalog.Music ? new("Music", "category", category, Separator: "") : new("All", "category", Separator: "") };
-        if (category is not (0 or LibraryCatalog.Music)) crumbs.Add(new(CategoryName(category), "category", category));
+        // A trail names the category it is in; it starts at All only for All itself.
+        var crumbs = new List<LibraryBreadcrumb> { new(CategoryName(category), "category", category, Separator: "") };
         if (show?.Series is not null)
         {
             var showId = LibraryIdentity.ShowKey(show);

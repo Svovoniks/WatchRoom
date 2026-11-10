@@ -10,7 +10,7 @@
      <Button x:Name="NowPlayingButton" Tag="Room" Click="Navigate" Visibility="Collapsed" Background="{DynamicResource AccentSoft}" HorizontalContentAlignment="Stretch" Padding="12,10" Margin="0,0,0,8" ToolTip="Return to the current video" AutomationProperties.Name="Return to player">
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
        <Border Width="30" Height="30" CornerRadius="15" Background="{DynamicResource Accent}" VerticalAlignment="Center"><TextBlock Text="&#xF5B0;" Style="{StaticResource Icon}" FontSize="11" Foreground="{DynamicResource AccentInk}" HorizontalAlignment="Center" Margin="2,0,0,0"/></Border>
-       <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Visibility="{Binding Visibility, ElementName=RailBrandName}"><TextBlock Text="Return to player" FontWeight="SemiBold" FontSize="13"/><TextBlock x:Name="NowPlayingLabel" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource Muted}" Margin="0,2,0,0"/></StackPanel>
+       <StackPanel x:Name="NowPlayingText" Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center"><TextBlock Text="Return to player" FontWeight="SemiBold" FontSize="13"/><TextBlock x:Name="NowPlayingLabel" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource Muted}" Margin="0,2,0,0"/></StackPanel>
       </Grid>
      </Button>
      <Button x:Name="SettingsNav" Tag="Settings" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Settings"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Settings" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>
@@ -23,11 +23,23 @@
       <ScrollBar x:Name="PART_VerticalScrollBar" HorizontalAlignment="Right" Width="12" MinWidth="0" Minimum="0" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{TemplateBinding VerticalOffset}" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
      </Grid></ControlTemplate></ScrollViewer.Template>
      <StackPanel Margin="0,0,12,0">
-       <!-- The brand row sits in the caption area, so its toggle takes clicks from the window frame. A collapsed sidebar keeps
-            the logo and puts the toggle under it (SideRail.cs). -->
-       <Grid x:Name="RailHeader" Margin="0,0,0,22" MinHeight="34"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <StackPanel x:Name="RailBrand" Orientation="Horizontal" Margin="10,0,0,0" VerticalAlignment="Center"><Image x:Name="RailLogo" Source="Assets/BlackPearl.png" Width="26" Height="26" AutomationProperties.Name="BlackPearl"/><TextBlock x:Name="RailBrandName" Text="BlackPearl" FontSize="18" FontWeight="SemiBold" Margin="10,0,0,1" VerticalAlignment="Center"/></StackPanel>
-        <Button x:Name="RailToggle" Content="&#xE700;" Click="ToggleRailClick" Style="{StaticResource QuietIcon}" Width="36" Margin="0" HorizontalAlignment="Right" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Collapse sidebar (Ctrl+B)" AutomationProperties.Name="Collapse sidebar"/>
+       <!-- The brand row sits in the caption area, so its toggle takes clicks from the window frame. Folded, the logo is the
+            toggle: it shows the toggle's icon while pointed at or focused, so the row keeps its height and nothing below it moves. -->
+       <Grid x:Name="RailHeader" Margin="0,0,0,22" MinHeight="34">
+        <StackPanel x:Name="RailBrand" Orientation="Horizontal" Margin="10,0,0,0" VerticalAlignment="Center">
+         <Image x:Name="RailLogo" Source="Assets/BlackPearl.png" Width="26" Height="26" AutomationProperties.Name="BlackPearl">
+          <Image.Style><Style TargetType="Image"><Style.Triggers>
+           <MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding (local:SideRail.Collapsed), RelativeSource={RelativeSource Self}}" Value="True"/><Condition Binding="{Binding IsMouseOver, ElementName=RailToggle}" Value="True"/></MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Hidden"/></MultiDataTrigger>
+           <MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding (local:SideRail.Collapsed), RelativeSource={RelativeSource Self}}" Value="True"/><Condition Binding="{Binding IsKeyboardFocused, ElementName=RailToggle}" Value="True"/></MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Hidden"/></MultiDataTrigger>
+          </Style.Triggers></Style></Image.Style>
+         </Image>
+         <TextBlock x:Name="RailBrandName" Text="BlackPearl" FontSize="18" FontWeight="SemiBold" Margin="10,0,0,1" VerticalAlignment="Center" Style="{StaticResource NavigationLabel}"/>
+        </StackPanel>
+        <Button x:Name="RailToggle" Content="&#xE700;" Click="ToggleRailClick" Width="36" Margin="0" HorizontalAlignment="Right" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Collapse sidebar (Ctrl+B)" AutomationProperties.Name="Collapse sidebar">
+         <Button.Style><Style TargetType="Button" BasedOn="{StaticResource QuietIcon}"><Style.Triggers>
+          <MultiTrigger><MultiTrigger.Conditions><Condition Property="local:SideRail.Collapsed" Value="True"/><Condition Property="IsMouseOver" Value="False"/><Condition Property="IsKeyboardFocused" Value="False"/></MultiTrigger.Conditions><Setter Property="Opacity" Value="0"/></MultiTrigger>
+         </Style.Triggers></Style></Button.Style>
+        </Button>
        </Grid>
        <Button x:Name="HomeNav" Tag="Home" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Home"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE80F;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Home" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>
        <Button x:Name="SearchNav" Tag="Search" Click="SearchNavClick" Style="{StaticResource Navigation}" ToolTip="Search and filter your library (Ctrl+F)" AutomationProperties.Name="Search"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE721;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Search" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>
@@ -247,17 +259,17 @@
      <!-- The library's categories: a segmented bar whose thumb slides to the current one (LibraryCategoryBar.cs). Search and Music have their own tabs, so it hides for them. -->
      <Border x:Name="LibraryCategoryBar" IsVisibleChanged="LibraryCategoryBarVisibilityChanged" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="3" HorizontalAlignment="Left" Margin="0,0,0,12">
       <Grid>
-       <Border x:Name="LibraryCategoryThumb" HorizontalAlignment="Left" Background="{DynamicResource Elevated}" CornerRadius="7" Visibility="Hidden" IsHitTestVisible="False"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform></Border>
-       <StackPanel x:Name="LibraryCategories" Orientation="Horizontal" SizeChanged="LibraryCategoriesSizeChanged" AutomationProperties.Name="Library category">
+       <Border x:Name="LibraryCategoryThumb" HorizontalAlignment="Left" Background="{DynamicResource Hover}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="7" Visibility="Hidden" IsHitTestVisible="False"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform></Border>
+       <StackPanel x:Name="LibraryCategories" Orientation="Horizontal" SizeChanged="LibraryCategoriesSizeChanged" KeyboardNavigation.TabNavigation="Once" KeyboardNavigation.DirectionalNavigation="Cycle" AutomationProperties.Name="Library category">
         <Button x:Name="AllLibraryNav" Content="All" Tag="0" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}"/>
         <Button x:Name="AnimeLibraryNav" Content="Anime" Tag="3" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}"/>
         <Button x:Name="ShowsLibraryNav" Content="Shows" Tag="2" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}"/>
         <Button x:Name="MoviesLibraryNav" Content="Movies" Tag="1" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}"/>
         <Button x:Name="UnavailableLibraryNav" Content="Unavailable" Tag="4" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}" Visibility="Collapsed"/>
         <!-- Shows and films with episodes or files still to come; listed only while there are some. -->
-        <Button x:Name="MissingLibraryNav" Tag="5" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}" Padding="14,0,6,0" Visibility="Collapsed" AutomationProperties.Name="Missing"><StackPanel Orientation="Horizontal"><TextBlock Text="Missing" VerticalAlignment="Center"/><Border Background="{DynamicResource AccentSoft}" CornerRadius="8" Padding="7,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock x:Name="MissingLibraryCount" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/></Border></StackPanel></Button>
+        <Button x:Name="MissingLibraryNav" Tag="5" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}" Padding="14,0,10,0" Visibility="Collapsed" AutomationProperties.Name="Missing"><StackPanel Orientation="Horizontal"><TextBlock Text="Missing" VerticalAlignment="Center"/><Border Background="{DynamicResource AccentSoft}" CornerRadius="8" Padding="7,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock x:Name="MissingLibraryCount" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/></Border></StackPanel></Button>
         <!-- Shows and films no metadata provider could identify; listed only while there are some. -->
-        <Button x:Name="UnmatchedLibraryNav" Tag="7" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}" Padding="14,0,6,0" Visibility="Collapsed" AutomationProperties.Name="Unmatched" ToolTip="Titles without a match yet. Open one and use Find artwork / fix match to identify it yourself."><StackPanel Orientation="Horizontal"><TextBlock Text="Unmatched" VerticalAlignment="Center"/><Border Background="{DynamicResource AccentSoft}" CornerRadius="8" Padding="7,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock x:Name="UnmatchedLibraryCount" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/></Border></StackPanel></Button>
+        <Button x:Name="UnmatchedLibraryNav" Tag="7" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}" Padding="14,0,10,0" Visibility="Collapsed" AutomationProperties.Name="Unmatched" ToolTip="Titles without a match yet. Open one and use Find artwork / fix match to identify it yourself."><StackPanel Orientation="Horizontal"><TextBlock Text="Unmatched" VerticalAlignment="Center"/><Border Background="{DynamicResource AccentSoft}" CornerRadius="8" Padding="7,1" Margin="8,0,0,0" VerticalAlignment="Center"><TextBlock x:Name="UnmatchedLibraryCount" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/></Border></StackPanel></Button>
        </StackPanel>
       </Grid>
      </Border>

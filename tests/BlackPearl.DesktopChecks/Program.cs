@@ -435,13 +435,16 @@ static class Program
         check(Crumbs().Last().Label == "Season unknown", "unknown seasons preserve their navigation identity");
         Navigate(2, LibraryIdentity.ShowKey(show), "Show", 1); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == show.Id);
         Call("Select", show);
-        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["All", "Shows", "Navigation Show", "Season 1", "Episode 1 · The Beginning"]), "episode details display the complete hierarchy");
+        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["Shows", "Navigation Show", "Season 1", "Episode 1 · The Beginning"]), "episode details display the complete hierarchy from their category");
         window.UpdateLayout(); var clipped = BorderAudit.Find((System.Windows.Media.Visual)window.Content);
         check(clipped.Count == 0, "details breadcrumbs and disclosure outlines are not clipped" + string.Concat(clipped.Select(x => Environment.NewLine + "  " + x)));
         ClickCrumb(Crumbs(true).Single(x => x.Level == "season"));
         await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == show.Id);
         check(((FrameworkElement)window.FindName("LibraryPage")).Visibility == Visibility.Visible && Crumbs().Last().Level == "season", "season breadcrumb returns from episode details to its grid");
         ClickCrumb(Crumbs().Single(x => x.Level == "show")); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
+        Call("LibraryNavClick", window, new RoutedEventArgs()); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
+        check(Crumbs().Length == 0, "Library, clicked on the library, returns to the top of the category");
+        Navigate(2, LibraryIdentity.ShowKey(show), "Show"); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
         ClickCrumb(Crumbs().Single(x => x.Label == "Shows")); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
         var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
         Call("OpenSearch", false); search.Text = "no matching title"; await Wait(() => cards.Count == 0);
@@ -454,8 +457,9 @@ static class Program
         await CheckCollapsedRail(window, check);
         Navigate(1); await Wait(() => cards.Count == 750 && cards.All(x => x.Card.Media.Kind == "Movie"));
         Call("Select", animeMovie);
-        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["All", "Unavailable", "Navigation Anime Film"]), "unavailable film details link back to the unavailable tab");
-        ClickCrumb(Crumbs(true).First()); await Wait(() => cards.Count == 752);
+        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["Unavailable", "Navigation Anime Film"]), "unavailable film details link back to the unavailable tab");
+        ClickCrumb(Crumbs(true).First()); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == animeMovie.Id);
+        Navigate(0); await Wait(() => cards.Count == 752);
     }
 
     // A window too short for the sidebar scrolls its navigation; Settings stays in view and the buttons keep their width.
@@ -514,16 +518,18 @@ static class Program
         var label = ((System.Windows.Controls.Panel)home.Content).Children[1];
         var icon = (FrameworkElement)((System.Windows.Controls.Panel)home.Content).Children[0];
         var content = (FrameworkElement)window.FindName("ContentArea");
-        var expanded = content.ActualWidth;
+        var expanded = content.ActualWidth; var homeTop = home.TranslatePoint(new Point(0, 0), rail).Y;
         Call("SetRailCollapsed", true); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
         var iconLeft = icon.TranslatePoint(new Point(0, 0), home).X;
         var logo = (FrameworkElement)window.FindName("RailLogo");
+        var toggle = (FrameworkElement)window.FindName("RailToggle");
         var logoLeft = logo.TranslatePoint(new Point(0, 0), home).X;
         check(rail.ActualWidth == 64 && !label.IsVisible && !((FrameworkElement)window.FindName("RailBrandName")).IsVisible,
             $"a collapsed sidebar is a strip of icons ({rail.ActualWidth:0.#} wide)");
-        check(logo.IsVisible && Math.Abs(logoLeft * 2 + logo.ActualWidth - home.ActualWidth) < 1 &&
-            logo.TranslatePoint(new Point(0, logo.ActualHeight), rail).Y <= ((FrameworkElement)window.FindName("RailToggle")).TranslatePoint(new Point(0, 0), rail).Y,
-            $"a collapsed sidebar keeps the logo, centred above its toggle ({logoLeft:0.#} in {home.ActualWidth:0.#})");
+        check(logo.IsVisible && Math.Abs(logoLeft * 2 + logo.ActualWidth - home.ActualWidth) < 1 && toggle.Opacity == 0 && toggle.IsVisible,
+            $"a collapsed sidebar keeps the logo, centred, with its toggle over it until pointed at ({logoLeft:0.#} in {home.ActualWidth:0.#})");
+        check(home.TranslatePoint(new Point(0, 0), rail).Y == homeTop, "folding the sidebar does not move its entries");
+        check(((System.Windows.Controls.TextBlock)icon).TextAlignment == TextAlignment.Center, "a collapsed sidebar centres each icon's glyph in its box");
         check(Math.Abs(iconLeft * 2 + icon.ActualWidth - home.ActualWidth) < 1, $"a collapsed sidebar centres its icons ({iconLeft:0.#} in {home.ActualWidth:0.#})");
         check(Equals(home.ToolTip, "Home") && content.ActualWidth > expanded, "collapsed icons name themselves and the page gains the width");
         Call("SetRailCollapsed", false); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
