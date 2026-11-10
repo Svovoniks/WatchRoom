@@ -417,13 +417,14 @@ static class Program
         var status = (System.Windows.Controls.ComboBox)window.FindName("LibraryStatusFilter");
         Navigate(4); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == animeMovie.Id);
         check(Crumbs().Last().Label == "Unavailable" && cards.All(x => !x.Card.Media.Available), "unavailable videos appear only in their separate library tab");
-        Navigate(3);
+        // Search's type of title and status filters combine.
+        var kinds = ((System.Windows.Controls.Panel)window.FindName("SearchKinds")).Children.OfType<System.Windows.Controls.RadioButton>().ToArray();
+        Call("OpenSearch", false); kinds.Single(x => (string)x.Tag == "3").IsChecked = true;
         status.SelectedIndex = 1; await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == anime.Id);
-        check(cards[0].Card.Poster is null, "artwork status combines with the sidebar category");
-        Navigate(2); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
-        status.SelectedIndex = 1; await Wait(() => cards.Count == 1);
+        check(cards[0].Card.Poster is null, "artwork status combines with the type of title in Search");
         check(!status.Items.OfType<System.Windows.Controls.ComboBoxItem>().Any(item => Equals(item.Content, "Unavailable")),
             "availability is a separate tab rather than a status filter");
+        status.SelectedIndex = 0; kinds[0].IsChecked = true;
         Navigate(2, LibraryIdentity.ShowKey(show), "Show"); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
         check(Crumbs().Select(x => x.Label).SequenceEqual(["All", "Shows", "Navigation Show"]), "show breadcrumb points to the season grid");
         Navigate(2, LibraryIdentity.ShowKey(show), "Show", 0); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == special.Id);
@@ -440,10 +441,13 @@ static class Program
         check(((FrameworkElement)window.FindName("LibraryPage")).Visibility == Visibility.Visible && Crumbs().Last().Level == "season", "season breadcrumb returns from episode details to its grid");
         ClickCrumb(Crumbs().Single(x => x.Level == "show")); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
         ClickCrumb(Crumbs().Single(x => x.Label == "Shows")); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
+        var all = Crumbs().First();
         var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
-        search.Text = "no matching title"; await Wait(() => cards.Count == 0);
-        ClickCrumb(Crumbs().First()); await Wait(() => cards.Count == 752);
-        check(Crumbs().Length == 1 && Crumbs()[0].IsCurrent, "All breadcrumb clears category, show, season, search, and status restrictions");
+        Call("OpenSearch", false); search.Text = "no matching title"; await Wait(() => cards.Count == 0);
+        check(((FrameworkElement)window.FindName("NoResults")).Visibility == Visibility.Visible, "a search without matches says so");
+        ClickCrumb(all); await Wait(() => cards.Count == 752);
+        check(Crumbs().Length == 1 && Crumbs()[0].IsCurrent, "All breadcrumb lists every title, whatever Search holds");
+        search.Clear();
         var menu = (FrameworkElement)window.FindName("LibraryCategories");
         Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Collapsed, "Library button collapses its category menu");
         Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Visible, "Library button expands its category menu");
@@ -476,32 +480,93 @@ static class Program
         await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
     }
 
+    // Categories show their location and actions in one toolbar row; Search shows its field and filters there instead.
     private static async Task CheckSearchLayout(MainWindow window, Action<bool, string> check)
     {
+        void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, arguments);
         var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
         var scan = (System.Windows.Controls.Button)window.FindName("RescanButton");
         var status = (System.Windows.Controls.ComboBox)window.FindName("LibraryStatusFilter");
         var frame = (FrameworkElement)window.FindName("SearchFrame");
+        var header = (FrameworkElement)window.FindName("SearchHeader");
+        var crumbs = (FrameworkElement)window.FindName("LibraryBreadcrumbs");
         var toolbar = (FrameworkElement)window.FindName("LibraryToolbar");
         var grid = (FrameworkElement)window.FindName("PosterGrid");
         var content = (FrameworkElement)window.FindName("ContentArea");
-        window.UpdateLayout();
-        var location = grid.TranslatePoint(new Point(0, 0), content);
-        var width = frame.ActualWidth; var height = toolbar.ActualHeight;
-        search.Focus(); await Dispatcher.Yield(DispatcherPriority.Input); window.UpdateLayout();
-        check(grid.TranslatePoint(new Point(0, 0), content) == location && toolbar.ActualHeight == height, "focusing search does not move the poster grid");
-        scan.Focus(); await Dispatcher.Yield(DispatcherPriority.Input); window.UpdateLayout();
-        check(grid.TranslatePoint(new Point(0, 0), content) == location && frame.ActualWidth == width, "button focus does not resize the search toolbar or shift the grid");
+        Call("NavigateLibrary", 0, null, null, null); await Task.Delay(100); window.UpdateLayout();
+        check(header.Visibility == Visibility.Collapsed && crumbs.Visibility == Visibility.Visible && scan.Visibility == Visibility.Visible,
+            "library categories show their location and actions rather than a search field");
+        var height = toolbar.ActualHeight;
+        check(height >= 40 && scan.ActualHeight == height, "the library toolbar keeps one usable height for its location and actions");
         var original = scan.Content; scan.Content = "Cancel scan"; window.UpdateLayout();
-        check(frame.ActualWidth == width && toolbar.ActualHeight == height, "scan button label changes keep the search field and toolbar dimensions stable");
+        check(toolbar.ActualHeight == height, "scan button label changes keep the toolbar height");
         scan.Content = original;
+        Call("OpenSearch", false); await Task.Delay(100); window.UpdateLayout();
+        check(header.Visibility == Visibility.Visible && crumbs.Visibility == Visibility.Collapsed && scan.Visibility == Visibility.Collapsed,
+            "Search shows its field and filters in place of the category's location and actions");
+        check(System.Windows.Automation.AutomationProperties.GetItemStatus((DependencyObject)window.FindName("SearchNav")) == "Selected" &&
+            System.Windows.Automation.AutomationProperties.GetItemStatus((DependencyObject)window.FindName("LibraryNav")) == "" &&
+            System.Windows.Automation.AutomationProperties.GetItemStatus((DependencyObject)window.FindName("AllLibraryNav")) == "",
+            "the sidebar marks Search, and no library category, as current");
+        var location = grid.TranslatePoint(new Point(0, 0), content);
+        var width = frame.ActualWidth;
+        search.Focus(); await Dispatcher.Yield(DispatcherPriority.Input); window.UpdateLayout();
+        check(grid.TranslatePoint(new Point(0, 0), content) == location, "focusing search does not move the poster grid");
         search.Text = "Movie"; await Task.Delay(300); window.UpdateLayout();
-        check(frame.ActualWidth == width && toolbar.ActualHeight == height, "search text and clear button do not resize the field");
+        check(frame.ActualWidth == width && grid.TranslatePoint(new Point(0, 0), content) == location, "search text and clear button do not resize the field or move the grid");
         search.Clear(); await Task.Delay(300);
         var scroll = (System.Windows.Controls.ScrollViewer)window.FindName("LibraryScroll");
-        check(scroll.VerticalScrollBarVisibility == System.Windows.Controls.ScrollBarVisibility.Hidden, "poster grid scrolls without a scrollbar, so filters never shift its width");
-        check(height >= 40 && status.ActualHeight == height && scan.ActualHeight == height && frame.ActualHeight == height,
-            "search, status filter, and rescan align to a single usable toolbar height");
+        // The slim scroll bar sits in the page's margin beside the grid, so showing it never changes the grid's width.
+        var presenter = (FrameworkElement)scroll.Template.FindName("PART_ScrollContentPresenter", scroll);
+        var bar = (FrameworkElement)scroll.Template.FindName("PART_VerticalScrollBar", scroll);
+        var shown = scroll.VerticalScrollBarVisibility;
+        scroll.VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Hidden; window.UpdateLayout(); var hiddenWidth = presenter.ActualWidth;
+        scroll.VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Visible; window.UpdateLayout(); var visibleWidth = presenter.ActualWidth;
+        var barLeft = bar.TranslatePoint(new Point(0, 0), grid).X;
+        scroll.VerticalScrollBarVisibility = shown; window.UpdateLayout();
+        check(shown == System.Windows.Controls.ScrollBarVisibility.Auto && hiddenWidth == visibleWidth && barLeft >= grid.ActualWidth && bar.ActualWidth <= 10,
+            $"the poster grid has a slim scroll bar beside it that never changes its width (grid {grid.ActualWidth:0}, bar at {barLeft:0}, content {hiddenWidth:0} / {visibleWidth:0})");
+        var menus = new[] { "SearchAudio", "SearchSubtitles", "SearchGenre", "SearchDecade", "SearchLengthFilter", "SearchRating", "LibraryStatusFilter" }
+            .Select(name => (System.Windows.Controls.ComboBox)window.FindName(name)).ToArray();
+        check(frame.ActualHeight >= 40 && menus.All(menu => menu.ActualHeight == status.ActualHeight && menu.ActualHeight >= 32),
+            "filter menus share one usable height under a full-height search field");
+        check(menus[0].Items.Count >= 1 && ((SearchChoice)menus[0].Items[0]).Code == "" && menus[1].Items.OfType<SearchChoice>().Any(x => x.Code == LibrarySearchFilters.NoSubtitles),
+            "language menus start with Any, and subtitles offer No subtitles");
+        // An open menu takes the next click to close itself; a click on another pill or type of title still acts.
+        var length = menus[4]; var rating = menus[5];
+        var kinds = ((System.Windows.Controls.Panel)window.FindName("SearchKinds")).Children.OfType<System.Windows.Controls.RadioButton>().ToArray();
+        Point Center(FrameworkElement element) => element.TranslatePoint(new Point(element.ActualWidth / 2, element.ActualHeight / 2), header);
+        length.IsDropDownOpen = true;
+        Call("ClickThrough", length, Center(rating)); await Task.Delay(100);
+        check(rating.IsDropDownOpen, "clicking another filter while a menu is open opens that filter");
+        rating.IsDropDownOpen = false; length.IsDropDownOpen = true;
+        Call("ClickThrough", length, Center(kinds[1])); await Task.Delay(100);
+        check(kinds[1].IsChecked == true, "clicking a type of title while a menu is open picks it");
+        length.IsDropDownOpen = false; kinds[0].IsChecked = true;
+        rating.SelectedIndex = 2; window.UpdateLayout();
+        var clear = LibraryScrollingChecks.Descendants(rating).OfType<System.Windows.Controls.Button>().Single(button => button.Command is not null);
+        length.IsDropDownOpen = true;
+        Call("ClickThrough", length, Center(clear)); await Task.Delay(100);
+        check(rating.SelectedIndex == 0 && !rating.IsDropDownOpen, "clicking a filter's clear button while another menu is open clears it");
+        length.IsDropDownOpen = false; await Task.Delay(400);
+        // A filter menu grows out of its pill like the player's menus, and folds back into it before it closes.
+        var popup = (PlayerMenuPopup)status.Template.FindName("PART_Popup", status);
+        void Snapshot(string name)
+        {
+            if (popup.Child is not FrameworkElement child || child.ActualWidth < 1) return;
+            var image = new System.Windows.Media.Imaging.RenderTargetBitmap((int)child.ActualWidth, (int)child.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            image.Render(child);
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder(); encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(image));
+            Directory.CreateDirectory("artifacts/ui-review/screens");
+            using var output = File.Create($"artifacts/ui-review/screens/{name}.png"); encoder.Save(output);
+        }
+        status.IsDropDownOpen = true; await Task.Delay(120); Snapshot("filter-menu-growing");
+        await Task.Delay(600); Snapshot("filter-menu-open");
+        check(popup.IsOpen && popup.Child?.Clip is null, "a filter menu opens fully, with nothing left clipping it");
+        status.IsDropDownOpen = false;
+        var folding = popup.IsOpen;
+        await Task.Delay(500);
+        check(!popup.IsOpen && (folding || !SystemParameters.ClientAreaAnimation), "a filter menu folds back into its pill before it closes");
         status.Focus(); window.UpdateLayout();
     }
 
@@ -512,10 +577,19 @@ static class Program
         object? Field(string name) => typeof(MainWindow).GetField(name, flags)!.GetValue(window);
         var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
         var filter = (System.Windows.Controls.ComboBox)window.FindName("LibraryStatusFilter");
-        Call("NavigateLibrary", 4, null!, null!, null!); search.Text = "Navigation"; filter.SelectedIndex = 1;
+        var anime = ((System.Windows.Controls.Panel)window.FindName("SearchKinds")).Children.OfType<System.Windows.Controls.RadioButton>().Single(x => (string)x.Tag == "3");
+        bool Searching() => (bool)Field("librarySearch")!;
+        Call("OpenSearch", false); search.Text = "Navigation"; filter.SelectedIndex = 1; anime.IsChecked = true;
+        Call("NavigateLibrary", 4, null!, null!, null!);
+        check(!Searching() && (int)Field("libraryCategory")! == 4, "a library category leaves Search");
+        Call("BrowseHistory", true);
+        check(Searching() && search.Text == "Navigation" && filter.SelectedIndex == 1 && anime.IsChecked == true, "Back from a category returns to Search with its text and filters");
+        Call("BrowseHistory", false);
+        check(!Searching() && (int)Field("libraryCategory")! == 4, "Forward returns to the category");
+        Call("BrowseHistory", true);
         Call("ShowPage", "Settings");
         Call("BrowseHistory", true); await Task.Delay(150);
-        check(Field("currentPage") as string == "Library" && (int)Field("libraryCategory")! == 4 && search.Text == "Navigation" && filter.SelectedIndex == 1, "back restores unavailable tab, search, and artwork filter");
+        check(Field("currentPage") as string == "Library" && Searching() && search.Text == "Navigation" && filter.SelectedIndex == 1, "back restores Search, its text and its filters");
         Call("BrowseHistory", false);
         check(Field("currentPage") as string == "Settings", "forward restores the page left by Back");
         Call("BrowseHistory", true); Call("ShowPage", "Queues");

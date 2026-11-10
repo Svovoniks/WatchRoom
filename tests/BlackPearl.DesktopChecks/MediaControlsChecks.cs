@@ -45,7 +45,7 @@ static class MediaControlsChecks
             Command(46); await Task.Delay(100);
             check(player.IsPlaying, "repeated explicit play never pauses playback");
 
-            Call("ShowPage", "Library"); search.Focus();
+            Call("OpenSearch", true);
             var key = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(window), Environment.TickCount, Key.MediaPlayPause)
                 { RoutedEvent = Keyboard.PreviewKeyDownEvent };
             search.RaiseEvent(key);

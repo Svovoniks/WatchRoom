@@ -181,7 +181,7 @@ public partial class MainWindow : Window
         library.MediaSaved += QueueLibraryUpdate;
         libraryUpdateTimer.Tick += (_, _) => ApplyLibraryUpdates();
         libraryUpdateTimer.Start();
-        InitializeSharedLibrary(); InitializeQueueSharing();
+        InitializeSharedLibrary(); InitializeQueueSharing(); InitializeSearchFilters();
         var savedCursor = library.Setting("queuePosition");
         LoadSavedRooms(); RefreshQueuePickers();
         if (int.TryParse(library.Setting("volume"), out var savedVolume)) Volume.Value = Math.Clamp(savedVolume, 0, 100);
@@ -397,7 +397,8 @@ public partial class MainWindow : Window
         // Music has its own sidebar entry, so the Library entry isn't selected alongside it.
         var page = name == "Details" ? "Library" : name == "Room" ? "Rooms" : name;
         if (page == "Library" && (name == "Details" ? selected?.IsMusic == true : libraryCategory == LibraryCatalog.Music)) page = "Music";
-        foreach (var button in new[] { HomeNav, LibraryNav, QueuesNav, RoomNav, SettingsNav })
+        if (name == "Library" && librarySearch) page = "Search";
+        foreach (var button in new[] { HomeNav, SearchNav, LibraryNav, QueuesNav, RoomNav, SettingsNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, (string)button.Tag == page ? "Selected" : "");
         System.Windows.Automation.AutomationProperties.SetItemStatus(MusicLibraryNav, page == "Music" ? "Selected" : "");
     }
@@ -414,6 +415,8 @@ public partial class MainWindow : Window
     private static string SeasonName(int season, IEnumerable<MediaItem>? members = null) => LibraryCatalog.SeasonName(season, members);
     private void UpdateLibraryCategorySelection(bool active)
     {
+        // Search lists the whole library, so no category is current there.
+        active &= !(librarySearch && currentPage == "Library");
         UnavailableLibraryNav.Visibility = !GuestLibrary && items.Any(item => !item.Available && !item.IsExtra && !item.IsVirtual)
             ? Visibility.Visible : Visibility.Collapsed;
         MissingLibraryNav.Visibility = !GuestLibrary && missingTitleCount > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -430,6 +433,12 @@ public partial class MainWindow : Window
     private void LibraryMenuClick(object sender, RoutedEventArgs e)
     {
         if (!ConfirmPageNavigation("Library")) return;
+        // From Search, Library opens its categories at All rather than folding them away.
+        if (librarySearch && currentPage == "Library")
+        {
+            LibraryCategories.Visibility = Visibility.Visible; LibraryChevron.Text = "";
+            NavigateLibrary(0); return;
+        }
         var visible = LibraryCategories.Visibility == Visibility.Visible;
         LibraryCategories.Visibility = LibraryPage.Visibility == Visibility.Visible && visible ? Visibility.Collapsed : Visibility.Visible;
         LibraryChevron.Text = LibraryCategories.Visibility == Visibility.Visible ? "" : "";
@@ -441,14 +450,16 @@ public partial class MainWindow : Window
         if (!ConfirmPageNavigation("Library")) return;
         if (GuestLibrary)
         {
-            libraryCategory = category; guestBrowse = new(Category: category); SearchBox.Clear(); ShowPage("Library");
+            libraryCategory = category; guestBrowse = new(Category: category); librarySearch = false; ShowPage("Library");
             return;
         }
-        if (currentPage != "Library" || libraryCategory != category || browseSeries != series || browseKind != kind || browseSeason != season || SearchBox.Text.Length > 0 || LibraryStatusFilter.SelectedIndex != 0) RememberLocation();
+        if (currentPage != "Library" || librarySearch || libraryCategory != category || browseSeries != series || browseKind != kind || browseSeason != season) RememberLocation();
         var restoring = restoringNavigation; restoringNavigation = true;
-        if (libraryCategory != category || browseSeries != series || browseKind != kind || browseSeason != season) ClearCardSelection();
+        if (librarySearch || libraryCategory != category || browseSeries != series || browseKind != kind || browseSeason != season) ClearCardSelection();
+        // Search keeps its text and filters for the next visit; categories show everything they hold.
+        librarySearch = false;
         libraryCategory = category; browseSeries = series; browseKind = kind; browseSeason = season;
-        ShowPage("Library"); SearchBox.Clear(); LibraryStatusFilter.SelectedIndex = 0;
+        ShowPage("Library");
         restoringNavigation = restoring;
         FilterLibrary();
     }
@@ -528,6 +539,9 @@ public partial class MainWindow : Window
         ReloadWanted(); CountMissingTitles();
         RefreshHome();
         UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
+        // A rescan can add videos, so Search reads their languages if it has been opened.
+        if (languageIndexWanted && !GuestLibrary) IndexLanguages();
+        if (librarySearch) RefreshSearchOptions();
         if (browseSeries is not null && !items.Any(x => LibraryIdentity.InShow(x, browseSeries, browseKind)))
         {
             var changed = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries));
@@ -600,14 +614,17 @@ public partial class MainWindow : Window
         libraryViewDirty = false;
         var cancellation = request.Token;
         // Capture one immutable library and navigation state before leaving the UI thread.
-        var status = LibraryStatusFilter.SelectedIndex;
+        ApplyLibraryMode();
+        var searchFilters = librarySearch ? CurrentSearchFilters() : null;
+        var languages = searchLanguages;
+        var status = librarySearch ? LibraryStatusFilter.SelectedIndex : 0;
         // Missing and upcoming episode placeholders browse inside shows that still have a playable file, and in
         // wanted titles, which have their placeholders before any file; Unavailable lists only files that have gone missing.
         var playableShows = items.Where(x => x.Available && x.Series is not null).Select(LibraryIdentity.ShowKey).ToHashSet();
         var wantedKeys = wanted.Keys.ToHashSet();
         var source = items.Where(x => libraryCategory == 4 ? !x.Available && !x.IsVirtual : x.Available || x.IsVirtual && (playableShows.Contains(LibraryIdentity.ShowKey(x)) || wantedKeys.Contains(LibraryIdentity.ShowKey(x)))).ToList();
         // All lists videos; music has its own category, and an album opened from search stays browsable.
-        if (libraryCategory is 0 or 5 && browseSeries is null) source.RemoveAll(x => x.IsMusic);
+        if (libraryCategory is 0 or 5 && browseSeries is null && searchFilters is null) source.RemoveAll(x => x.IsMusic);
         var missingOnly = libraryCategory == 5 && browseSeries is null;
         // Unmatched titles leave Shows, Anime and Movies for their own category, and All still lists everything.
         if (libraryCategory == LibraryCatalog.Unmatched && browseSeries is null) source.RemoveAll(x => !unmatchedTitles.Contains(LibraryIdentity.ShowKey(x)));
@@ -615,11 +632,10 @@ public partial class MainWindow : Window
         var series = browseSeries; var kind = browseKind; var season = browseSeason;
         var showTitle = items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind))?.Series ?? browseSeries;
         var album = browseKind == MusicFiles.Kind;
-        SearchHint.Text = browseSeries is null ? libraryCategory == LibraryCatalog.Music ? "Search your music" : "Search your library" : album ? "Search tracks" : browseSeason is null ? "Search seasons" : "Search episodes";
-        SearchBox.ToolTip = browseSeries is null ? "Search your library (Ctrl+F)" : "Search within " + showTitle + (browseSeason is null ? "" : $" · Season {browseSeason}");
+        SearchHint.Text = searchFilters?.Category == LibraryCatalog.Music ? "Search your music" : "Search titles, episodes and file names";
         System.Windows.Automation.AutomationProperties.SetName(SearchBox, SearchHint.Text);
         var filter = libraryCategory is 4 or 5 or LibraryCatalog.Unmatched ? 0 : libraryCategory;
-        var query = SearchBox.Text.Trim();
+        var query = searchFilters is null ? "" : SearchBox.Text.Trim();
         if (!backgroundUpdate)
         {
             ResultCount.Text = "Searching…";
@@ -640,7 +656,11 @@ public partial class MainWindow : Window
             // A slow artwork drive must not spawn overlapping searches on every keystroke.
             await librarySearchGate.WaitAsync(cancellation);
             List<LibraryCard> cards;
-            try { cards = await LibraryCatalog.SearchAsync(source, query, filter, series, kind, season, cancellation, displaySpecialsWithinSeasons, season is null ? null : PreferredVersion(series)); }
+            try
+            {
+                cards = searchFilters is not null ? await Task.Run(() => LibrarySearch.Search(source, query, searchFilters, languages, cancellation), cancellation)
+                    : await LibraryCatalog.SearchAsync(source, query, filter, series, kind, season, cancellation, displaySpecialsWithinSeasons, season is null ? null : PreferredVersion(series));
+            }
             finally { librarySearchGate.Release(); }
             if (status == 1) cards = cards.Where(card => card.Poster is null).ToList();
             if (missingOnly) cards = cards.Where(card => card.Status is not null).ToList();
@@ -744,9 +764,10 @@ public partial class MainWindow : Window
     private void SearchFrameClick(object sender, MouseButtonEventArgs e) => SearchBox.Focus();
     private void ResetFilters(object sender, RoutedEventArgs e)
     {
-        NavigateLibrary(0);
+        if (!librarySearch) { NavigateLibrary(0); return; }
+        ResetSearch(); FilterLibrary(); SearchBox.Focus();
     }
-    private void FilterChanged(object sender, SelectionChangedEventArgs e) => FilterLibrary();
+    private void FilterChanged(object sender, SelectionChangedEventArgs e) { if (!updatingSearchFilters) SearchFilterChanged(sender, e); }
     private void CardArtworkFailed(object sender, ExceptionRoutedEventArgs e)
     {
         // An unavailable or invalid image should use the same fallback as missing artwork.
@@ -2160,10 +2181,7 @@ public partial class MainWindow : Window
         if (inPlayer && e.Key == Key.Tab) ShowPlayerControls();
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen)
         {
-            if (!ConfirmPageNavigation("Library")) { e.Handled = true; return; }
-            ShowPage("Library");
-            var search = SearchBox;
-            search.Focus(); search.SelectAll(); e.Handled = true; return;
+            OpenSearch(focus: true); e.Handled = true; return;
         }
         if (e.Key == Key.N && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen && !GuestLibrary && InAppDialog.Open.Count == 0 && !inPlayer)
         { AddTitleClick(sender, e); e.Handled = true; return; }

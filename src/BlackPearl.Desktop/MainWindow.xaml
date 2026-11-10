@@ -25,6 +25,7 @@
      <StackPanel Margin="0,0,12,0">
        <StackPanel Orientation="Horizontal" Margin="10,0,0,22"><Image Source="Assets/BlackPearl.png" Width="26" Height="26"/><TextBlock Text="BlackPearl" FontSize="18" FontWeight="SemiBold" Margin="10,0,0,1" VerticalAlignment="Center"/></StackPanel>
        <Button x:Name="HomeNav" Tag="Home" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Home"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE80F;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Home"/></StackPanel></Button>
+       <Button x:Name="SearchNav" Tag="Search" Click="SearchNavClick" Style="{StaticResource Navigation}" ToolTip="Search and filter your library (Ctrl+F)" AutomationProperties.Name="Search"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE721;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Search"/></StackPanel></Button>
        <Button x:Name="LibraryNav" Tag="Library" Click="LibraryMenuClick" Style="{StaticResource Navigation}" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Library" AutomationProperties.HelpText="Expand or collapse library categories">
         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8F1;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Library"/></StackPanel><TextBlock x:Name="LibraryChevron" Grid.Column="1" Text="&#xE70D;" Style="{StaticResource Icon}" FontSize="10" Foreground="{DynamicResource Muted}"/></Grid>
        </Button>
@@ -83,17 +84,6 @@
        <DataTrigger.EnterActions><BeginStoryboard><Storyboard><ObjectAnimationUsingKeyFrames Storyboard.TargetProperty="Visibility"><DiscreteObjectKeyFrame KeyTime="0" Value="{x:Static Visibility.Visible}"/></ObjectAnimationUsingKeyFrames><DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.18"/></Storyboard></BeginStoryboard></DataTrigger.EnterActions>
        <DataTrigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.28"/><ObjectAnimationUsingKeyFrames Storyboard.TargetProperty="Visibility"><DiscreteObjectKeyFrame KeyTime="0:0:0.28" Value="{x:Static Visibility.Hidden}"/></ObjectAnimationUsingKeyFrames></Storyboard></BeginStoryboard></DataTrigger.ExitActions>
       </DataTrigger></Style.Triggers>
-     </Style>
-     <!-- Single-choice filter pill for the mystery deck. -->
-     <Style x:Key="Chip" TargetType="RadioButton">
-      <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Margin" Value="0,0,6,6"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
-      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
-       <Border x:Name="Pill" Background="Transparent" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="14" Padding="12,5"><ContentPresenter VerticalAlignment="Center"/></Border>
-       <ControlTemplate.Triggers>
-        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger>
-        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Accent}"/><Setter TargetName="Pill" Property="Background" Value="{DynamicResource AccentSoft}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
-       </ControlTemplate.Triggers>
-      </ControlTemplate></Setter.Value></Setter>
      </Style>
      <Style x:Key="CardBack" TargetType="Border">
       <Setter Property="Width" Value="128"/><Setter Property="Height" Value="190"/><Setter Property="CornerRadius" Value="11"/><Setter Property="BorderThickness" Value="1"/>
@@ -264,9 +254,10 @@
      <Border x:Name="HostLibraryActivity" Visibility="Collapsed" Background="{DynamicResource AccentSoft}" CornerRadius="10" Padding="14,6" Margin="0,0,0,12">
       <DockPanel><Button x:Name="BrowseWithGuestButton" DockPanel.Dock="Right" Click="BrowseWithGuest" Padding="12,0" Margin="8,0,0,0" Visibility="Collapsed"/><Button DockPanel.Dock="Right" Content="Permissions" Click="OpenLibraryPermissions" Padding="12,0" Margin="8,0,0,0"/><TextBlock Text="&#xE716;" DockPanel.Dock="Left" Style="{StaticResource Icon}" Foreground="{DynamicResource Accent}" Margin="0,0,10,0"/><TextBlock x:Name="HostLibraryActivityText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"/></DockPanel>
      </Border>
-     <Grid x:Name="LibraryToolbar" Height="40" Margin="0,0,0,14" SizeChanged="LibraryToolbarSizeChanged">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <Border x:Name="SearchFrame" MouseLeftButtonDown="SearchFrameClick" Background="{DynamicResource Surface}" BorderThickness="1" CornerRadius="10" Padding="14,0,8,0" HorizontalAlignment="Stretch" Cursor="IBeam">
+     <!-- Search: the library's grid under a search field and filters, in place of a category's breadcrumbs. -->
+     <StackPanel x:Name="SearchHeader" Visibility="Collapsed" Margin="0,0,0,8">
+      <TextBlock Text="Search" Style="{StaticResource PageHeading}" Margin="0,0,0,14"/>
+      <Border x:Name="SearchFrame" Height="44" MouseLeftButtonDown="SearchFrameClick" Background="{DynamicResource Surface}" BorderThickness="1" CornerRadius="10" Padding="14,0,8,0" HorizontalAlignment="Stretch" Cursor="IBeam">
        <Border.Style><Style TargetType="Border"><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger></Style.Triggers></Style></Border.Style>
        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/></Grid.ColumnDefinitions>
         <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Muted}" Margin="0,0,12,0" IsHitTestVisible="False"/>
@@ -278,12 +269,121 @@
         <Button x:Name="ClearSearchButton" Grid.Column="2" Content="&#xE711;" Click="ClearSearch" ToolTip="Clear search" AutomationProperties.Name="Clear search" Style="{StaticResource QuietIcon}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center" Width="28" Height="28" MinHeight="0" Margin="0" Visibility="Collapsed"/>
        </Grid>
       </Border>
-      <ComboBox x:Name="LibraryStatusFilter" Grid.Column="1" Width="180" Height="40" SelectedIndex="0" SelectionChanged="FilterChanged" AutomationProperties.Name="Filter library" ToolTip="Filter by artwork or watch progress" Margin="10,0,10,0"><ComboBoxItem Content="All watch states"/><ComboBoxItem Content="Needs artwork"/><ComboBoxItem Content="Continue watching"/><ComboBoxItem Content="Unwatched"/><ComboBoxItem Content="Watched"/><ComboBoxItem Content="Missing"/><ComboBoxItem Content="Upcoming"/></ComboBox>
+      <!-- The type of title is one choice among several, so it is a segmented control; green is kept for filters that are on. -->
+      <DockPanel Margin="0,12,0,0">
+       <TextBlock DockPanel.Dock="Right" Text="{Binding Text, ElementName=ResultCount}" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="12,0,8,0" AutomationProperties.LiveSetting="Polite"/>
+       <Button x:Name="ClearSearchFiltersButton" DockPanel.Dock="Right" Content="Clear filters" Click="ClearSearchFiltersClick" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Accent}" Height="30" MinHeight="0" Padding="10,0" Margin="8,0,0,0" FontSize="13" VerticalAlignment="Center" Visibility="Collapsed"/>
+       <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="3" HorizontalAlignment="Left">
+        <StackPanel x:Name="SearchKinds" Orientation="Horizontal" AutomationProperties.Name="Type of title">
+         <StackPanel.Resources>
+          <Style TargetType="RadioButton">
+           <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontSize" Value="13"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+           <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
+            <Border x:Name="Segment" Background="Transparent" CornerRadius="7" Height="26" Padding="14,0"><ContentPresenter VerticalAlignment="Center"/></Border>
+            <ControlTemplate.Triggers>
+             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Segment" Property="Background" Value="{DynamicResource Hover}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+             <Trigger Property="IsChecked" Value="True"><Setter TargetName="Segment" Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+            </ControlTemplate.Triggers>
+           </ControlTemplate></Setter.Value></Setter>
+          </Style>
+         </StackPanel.Resources>
+         <RadioButton x:Name="SearchAllKinds" GroupName="SearchKind" Content="All videos" Tag="0" IsChecked="True" Checked="SearchFilterChanged"/>
+         <RadioButton GroupName="SearchKind" Content="Movies" Tag="1" Checked="SearchFilterChanged"/>
+         <RadioButton GroupName="SearchKind" Content="Shows" Tag="2" Checked="SearchFilterChanged"/>
+         <RadioButton GroupName="SearchKind" Content="Anime" Tag="3" Checked="SearchFilterChanged"/>
+         <RadioButton x:Name="SearchMusicKind" GroupName="SearchKind" Content="Music" Tag="6" Checked="SearchFilterChanged"/>
+        </StackPanel>
+       </Border>
+      </DockPanel>
+      <!-- Filters are pills: an icon and a name until something is chosen, then the choice with a button that clears it. -->
+      <WrapPanel x:Name="SearchFilters" Margin="0,12,0,0">
+       <WrapPanel.Resources>
+        <!-- The keyboard focus ring follows the pill's round ends. -->
+        <Style x:Key="PillFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate><Border Margin="-3" BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="20" SnapsToDevicePixels="True"/></ControlTemplate></Setter.Value></Setter></Style>
+        <Style x:Key="FilterPill" TargetType="ComboBox">
+         <Setter Property="Height" Value="34"/><Setter Property="Margin" Value="0,0,8,8"/><Setter Property="FontSize" Value="13"/>
+         <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Cursor" Value="Hand"/>
+         <Setter Property="FocusVisualStyle" Value="{StaticResource PillFocus}"/><Setter Property="ScrollViewer.CanContentScroll" Value="False"/>
+         <Setter Property="AlternationCount" Value="100000"/>
+         <Setter Property="ItemContainerStyle"><Setter.Value>
+          <Style TargetType="ComboBoxItem">
+           <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+           <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem">
+            <StackPanel>
+             <Border x:Name="Row" Background="Transparent" CornerRadius="7" Padding="10,7" Margin="0,1">
+              <DockPanel><TextBlock x:Name="Check" DockPanel.Dock="Right" Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource Accent}" Margin="18,0,0,0" VerticalAlignment="Center" Visibility="Hidden"/><ContentPresenter VerticalAlignment="Center"/></DockPanel>
+             </Border>
+             <Border x:Name="Divider" Height="1" Background="{DynamicResource Line}" Margin="8,4,8,4" Visibility="Collapsed"/>
+            </StackPanel>
+            <ControlTemplate.Triggers>
+             <Trigger Property="ItemsControl.AlternationIndex" Value="0"><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter TargetName="Divider" Property="Visibility" Value="Visible"/></Trigger>
+             <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Row" Property="Background" Value="{DynamicResource Hover}"/></Trigger>
+             <Trigger Property="IsSelected" Value="True"><Setter TargetName="Check" Property="Visibility" Value="Visible"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+            </ControlTemplate.Triggers>
+           </ControlTemplate></Setter.Value></Setter>
+          </Style>
+         </Setter.Value></Setter>
+         <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
+          <Grid>
+           <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+            <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><ContentPresenter/></ControlTemplate></ToggleButton.Template>
+            <Border x:Name="Pill" Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource AccentEdge}" BorderThickness="1" CornerRadius="17" Padding="13,0">
+             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <TextBlock x:Name="Glyph" Text="{TemplateBinding local:FilterPill.Icon}" FontFamily="{StaticResource IconFont}" FontSize="13" Foreground="{DynamicResource Accent}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+              <TextBlock x:Name="Label" Text="{TemplateBinding local:FilterPill.Label}" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
+              <ContentPresenter x:Name="Choice" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}" Margin="7,0,0,0" MaxWidth="200" VerticalAlignment="Center" TextElement.FontWeight="SemiBold" TextElement.Foreground="{DynamicResource Ink}" IsHitTestVisible="False"><ContentPresenter.Resources><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis"/></Style></ContentPresenter.Resources></ContentPresenter>
+              <TextBlock x:Name="Chevron" Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Foreground="{DynamicResource Muted}" Margin="9,1,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
+              <Border x:Name="ClearSpace" Width="20"/>
+             </StackPanel>
+            </Border>
+           </ToggleButton>
+           <Button x:Name="ClearChoice" Command="{x:Static local:FilterPill.Clear}" CommandParameter="{Binding RelativeSource={RelativeSource TemplatedParent}}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,7,0" Width="22" Height="22" Focusable="False" Cursor="Hand" ToolTip="Clear this filter" AutomationProperties.Name="{Binding (local:FilterPill.Label), RelativeSource={RelativeSource TemplatedParent}, StringFormat=Clear {0}}">
+            <Button.Template><ControlTemplate TargetType="Button"><Border x:Name="Disc" Background="Transparent" CornerRadius="11"><TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}" FontSize="9" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Disc" Property="Background" Value="{DynamicResource AccentEdge}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
+           </Button>
+           <!-- The player's menu popup: it grows down out of the pill as it opens and folds back into it as it closes. -->
+           <local:PlayerMenuPopup x:Name="PART_Popup" GrowsDown="True" TakesMouse="False" SoftwareSurface="False" Placement="Bottom" HorizontalOffset="-12" VerticalOffset="-6" StaysOpen="True" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="None">
+            <Border>
+             <ContentControl Margin="12" Focusable="False" IsTabStop="False" MinWidth="230">
+              <ContentControl.Template><ControlTemplate TargetType="ContentControl"><Border Effect="{StaticResource PopupShadow}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="12" Padding="6,6,4,6"><ContentPresenter/></Border></ControlTemplate></ContentControl.Template>
+              <DockPanel>
+               <TextBlock DockPanel.Dock="Top" Text="{TemplateBinding AutomationProperties.Name}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Muted}" Margin="10,6,10,4"/>
+               <ScrollViewer Style="{StaticResource SlimScrollViewer}" MaxHeight="340" CanContentScroll="False" Padding="0,0,8,0"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer>
+              </DockPanel>
+             </ContentControl>
+            </Border>
+           </local:PlayerMenuPopup>
+          </Grid>
+          <ControlTemplate.Triggers>
+           <!-- The first item is "any": the pill then names the filter instead of showing a choice. -->
+           <Trigger Property="SelectedIndex" Value="0"><Setter TargetName="Pill" Property="Background" Value="Transparent"/><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Line}"/><Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Muted}"/><Setter TargetName="Label" Property="Foreground" Value="{DynamicResource Ink}"/><Setter TargetName="Choice" Property="Visibility" Value="Collapsed"/><Setter TargetName="Chevron" Property="Visibility" Value="Visible"/><Setter TargetName="ClearSpace" Property="Visibility" Value="Collapsed"/><Setter TargetName="ClearChoice" Property="Visibility" Value="Collapsed"/></Trigger>
+           <Trigger Property="SelectedIndex" Value="-1"><Setter TargetName="Pill" Property="Background" Value="Transparent"/><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Line}"/><Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Muted}"/><Setter TargetName="Label" Property="Foreground" Value="{DynamicResource Ink}"/><Setter TargetName="Choice" Property="Visibility" Value="Collapsed"/><Setter TargetName="Chevron" Property="Visibility" Value="Visible"/><Setter TargetName="ClearSpace" Property="Visibility" Value="Collapsed"/><Setter TargetName="ClearChoice" Property="Visibility" Value="Collapsed"/></Trigger>
+           <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="SelectedIndex" Value="0"/></MultiTrigger.Conditions><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Muted}"/><Setter TargetName="Pill" Property="Background" Value="{DynamicResource Hover}"/></MultiTrigger>
+           <Trigger Property="IsDropDownOpen" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
+           <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+          </ControlTemplate.Triggers>
+         </ControlTemplate></Setter.Value></Setter>
+        </Style>
+       </WrapPanel.Resources>
+       <ComboBox x:Name="SearchAudio" Style="{StaticResource FilterPill}" local:FilterPill.Label="Audio" local:FilterPill.Icon="&#xE767;" DisplayMemberPath="Name" SelectedValuePath="Code" SelectionChanged="SearchFilterChanged" DropDownClosed="SearchOptionsClosed" IsTextSearchEnabled="True" TextSearch.TextPath="Name" AutomationProperties.Name="Audio language" ToolTip="Videos with an audio track in this language"/>
+       <ComboBox x:Name="SearchSubtitles" Style="{StaticResource FilterPill}" local:FilterPill.Label="Subtitles" local:FilterPill.Icon="&#xE7F0;" DisplayMemberPath="Name" SelectedValuePath="Code" SelectionChanged="SearchFilterChanged" DropDownClosed="SearchOptionsClosed" IsTextSearchEnabled="True" TextSearch.TextPath="Name" AutomationProperties.Name="Subtitle language" ToolTip="Videos with subtitles in this language, in the file or in a subtitle file beside it"/>
+       <ComboBox x:Name="SearchGenre" Style="{StaticResource FilterPill}" local:FilterPill.Label="Genre" local:FilterPill.Icon="&#xE8EC;" DisplayMemberPath="Name" SelectedValuePath="Code" SelectionChanged="SearchFilterChanged" IsTextSearchEnabled="True" TextSearch.TextPath="Name" AutomationProperties.Name="Genre"/>
+       <ComboBox x:Name="SearchDecade" Style="{StaticResource FilterPill}" local:FilterPill.Label="Released" local:FilterPill.Icon="&#xE787;" DisplayMemberPath="Name" SelectedValuePath="Code" SelectionChanged="SearchFilterChanged" AutomationProperties.Name="Released"/>
+       <ComboBox x:Name="SearchLengthFilter" Style="{StaticResource FilterPill}" local:FilterPill.Label="Length" local:FilterPill.Icon="&#xE916;" SelectedIndex="0" SelectionChanged="SearchFilterChanged" AutomationProperties.Name="Length" ToolTip="The length of a film, or of a show's episodes"><ComboBoxItem Content="Any length" Tag="Any"/><ComboBoxItem Content="Under 30 min" Tag="UpToHalfHour"/><ComboBoxItem Content="30 min to 1 hour" Tag="UpToHour"/><ComboBoxItem Content="1 to 2 hours" Tag="UpToTwoHours"/><ComboBoxItem Content="Over 2 hours" Tag="OverTwoHours"/></ComboBox>
+       <ComboBox x:Name="SearchRating" Style="{StaticResource FilterPill}" local:FilterPill.Label="Rating" local:FilterPill.Icon="&#xE734;" SelectedIndex="0" SelectionChanged="SearchFilterChanged" AutomationProperties.Name="Rating" ToolTip="The rating from the title's metadata provider"><ComboBoxItem Content="Any rating" Tag=""/><ComboBoxItem Content="6 and up" Tag="6"/><ComboBoxItem Content="7 and up" Tag="7"/><ComboBoxItem Content="8 and up" Tag="8"/></ComboBox>
+       <ComboBox x:Name="LibraryStatusFilter" Style="{StaticResource FilterPill}" local:FilterPill.Label="Status" local:FilterPill.Icon="&#xE7B3;" SelectedIndex="0" SelectionChanged="FilterChanged" AutomationProperties.Name="Watch state" ToolTip="Filter by artwork or watch progress"><ComboBoxItem Content="All watch states"/><ComboBoxItem Content="Needs artwork"/><ComboBoxItem Content="Continue watching"/><ComboBoxItem Content="Unwatched"/><ComboBoxItem Content="Watched"/><ComboBoxItem Content="Missing"/><ComboBoxItem Content="Upcoming"/></ComboBox>
+      </WrapPanel>
+     </StackPanel>
+     <Grid x:Name="LibraryToolbar" MinHeight="40" Margin="0,0,0,10" SizeChanged="LibraryToolbarSizeChanged">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <ItemsControl x:Name="LibraryBreadcrumbs" Margin="-8,0,0,0" VerticalAlignment="Center" Button.Click="BreadcrumbClick" Style="{StaticResource LibraryBreadcrumbs}" AutomationProperties.Name="Library location"/>
+      <!-- Search says here what it is still reading, or what a guest can search. -->
+      <TextBlock x:Name="SearchNote" Visibility="Collapsed" Style="{StaticResource MutedText}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"/>
+      <TextBlock Grid.Column="1" x:Name="ResultCount" MinWidth="100" TextAlignment="Right" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="12,0,8,0"/>
       <Button x:Name="RescanButton" Grid.Column="2" Width="112" Height="40" MinHeight="0" Padding="12,0" Content="Rescan" Click="ScanClick" Margin="0" ToolTip="Check your folders for new videos"/>
       <!-- Adds a show or film from a metadata search before its files are here; narrow windows keep only the plus. -->
       <Button x:Name="AddTitleButton" Grid.Column="3" Height="40" MinHeight="0" Padding="14,0" Margin="10,0,0,0" Content="Add title" Style="{StaticResource Primary}" ContentTemplate="{StaticResource AddContent}" Click="AddTitleClick" ToolTip="Add a show or film you don't have files for yet (Ctrl+N)" AutomationProperties.Name="Add title"/>
      </Grid>
-     <Grid Margin="-8,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ItemsControl x:Name="LibraryBreadcrumbs" Button.Click="BreadcrumbClick" Style="{StaticResource LibraryBreadcrumbs}" AutomationProperties.Name="Library location"/><TextBlock Grid.Column="1" x:Name="ResultCount" Width="100" TextAlignment="Right" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="12,0,8,0"/></Grid>
      <Expander x:Name="SeasonInformation" Foreground="{DynamicResource Muted}" Header="Season details" Visibility="Collapsed" Margin="-6,0,0,10"><TextBlock x:Name="SeasonSummary" Style="{StaticResource MutedText}" Margin="0,8,0,8" MaxWidth="760" HorizontalAlignment="Left"/></Expander>
      <!-- Asks an acquisition plugin for the missing and upcoming episodes of the season being browsed. -->
      <WrapPanel>
@@ -294,7 +394,7 @@
      <!-- What a wanted show has and still needs, while browsing it. -->
      <ContentControl x:Name="WantedLibraryPanel" Visibility="Collapsed" Focusable="False" Margin="0,0,0,14"/>
     </StackPanel>
-    <Grid x:Name="LocalLibraryContent" Grid.Row="1" Margin="-6,0,0,0"><ItemsControl x:Name="PosterGrid" MouseMove="LibraryPointerMove" MouseLeave="LibraryPointerLeave" PreviewMouseWheel="HostLibraryScrollInput" PreviewTouchDown="HostLibraryTouchInput" VirtualizingPanel.ScrollUnit="Pixel"><ItemsControl.Template><ControlTemplate TargetType="ItemsControl"><ScrollViewer x:Name="LibraryScroll" PreviewMouseLeftButtonDown="HostLibraryPointerInput" ScrollChanged="LibraryScrollChanged" CanContentScroll="True" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled"><ItemsPresenter/></ScrollViewer></ControlTemplate></ItemsControl.Template><ItemsControl.ItemsPanel><ItemsPanelTemplate><local:VirtualizingLibraryPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Grid RequestBringIntoView="LibraryCardBringIntoView">
+    <Grid x:Name="LocalLibraryContent" Grid.Row="1" Margin="-6,0,0,0"><ItemsControl x:Name="PosterGrid" MouseMove="LibraryPointerMove" MouseLeave="LibraryPointerLeave" PreviewMouseWheel="HostLibraryScrollInput" PreviewTouchDown="HostLibraryTouchInput" VirtualizingPanel.ScrollUnit="Pixel"><ItemsControl.Template><ControlTemplate TargetType="ItemsControl"><ScrollViewer x:Name="LibraryScroll" Style="{StaticResource SlimScrollViewer}" Margin="0,0,-24,0" Padding="0,0,24,0" PreviewMouseLeftButtonDown="HostLibraryPointerInput" ScrollChanged="LibraryScrollChanged" CanContentScroll="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><ItemsPresenter/></ScrollViewer></ControlTemplate></ItemsControl.Template><ItemsControl.ItemsPanel><ItemsPanelTemplate><local:VirtualizingLibraryPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Grid RequestBringIntoView="LibraryCardBringIntoView">
       <Border Panel.ZIndex="1" IsHitTestVisible="False" BorderBrush="{DynamicResource Accent}" BorderThickness="3" CornerRadius="12" Margin="0,0,14,18"><Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsGuestHovered}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style></Border>
       <Button Click="LibraryCardClick" MouseEnter="LibraryCardHoverEnter" MouseLeave="LibraryCardHoverLeave" Tag="{Binding Card}" Style="{StaticResource PosterCard}" VerticalAlignment="Top" ContextMenuOpening="CardContextMenu" ToolTip="{Binding DisplayTitle}" ToolTipService.Placement="Bottom" ToolTipOpening="CardToolTipOpening" AutomationProperties.Name="{Binding DisplayTitle}"><Button.ContextMenu><ContextMenu/></Button.ContextMenu>
        <StackPanel>
@@ -318,7 +418,7 @@
       <Button Click="ToggleCardWatched"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource CardWatchedButton}"><Style.Triggers><DataTrigger Binding="{Binding IsRemote}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger><DataTrigger Binding="{Binding HasNoFiles}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
      </Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
      <StackPanel x:Name="EmptyLibrary" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420"><Border Width="76" Height="76" CornerRadius="38" Background="{DynamicResource AccentSoft}" Margin="0,0,0,22"><TextBlock Text="&#xE8B7;" Style="{StaticResource Icon}" FontSize="30" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><TextBlock Text="Your library starts here" FontWeight="SemiBold" FontSize="24" TextAlignment="Center" TextWrapping="Wrap"/><TextBlock Text="Add a video folder to discover movies and shows. Your files stay where they are." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,24"/><WrapPanel HorizontalAlignment="Center"><Button Content="Add folder" Style="{StaticResource Primary}" ContentTemplate="{StaticResource AddContent}" Tag="Folders" Click="Navigate"/><Button Content="Join a friend" ContentTemplate="{StaticResource PeopleContent}" Click="JoinFromWelcome" Margin="0,0,8,8"/><Button Content="Add a title" ContentTemplate="{StaticResource AddContent}" Click="AddTitleClick" Margin="0,0,0,8" ToolTip="Add a show or film you don't have files for yet"/></WrapPanel></StackPanel>
-     <StackPanel x:Name="NoResults" Visibility="Collapsed" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420"><TextBlock Text="&#xE721;" Style="{StaticResource EmptyStateIcon}" Foreground="{DynamicResource Muted}"/><TextBlock Text="No titles found" FontSize="24" FontWeight="SemiBold" TextAlignment="Center"/><TextBlock x:Name="NoResultsHint" Text="Try another search or clear your filters." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,22"/><Button x:Name="FindTitleButton" Style="{StaticResource Primary}" Click="FindTitleClick" HorizontalAlignment="Center" Margin="0,0,0,10" Visibility="Collapsed"/><Button Content="Clear search and filters" Click="ResetFilters" HorizontalAlignment="Center" Margin="0"/></StackPanel>
+     <StackPanel x:Name="NoResults" Visibility="Collapsed" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420"><TextBlock Text="&#xE721;" Style="{StaticResource EmptyStateIcon}" Foreground="{DynamicResource Muted}"/><TextBlock Text="No titles found" FontSize="24" FontWeight="SemiBold" TextAlignment="Center"/><TextBlock x:Name="NoResultsHint" Text="Try another search or clear your filters." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,22"/><Button x:Name="FindTitleButton" Style="{StaticResource Primary}" Click="FindTitleClick" HorizontalAlignment="Center" Margin="0,0,0,10" Visibility="Collapsed"/><Button x:Name="ResetFiltersButton" Content="Clear search and filters" Click="ResetFilters" HorizontalAlignment="Center" Margin="0"/></StackPanel>
      <!-- The browsing guest's mouse, shown to the host while following them. -->
      <Canvas x:Name="GuestPointerLayer" IsHitTestVisible="False" ClipToBounds="True"><Grid x:Name="GuestPointer" Width="24" Height="24" Margin="-12,-12,0,0" Visibility="Collapsed" AutomationProperties.Name="Guest pointer"><Grid.RenderTransform><TranslateTransform x:Name="GuestPointerPosition"/></Grid.RenderTransform><Ellipse Fill="{DynamicResource Accent}" Opacity="0.3"/><Ellipse Stroke="{DynamicResource Accent}" StrokeThickness="2.5"/></Grid></Canvas></Grid>
     <!-- Several selected cards: what can be done to all of them at once. Ctrl+click or Shift+click selects, Esc clears. -->

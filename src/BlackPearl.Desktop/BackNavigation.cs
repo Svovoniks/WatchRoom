@@ -5,19 +5,22 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using BlackPearl.Core;
 
 namespace BlackPearl.Desktop;
 
 public partial class MainWindow
 {
     private sealed record BrowseLocation(string Page, int Category, string? Series, string? Kind, int? Season,
-        string? MediaId, string Search, int Filter, double LibraryOffset, double DetailOffset, string? QueueId);
+        string? MediaId, string Search, int Filter, double LibraryOffset, double DetailOffset, string? QueueId,
+        bool Searching = false, LibrarySearchFilters? SearchFilters = null);
     private readonly List<BrowseLocation> backLocations = [], forwardLocations = [];
     private string currentPage = "";
     private bool restoringNavigation;
     private int navigationGeneration;
     private BrowseLocation CaptureLocation() => new(currentPage, libraryCategory, browseSeries, browseKind, browseSeason,
-        selected?.Id, SearchBox.Text, LibraryStatusFilter.SelectedIndex, LibraryScroll.VerticalOffset, Details.VerticalOffset, openQueueId);
+        selected?.Id, SearchBox.Text, LibraryStatusFilter.SelectedIndex, LibraryScroll.VerticalOffset, Details.VerticalOffset, openQueueId,
+        librarySearch, CurrentSearchFilters());
     private void RememberLocation()
     {
         if (restoringNavigation || currentPage.Length == 0) return;
@@ -37,7 +40,8 @@ public partial class MainWindow
         try
         {
             libraryCategory = location.Category; browseSeries = location.Series; browseKind = location.Kind; browseSeason = location.Season;
-            SearchBox.Text = location.Search; LibraryStatusFilter.SelectedIndex = location.Filter;
+            librarySearch = location.Searching;
+            ApplySearchFilters(location.SearchFilters ?? new(), location.Filter); SearchBox.Text = location.Search;
             if (openQueueId != location.QueueId) { CloseQueueAddPanel(); openQueueId = location.QueueId; }
             if (location.Page == "Details" && items.FirstOrDefault(x => x.Id == location.MediaId) is { } item) Select(item);
             else ShowPage(location.Page == "Details" ? "Library" : location.Page);

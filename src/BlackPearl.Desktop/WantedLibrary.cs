@@ -36,7 +36,9 @@ public partial class MainWindow
         offer &= query.Length > 0 && !GuestLibrary;
         FindTitleButton.Visibility = offer ? Visibility.Visible : Visibility.Collapsed;
         FindTitleButton.Content = TmdbCredentials.Resolve(savedMetadataToken) is not null ? $"Find “{query}” on TMDB and add it" : $"Search for “{query}” and add it";
-        NoResultsHint.Text = offer ? "You can still add it. It shows as Missing until a scan finds its files." : "Try another search or clear your filters.";
+        NoResultsHint.Text = offer ? "You can still add it. It shows as Missing until a scan finds its files."
+            : !librarySearch ? "Nothing here yet." : SearchFilterSummary() is { Length: > 0 } filters ? $"Nothing matches {filters}. Remove a filter, or clear them all."
+            : "Try another search.";
     }
     private async void AddTitleClick(object sender, RoutedEventArgs e) => await Guard(() => AddTitle(""));
     private async void FindTitleClick(object sender, RoutedEventArgs e) => await Guard(() => AddTitle(SearchBox.Text.Trim()));

@@ -83,6 +83,78 @@ static class LibrarySearchFixture
         rejected = false;
         try { await first; } catch (OperationCanceledException) { rejected = true; }
         check(rejected, "superseded search cancels during enumeration instead of returning stale results");
+        SearchFilters(check);
+    }
+
+    // The Search tab: text, type of title, title filters and file filters, with languages read from the files and cached.
+    private static void SearchFilters(Action<bool, string> check)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "blackpearl-search-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var store = new LibraryStore(Path.Combine(directory, "db"));
+            string Video(string name, Mp4Fixture.Audio[] audio, Mp4Fixture.Subtitle[]? subtitles = null)
+            { var path = Path.Combine(directory, name); Mp4Fixture.Write(path, audio, subtitles ?? []); return path; }
+            Mp4Fixture.Audio Sound(string? language = null) => new(new short[8000], 8000, language);
+            // The first audio track is untagged, and was identified as French while it played.
+            var dubbed = Video("Dubbed Film (2004).mp4", [Sound(), Sound("jpn")], [new("tx3g", ["Hello there."], "eng")]);
+            store.CacheTrackLanguage(dubbed, LibraryStore.TrackLanguageFile(dubbed)!, true, 0, "fr");
+            var plain = Video("Plain Film (1994).mp4", [Sound("eng")]);
+            File.WriteAllText(Path.Combine(directory, "Plain Film (1994).ru.srt"), "1\n00:00:01,000 --> 00:00:02,000\nПривет\n");
+            var avi = Path.Combine(directory, "Old Film.avi"); File.WriteAllText(avi, "avi");
+            var first = Video("Search Show S01E01.mp4", [Sound("jpn")]);
+            var second = Video("Search Show S01E02.mp4", [Sound("eng")]);
+            var paths = new[] { dubbed, plain, avi, first, second };
+
+            var languages = FileLanguageIndex.Read(store, paths);
+            check(languages[dubbed].Audio.Order().SequenceEqual(["fr", "ja"]) && languages[dubbed].Subtitles.SequenceEqual(["en"]) && languages[dubbed].HasSubtitles,
+                "the language index reads tagged tracks and takes identified languages for untagged ones");
+            check(languages[plain].Audio.SequenceEqual(["en"]) && languages[plain].Subtitles.SequenceEqual(["ru"]) && languages[plain].HasSubtitles,
+                "subtitle files beside a video count by the language their name gives");
+            check(!languages[avi].Read && languages[avi].Audio.Length == 0 && !languages[avi].HasSubtitles, "containers whose tracks can't be listed have no known audio");
+            var cached = store.CachedTrackLists();
+            check(cached.Count == 4 && cached[LibraryStore.TrackLanguageFile(dubbed)!] == "a0=;a1=ja;s2=en", "the track lists of MP4 and Matroska files are cached by file version");
+            var firstKey = LibraryStore.TrackLanguageFile(first)!;
+            store.CacheTrackLists([(first, firstKey, "a0=de")]);
+            check(FileLanguageIndex.Read(store, [first])[first].Audio.SequenceEqual(["de"]), "a cached track list is used without reading the file again");
+            store.CacheTrackLists([(first, firstKey, "a0=ja")]);
+
+            MediaItem Episode(string id, string path, int number, string title) =>
+                new(id, path, "Search Show", "Anime", Series: "Search Show", Season: 1, Episode: number, EpisodeTitle: title, Year: 2015, RuntimeMinutes: 24, Genres: ["Animation"]);
+            MediaItem[] items =
+            [
+                new("dubbed", dubbed, "Dubbed Film", "Movie", Year: 2004, Genres: ["Drama"], Rating: 7.5, FileRuntimeMinutes: 95),
+                new("plain", plain, "Plain Film", "Movie", Year: 1994, Genres: ["Comedy"], Rating: 6.1, RuntimeMinutes: 130),
+                new("avi", avi, "Old Film", "Movie", Year: 1961),
+                Episode("first", first, 1, "The Lighthouse"), Episode("second", second, 2, "Harbour"),
+                new("song", Path.Combine(directory, "song.mp3"), "Search Song", MusicFiles.Kind, Series: "Search Album", Episode: 1),
+            ];
+            List<LibraryCard> Find(string query, LibrarySearchFilters filters) => LibrarySearch.Search(items, query, filters, languages);
+            string[] Titles(string query, LibrarySearchFilters filters) => Find(query, filters).Select(card => card.DisplayTitle).ToArray();
+            check(Titles("", new()).SequenceEqual(["Dubbed Film", "Old Film", "Plain Film", "Search Show"]), "Search lists every video title once, without music");
+            check(Titles("", new(Category: LibraryCatalog.Music)).SequenceEqual(["Search Album"]) && Titles("", new(Category: 3)).SequenceEqual(["Search Show"]) &&
+                Titles("", new(Category: 1)).Length == 3, "the type of title narrows Search to films, anime or music");
+            check(Titles("FILM", new()).Length == 3 && Titles("plain", new(AudioLanguage: "ja")).Length == 0, "text and filters combine, ignoring case");
+            var episode = Find("lighthouse", new()).Single();
+            check(episode.DisplayTitle == "Search Show" && episode.Caption.EndsWith("· 1 episode matches"), "an episode title finds its show and says how many episodes match");
+            var japanese = Find("", new(AudioLanguage: "ja"));
+            check(japanese.Select(card => card.DisplayTitle).SequenceEqual(["Dubbed Film", "Search Show"]) && japanese[1].Caption.EndsWith("· 1 of 2 files match"),
+                "an audio language finds films and shows that have it, and a show says how many of its files do");
+            check(Titles("", new(AudioLanguage: "fr")).SequenceEqual(["Dubbed Film"]), "languages identified for untagged tracks count");
+            check(Titles("", new(SubtitleLanguage: "ru")).SequenceEqual(["Plain Film"]) && Titles("", new(SubtitleLanguage: "en")).SequenceEqual(["Dubbed Film"]),
+                "a subtitle language matches embedded subtitles and subtitle files");
+            check(Titles("", new(SubtitleLanguage: LibrarySearchFilters.NoSubtitles)).SequenceEqual(["Old Film", "Search Show"]), "No subtitles finds videos without any");
+            check(Titles("", new(Genre: "drama")).SequenceEqual(["Dubbed Film"]) && Titles("", new(Decade: 1990)).SequenceEqual(["Plain Film"]) &&
+                Titles("", new(Decade: 2010)).SequenceEqual(["Search Show"]) && Titles("", new(MinimumRating: 7)).SequenceEqual(["Dubbed Film"]),
+                "genre, decade and rating filter by the title's metadata");
+            check(Titles("", new(Length: SearchLength.OverTwoHours)).SequenceEqual(["Plain Film"]) && Titles("", new(Length: SearchLength.UpToHalfHour)).SequenceEqual(["Search Show"]) &&
+                Titles("", new(Length: SearchLength.UpToTwoHours)).SequenceEqual(["Dubbed Film"]), "length uses the file's own runtime first, then the provider's");
+            File.Delete(second);
+            store.RemoveStaleTrackLanguages();
+            check(store.CachedTrackLists().Count == 3 && store.CachedTrackLists().ContainsKey(firstKey), "cleanup removes the cached track lists of deleted files");
+        }
+        finally { Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); try { Directory.Delete(directory, true); } catch (IOException) { } }
     }
     // Answers every request with the same body, or fails it when there's none.
     private sealed class CannedHandler(string? body) : HttpMessageHandler

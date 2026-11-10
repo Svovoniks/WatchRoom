@@ -36,7 +36,7 @@ static class CardSelectionChecks
         var wanted = WantedTitles.Add(store, directory, WantedTitles.FromMatch(new(9301, "movie", "Selection check wanted", "2004", null, "", "Movie"), "Movie", [], false, null), []);
         Await(Call("RefreshLibrary"));
 
-        Call("NavigateLibrary", 1, null, null, null);
+        Call("OpenSearch", false); Call("ResetSearch");
         search.Text = "Selection check";
         Until(() => cards.Count == 3 && cards.All(c => c.DisplayTitle.StartsWith("Selection check")));
         check(cards.Count == 3 && bar.Visibility == Visibility.Collapsed, "nothing is selected and the selection bar is hidden at first");
@@ -83,11 +83,10 @@ static class CardSelectionChecks
         check(selected.SetEquals([Card(first.Id).Key]) && count.Text == "1 selected", "narrowing the search drops cards that left view from the selection");
         Call("NavigateLibrary", 4, null, null, null);
         check(selected.Count == 0 && bar.Visibility == Visibility.Collapsed, "changing library location clears the selection");
-        // Under Unavailable, the entries of videos that are gone can be removed together.
-        search.Text = "Selection check";
-        Until(() => cards.Count == 1 && cards[0].Card.Media.Id == gone.Id);
-        Call("SelectAllCards");
-        (titles, unavailable) = ((WantedTitle[], MediaItem[]))Call("SelectionRemoval", (object)cards.ToArray())!;
+        // Under Unavailable, the entries of videos that are gone can be removed.
+        Until(() => cards.Any(c => c.Card.Media.Id == gone.Id));
+        Call("ToggleCardSelection", Card(gone.Id));
+        (titles, unavailable) = ((WantedTitle[], MediaItem[]))Call("SelectionRemoval", (object)new[] { Card(gone.Id) })!;
         check(titles.Length == 0 && unavailable.Select(x => x.Id).SequenceEqual([gone.Id]), "removal takes the entries of selected videos that are gone");
         Call("ShowPage", "Home");
         check(selected.Count == 0 && bar.Visibility == Visibility.Collapsed, "leaving the library clears the selection");

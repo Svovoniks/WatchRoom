@@ -292,8 +292,11 @@ public partial class MainWindow
                     LibraryCatalog.Music => item.IsMusic, _ => parent is not null || !item.IsMusic }),
                     view.Browse.Query, show, parent?.Kind, view.Browse.Season).Take(view.LoadedCount);
                 mirroredCards.Clear(); mirroredCards.AddBatch(cards.Select(card => new LibraryCardView(card)));
-                libraryCategory = view.Browse.Category; browseSeries = show; browseKind = parent?.Kind; browseSeason = view.Browse.Season;
-                SearchBox.Text = view.Browse.Query; UpdateBreadcrumbs(); UpdateLibraryCategorySelection(true);
+                // A guest's search shows as Search here, with their text and type of title.
+                librarySearch = parent is null && view.Browse.Query.Length > 0;
+                if (librarySearch) ApplySearchFilters(new(view.Browse.Category), 0);
+                libraryCategory = librarySearch ? 0 : view.Browse.Category; browseSeries = show; browseKind = parent?.Kind; browseSeason = view.Browse.Season;
+                SearchBox.Text = view.Browse.Query; ApplyLibraryMode(); UpdateBreadcrumbs(); UpdateLibraryCategorySelection(true);
                 ResultCount.Text = mirroredCards.Count + " items";
             }
             foreach (var card in mirroredCards) card.SetGuestHovered(card.Card.Media.Id == view.HoveredId);
@@ -304,7 +307,7 @@ public partial class MainWindow
             else
             {
                 if (currentPage == "Details") ShowPage("Library");
-                libraryCategory = view.Browse.Category; browseSeries = show; browseKind = parent?.Kind; browseSeason = view.Browse.Season;
+                libraryCategory = librarySearch ? 0 : view.Browse.Category; browseSeries = show; browseKind = parent?.Kind; browseSeason = view.Browse.Season;
                 UpdateBreadcrumbs();
                 PosterGrid.ItemsSource = mirroredCards; EmptyLibrary.Visibility = NoResults.Visibility = Visibility.Collapsed;
                 var fraction = view.ScrollFraction;
