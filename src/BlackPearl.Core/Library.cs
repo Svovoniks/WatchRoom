@@ -415,13 +415,7 @@ public sealed partial class LibraryStore
     public List<MediaItem> All()
     {
         ExpireTmdbContent();
-        using var db = Open(); using var c = db.CreateCommand(); c.CommandText = "SELECT json FROM media";
-        using var rows = c.ExecuteReader(); var items = new List<MediaItem>();
-        while (rows.Read()) items.Add(Wire.Read<MediaItem>(rows.GetString(0)));
-        var shows = Shows().ToDictionary(x => x.Id); var seasons = Seasons().ToDictionary(x => x.Id);
-        return SortItems(items.Select(item => ApplyHierarchy(item,
-            item.ShowId is { } showId ? shows.GetValueOrDefault(showId) : null,
-            item.SeasonId is { } seasonId ? seasons.GetValueOrDefault(seasonId) : null)));
+        return ReadCatalog();
     }
     // Fetch stages re-read only their affected records after awaiting providers.
     // Join current hierarchy data too: a sibling edit can change the shared show.

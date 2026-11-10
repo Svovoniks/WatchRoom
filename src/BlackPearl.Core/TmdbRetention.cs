@@ -76,9 +76,11 @@ public static class TmdbRetention
     }
     // Every downloaded field back to what it was before the provider set it, as when a match turns out to be the wrong title.
     internal static MediaItem Revert(MediaItem item) => item.TmdbFields is { Count: > 0 } ? Wire.Read<MediaItem>(Expire(Wire.Serialize(item), long.MaxValue, out _)) : item;
-    internal static string Expire(string json, long now, out bool changed)
+    internal static string Expire(string json, long now, out bool changed) => Expire(json, now, out changed, out _);
+    // An unchanged row stays unchanged until "due", when its oldest downloaded field reaches the maximum age.
+    internal static string Expire(string json, long now, out bool changed, out long due)
     {
-        var node = JsonNode.Parse(json)!.AsObject(); changed = false;
+        var node = JsonNode.Parse(json)!.AsObject(); changed = false; due = long.MaxValue;
         var fields = node["tmdbFields"]?.Deserialize<Dictionary<string, TmdbField>>(Wire.Json);
         if (fields is null) return json;
         foreach (var (name, field) in fields.ToArray())
@@ -86,7 +88,7 @@ public static class TmdbRetention
             // User/provider replacements are retained and their old snapshots
             // discarded. Unchanged downloaded values expire even when locked.
             var same = Read(node, name) == field.Value;
-            if (same && field.FetchedAt > now - (long)MaximumAge.TotalMilliseconds) continue;
+            if (same && field.FetchedAt > now - (long)MaximumAge.TotalMilliseconds) { due = Math.Min(due, field.FetchedAt + (long)MaximumAge.TotalMilliseconds); continue; }
             if (same) Write(node, name, field.Original);
             fields.Remove(name); changed = true;
         }

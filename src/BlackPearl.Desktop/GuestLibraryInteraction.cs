@@ -117,7 +117,7 @@ public partial class MainWindow
         Episodes.Visibility = DetailVersions.Visibility = DetailExtrasSection.Visibility = Visibility.Collapsed; DetailPoster.Source = null;
         ScheduleGuestView();
         var view = guestLibraryCards.FirstOrDefault(view => view.Card == card);
-        if (view is not null) { await view.LoadPosterAsync(); if (selected?.Id == card.Media.Id && GuestLibrary) DetailPoster.Source = view.Poster; }
+        if (view is not null) { await view.LoadPosterAsync(); if (selected?.Id == card.Media.Id && GuestLibrary) DetailPoster.Source = view.Poster; view.ReleaseIfHidden(); }
         if (selected?.Id == card.Media.Id && GuestLibrary) await UpgradeGuestDetailArtwork(card);
     }
     private void WatchGuestVideo()

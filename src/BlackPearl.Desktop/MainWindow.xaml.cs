@@ -715,6 +715,7 @@ public partial class MainWindow : Window
                 cancellation.ThrowIfCancellationRequested();
                 var view = playback[index].View;
                 if (views.ContainsKey(view.Key)) view.Update(cards[index], playback[index].PosterFile);
+                else view.ShowInGrid();
                 view.SetPlayback(playback[index].Position, playback[index].Watched);
                 if (initialBatch is not null) initialBatch.Add(view);
                 else if (index >= libraryCards.Count || libraryCards[index] != view)
@@ -882,6 +883,7 @@ public partial class MainWindow : Window
         if (path == detailPosterPath && (path is null || DetailPoster.Source is not null)) return;
         detailPosterPath = path; DetailPoster.Source = null;
         var view = new LibraryCardView(new LibraryCard(item.DisplayTitle, item.Caption, path, item, "episode"));
+        view.ShowIn(DetailPoster.MaxWidth, DetailPoster.MaxHeight, whole: true);
         await view.LoadPosterAsync();
         if (!closing && generation == detailPosterGeneration) DetailPoster.Source = view.Poster;
     }
@@ -1299,6 +1301,7 @@ public partial class MainWindow : Window
     }
     private async void CardArtworkLoaded(object sender, RoutedEventArgs e)
     {
+        PosterLease.Watch((Image)sender);
         if (((Image)sender).DataContext is LibraryCardView view) { await view.LoadPosterAsync(); await ImproveEpisodeArtwork(view); }
     }
     // The card's title tooltip only appears when the caption is cut short and the card has artwork;
@@ -1322,7 +1325,8 @@ public partial class MainWindow : Window
     }
     private async void CardArtworkUpdated(object sender, System.Windows.Data.DataTransferEventArgs e)
     {
-        if (((Image)sender).DataContext is LibraryCardView view) await view.LoadPosterAsync();
+        // Artwork let go of while its page is hidden also updates the image, and must not load again until it shows.
+        if (sender is Image { IsVisible: true, DataContext: LibraryCardView view }) await view.LoadPosterAsync();
     }
     // A black thumbnail from an earlier capture is dropped so the next capture can replace it.
     private static MediaItem WithoutFlatThumbnail(MediaItem item)
@@ -2285,6 +2289,13 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
+        // Artwork is decoded for the display's pixels; on a display with a different scale, what is on screen loads again.
+        LibraryCardView.PixelScale = VisualTreeHelper.GetDpi(this).DpiScaleX;
+        DpiChanged += (_, args) =>
+        {
+            LibraryCardView.PixelScale = args.NewDpi.DpiScaleX;
+            foreach (var view in libraryCards.Concat(HomeViews()).Concat(queueArtwork.Values).ToArray()) view.Reload();
+        };
         HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(NavigationWindowMessage);
         InitializeCaption(new WindowInteropHelper(this).Handle);
         InitializePictureInPicture(new WindowInteropHelper(this).Handle);

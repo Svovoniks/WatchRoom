@@ -237,6 +237,14 @@ if (args.FirstOrDefault() == "--library-versions")
     Console.WriteLine($"{checks} library version and extras checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--library-rows")
+{
+    var checks = 0;
+    LibraryRowsFixture.Run(Path.GetFullPath(args.ElementAtOrDefault(1) ?? "artifacts/library-rows-check"), (condition, name) =>
+    { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); checks++; });
+    Console.WriteLine($"{checks} library row reading checks passed."); return;
+}
+
 if (args.FirstOrDefault() == "--missing-episodes")
 {
     var checks = 0;
@@ -428,6 +436,7 @@ await EpisodeArtworkFixture.Run(Path.Combine(root, "episode-artwork"), Check);
 await LibraryIngestionFixture.Run(Path.Combine(root, "ingestion"), Check);
 await MusicLibraryFixture.Run(Path.Combine(root, "music-library"), Check);
 await LibraryVersionsFixture.Run(Path.Combine(root, "library-versions"), Check);
+LibraryRowsFixture.Run(Path.Combine(root, "library-rows"), Check);
 await WantedTitlesFixture.Run(Path.Combine(root, "wanted-titles"), Check);
 MissingEpisodesFixture.Run(Path.Combine(root, "missing-episodes"), Check);
 await AcquisitionPluginsFixture.Run(Path.Combine(root, "acquisition-plugins"), Check);

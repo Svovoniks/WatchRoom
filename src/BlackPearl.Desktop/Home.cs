@@ -105,9 +105,11 @@ public partial class MainWindow
             HomeHeroOverview.Visibility = HomeHeroOverview.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             HomeHeroResume.Content = homeHero.HomePosition >= 10000 ? "Resume" : homeHero.IsEpisode ? "Play next episode" : "Play";
             System.Windows.Automation.AutomationProperties.SetName(HomeHeroResume, HomeHeroResume.Content + " " + homeHero.HomeTitle);
-            _ = homeHero.LoadPosterAsync();
+            // Each card's artwork is decoded for the frame its template draws it in; a title can move between frames.
+            homeHero.ShowIn(620, 340); _ = homeHero.LoadPosterAsync();
         }
         homeContinueAll = continuing.Skip(1).ToArray();
+        foreach (var view in homeContinueAll) view.ShowIn(36, 52);
         RenderHomeStrip();
         var suggestions = views.Where(view => view.HomeSection == "suggestions").ToArray();
         foreach (var view in suggestions) view.SetHomeText(TitleFacts(view), view.Card.Media.Genres?.FirstOrDefault(genre => !string.IsNullOrWhiteSpace(genre)) ?? "");
@@ -118,7 +120,8 @@ public partial class MainWindow
             var unseen = homeUnseen.Count(title => title.Card.Media.Kind == row.Kind);
             row.Update(members.FirstOrDefault(), members.Skip(1).ToArray(), GuestLibrary || unseen == 0 ? "" : $"{unseen} not started");
             // The spotlight card is reused when its title changes, so its image's Loaded event does not fire again.
-            if (row.Spotlight is { } spotlight) _ = spotlight.LoadPosterAsync();
+            foreach (var tile in row.Tiles) tile.ShowIn(140, 210);
+            if (row.Spotlight is { } spotlight) { spotlight.ShowIn(250, 210); _ = spotlight.LoadPosterAsync(); }
         }
         HomeSuggestionsEmpty.Visibility = suggestions.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         homeMysteryFallback = views.FirstOrDefault(view => view.HomeSection == "mystery");
@@ -217,7 +220,7 @@ public partial class MainWindow
         var heading = pick?.DisplayTitle ?? (local ? "Nothing matches" : "");
         var meta = pick is null ? local ? "Try another type or length." : "" :
             string.Join(" · ", new[] { pick.Card.Media.Kind, TitleFacts(pick), note }.Where(part => part.Length > 0));
-        if (pick is not null) _ = pick.LoadPosterAsync();
+        if (pick is not null) { pick.ShowIn(128, 190); _ = pick.LoadPosterAsync(); }
         void Reveal()
         {
             HomeMysteryCard.DataContext = pick;
@@ -302,6 +305,7 @@ public partial class MainWindow
     }
     private async void HomeArtworkLoaded(object sender, RoutedEventArgs e)
     {
+        PosterLease.Watch((Image)sender);
         if (((Image)sender).DataContext is LibraryCardView view) await view.LoadPosterAsync();
     }
     // Artwork that arrives after its card is on screen fades in; artwork present at creation rides the card entrance.

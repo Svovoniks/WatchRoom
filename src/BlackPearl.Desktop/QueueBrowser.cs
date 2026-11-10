@@ -16,7 +16,8 @@ public partial class MainWindow
     // Rows, covers and search results share artwork so each image decodes once. Only rows on screen ask
     // for it, and the cache is dropped when it grows so scrolling a large library does not hold every image.
     private readonly Dictionary<string, LibraryCardView> queueArtwork = new(StringComparer.OrdinalIgnoreCase);
-    private LibraryCardView QueueArtwork(string key, MediaItem item, Func<LibraryCard> card)
+    // Width and height are the largest frame the artwork is drawn in, so a row's thumbnail is not decoded at full size.
+    private LibraryCardView QueueArtwork(string key, MediaItem item, Func<LibraryCard> card, double width, double height)
     {
         if (queueArtwork.TryGetValue(key, out var view))
         {
@@ -25,7 +26,7 @@ public partial class MainWindow
         }
         if (queueArtwork.Count >= 160) queueArtwork.Clear();
         queueArtwork[key] = view = new LibraryCardView(card());
-        _ = view.LoadPosterAsync();
+        view.ShowIn(width, height); _ = view.LoadPosterAsync();
         return view;
     }
     // Episode stills, or a movie's poster, with the item's watch progress.
@@ -33,7 +34,7 @@ public partial class MainWindow
     {
         var view = QueueArtwork("still:" + item.Id, item, () => new LibraryCard(item.ShownTitle, item.Caption,
             item.Series is null ? new[] { item.Poster, item.SeriesPoster }.FirstOrDefault(ArtworkCache.IsUsable) : LibraryCatalog.EpisodeArtwork(item),
-            item, item.Series is null ? "movie" : "episode"));
+            item, item.Series is null ? "movie" : "episode"), 112, 63);
         UpdateCardPlayback(view);
         return view;
     }
@@ -48,7 +49,7 @@ public partial class MainWindow
             if (!shows.Add(LibraryIdentity.ShowKey(item))) continue;
             var poster = (item.Series is null ? new[] { item.Poster, item.SeriesPoster } : new[] { item.SeriesPoster, item.SeasonPoster, item.Poster })
                 .FirstOrDefault(ArtworkCache.IsUsable);
-            if (poster is not null) covers.Add(QueueArtwork("cover:" + poster, item, () => new LibraryCard(item.ShownTitle, "", poster, item, "movie")));
+            if (poster is not null) covers.Add(QueueArtwork("cover:" + poster, item, () => new LibraryCard(item.ShownTitle, "", poster, item, "movie"), 68, 100));
         }
         return covers;
     }
