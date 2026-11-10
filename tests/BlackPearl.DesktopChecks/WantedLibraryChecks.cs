@@ -81,7 +81,7 @@ static class WantedLibraryChecks
             "a wanted film's page explains when it comes out and offers its actions");
 
         // A search that finds nothing offers to add the title.
-        Call("NavigateLibrary", 0, null, null, null);
+        Call("OpenSearch", false); Call("ResetSearch");
         var search = (TextBox)window.FindName("SearchBox"); search.Text = "zz no such title";
         var find = (Button)window.FindName("FindTitleButton");
         Until(() => find.Visibility == Visibility.Visible);

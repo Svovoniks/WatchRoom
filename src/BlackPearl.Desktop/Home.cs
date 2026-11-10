@@ -372,7 +372,7 @@ public partial class MainWindow
             {
                 guestParentTitle = card.DisplayTitle;
                 guestBrowse = new(Category: card.Media.Kind == "Anime" ? 3 : 2, ParentId: card.Media.Id);
-                SearchBox.Clear(); ShowPage("Library");
+                librarySearch = false; ShowPage("Library");
             }
             else
             {

@@ -10,6 +10,8 @@ namespace BlackPearl.Desktop;
 // the card, then the card's content drifts in. Closing reverses it back into the pill. A plain popup
 // window closes instantly, so every close request (outside click, Escape, choosing a track) is held
 // open by coercion until the motion finishes.
+// Search's filter menus use it too, as their ComboBoxes' drop-downs: they grow down out of the pill (GrowsDown), and
+// leave the mouse to the ComboBox (TakesMouse false).
 public sealed class PlayerMenuPopup : Popup
 {
     private static readonly TimeSpan GrowTime = TimeSpan.FromMilliseconds(340), ShrinkTime = TimeSpan.FromMilliseconds(230), ContentDelay = TimeSpan.FromMilliseconds(110);
@@ -26,6 +28,13 @@ public sealed class PlayerMenuPopup : Popup
     static PlayerMenuPopup() => IsOpenProperty.OverrideMetadata(typeof(PlayerMenuPopup), new FrameworkPropertyMetadata(false, null, CoerceIsOpen));
 
     public PlayerMenuPopup() => menus.Add(this);
+
+    /// <summary>The menu opens below its pill rather than above it, so it grows down out of the pill.</summary>
+    public bool GrowsDown { get; set; }
+    /// <summary>Whether the menu takes the mouse while open, so an outside click closes it. A ComboBox's drop-down leaves that to the ComboBox.</summary>
+    public bool TakesMouse { get; set; } = true;
+    /// <summary>Draws the menu in software, as menus over the native video need.</summary>
+    public bool SoftwareSurface { get; set; } = true;
 
     private static object CoerceIsOpen(DependencyObject d, object value)
     {
@@ -64,7 +73,7 @@ public sealed class PlayerMenuPopup : Popup
     {
         base.OnOpened(e);
         // Menus open over the native video; keep them on the software surface like the video overlay.
-        if (Child is { } child) App.UseSoftwareSurface(child);
+        if (SoftwareSurface && Child is { } child) App.UseSoftwareSurface(child);
         // The window and its layout exist now, so the pill's position inside it is known. Start on the
         // next frame: building a large menu can block a frame, and a motion begun before that stall
         // would jump straight to its end.
@@ -116,7 +125,7 @@ public sealed class PlayerMenuPopup : Popup
             // The content waits for the shape to open up, then drifts in.
             content.RenderTransform = drift;
             content.BeginAnimation(OpacityProperty, After(ContentDelay, 0, 1, TimeSpan.FromMilliseconds(200)));
-            drift.BeginAnimation(TranslateTransform.YProperty, After(ContentDelay, 10, 0, TimeSpan.FromMilliseconds(260)));
+            drift.BeginAnimation(TranslateTransform.YProperty, After(ContentDelay, GrowsDown ? -10 : 10, 0, TimeSpan.FromMilliseconds(260)));
         }
     }
 
@@ -134,7 +143,7 @@ public sealed class PlayerMenuPopup : Popup
     private void Reopen()
     {
         generation++; fading = false;
-        SetCurrentValue(StaysOpenProperty, false); // Take the mouse back so an outside click closes it again.
+        if (TakesMouse) SetCurrentValue(StaysOpenProperty, false); // Take the mouse back so an outside click closes it again.
         if (Child is not FrameworkElement host) return;
         var (_, full) = Shapes(host);
         var current = generation;
@@ -152,7 +161,7 @@ public sealed class PlayerMenuPopup : Popup
         // Let go of the mouse while folding away. A popup only takes the mouse when nothing else holds it,
         // so a menu opened during this fade would otherwise open without it and never close on an
         // outside click.
-        SetCurrentValue(StaysOpenProperty, true);
+        if (TakesMouse) SetCurrentValue(StaysOpenProperty, true);
         if (Child is not FrameworkElement host) { Release(); return; }
         var (pill, full) = Shapes(host);
         if (shape is null || host.Clip != shape) { shape = new RectangleGeometry(full, CardRadius + ShadowRoom, CardRadius + ShadowRoom); host.Clip = shape; }
@@ -164,7 +173,7 @@ public sealed class PlayerMenuPopup : Popup
         host.BeginAnimation(OpacityProperty, vanish);
     }
 
-    // The pill's outline as it would sit at the card's bottom-left corner, and the card plus its shadow.
+    // The pill's outline as it would sit at the card's bottom-left corner (top-left when it grows down), and the card plus its shadow.
     private (Rect Pill, Rect Full) Shapes(FrameworkElement host)
     {
         var card = (host as Decorator)?.Child as FrameworkElement ?? host;
@@ -175,7 +184,7 @@ public sealed class PlayerMenuPopup : Popup
         var height = Math.Min(target?.ActualHeight is > 0 and var h ? h : 32, bounds.Height);
         // The popup sits HorizontalOffset from the pill's left edge, so the pill starts at -HorizontalOffset.
         var left = Math.Clamp(-HorizontalOffset, bounds.Left, Math.Max(bounds.Left, bounds.Right - width));
-        var pill = new Rect(left, bounds.Bottom - height, width, height);
+        var pill = new Rect(left, GrowsDown ? bounds.Top : bounds.Bottom - height, width, height);
         var full = bounds; full.Inflate(ShadowRoom, ShadowRoom);
         return (pill, full);
     }
@@ -203,7 +212,7 @@ public sealed class PlayerMenuPopup : Popup
         fading = false; releasing = true;
         try { SetCurrentValue(IsOpenProperty, false); }
         finally { releasing = false; }
-        SetCurrentValue(StaysOpenProperty, false);
+        if (TakesMouse) SetCurrentValue(StaysOpenProperty, false);
     }
 
     private static T Frozen<T>(T value) where T : Freezable { value.Freeze(); return value; }

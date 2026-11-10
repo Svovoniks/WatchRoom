@@ -180,7 +180,7 @@ public partial class MainWindow
             int? season = listed.Series is null ? null : listed.Season ?? -1;
             history.Add(new("Details", CategoryFor(listed), series, kind, season, listed.Id, "", 0, 0, 0, openQueueId));
             // Back to library from the player opens the video's show, unless the library is already showing elsewhere.
-            if (currentPage == "Room") { libraryCategory = CategoryFor(listed); browseSeries = series; browseKind = kind; browseSeason = season; }
+            if (currentPage == "Room") { librarySearch = false; libraryCategory = CategoryFor(listed); browseSeries = series; browseKind = kind; browseSeason = season; }
         }
         backLocations.InsertRange(0, history);
         System.Windows.Input.CommandManager.InvalidateRequerySuggested();

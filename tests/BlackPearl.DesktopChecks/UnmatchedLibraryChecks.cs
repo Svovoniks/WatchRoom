@@ -41,11 +41,11 @@ static class UnmatchedLibraryChecks
             "Unmatched lists the shows and films nothing identified, and no others");
         check(cards.Count == before + 2, "Unmatched shows one card per title");        check(System.Windows.Automation.AutomationProperties.GetItemStatus(nav) == "Selected", "the sidebar marks Unmatched as the current category");
 
+        Call("OpenSearch", false); Call("ResetSearch");
         var search = (TextBox)window.FindName("SearchBox"); search.Text = "Unmatched Check Film";
         Until(() => cards.Count == 1);
-        check(cards.Count == 1 && cards[0].Card.Media.Id == film.Id, "search works within Unmatched");
+        check(cards.Count == 1 && cards[0].Card.Media.Id == film.Id, "Search finds unmatched titles");
         search.Clear();
-        Until(() => cards.Count == before + 2);
 
         // They aren't in the categories they'll move to once they're matched.
         Call("NavigateLibrary", 1, null, null, null);

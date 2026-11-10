@@ -160,6 +160,8 @@ public static partial class SubtitleText
     private sealed record Track(ContainerTrack Entry, int Compression, byte[] Stripped, byte[] Private);
     private sealed record Header(List<Track> Tracks, long ClustersStart);
 
+    /// <summary>Whether Tracks can list this file's tracks: Matroska and MP4 only.</summary>
+    public static bool ListsTracks(string path) => IsMatroska(path) || IsMp4(path);
     private static bool IsMatroska(string path) => Path.GetExtension(path).ToLowerInvariant() is ".mkv" or ".mka" or ".mks" or ".webm";
     private static FileStream Open(string path) => new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.RandomAccess);
 

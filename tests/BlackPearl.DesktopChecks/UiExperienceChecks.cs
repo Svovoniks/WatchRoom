@@ -86,16 +86,15 @@ static class UiExperienceChecks
             store.Setting("position:" + media[1].Id, "40000");
             store.Setting("position:" + unavailable.Id, "40000");
             Set("libraryLoaded", true); Set("items", media);
-            Call("ShowPage", "Library"); Filter(2);
+            // Watch states are a Search filter.
+            Call("OpenSearch", false); Filter(2);
             var cards = (LibraryCardCollection)Field("libraryCards");
             Check(cards.Count == 2 && cards.Any(card => card.IsMovie) && cards.Any(card => card.Card.Level == "series"),
                 "Continue watching includes resumed movies and series, excludes watched and unavailable files");
             var movie = cards.Single(card => card.IsMovie);
             Check(movie.PlaybackLabel == "Resume · 21:00" && movie.HasPlaybackProgress && movie.Progress > 0,
                 "movie poster exposes its saved resume time and progress");
-            Call("NavigateLibrary", 2, LibraryIdentity.ShowKey(episode), "Show", null!); Filter(2);
-            Check(cards.Count == 1 && cards[0].Card.Season == 1, "Continue watching keeps only the season containing an unfinished video");
-            Call("NavigateLibrary", 0, null!, null!, null!); Filter(4);
+            Filter(4);
             Check(cards.Count == 1 && cards[0].Card.Media.Id == media[1].Id, "Watched filter returns completed titles");
             Filter(3); Check(cards.All(card => !card.IsWatched), "Unwatched filter excludes completed titles");
             Filter(0); var allCount = cards.Count;
@@ -125,7 +124,10 @@ static class UiExperienceChecks
                 Set("light", theme == "light"); Call("ApplyTheme");
                 foreach (var size in new[] { (900, 600), (1280, 810) })
                 {
-                    Call("ShowPage", "Library"); Filter(0); Capture("library-" + theme, size.Item1, size.Item2);
+                    Call("NavigateLibrary", 0, null!, null!, null!); Filter(0); Capture("library-" + theme, size.Item1, size.Item2);
+                    Call("OpenSearch", false); Filter(0); Capture("search-" + theme, size.Item1, size.Item2);
+                    Control<ComboBox>("SearchRating").SelectedIndex = 2; Filter(3); Capture("search-filtered-" + theme, size.Item1, size.Item2);
+                    Control<ComboBox>("SearchRating").SelectedIndex = 0; Filter(0);
                     Call("Select", media[0]); Capture("details-" + theme, size.Item1, size.Item2);
                     Call("ShowPage", "Queues"); Capture("queue-empty-" + theme, size.Item1, size.Item2);
                     queues[0] = queues[0] with { MediaIds = [media[0].Id, media[1].Id, episode.Id] }; Call("RefreshQueuePickers"); Capture("queue-" + theme, size.Item1, size.Item2);

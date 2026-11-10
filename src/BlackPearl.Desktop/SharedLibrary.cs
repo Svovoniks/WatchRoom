@@ -50,7 +50,7 @@ public partial class MainWindow
         if (GuestLibraryStatus is null) return;
         var guest = GuestLibrary;
         if (guest && !OwnsLibrary && !guestBrowsePending) ClearHostArtworkRequests();
-        LibraryStatusFilter.Visibility = RescanButton.Visibility = AddTitleButton.Visibility = guest ? Visibility.Collapsed : Visibility.Visible;
+        ApplyLibraryMode();
         GuestLibraryStatus.Visibility = guest ? Visibility.Visible : Visibility.Collapsed;
         HostLibraryActivity.Visibility = room?.Identity?.Host == true ? Visibility.Visible : Visibility.Collapsed;
         var activity = room?.Snapshot?.LibraryActivity;
@@ -116,10 +116,11 @@ public partial class MainWindow
     {
         if (!GuestLibrary || currentPage != "Library") return;
         guestLibraryNotice = null;
-        var query = SearchBox.Text.Trim();
-        guestBrowse = guestBrowse with { Query = query[..Math.Min(query.Length, 100)], Page = 0 };
-        SearchHint.Text = guestBrowse.ParentId is null ? "Search host’s library" : guestBrowse.Season is null ? "Search seasons" : "Search episodes";
-        SearchBox.ToolTip = SearchHint.Text + " (Ctrl+F)";
+        // Only Search sends text; a category or show lists everything in it.
+        var query = librarySearch ? SearchBox.Text.Trim() : "";
+        guestBrowse = guestBrowse with { Query = query[..Math.Min(query.Length, 100)], Page = 0, Category = librarySearch ? SearchCategory() : guestBrowse.Category };
+        ApplyLibraryMode();
+        SearchHint.Text = "Search host’s library";
         ClearSearchButton.Visibility = SearchBox.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         UpdateHostBreadcrumbs(); UpdateLibraryCategorySelection(true);
         var key = guestBrowse with { Page = 0 };
@@ -229,7 +230,7 @@ public partial class MainWindow
     {
         libraryCategory = crumb.Category;
         guestBrowse = new(Category: crumb.Category, ParentId: crumb.Series, Season: crumb.Season);
-        SearchBox.Clear(); ShowPage("Library"); FilterHostLibrary();
+        librarySearch = false; ShowPage("Library"); FilterHostLibrary();
     }
     private void OpenHostCard(LibraryCard card)
     {
@@ -239,7 +240,7 @@ public partial class MainWindow
             if (card.Level == "series") guestParentTitle = card.DisplayTitle;
             guestBrowse = guestBrowse with { ParentId = card.Level == "season" ? guestBrowse.ParentId : card.Media.Id,
                 Season = card.Level == "season" ? card.Season : null, Query = "", Page = 0 };
-            SearchBox.Clear(); FilterHostLibrary();
+            librarySearch = false; FilterHostLibrary();
         }
         else OpenGuestVideo(card);
     }

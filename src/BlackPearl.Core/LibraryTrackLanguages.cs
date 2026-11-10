@@ -7,7 +7,7 @@ namespace BlackPearl.Core;
 // Each cached file also records its path, so entries for files that were deleted or changed can be removed.
 public sealed partial class LibraryStore
 {
-    private const string TrackLanguagePrefix = "trackLanguage:", TrackLanguageFilePrefix = "trackLanguageFile:";
+    private const string TrackLanguagePrefix = "trackLanguage:", TrackLanguageFilePrefix = "trackLanguageFile:", TrackListPrefix = "trackList:";
     // Part of every file key: raising it when detection improves makes earlier results stale, so files are identified again.
     private const int DetectionVersion = 5;
 
@@ -27,6 +27,16 @@ public sealed partial class LibraryStore
     public void CacheTrackLanguage(string path, string fileKey, bool audio, int id, string? language) => SetSettings([
         new(TrackLanguageFilePrefix + fileKey, path), new(TrackLanguageKey(fileKey, audio, id), language ?? "")]);
 
+    /// <summary>Languages identified earlier, by TrackLanguageKey; an empty value means the track's language wasn't found.</summary>
+    public Dictionary<string, string> CachedTrackLanguages() => SettingsWithPrefix(TrackLanguagePrefix);
+
+    /// <summary>The audio and subtitle tracks of files listed earlier for search (FileLanguageIndex), by file key.</summary>
+    public Dictionary<string, string> CachedTrackLists() =>
+        SettingsWithPrefix(TrackListPrefix).ToDictionary(entry => entry.Key[TrackListPrefix.Length..], entry => entry.Value);
+
+    public void CacheTrackLists(IEnumerable<(string Path, string FileKey, string Tracks)> files) => SetSettings(files.SelectMany(file =>
+        new KeyValuePair<string, string>[] { new(TrackLanguageFilePrefix + file.FileKey, file.Path), new(TrackListPrefix + file.FileKey, file.Tracks) }));
+
     /// <summary>Removes cached languages of files that are gone or have changed since. Files on a drive or network
     /// share that isn't reachable right now keep theirs, so unplugging a drive doesn't throw its results away.</summary>
     public int RemoveStaleTrackLanguages()
@@ -34,6 +44,7 @@ public sealed partial class LibraryStore
         var files = SettingsWithPrefix(TrackLanguageFilePrefix).ToDictionary(entry => entry.Key[TrackLanguageFilePrefix.Length..], entry => entry.Value);
         var keep = files.Where(entry => TrackLanguageFile(entry.Value) == entry.Key || !Reachable(entry.Value)).Select(entry => entry.Key).ToHashSet();
         var stale = SettingsWithPrefix(TrackLanguagePrefix).Keys.Where(key => !keep.Contains(key[TrackLanguagePrefix.Length..].Split(':')[0]))
+            .Concat(SettingsWithPrefix(TrackListPrefix).Keys.Where(key => !keep.Contains(key[TrackListPrefix.Length..])))
             .Concat(files.Keys.Where(key => !keep.Contains(key)).Select(key => TrackLanguageFilePrefix + key)).ToArray();
         if (stale.Length == 0) return 0;
         using var db = Open(); using var transaction = db.BeginTransaction();

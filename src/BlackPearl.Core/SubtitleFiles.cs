@@ -39,7 +39,9 @@ public static class SubtitleFiles
     /// in a Subtitles or Subs folder, named as the video or starting with its name, ignoring case and punctuation.
     /// A .sub is skipped when an .idx of the same name holds it.
     /// </summary>
-    public static IReadOnlyList<string> VlcSidecars(string videoPath)
+    /// <param name="listFolder">Lists a folder's files, or none when it doesn't exist; a caller looking at many videos can
+    /// list each folder once.</param>
+    public static IReadOnlyList<string> VlcSidecars(string videoPath, Func<string, IEnumerable<string>>? listFolder = null)
     {
         var found = new List<string>();
         try
@@ -47,10 +49,10 @@ public static class SubtitleFiles
             var directory = Path.GetDirectoryName(Path.GetFullPath(videoPath));
             if (directory is null) return found;
             var video = Simplify(Path.GetFileNameWithoutExtension(videoPath));
+            listFolder ??= folder => Directory.Exists(folder) ? Directory.EnumerateFiles(folder) : [];
             foreach (var folder in new[] { directory, Path.Combine(directory, "Subtitles"), Path.Combine(directory, "Subs") })
             {
-                if (!Directory.Exists(folder)) continue;
-                foreach (var file in Directory.EnumerateFiles(folder))
+                foreach (var file in listFolder(folder))
                 {
                     var extension = Path.GetExtension(file);
                     if (!VlcExtensions.Contains(extension) || !Simplify(Path.GetFileNameWithoutExtension(file)).StartsWith(video, StringComparison.Ordinal)) continue;

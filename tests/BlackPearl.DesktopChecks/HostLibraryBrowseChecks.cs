@@ -72,7 +72,8 @@ static class HostLibraryBrowseChecks
             var cards = Field<LibraryCardCollection>("guestLibraryCards");
             var grid = Control<ItemsControl>("PosterGrid");
             Check(ReferenceEquals(grid.ItemsSource, cards) && cards.Count == 8, "host data uses the regular poster grid");
-            Check(Control<FrameworkElement>("RescanButton").Visibility == Visibility.Collapsed && Control<FrameworkElement>("LibraryStatusFilter").Visibility == Visibility.Collapsed,
+            Check(Control<FrameworkElement>("RescanButton").Visibility == Visibility.Collapsed && Control<FrameworkElement>("AddTitleButton").Visibility == Visibility.Collapsed &&
+                Control<FrameworkElement>("SearchFilters").Visibility == Visibility.Collapsed,
                 "local-only toolbar actions are removed while browsing the host");
             Pump(cards[0].LoadPosterAsync());
             Check(cards[0].Poster is not null && cards[0].IsRemote && cards[0].Card.Poster is null, "remote poster decodes from bytes without local filesystem access");
@@ -87,6 +88,7 @@ static class HostLibraryBrowseChecks
             Call("RequestHostLibrary", true); Receive(SharedLibrary.Browse(movies, new(Page: 1), _ => thumbnail));
             Check(cards.Count == 16 && cards.Select(card => card.Card.Media.Id).Distinct().Count() == 16, "subsequent chunks append without replacing or duplicating cards");
             var firstCard = cards[0];
+            Call("OpenSearch", false);
             var search = Control<TextBox>("SearchBox"); search.Text = "Movie 24"; Call("FilterHostLibrary");
             var oldRequest = Field<long>("guestBrowseRequest");
             Receive(SharedLibrary.Browse(movies, new(Query: "Movie 24"), _ => thumbnail));
