@@ -39,7 +39,7 @@
   <Style x:Key="Overline" TargetType="TextBlock"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Margin" Value="0,0,0,8"/></Style>
   <Style x:Key="FieldLabel" TargetType="TextBlock"><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="FontSize" Value="13"/><Setter Property="Margin" Value="0,0,0,2"/></Style>
   <Style x:Key="Icon" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="16"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
-  <Style x:Key="NavigationIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="Width" Value="28"/><Style.Triggers><Trigger Property="local:SideRail.Collapsed" Value="True"><Setter Property="TextAlignment" Value="Center"/></Trigger></Style.Triggers></Style>
+  <Style x:Key="NavigationIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="Width" Value="28"/><Style.Triggers><Trigger Property="local:SideRail.Collapsed" Value="True"><Setter Property="TextAlignment" Value="Center"/></Trigger><DataTrigger Binding="{Binding (AutomationProperties.ItemStatus), RelativeSource={RelativeSource AncestorType=Button}}" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Accent}"/></DataTrigger></Style.Triggers></Style>
   <Style x:Key="EmptyStateIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="FontSize" Value="40"/><Setter Property="Foreground" Value="{DynamicResource Accent}"/><Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="Margin" Value="0,0,0,20"/></Style>
   <!-- A rounded panel used to group related content and settings. -->
   <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="20,18"/><Setter Property="Margin" Value="0,0,0,16"/></Style>
@@ -141,7 +141,8 @@
   </Style>
   <Style TargetType="CheckBox" BasedOn="{StaticResource Switch}"/>
 
-  <!-- Sidebar navigation: a soft accent pill with a leading indicator marks the current page. -->
+  <!-- Sidebar navigation. The current page is marked by the pearl on the sidebar's edge (SideRail.cs), a bright
+       label and an accent icon, rather than a fill: pointing at an entry is the only thing that fills it. -->
   <Style x:Key="Navigation" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
    <Setter Property="Height" Value="40"/><Setter Property="Padding" Value="12,0"/>
    <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Margin" Value="0,0,0,2"/>
@@ -149,13 +150,12 @@
     <Grid>
      <Border x:Name="Frame" Background="{TemplateBinding Background}" CornerRadius="8"/>
      <Border x:Name="Tint" Background="{DynamicResource Ink}" Opacity="0" CornerRadius="8" IsHitTestVisible="False"/>
-     <Border x:Name="Indicator" Width="3" Height="16" CornerRadius="1.5" Background="{DynamicResource Accent}" HorizontalAlignment="Left" Visibility="Collapsed"/>
      <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True"/>
     </Grid>
     <ControlTemplate.Triggers>
-     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.06"/></Trigger>
-     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.12"/></Trigger>
-     <Trigger Property="AutomationProperties.ItemStatus" Value="Selected"><Setter TargetName="Frame" Property="Background" Value="{DynamicResource AccentSoft}"/><Setter TargetName="Indicator" Property="Visibility" Value="Visible"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.05"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.1"/></Trigger>
+     <Trigger Property="AutomationProperties.ItemStatus" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
      <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
     </ControlTemplate.Triggers>
    </ControlTemplate></Setter.Value></Setter>

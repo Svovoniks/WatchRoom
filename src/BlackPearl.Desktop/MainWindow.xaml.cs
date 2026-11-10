@@ -402,6 +402,7 @@ public partial class MainWindow : Window
         foreach (var button in new[] { HomeNav, SearchNav, LibraryNav, QueuesNav, RoomNav, SettingsNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, (string)button.Tag == page ? "Selected" : "");
         System.Windows.Automation.AutomationProperties.SetItemStatus(MusicLibraryNav, page == "Music" ? "Selected" : "");
+        QueueRailPearl();
     }
     private void Navigate(object sender, RoutedEventArgs e)
     {

@@ -22,20 +22,21 @@
       <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" CanContentScroll="{TemplateBinding CanContentScroll}"/>
       <ScrollBar x:Name="PART_VerticalScrollBar" HorizontalAlignment="Right" Width="12" MinWidth="0" Minimum="0" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{TemplateBinding VerticalOffset}" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
      </Grid></ControlTemplate></ScrollViewer.Template>
-     <StackPanel Margin="0,0,12,0">
+     <StackPanel x:Name="RailNavigation" Margin="0,0,12,0">
        <!-- The brand row sits in the caption area, so its toggle takes clicks from the window frame. Folded, the logo is the
             toggle: it shows the toggle's icon while pointed at or focused, so the row keeps its height and nothing below it moves. -->
        <Grid x:Name="RailHeader" Margin="0,0,0,22" MinHeight="34">
         <StackPanel x:Name="RailBrand" Orientation="Horizontal" Margin="10,0,0,0" VerticalAlignment="Center">
-         <Image x:Name="RailLogo" Source="Assets/BlackPearl.png" Width="26" Height="26" AutomationProperties.Name="BlackPearl">
+         <Image x:Name="RailLogo" Source="Assets/BlackPearl.png" Width="28" Height="28" AutomationProperties.Name="BlackPearl">
           <Image.Style><Style TargetType="Image"><Style.Triggers>
            <MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding (local:SideRail.Collapsed), RelativeSource={RelativeSource Self}}" Value="True"/><Condition Binding="{Binding IsMouseOver, ElementName=RailToggle}" Value="True"/></MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Hidden"/></MultiDataTrigger>
            <MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding (local:SideRail.Collapsed), RelativeSource={RelativeSource Self}}" Value="True"/><Condition Binding="{Binding IsKeyboardFocused, ElementName=RailToggle}" Value="True"/></MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Hidden"/></MultiDataTrigger>
           </Style.Triggers></Style></Image.Style>
          </Image>
-         <TextBlock x:Name="RailBrandName" Text="BlackPearl" FontSize="18" FontWeight="SemiBold" Margin="10,0,0,1" VerticalAlignment="Center" Style="{StaticResource NavigationLabel}"/>
+         <!-- The name is set in a serif, like a jeweller's mark, apart from the interface type around it. -->
+         <TextBlock x:Name="RailBrandName" Text="BlackPearl" FontFamily="Sitka Heading, Georgia" FontSize="21" FontWeight="SemiBold" Margin="9,0,0,2" VerticalAlignment="Center" Style="{StaticResource NavigationLabel}"/>
         </StackPanel>
-        <Button x:Name="RailToggle" Content="&#xE700;" Click="ToggleRailClick" Width="36" Margin="0" HorizontalAlignment="Right" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Collapse sidebar (Ctrl+B)" AutomationProperties.Name="Collapse sidebar">
+        <Button x:Name="RailToggle" Content="&#xE90C;" Click="ToggleRailClick" Width="36" Margin="0" HorizontalAlignment="Right" VerticalAlignment="Center" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Collapse sidebar (Ctrl+B)" AutomationProperties.Name="Collapse sidebar">
          <Button.Style><Style TargetType="Button" BasedOn="{StaticResource QuietIcon}"><Style.Triggers>
           <MultiTrigger><MultiTrigger.Conditions><Condition Property="local:SideRail.Collapsed" Value="True"/><Condition Property="IsMouseOver" Value="False"/><Condition Property="IsKeyboardFocused" Value="False"/></MultiTrigger.Conditions><Setter Property="Opacity" Value="0"/></MultiTrigger>
          </Style.Triggers></Style></Button.Style>
@@ -47,7 +48,8 @@
        <Button x:Name="LibraryNav" Tag="Library" Click="LibraryNavClick" Style="{StaticResource Navigation}" AutomationProperties.Name="Library"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8F1;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Library" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>
        <!-- Music sits beside the video library rather than in it; listed once a folder is a Music folder or the library holds music. -->
        <Button x:Name="MusicLibraryNav" Tag="6" Click="LibraryCategoryClick" Style="{StaticResource Navigation}" Visibility="Collapsed" AutomationProperties.Name="Music"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8D6;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Music" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>
-       <Button x:Name="QueuesNav" Tag="Queues" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Queues"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8FD;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Queues" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>
+       <!-- What you watch together sits apart from your own library. -->
+       <Button x:Name="QueuesNav" Tag="Queues" Click="Navigate" Style="{StaticResource Navigation}" Margin="0,14,0,2" AutomationProperties.Name="Queues"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8FD;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Queues" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>
        <Button x:Name="RoomNav" Tag="Rooms" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Watch rooms"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE716;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Watch rooms" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>
      </StackPanel>
     </ScrollViewer>
@@ -60,6 +62,20 @@
    <Image Source="{Binding Source, ElementName=DetailPoster, Converter={StaticResource DetailBackdrop}}" Stretch="UniformToFill" Margin="-90" RenderOptions.BitmapScalingMode="Linear"/>
    <Rectangle Fill="{DynamicResource BackdropFade}"/>
   </Grid>
+
+  <!-- A black pearl, the app's logo, is strung on the sidebar's edge beside the current page and rolls along it to the next
+       one (SideRail.cs). It overhangs the page, so it lies above the backdrop but below the page content. Its sheen and glow
+       take the theme accent. -->
+  <Canvas x:Name="RailPearlLayer" Grid.RowSpan="2" IsHitTestVisible="False" Visibility="{Binding Visibility, ElementName=Rail}">
+   <!-- Drawn like the logo's pearl: a dark body, the accent sheen low on the right, a violet one on the left and a bright highlight. -->
+   <Grid x:Name="RailPearl" Width="15" Height="15" Visibility="Hidden">
+    <Grid.RenderTransform><TranslateTransform/></Grid.RenderTransform>
+    <Grid.Effect><DropShadowEffect Color="{DynamicResource AccentColor}" ShadowDepth="0" BlurRadius="12" Opacity="0.8"/></Grid.Effect>
+    <Ellipse><Ellipse.Fill><RadialGradientBrush GradientOrigin="0.74,0.82" Center="0.64,0.7" RadiusX="0.8" RadiusY="0.8"><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="#FF262A36" Offset="0.55"/><GradientStop Color="#FF09090D" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+    <Ellipse><Ellipse.Fill><RadialGradientBrush GradientOrigin="0.2,0.5" Center="0.25,0.5" RadiusX="0.55" RadiusY="0.6"><GradientStop Color="#B07A55D0" Offset="0"/><GradientStop Color="#007A55D0" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+    <Ellipse Width="4.5" Height="3.5" Margin="3.5,3,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="#F2FFFFFF"/>
+   </Grid>
+  </Canvas>
   <Grid Grid.Column="1" Grid.Row="1" Margin="28,6,28,16" x:Name="ContentArea">
 
    <!-- Home -->

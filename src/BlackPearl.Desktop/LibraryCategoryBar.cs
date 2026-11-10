@@ -29,7 +29,7 @@ public partial class MainWindow
         }
         var left = target.TranslatePoint(new Point(0, 0), LibraryCategories).X;
         var shift = (TranslateTransform)LibraryCategoryThumb.RenderTransform;
-        if (!categoryThumbPlaced)
+        if (!categoryThumbPlaced || !SystemParameters.ClientAreaAnimation)
         {
             shift.BeginAnimation(TranslateTransform.XProperty, null); LibraryCategoryThumb.BeginAnimation(WidthProperty, null);
             shift.X = left; LibraryCategoryThumb.Width = target.ActualWidth;

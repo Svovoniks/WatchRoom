@@ -519,7 +519,27 @@ static class Program
         var icon = (FrameworkElement)((System.Windows.Controls.Panel)home.Content).Children[0];
         var content = (FrameworkElement)window.FindName("ContentArea");
         var expanded = content.ActualWidth; var homeTop = home.TranslatePoint(new Point(0, 0), rail).Y;
+        // The pearl on the sidebar's edge marks the current page, and rolls to the next one.
+        var pearl = (FrameworkElement)window.FindName("RailPearl");
+        string Pearled(string entry)
+        {
+            var target = (FrameworkElement)window.FindName(entry);
+            var centre = pearl.TranslatePoint(new Point(pearl.ActualWidth / 2, pearl.ActualHeight / 2), rail);
+            var middle = target.TranslatePoint(new Point(0, target.ActualHeight / 2), rail).Y;
+            return pearl.IsVisible && Math.Abs(centre.X - (rail.ActualWidth - 0.5)) < 0.5 && Math.Abs(centre.Y - middle) < 1 ? ""
+                : $" (pearl {(pearl.IsVisible ? "shown" : "hidden")} at {centre.X:0.#},{centre.Y:0.#}; edge {rail.ActualWidth - 0.5:0.#}, entry middle {middle:0.#})";
+        }
+        var page = (string)typeof(MainWindow).GetField("currentPage", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+        Call("ShowPage", "Home"); await Task.Delay(450); window.UpdateLayout();
+        var placed = Pearled("HomeNav");
+        check(placed == "", "the pearl sits on the sidebar's edge beside the current page" + placed);
+        Call("ShowPage", "Queues"); await Task.Delay(450); window.UpdateLayout();
+        placed = Pearled("QueuesNav");
+        check(placed == "", "the pearl rolls to the page opened" + placed);
         Call("SetRailCollapsed", true); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+        placed = Pearled("QueuesNav");
+        check(placed == "", "the pearl stays on the edge of a folded sidebar" + placed);
+        Call("ShowPage", "Home"); await Task.Delay(450); window.UpdateLayout();
         var iconLeft = icon.TranslatePoint(new Point(0, 0), home).X;
         var logo = (FrameworkElement)window.FindName("RailLogo");
         var toggle = (FrameworkElement)window.FindName("RailToggle");
@@ -534,6 +554,7 @@ static class Program
         check(Equals(home.ToolTip, "Home") && content.ActualWidth > expanded, "collapsed icons name themselves and the page gains the width");
         Call("SetRailCollapsed", false); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
         check(rail.ActualWidth == 212 && label.IsVisible && home.ToolTip is null && content.ActualWidth == expanded, "the sidebar expands back to its labels");
+        Call("ShowPage", page); await Dispatcher.Yield(DispatcherPriority.Render);
     }
 
     // Categories show their location and actions in one toolbar row; Search shows its field and filters there instead.

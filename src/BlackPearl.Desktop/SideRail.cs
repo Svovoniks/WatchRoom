@@ -1,5 +1,9 @@
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
 
 namespace BlackPearl.Desktop;
 
@@ -16,18 +20,26 @@ public static class SideRail
 }
 
 // The sidebar folds into a thin strip of icons from its toggle or Ctrl+B, and stays that way across launches.
+// A pearl strung on its edge marks the current page and rolls to the next one.
 public partial class MainWindow
 {
     private const double RailExpandedWidth = 212, RailCollapsedWidth = 64;
     private const string RailCollapsedKey = "railCollapsed";
-    private bool railCollapsed;
+    private static readonly Duration RailPearlDuration = new(TimeSpan.FromMilliseconds(260));
+    private bool railCollapsed, railPearlPlaced;
 
     private double RailColumnWidth => railCollapsed ? RailCollapsedWidth : RailExpandedWidth;
+    private Button[] RailEntries => [HomeNav, SearchNav, LibraryNav, MusicLibraryNav, QueuesNav, RoomNav, SettingsNav];
 
     private void InitializeSideRail()
     {
         railCollapsed = library.Setting(RailCollapsedKey) == "true";
         ApplySideRail();
+        // The pearl stays beside its entry while the sidebar scrolls, resizes, gains the Music entry or comes back from the player.
+        RailScroll.ScrollChanged += (_, _) => PlaceRailPearl(animate: false);
+        RailNavigation.SizeChanged += (_, _) => PlaceRailPearl(animate: false);
+        RailPearlLayer.SizeChanged += (_, _) => PlaceRailPearl(animate: false);
+        RailPearlLayer.IsVisibleChanged += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => PlaceRailPearl(animate: false));
     }
 
     private void ToggleRailClick(object sender, RoutedEventArgs e) => SetRailCollapsed(!railCollapsed);
@@ -57,5 +69,37 @@ public partial class MainWindow
         // Without their labels, the icons name themselves in a tooltip. Buttons with their own tooltip keep it.
         foreach (var button in new[] { HomeNav, LibraryNav, MusicLibraryNav, QueuesNav, RoomNav, SettingsNav })
             button.ToolTip = railCollapsed ? AutomationProperties.GetName(button) : null;
+    }
+
+    /// <summary>Rolls the pearl to the newly selected entry once the sidebar has updated.</summary>
+    private void QueueRailPearl() => Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => PlaceRailPearl(animate: true));
+
+    /// <summary>Puts the pearl beside the selected sidebar entry, rolling there when asked and it is already showing.</summary>
+    private void PlaceRailPearl(bool animate)
+    {
+        if (RailPearl is null) return;
+        var target = RailEntries.FirstOrDefault(button => button.IsVisible && AutomationProperties.GetItemStatus(button) == "Selected");
+        // An entry scrolled out of the sidebar's view has no pearl beside it; Settings is outside the scrolling part.
+        var shown = target is not null && RailPearlLayer.IsVisible && target.ActualHeight > 0 && (target == SettingsNav ||
+            target.TranslatePoint(new Point(0, target.ActualHeight / 2), RailScroll).Y is var middle && middle >= 0 && middle <= RailScroll.ActualHeight);
+        var shift = (TranslateTransform)RailPearl.RenderTransform;
+        if (!shown)
+        {
+            shift.BeginAnimation(TranslateTransform.YProperty, null);
+            RailPearl.Visibility = Visibility.Hidden; railPearlPlaced = false;
+            return;
+        }
+        // Centred on the sidebar's one-pixel edge, whatever its width.
+        Canvas.SetLeft(RailPearl, RailPearlLayer.ActualWidth - 0.5 - RailPearl.Width / 2);
+        var top = Math.Round(target!.TranslatePoint(new Point(0, target.ActualHeight / 2), RailPearlLayer).Y - RailPearl.Height / 2);
+        if (!railPearlPlaced || !animate || !SystemParameters.ClientAreaAnimation)
+        {
+            // A layout change while the pearl rolls lands it where it was heading.
+            shift.BeginAnimation(TranslateTransform.YProperty, null); shift.Y = top;
+            RailPearl.Visibility = Visibility.Visible; railPearlPlaced = true;
+            return;
+        }
+        if (shift.Y == top) return;
+        shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(top, RailPearlDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut } });
     }
 }
