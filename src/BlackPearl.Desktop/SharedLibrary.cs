@@ -223,7 +223,7 @@ public partial class MainWindow
             if (guestBrowse.Season is { } season) crumbs.Add(new(SeasonName(season), "season", guestBrowse.Category, guestBrowse.ParentId, Season: season));
         }
         crumbs[^1] = crumbs[^1] with { IsCurrent = true };
-        LibraryBreadcrumbs.ItemsSource = crumbs;
+        LibraryBreadcrumbs.ItemsSource = LibraryTrail(crumbs);
         DetailBreadcrumbs.ItemsSource = currentPage == "Details" && selected is not null ? crumbs.Concat(new[] { new LibraryBreadcrumb(selected.Title, "media", IsCurrent: true) }).ToArray() : crumbs;
     }
     private void NavigateHostBreadcrumb(LibraryBreadcrumb crumb)

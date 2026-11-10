@@ -408,16 +408,17 @@ static class Program
         LibraryBreadcrumb[] Crumbs(bool details = false) => ((System.Windows.Controls.ItemsControl)window.FindName(details ? "DetailBreadcrumbs" : "LibraryBreadcrumbs")).Items.Cast<LibraryBreadcrumb>().ToArray();
         void ClickCrumb(LibraryBreadcrumb crumb) => Call("BreadcrumbClick", window,
             new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent, new System.Windows.Controls.Button { DataContext = crumb }));
+        string Status(string name) => System.Windows.Automation.AutomationProperties.GetItemStatus((DependencyObject)window.FindName(name));
         Navigate(3); await Wait(() => cards.Count == 1 && cards.All(x => x.Card.Media.Kind == "Anime"));
         var categoryButton = (System.Windows.Controls.Button)window.FindName("ShowsLibraryNav");
         categoryButton.Focus(); Call("LibraryCategoryClick", categoryButton, new RoutedEventArgs());
         await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
         check(!((System.Windows.Controls.TextBox)window.FindName("SearchBox")).IsKeyboardFocusWithin, "category navigation does not move the cursor into search");
         Navigate(3); await Wait(() => cards.Count == 1 && cards.All(x => x.Card.Media.Kind == "Anime"));
-        check(Crumbs().Select(x => x.Label).SequenceEqual(["All", "Anime"]), "Anime category excludes unavailable titles and preserves its category path");
+        check(Crumbs().Length == 0 && Status("AnimeLibraryNav") == "Selected", "Anime category excludes unavailable titles and is marked in the category bar rather than a trail");
         var status = (System.Windows.Controls.ComboBox)window.FindName("LibraryStatusFilter");
         Navigate(4); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == animeMovie.Id);
-        check(Crumbs().Last().Label == "Unavailable" && cards.All(x => !x.Card.Media.Available), "unavailable videos appear only in their separate library tab");
+        check(Status("UnavailableLibraryNav") == "Selected" && cards.All(x => !x.Card.Media.Available), "unavailable videos appear only in their separate library tab");
         // Search's type of title and status filters combine.
         var kinds = ((System.Windows.Controls.Panel)window.FindName("SearchKinds")).Children.OfType<System.Windows.Controls.RadioButton>().ToArray();
         Call("OpenSearch", false); kinds.Single(x => (string)x.Tag == "3").IsChecked = true;
@@ -427,7 +428,7 @@ static class Program
             "availability is a separate tab rather than a status filter");
         status.SelectedIndex = 0; kinds[0].IsChecked = true;
         Navigate(2, LibraryIdentity.ShowKey(show), "Show"); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
-        check(Crumbs().Select(x => x.Label).SequenceEqual(["All", "Shows", "Navigation Show"]), "show breadcrumb points to the season grid");
+        check(Crumbs().Select(x => x.Label).SequenceEqual(["Shows", "Navigation Show"]) && Crumbs()[0].Separator == "", "show breadcrumb points to the season grid and starts at its category");
         Navigate(2, LibraryIdentity.ShowKey(show), "Show", 0); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == special.Id);
         check(Crumbs().Last().Label == "Specials", "specials have an explicit clickable breadcrumb");
         Navigate(2, LibraryIdentity.ShowKey(show), "Show", -1); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == unknown.Id);
@@ -442,17 +443,15 @@ static class Program
         check(((FrameworkElement)window.FindName("LibraryPage")).Visibility == Visibility.Visible && Crumbs().Last().Level == "season", "season breadcrumb returns from episode details to its grid");
         ClickCrumb(Crumbs().Single(x => x.Level == "show")); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
         ClickCrumb(Crumbs().Single(x => x.Label == "Shows")); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
-        var all = Crumbs().First();
         var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
         Call("OpenSearch", false); search.Text = "no matching title"; await Wait(() => cards.Count == 0);
         check(((FrameworkElement)window.FindName("NoResults")).Visibility == Visibility.Visible, "a search without matches says so");
-        ClickCrumb(all); await Wait(() => cards.Count == 752);
-        check(Crumbs().Length == 1 && Crumbs()[0].IsCurrent, "All breadcrumb lists every title, whatever Search holds");
+        Call("LibraryCategoryClick", window.FindName("AllLibraryNav"), new RoutedEventArgs()); await Wait(() => cards.Count == 752);
+        check(Crumbs().Length == 0 && Status("AllLibraryNav") == "Selected", "the All category lists every title, whatever Search holds");
         search.Clear();
-        var menu = (FrameworkElement)window.FindName("LibraryCategories");
-        Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Collapsed, "Library button collapses its category menu");
-        Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Visible, "Library button expands its category menu");
+        await CheckCategoryBar(window, check);
         await CheckShortRail(window, check);
+        await CheckCollapsedRail(window, check);
         Navigate(1); await Wait(() => cards.Count == 750 && cards.All(x => x.Card.Media.Kind == "Movie"));
         Call("Select", animeMovie);
         check(Crumbs(true).Select(x => x.Label).SequenceEqual(["All", "Unavailable", "Navigation Anime Film"]), "unavailable film details link back to the unavailable tab");
@@ -470,8 +469,8 @@ static class Program
         window.WindowState = WindowState.Normal; window.Height = 2000;
         await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
         var width = home.ActualWidth;
-        // Well below the minimum height, so the navigation overflows whichever categories are listed.
-        window.MinHeight = 400; window.Height = 400; scroll.ScrollToBottom();
+        // Well below the minimum height, so the navigation overflows whichever entries are listed.
+        window.MinHeight = 280; window.Height = 280; scroll.ScrollToBottom();
         await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
         var bottom = settings.TranslatePoint(new Point(0, settings.ActualHeight), rail).Y;
         check(scroll.ScrollableHeight > 0 && settings.IsVisible && bottom <= rail.ActualHeight,
@@ -479,6 +478,51 @@ static class Program
         check(home.ActualWidth == width, $"sidebar buttons keep their width when its scroll bar appears ({width:0.#} -> {home.ActualWidth:0.#})");
         scroll.ScrollToTop(); window.MinHeight = minimum; window.Height = height; window.WindowState = state;
         await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+    }
+
+    // The library's categories are a bar at the top of the Library page whose thumb slides to the current category.
+    private static async Task CheckCategoryBar(MainWindow window, Action<bool, string> check)
+    {
+        void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, arguments);
+        var bar = (FrameworkElement)window.FindName("LibraryCategoryBar");
+        var track = (FrameworkElement)window.FindName("LibraryCategories");
+        var thumb = (FrameworkElement)window.FindName("LibraryCategoryThumb");
+        var shift = (System.Windows.Media.TranslateTransform)thumb.RenderTransform;
+        async Task Settle() { await Task.Delay(400); await Dispatcher.Yield(DispatcherPriority.ContextIdle); window.UpdateLayout(); }
+        bool Under(string name)
+        {
+            var segment = (FrameworkElement)window.FindName(name);
+            return thumb.IsVisible && Math.Abs(segment.TranslatePoint(new Point(0, 0), track).X - shift.X) < 0.5 && Math.Abs(segment.ActualWidth - thumb.ActualWidth) < 0.5;
+        }
+        Call("NavigateLibrary", 0, null, null, null); await Settle();
+        check(bar.IsVisible && bar.TranslatePoint(new Point(0, 0), (FrameworkElement)window.FindName("LibraryPage")).Y < 1, "the category bar sits at the top of the Library page");
+        check(Under("AllLibraryNav"), "the category bar's thumb sits under All");
+        Call("LibraryCategoryClick", window.FindName("MoviesLibraryNav"), new RoutedEventArgs()); await Settle();
+        check(Under("MoviesLibraryNav"), "the thumb slides to the category chosen");
+        Call("OpenSearch", false); await Settle();
+        check(!bar.IsVisible, "Search hides the category bar");
+        Call("LibraryNavClick", window, new RoutedEventArgs()); await Settle();
+        check(bar.IsVisible && Under("AllLibraryNav"), "Library leaves Search for All, and the thumb is placed again when the bar returns");
+    }
+
+    // The sidebar folds into a strip of icons, with each icon named in a tooltip, and unfolds again.
+    private static async Task CheckCollapsedRail(MainWindow window, Action<bool, string> check)
+    {
+        void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, arguments);
+        var rail = (FrameworkElement)window.FindName("Rail");
+        var home = (System.Windows.Controls.Button)window.FindName("HomeNav");
+        var label = ((System.Windows.Controls.Panel)home.Content).Children[1];
+        var icon = (FrameworkElement)((System.Windows.Controls.Panel)home.Content).Children[0];
+        var content = (FrameworkElement)window.FindName("ContentArea");
+        var expanded = content.ActualWidth;
+        Call("SetRailCollapsed", true); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+        var iconLeft = icon.TranslatePoint(new Point(0, 0), home).X;
+        check(rail.ActualWidth == 64 && !label.IsVisible && ((FrameworkElement)window.FindName("RailBrand")).Visibility == Visibility.Collapsed,
+            $"a collapsed sidebar is a strip of icons ({rail.ActualWidth:0.#} wide)");
+        check(Math.Abs(iconLeft * 2 + icon.ActualWidth - home.ActualWidth) < 1, $"a collapsed sidebar centres its icons ({iconLeft:0.#} in {home.ActualWidth:0.#})");
+        check(Equals(home.ToolTip, "Home") && content.ActualWidth > expanded, "collapsed icons name themselves and the page gains the width");
+        Call("SetRailCollapsed", false); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+        check(rail.ActualWidth == 212 && label.IsVisible && home.ToolTip is null && content.ActualWidth == expanded, "the sidebar expands back to its labels");
     }
 
     // Categories show their location and actions in one toolbar row; Search shows its field and filters there instead.
@@ -613,7 +657,7 @@ static class Program
         check(Field("currentPage") as string == "Settings", "small horizontal movements do not accidentally navigate");
         Horizontal(-120); Horizontal(-360);
         check(Field("currentPage") as string == "Library", "horizontal swipe goes Back once and ignores its inertia");
-        Call("OpenSearch", false); Call("ShowPage", "Home"); Call("LibraryMenuClick", window, new RoutedEventArgs());
+        Call("OpenSearch", false); Call("ShowPage", "Home"); Call("LibraryNavClick", window, new RoutedEventArgs());
         check(Field("currentPage") as string == "Library" && !Searching() &&
             System.Windows.Automation.AutomationProperties.GetItemStatus((DependencyObject)window.FindName("LibraryNav")) == "Selected",
             "the Library entry opens the library, not Search, after Search was used from another page");
