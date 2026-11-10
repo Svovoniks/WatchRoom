@@ -159,14 +159,19 @@ public static class FileLanguageIndex
             cancellation.ThrowIfCancellationRequested();
             done++;
             if (LibraryStore.TrackLanguageFile(path) is not { } fileKey) continue;
-            if (!cached.TryGetValue(fileKey, out var tracks) && SubtitleText.ListsTracks(path))
+            try
             {
-                // Unreadable headers aren't cached, so a file that was busy or half copied is read again next time.
-                tracks = Encode(SubtitleText.Tracks(path, cancellation));
-                if (tracks is not null) fresh.Add((path, fileKey, tracks));
-                if (fresh.Count >= 200) { store.CacheTrackLists(fresh); fresh.Clear(); }
+                if (!cached.TryGetValue(fileKey, out var tracks) && SubtitleText.ListsTracks(path))
+                {
+                    // Unreadable headers aren't cached, so a file that was busy or half copied is read again next time.
+                    tracks = Encode(SubtitleText.Tracks(path, cancellation));
+                    if (tracks is not null) fresh.Add((path, fileKey, tracks));
+                }
+                result[path] = Resolve(tracks, fileKey, identified, SubtitleFiles.VlcSidecars(path, ListFolder));
             }
-            result[path] = Resolve(tracks, fileKey, identified, SubtitleFiles.VlcSidecars(path, ListFolder));
+            // One malformed file is left out rather than ending the pass for the rest of the library.
+            catch (Exception ex) when (ex is not OperationCanceledException) { }
+            if (fresh.Count >= 200) { store.CacheTrackLists(fresh); fresh.Clear(); }
             if (progress is not null && Environment.TickCount64 - reported > 1500)
             { reported = Environment.TickCount64; progress(new(result, StringComparer.OrdinalIgnoreCase), done); }
         }

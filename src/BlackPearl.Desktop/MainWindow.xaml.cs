@@ -433,8 +433,8 @@ public partial class MainWindow : Window
     private void LibraryMenuClick(object sender, RoutedEventArgs e)
     {
         if (!ConfirmPageNavigation("Library")) return;
-        // From Search, Library opens its categories at All rather than folding them away.
-        if (librarySearch && currentPage == "Library")
+        // After Search, Library opens its categories at All rather than folding them away (or showing Search again).
+        if (librarySearch)
         {
             LibraryCategories.Visibility = Visibility.Visible; LibraryChevron.Text = "";
             NavigateLibrary(0); return;
@@ -540,7 +540,7 @@ public partial class MainWindow : Window
         RefreshHome();
         UpdateLibraryCategorySelection(currentPage is "Library" or "Details");
         // A rescan can add videos, so Search reads their languages if it has been opened.
-        if (languageIndexWanted && !GuestLibrary) IndexLanguages();
+        if (languageIndexWanted && !GuestLibrary) { languageIndexDone = false; IndexLanguages(); }
         if (librarySearch) RefreshSearchOptions();
         if (browseSeries is not null && !items.Any(x => LibraryIdentity.InShow(x, browseSeries, browseKind)))
         {

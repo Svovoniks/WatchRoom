@@ -612,6 +612,13 @@ static class Program
         check(Field("currentPage") as string == "Settings", "small horizontal movements do not accidentally navigate");
         Horizontal(-120); Horizontal(-360);
         check(Field("currentPage") as string == "Library", "horizontal swipe goes Back once and ignores its inertia");
+        Call("OpenSearch", false); Call("ShowPage", "Home"); Call("LibraryMenuClick", window, new RoutedEventArgs());
+        check(Field("currentPage") as string == "Library" && !Searching() &&
+            System.Windows.Automation.AutomationProperties.GetItemStatus((DependencyObject)window.FindName("LibraryNav")) == "Selected",
+            "the Library entry opens the library, not Search, after Search was used from another page");
+        Call("ShowPage", "Home"); Call("OpenSearch", false); Call("BrowseHistory", true);
+        check(Field("currentPage") as string == "Home" && !Searching(), "Back from Search to Home leaves Search behind");
+        Call("NavigateLibrary", 0, null!, null!, null!);
     }
 
     private static void CheckQueueEditing(MainWindow window, LibraryStore store, Action<bool, string> check)

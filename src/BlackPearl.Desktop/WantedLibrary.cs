@@ -33,7 +33,8 @@ public partial class MainWindow
     // A search that finds nothing in the library offers to look the title up and add it.
     private void ShowFindTitle(string query, bool offer)
     {
-        offer &= query.Length > 0 && !GuestLibrary;
+        // When filters hid the matches the title may already be in the library, so only an unfiltered search offers it.
+        offer &= query.Length > 0 && !GuestLibrary && !(librarySearch && SearchFiltersActive());
         FindTitleButton.Visibility = offer ? Visibility.Visible : Visibility.Collapsed;
         FindTitleButton.Content = TmdbCredentials.Resolve(savedMetadataToken) is not null ? $"Find “{query}” on TMDB and add it" : $"Search for “{query}” and add it";
         NoResultsHint.Text = offer ? "You can still add it. It shows as Missing until a scan finds its files."

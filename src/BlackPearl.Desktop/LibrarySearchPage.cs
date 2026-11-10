@@ -18,12 +18,12 @@ public sealed record SearchChoice(string Name, string Code)
 // place of the category's breadcrumbs, and the grid lists matching shows, films and albums from the whole library.
 // Opening a show from it browses that show in the library; Back returns to the search as it was.
 // Audio and subtitle languages come from a background pass over the library's videos (FileLanguageIndex), started the
-// first time Search opens and repeated when it opens again or the library is rescanned. Matches appear as files are read.
+// first time Search opens and repeated when the library changes. Matches appear as files are read.
 public partial class MainWindow
 {
     private bool librarySearch;
     private Dictionary<string, FileLanguages> searchLanguages = new(StringComparer.OrdinalIgnoreCase);
-    private bool languageIndexRunning, languageIndexAgain, languageIndexWanted, updatingSearchFilters;
+    private bool languageIndexRunning, languageIndexAgain, languageIndexWanted, languageIndexDone, updatingSearchFilters;
     private (int Done, int Total)? languageIndexProgress;
 
     private void SearchNavClick(object sender, RoutedEventArgs e) => OpenSearch(focus: false);
@@ -34,15 +34,17 @@ public partial class MainWindow
         if (!ConfirmPageNavigation("Library")) return;
         if (!librarySearch || currentPage != "Library")
         {
-            // Showing the page remembers where it came from, except from a category of the same page.
-            if (currentPage == "Library") RememberLocation();
+            // Remember where Search was opened from before changing anything, so Back returns there as it was.
+            RememberLocation();
             ClearCardSelection();
             librarySearch = true; libraryCategory = 0; browseSeries = browseKind = null; browseSeason = null;
             if (GuestLibrary) guestBrowse = new(Category: SearchCategory());
             RefreshSearchOptions();
-            ShowPage("Library");
+            var restoring = restoringNavigation; restoringNavigation = true;
+            try { ShowPage("Library"); }
+            finally { restoringNavigation = restoring; }
         }
-        if (!GuestLibrary) IndexLanguages();
+        if (!GuestLibrary && !languageIndexDone) IndexLanguages();
         if (focus) { SearchBox.Focus(); SearchBox.SelectAll(); }
     }
 
@@ -237,6 +239,7 @@ public partial class MainWindow
                 languageIndexProgress = null;
                 UseLanguages(result);
             } while (languageIndexAgain && !closing);
+            languageIndexDone = true;
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         catch (Exception ex) { PlaybackDiagnostics.Record("search-language-index-failed", new { error = ex.GetType().Name, ex.Message }); }
