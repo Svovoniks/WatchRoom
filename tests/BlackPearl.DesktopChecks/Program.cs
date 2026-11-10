@@ -554,6 +554,13 @@ static class Program
         check(Equals(home.ToolTip, "Home") && content.ActualWidth > expanded, "collapsed icons name themselves and the page gains the width");
         Call("SetRailCollapsed", false); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
         check(rail.ActualWidth == 212 && label.IsVisible && home.ToolTip is null && content.ActualWidth == expanded, "the sidebar expands back to its labels");
+        // A click focuses the toggle; it must not stay over the folded strip's logo once the pointer leaves.
+        window.Activate(); toggle.Focus(); await Dispatcher.Yield(DispatcherPriority.Input);
+        var focusedBefore = toggle.IsKeyboardFocused;
+        Call("ToggleRailClick", toggle, new RoutedEventArgs()); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+        check(focusedBefore && !toggle.IsKeyboardFocused && logo.IsVisible && toggle.Opacity == 0,
+            $"folding from the toggle shows the logo again rather than the focused toggle (focused before {focusedBefore}, after {toggle.IsKeyboardFocused}, logo {logo.IsVisible})");
+        Call("SetRailCollapsed", false); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
         Call("ShowPage", page); await Dispatcher.Yield(DispatcherPriority.Render);
     }
 

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -42,7 +43,15 @@ public partial class MainWindow
         RailPearlLayer.IsVisibleChanged += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => PlaceRailPearl(animate: false));
     }
 
-    private void ToggleRailClick(object sender, RoutedEventArgs e) => SetRailCollapsed(!railCollapsed);
+    private void ToggleRailClick(object sender, RoutedEventArgs e)
+    {
+        SetRailCollapsed(!railCollapsed);
+        // A click focuses the toggle, and a focused toggle stays over the folded strip's logo. Only keyboard focus should
+        // keep it there, so a click hands focus to the window, where keyboard shortcuts are handled.
+        if (InputManager.Current.MostRecentInputDevice is KeyboardDevice || !RailToggle.IsKeyboardFocused) return;
+        Keyboard.Focus(this);
+        if (RailToggle.IsKeyboardFocused) Keyboard.ClearFocus();
+    }
 
     private void SetRailCollapsed(bool collapsed)
     {
