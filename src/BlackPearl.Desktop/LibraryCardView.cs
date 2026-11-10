@@ -119,7 +119,7 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         var changed = previous.Poster != card.Poster || posterVersion != version;
         if (changed) { imageGeneration++; requestedPath = null; }
         posterVersion = version;
-        if (changed) _ = LoadPosterAsync();
+        if (changed) Reload();
     }
     public void SetPlayback(long positionMs, bool watched)
     {
@@ -130,15 +130,71 @@ public sealed class LibraryCardView : INotifyPropertyChanged
         if (PlaybackLabel != label) { PlaybackLabel = label; Changed(nameof(PlaybackLabel)); Changed(nameof(HasPlaybackProgress)); }
     }
     public void SetPlaybackLabel(string label) { if (PlaybackLabel == label) return; PlaybackLabel = label; Changed(nameof(PlaybackLabel)); Changed(nameof(HasPlaybackProgress)); }
+    // A decoded poster takes about half a megabyte, and as much again on the graphics card while it is drawn, so a
+    // card holds its artwork only while an image on screen shows it (see PosterLease) and decodes it no larger than the
+    // frame it is drawn in. Cards nothing has leased, such as queue rows, keep their artwork as long as they live.
+    public static double PixelScale { get; set; } = 1;
+    private Size? frame;
+    private bool wholeFrame;
+    private double requestedScale;
+    private int shown, hides;
+    private bool leased, asked;
+    // The area the artwork fills, in device-independent units, or fits inside when "whole".
+    public void ShowIn(double width, double height, bool whole = false)
+    {
+        var area = new Size(width, height);
+        if (frame == area && wholeFrame == whole) return;
+        frame = area; wholeFrame = whole;
+        if (IsRemote || requestedPath is null) return;
+        requestedPath = null; Reload();
+    }
+    // The library grid's artwork frames: see the card template in MainWindow.xaml.
+    public void ShowInGrid() => ShowIn(IsEpisode ? 288 : 168, IsEpisode ? 162 : IsAlbum ? 168 : 248);
+    // Loads again after the artwork, its frame or the display scale changed. A card that is off screen loads when it is
+    // shown, and one whose artwork nothing has asked for yet, such as a grid card never scrolled to, waits to be asked.
+    public void Reload() { if (shown > 0 || !leased && asked) _ = LoadPosterAsync(); }
+    internal void Shown() { leased = true; hides++; shown++; _ = LoadPosterAsync(); }
+    internal void Hidden() { if (--shown == 0) ReleaseLater(); }
+    // For artwork loaded while the card was off screen, as when its details page borrows it.
+    internal void ReleaseIfHidden() { if (leased && shown == 0) ReleaseLater(); }
+    // Artwork that left the screen is kept for a short while, so going back a page or scrolling back shows it at once.
+    private const int HiddenLimit = 96;
+    internal static long HiddenForMs = 30000;
+    private static readonly Queue<(LibraryCardView View, int Hide, long At)> hidden = new();
+    private static System.Windows.Threading.DispatcherTimer? sweep;
+    private void ReleaseLater()
+    {
+        hidden.Enqueue((this, ++hides, Environment.TickCount64));
+        sweep ??= new(TimeSpan.FromSeconds(5), System.Windows.Threading.DispatcherPriority.Background, (_, _) => Sweep(), System.Windows.Threading.Dispatcher.CurrentDispatcher);
+        sweep.Start(); Sweep();
+    }
+    internal static void Sweep()
+    {
+        var now = Environment.TickCount64;
+        while (hidden.Count > 0 && (hidden.Count > HiddenLimit || now - hidden.Peek().At >= HiddenForMs))
+        {
+            var (view, hide, _) = hidden.Dequeue();
+            // Shown again since, or hidden again later: a newer entry decides.
+            if (view.shown > 0 || view.hides != hide) continue;
+            view.imageGeneration++; view.requestedPath = null;
+            if (view.Poster is not null) { view.SetPoster(null); released++; }
+        }
+        if (hidden.Count == 0) sweep?.Stop();
+        // A bitmap's pixels live outside the managed heap and are freed only once the collector finds its small managed
+        // object, which an idle app never prompts it to do. So ask, once the screen has settled or enough has piled up.
+        if (released > 0 && (hidden.Count == 0 || released >= 200)) { released = 0; GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: false); }
+    }
+    private static int released;
     public Task LoadPosterAsync()
     {
+        asked = true;
         if (IsRemote)
         {
             if (requestedPath is not null || remoteThumbnail is null && RemoteArtworkLoader is null) return loading;
             requestedPath = "remote";
             return loading = LoadEnhancedPosterAsync();
         }
-        if (requestedPath == Card.Poster && Card.Poster is not null) return loading;
+        if (requestedPath == Card.Poster && Card.Poster is not null && requestedScale == PixelScale) return loading;
         return loading = LoadPosterCoreAsync();
     }
     private async Task LoadEnhancedPosterAsync()
@@ -161,16 +217,21 @@ public sealed class LibraryCardView : INotifyPropertyChanged
             catch (Exception ex) when (ex is FormatException or IOException or NotSupportedException or ArgumentException) { return null; }
             finally { imageWorkers.Release(); }
         });
-        if (image is not null) SetPoster(image);
+        // Released while it decoded: the card left the screen.
+        if (image is not null && requestedPath is not null) SetPoster(image);
     }
     private async Task LoadPosterCoreAsync()
     {
         if (Card.Poster is not { } path) { if (Poster is not null) SetPoster(null); return; }
-        if (requestedPath == path) return;
-        requestedPath = path;
+        var scale = PixelScale;
+        if (requestedPath == path && requestedScale == scale) return;
+        requestedPath = path; requestedScale = scale;
         var generation = ++imageGeneration; var version = posterVersion;
-        var episode = IsEpisode;
-        var cacheKey = $"{path}:{version.Length}:{version.Modified}:{episode}";
+        var episode = IsEpisode; var area = frame; var whole = wholeFrame;
+        var cacheKey = $"{path}:{version.Length}:{version.Modified}:{episode}:{area}:{whole}:{scale}";
+        // Artwork another card still holds, or that has not been collected since this one let go of it, shows at once.
+        lock (images) if (images.TryGetValue(cacheKey, out var kept) && kept.TryGetTarget(out var ready))
+            { if (!ReferenceEquals(Poster, ready)) SetPoster(ready); return; }
         var image = await Task.Run(async () =>
         {
             await imageWorkers.WaitAsync();
@@ -179,7 +240,17 @@ public sealed class LibraryCardView : INotifyPropertyChanged
                 lock (images) if (images.TryGetValue(cacheKey, out var cached) && cached.TryGetTarget(out var found)) return found;
                 using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 var bitmap = new BitmapImage(); bitmap.BeginInit(); bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                if (episode) bitmap.DecodePixelWidth = 640; else bitmap.DecodePixelHeight = 400;
+                if (area is { Width: > 0, Height: > 0 } box)
+                {
+                    // The file's own size says which side of the frame the artwork reaches first.
+                    var source = BitmapDecoder.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None).Frames[0];
+                    double width = source.PixelWidth, height = source.PixelHeight; stream.Position = 0;
+                    double across = box.Width * scale / width, down = box.Height * scale / height;
+                    // Never larger than the file, nor than artwork without a frame is decoded.
+                    var ratio = Math.Min(Math.Min(whole ? Math.Min(across, down) : Math.Max(across, down), episode ? 640 / width : 400 / height), 1);
+                    bitmap.DecodePixelWidth = Math.Max(1, (int)Math.Ceiling(width * ratio));
+                }
+                else if (episode) bitmap.DecodePixelWidth = 640; else bitmap.DecodePixelHeight = 400;
                 bitmap.StreamSource = stream; bitmap.EndInit(); bitmap.Freeze();
                 lock (images)
                 {

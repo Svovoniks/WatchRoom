@@ -4,6 +4,8 @@ public sealed partial class LibraryStore
 {
     private readonly object retentionGate = new();
     private long lastRetentionCheck;
+    // When each row last checked next holds something due, by the hash of its bytes.
+    private Dictionary<UInt128, long> retentionDue = [];
     public bool ExpireTmdbContent(bool force = false)
     {
         lock (retentionGate)
@@ -11,7 +13,7 @@ public sealed partial class LibraryStore
             var now = Wire.Now;
             if (!force && now - lastRetentionCheck < (long)TimeSpan.FromHours(1).TotalMilliseconds) return false;
             using var db = Open(); using var transaction = db.BeginTransaction();
-            var changed = false;
+            var changed = false; var checkedRows = new Dictionary<UInt128, long>(retentionDue.Count);
             foreach (var table in new[] { "media", "shows", "seasons" })
             {
                 var rows = new List<(string Id, string Json)>();
@@ -19,19 +21,26 @@ public sealed partial class LibraryStore
                 {
                     read.Transaction = transaction; read.CommandText = "SELECT id,json FROM " + table;
                     using var reader = read.ExecuteReader();
-                    while (reader.Read()) rows.Add((reader.GetString(0), reader.GetString(1)));
+                    while (reader.Read())
+                    {
+                        // Whether a row holds anything due depends only on its bytes and the time, so a row found to
+                        // hold nothing due is not parsed again until its oldest download comes due.
+                        var key = RowText.Hash(RowText.Bytes(reader, 1));
+                        if (retentionDue.TryGetValue(key, out var due) && now < due) { checkedRows[key] = due; continue; }
+                        var json = TmdbRetention.Expire(reader.GetString(1), now, out var expired, out due);
+                        if (expired) rows.Add((reader.GetString(0), json)); else checkedRows[key] = due;
+                    }
                 }
                 foreach (var row in rows)
                 {
-                    var json = TmdbRetention.Expire(row.Json, now, out var expired);
-                    if (!expired) continue;
+                    var json = row.Json;
                     using var update = db.CreateCommand(); update.Transaction = transaction;
                     update.CommandText = "UPDATE " + table + " SET json=$json WHERE id=$id";
                     update.Parameters.AddWithValue("$json", json); update.Parameters.AddWithValue("$id", row.Id); update.ExecuteNonQuery();
                     changed = true;
                 }
             }
-            transaction.Commit();
+            transaction.Commit(); retentionDue = checkedRows;
             if (Setting("metadata-outstanding-v2") is { } issuesJson)
             {
                 try

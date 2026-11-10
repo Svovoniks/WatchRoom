@@ -310,6 +310,7 @@ static class Program
                 retained = tracker.Poster;
                 tracker.Update(tracker.Card with { Poster = Path.Combine(directory, "failed-replacement.png") }); await tracker.LoadPosterAsync();
                 Check(ReferenceEquals(retained, tracker.Poster), "failed artwork replacement keeps the previous image");
+                await PosterLeaseChecks.Run(directory, entries[0], Check);
                 var episodeView = new LibraryCardView(new("Episode 1", "Example", posterPath, entries[0] with { Series = "Example", Season = 1, Episode = 1, RuntimeMinutes = 20 }, "episode"));
                 episodeView.SetPlayback(600000, false);
                 Check(episodeView.Progress == 50 && episodeView.PlaybackLabel == "Resume · 10:00", "episode playback progress uses runtime and saved resume point");
