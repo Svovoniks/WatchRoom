@@ -31,8 +31,9 @@ public sealed class ThreadBar : ContentControl
     private static readonly DependencyPropertyDescriptor ItemStatus = DependencyPropertyDescriptor.FromProperty(AutomationProperties.ItemStatusProperty, typeof(UIElement));
     private readonly List<Rectangle> threads = [];
     private readonly HashSet<FrameworkElement> watched = [];
+    private readonly EventHandler statusChanged; private readonly SizeChangedEventHandler choiceResized, contentResized; private readonly EventHandler containersChanged;
     private Canvas? layer;
-    private Border? light;
+    private FrameworkElement? light;
     private bool placed, queued, queuedGlide;
 
     /// <summary>The lit stretch under the chosen word.</summary>
@@ -45,14 +46,20 @@ public sealed class ThreadBar : ContentControl
         Focusable = false; IsTabStop = false;
         AddHandler(ToggleButton.CheckedEvent, new RoutedEventHandler((_, _) => Queue(glide: true)));
         AddHandler(Selector.SelectionChangedEvent, new SelectionChangedEventHandler((_, _) => Queue(glide: true)));
+        statusChanged = (_, _) => Queue(glide: true);
+        choiceResized = (_, _) => Queue(glide: false); contentResized = (_, _) => Queue(glide: false);
+        containersChanged = (_, _) => { Watch(); Queue(glide: false); };
         IsVisibleChanged += (_, _) => { placed = false; Queue(glide: false); };
+        // Watching a choice's status registers it with WPF for good, which would keep the choice, this bar and the dialog or page
+        // around it alive after they close. So the choices are watched only while the bar is shown, and let go when it unloads.
         Loaded += (_, _) => { Watch(); Queue(glide: false); };
+        Unloaded += (_, _) => Unwatch();
     }
 
     public override void OnApplyTemplate()
     {
         base.OnApplyTemplate();
-        layer = GetTemplateChild("PART_Layer") as Canvas; light = GetTemplateChild("PART_Light") as Border;
+        layer = GetTemplateChild("PART_Layer") as Canvas; light = GetTemplateChild("PART_Light") as FrameworkElement;
         // A transform set in a shared template is frozen, so the light gets its own to move by.
         if (light is not null) light.RenderTransform = new TranslateTransform();
         threads.Clear(); placed = false; Queue(glide: false);
@@ -61,31 +68,48 @@ public sealed class ThreadBar : ContentControl
     protected override void OnContentChanged(object oldContent, object newContent)
     {
         base.OnContentChanged(oldContent, newContent);
-        if (newContent is FrameworkElement content) content.SizeChanged += (_, _) => Queue(glide: false);
+        Unwatch();
+        if (oldContent is FrameworkElement old) old.SizeChanged -= contentResized;
+        if (oldContent is ItemsControl oldList) oldList.ItemContainerGenerator.StatusChanged -= containersChanged;
+        if (newContent is FrameworkElement content) content.SizeChanged += contentResized;
         // A list makes its items' containers as it lays out, so they are watched as they appear.
-        if (newContent is ItemsControl list) list.ItemContainerGenerator.StatusChanged += (_, _) => { Watch(); Queue(glide: false); };
+        if (newContent is ItemsControl list) list.ItemContainerGenerator.StatusChanged += containersChanged;
         Watch(); Queue(glide: false);
     }
 
     /// <summary>Follows the choices: a new choice glides the light, and a choice changing size moves it with the words.</summary>
     private void Watch()
     {
-        foreach (var choice in Choices())
+        if (!IsLoaded || !IsVisible) return;
+        // A list replaces an item's container when the item is replaced; the old one is let go.
+        var current = Choices().ToHashSet();
+        foreach (var gone in watched.Where(choice => !current.Contains(choice)).ToList()) { ItemStatus.RemoveValueChanged(gone, statusChanged); gone.SizeChanged -= choiceResized; watched.Remove(gone); }
+        foreach (var choice in current)
         {
             if (!watched.Add(choice)) continue;
-            ItemStatus.AddValueChanged(choice, (_, _) => Queue(glide: true));
-            choice.SizeChanged += (_, _) => Queue(glide: false);
+            ItemStatus.AddValueChanged(choice, statusChanged);
+            choice.SizeChanged += choiceResized;
         }
+    }
+
+    private void Unwatch()
+    {
+        foreach (var choice in watched) { ItemStatus.RemoveValueChanged(choice, statusChanged); choice.SizeChanged -= choiceResized; }
+        watched.Clear();
     }
 
     /// <summary>Lays the threads and light out once the choices have settled, gliding if any change asked to. A change of
     /// choice clears one mark and sets another; waiting for both keeps the light from vanishing in between.</summary>
     private void Queue(bool glide)
     {
+        // A hidden bar, such as one on a page not showing, has nothing to lay out; it does so when it is shown, as becoming visible
+        // queues it again. Many bars wait on hidden pages at startup, and laying them all out slowed the first page's layout.
+        if (!IsVisible) { placed = false; return; }
         queuedGlide |= glide;
         if (queued) return;
         queued = true;
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { queued = false; var g = queuedGlide; queuedGlide = false; Place(g); });
+        // Below input, so laying out the light never holds up the pointer or keyboard, as it did at startup; it waits a frame at most.
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { queued = false; var g = queuedGlide; queuedGlide = false; Place(g); });
     }
 
     private void Place(bool glide)

@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
@@ -49,6 +50,16 @@ public sealed class RollingText : Decorator
         Child = host; host.Children.Add(display);
     }
 
+    /// <summary>Screen readers see the count as one piece of text, named by what it shows, never the digits it rolls with.</summary>
+    protected override AutomationPeer OnCreateAutomationPeer() => new CountPeer(this);
+
+    private sealed class CountPeer(RollingText owner) : FrameworkElementAutomationPeer(owner)
+    {
+        protected override AutomationControlType GetAutomationControlTypeCore() => AutomationControlType.Text;
+        protected override string GetClassNameCore() => nameof(RollingText);
+        protected override string GetNameCore() => ((RollingText)Owner).Text;
+        protected override List<AutomationPeer>? GetChildrenCore() => null;
+    }
     /// <summary>A new count is on its way: the count shown dims until it arrives, or the status shows if there is no count yet.</summary>
     public void ShowPending(string status)
     {
@@ -59,6 +70,8 @@ public sealed class RollingText : Decorator
     private void Show(string from, string to)
     {
         AutomationProperties.SetName(this, to);
+        // A live count tells screen readers it changed, as one piece of text rather than its rolling digits.
+        if (AutomationProperties.GetLiveSetting(this) != AutomationLiveSetting.Off && IsLoaded) UIElementAutomationPeer.CreatePeerForElement(this)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
         // A new count has arrived. Set without replacing a binding, so a count that follows another keeps following it.
         SetCurrentValue(PendingProperty, false); EndRoll();
         display.Text = to;

@@ -60,10 +60,12 @@
        one (SideRail.cs). It overhangs the page, so it lies above the backdrop but below the page content. Its sheen and glow
        take the theme accent. -->
   <Canvas x:Name="RailPearlLayer" Grid.RowSpan="2" IsHitTestVisible="False" Visibility="{Binding Visibility, ElementName=Rail}">
-   <ContentControl x:Name="RailPearl" Style="{StaticResource Pearl}" Width="15" Height="15" Visibility="Hidden">
-    <ContentControl.RenderTransform><TranslateTransform/></ContentControl.RenderTransform>
-    <ContentControl.Effect><DropShadowEffect Color="{DynamicResource AccentColor}" ShadowDepth="0" BlurRadius="12" Opacity="0.8"/></ContentControl.Effect>
-   </ContentControl>
+   <Grid x:Name="RailPearl" Width="15" Height="15" Visibility="Hidden">
+    <Grid.RenderTransform><TranslateTransform/></Grid.RenderTransform>
+    <!-- The pearl's glow is a soft halo drawn as a gradient: a blur effect looked the same but slowed the library's first layout. -->
+    <Ellipse Margin="-9" Opacity="0.5" IsHitTestVisible="False"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="{DynamicResource AccentColor}" Offset="0.3"/><GradientStop Color="{DynamicResource AccentClear}" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+    <ContentControl Style="{StaticResource Pearl}"/>
+   </Grid>
   </Canvas>
   <Grid Grid.Column="1" Grid.Row="1" Margin="28,6,28,16" x:Name="ContentArea">
 

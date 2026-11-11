@@ -197,10 +197,17 @@
     <Grid>
      <ContentPresenter/>
      <Canvas x:Name="PART_Layer" IsHitTestVisible="False">
-      <Border x:Name="PART_Light" Height="2" CornerRadius="1" Visibility="Hidden">
-       <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="{DynamicResource AccentClear}" Offset="0"/><GradientStop Color="{DynamicResource AccentColor}" Offset="0.14"/><GradientStop Color="#FF9A7AE6" Offset="0.86"/><GradientStop Color="#009A7AE6" Offset="1"/></LinearGradientBrush></Border.Background>
-       <Border.Effect><DropShadowEffect Color="{DynamicResource AccentColor}" ShadowDepth="0" BlurRadius="10" Opacity="0.9"/></Border.Effect>
-      </Border>
+<!-- The light: a bright line with a soft halo around it. The halo is drawn as gradients, not a blur effect, which looked the
+           same but slowed the library's first layout. -->
+      <Grid x:Name="PART_Light" Height="10" Visibility="Hidden">
+       <Border Opacity="0.45">
+        <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="{DynamicResource AccentClear}" Offset="0"/><GradientStop Color="{DynamicResource AccentColor}" Offset="0.5"/><GradientStop Color="{DynamicResource AccentClear}" Offset="1"/></LinearGradientBrush></Border.Background>
+        <Border.OpacityMask><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#FF000000" Offset="0.2"/><GradientStop Color="#FF000000" Offset="0.8"/><GradientStop Color="#00000000" Offset="1"/></LinearGradientBrush></Border.OpacityMask>
+       </Border>
+       <Border Height="2" CornerRadius="1" VerticalAlignment="Center">
+        <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="{DynamicResource AccentClear}" Offset="0"/><GradientStop Color="{DynamicResource AccentColor}" Offset="0.14"/><GradientStop Color="#FF9A7AE6" Offset="0.86"/><GradientStop Color="#009A7AE6" Offset="1"/></LinearGradientBrush></Border.Background>
+       </Border>
+      </Grid>
      </Canvas>
     </Grid>
    </ControlTemplate></Setter.Value></Setter>

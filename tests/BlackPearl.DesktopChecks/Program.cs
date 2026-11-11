@@ -455,6 +455,7 @@ static class Program
         await CheckCategoryBar(window, check);
         await CheckThreadSelectors(window, check);
         CheckResourceLookups(window, check);
+        await CheckThreadBarReleased(window, check);
         await CheckShortRail(window, check);
         await CheckCollapsedRail(window, check);
         Navigate(1); await Wait(() => cards.Count == 750 && cards.All(x => x.Card.Media.Kind == "Movie"));
@@ -501,6 +502,36 @@ static class Program
         var thread = bar.Threads.Select(line => line.TranslatePoint(new Point(0, 0.5), bar).Y).Where(y => y >= below).DefaultIfEmpty(double.NaN).Min();
         var fine = light.IsVisible && Math.Abs(at.X + light.ActualWidth / 2 - (word + wordWidth / 2)) < 1 && at.X <= word && at.X + light.ActualWidth >= word + wordWidth && Math.Abs(at.Y - thread) < 0.5;
         return (chosen, fine ? "" : $" (light {(light.IsVisible ? "at" : "hidden at")} {at.X:0.#},{at.Y:0.#}, {light.ActualWidth:0.#} wide; word at {word:0.#}, {wordWidth:0.#} wide; its thread at {thread:0.#})");
+    }
+    // A thread selector that has closed, or was never shown, is collected with its choices. Watching a choice's status registers
+    // it with WPF for good, so a selector that kept watching after it unloaded would keep a closed dialog alive.
+    private static async Task CheckThreadBarReleased(MainWindow window, Action<bool, string> check)
+    {
+        var host = (System.Windows.Controls.Panel)window.FindName("WindowRoot");
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static ThreadBar Make()
+        {
+            var panel = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+            for (var i = 0; i < 3; i++)
+            {
+                var choice = new System.Windows.Controls.Button { Content = "Choice " + i };
+                choice.SetResourceReference(FrameworkElement.StyleProperty, "ThreadOption");
+                System.Windows.Automation.AutomationProperties.SetItemStatus(choice, i == 0 ? "Selected" : "");
+                panel.Children.Add(choice);
+            }
+            // Shown, so it watches its choices, but invisible to the eye.
+            return new ThreadBar { Content = panel, Opacity = 0 };
+        }
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static WeakReference Show(System.Windows.Controls.Panel host) { var bar = Make(); host.Children.Add(bar); return new WeakReference(bar); }
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static void Close(System.Windows.Controls.Panel host, WeakReference shown) { if (shown.Target is UIElement bar) host.Children.Remove(bar); }
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static WeakReference NeverShown() => new(Make());
+        var shown = Show(host); await Task.Delay(400);
+        Close(host, shown); var never = NeverShown(); await Task.Delay(400);
+        for (var i = 0; i < 3; i++) { GC.Collect(); GC.WaitForPendingFinalizers(); await Dispatcher.Yield(DispatcherPriority.Background); }
+        check(!shown.IsAlive && !never.IsAlive, $"a closed or never-shown thread selector is collected (closed one {(shown.IsAlive ? "kept" : "collected")}, never-shown one {(never.IsAlive ? "kept" : "collected")})");
     }
     // Every style or brush the code looks up by name exists. Such a lookup fails silently, so a style removed or renamed in XAML
     // would leave a control the code builds unstyled, as the Downloads choice once was.
@@ -796,6 +827,13 @@ static class Program
                 roll = await Roll(from, to);
                 check(roll.Seamless && roll.Shown == to, $"rolling from \"{from}\" to \"{to}\" settles without a flicker or jump when the roll ends (shows \"{roll.Shown}\")");
             }
+        }
+        // Screen readers see a rolled count as one text named by its value, not the digits it rolled with.
+        {
+            count.Text = "218 items"; await Task.Delay(900); count.Text = "242 items"; await Task.Delay(900);
+            var peer = System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(count);
+            check(peer.GetAutomationControlType() == System.Windows.Automation.Peers.AutomationControlType.Text && peer.GetName() == "242 items" && (peer.GetChildren()?.Count ?? 0) == 0,
+                $"a rolled count reads as one text to screen readers (\"{peer.GetName()}\", {peer.GetChildren()?.Count ?? 0} parts)");
         }
         // While a new count is on its way the old one dims and stays, instead of a status flashing between the two.
         count.Text = "42 items"; await Task.Delay(900);
