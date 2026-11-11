@@ -9,7 +9,9 @@ using BlackPearl.Core;
 using BlackPearl.Desktop;
 
 // Design review: renders the real window over a copy of a library (BLACKPEARL_DATA) to PNG files.
-// Usage: --render-screens <output directory> [width height]
+// Usage: --render-screens <output directory> [width height] [--scale 1.25]
+// --scale draws as a display at that scaling would, closely but not exactly: text and elements created after it is set
+// (dialogs, a rolling count) can still draw at the display's own scaling. CheckScalings in Program.cs checks exact pixels.
 static class ScreenRender
 {
     public static async Task Run(MainWindow window, string output, int width, int height)
@@ -32,11 +34,20 @@ static class ScreenRender
             }
         }
         Directory.CreateDirectory(output);
+        // Screens are drawn at the window's own DPI, the user's display scaling unless --scale sets another, so fractional
+        // sizes round the way they do on screen. The animation strips below stay at 96 DPI: they crop by layout position.
+        static RenderTargetBitmap Picture(FrameworkElement root)
+        {
+            var dpi = VisualTreeHelper.GetDpi(root);
+            return new RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth * dpi.DpiScaleX), (int)Math.Ceiling(root.ActualHeight * dpi.DpiScaleY),
+                dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+        }
+        Console.WriteLine($"Rendering at {VisualTreeHelper.GetDpi(window).DpiScaleX * 100:F0}% scaling, {width}x{height} DIP");
         async Task Capture(string name)
         {
             await Settle();
             var root = (FrameworkElement)window.Content;
-            var bitmap = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(root);
+            var bitmap = Picture(root); bitmap.Render(root);
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
             await using var file = File.Create(Path.Combine(output, name + ".png")); encoder.Save(file);
             Console.WriteLine("Saved " + name);
@@ -140,7 +151,7 @@ static class ScreenRender
                 var dialog = InAppDialog.Open[^1];
                 var layer = (FrameworkElement)typeof(InAppDialog).GetField("layer", flags)!.GetValue(dialog)!;
                 var root = (FrameworkElement)window.Content;
-                var picture = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                var picture = Picture(root);
                 picture.Render(root); picture.Render(layer);
                 var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(picture));
                 using (var file = File.Create(Path.Combine(output, $"dialog-{name}.png"))) encoder.Save(file);
