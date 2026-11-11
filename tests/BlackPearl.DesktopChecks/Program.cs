@@ -488,7 +488,7 @@ static class Program
     private static async Task CheckCategoryBar(MainWindow window, Action<bool, string> check)
     {
         void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, arguments);
-        var bar = (FrameworkElement)window.FindName("LibraryCategoryBar");
+        var categories = (FrameworkElement)window.FindName("LibraryCategoryBar");
         var track = (FrameworkElement)window.FindName("LibraryCategories");
         var thumb = (FrameworkElement)window.FindName("LibraryCategoryThumb");
         var shift = (System.Windows.Media.TranslateTransform)thumb.RenderTransform;
@@ -499,14 +499,14 @@ static class Program
             return thumb.IsVisible && Math.Abs(segment.TranslatePoint(new Point(0, 0), track).X - shift.X) < 0.5 && Math.Abs(segment.ActualWidth - thumb.ActualWidth) < 0.5;
         }
         Call("NavigateLibrary", 0, null, null, null); await Settle();
-        check(bar.IsVisible && bar.TranslatePoint(new Point(0, 0), (FrameworkElement)window.FindName("LibraryPage")).Y < 1, "the category bar sits at the top of the Library page");
-        check(Under("AllLibraryNav"), "the category bar's thumb sits under All");
+        check(categories.IsVisible && categories.TranslatePoint(new Point(0, 0), (FrameworkElement)window.FindName("LibraryPage")).Y < 1, "the category categories sits at the top of the Library page");
+        check(Under("AllLibraryNav"), "the category categories's thumb sits under All");
         Call("LibraryCategoryClick", window.FindName("MoviesLibraryNav"), new RoutedEventArgs()); await Settle();
         check(Under("MoviesLibraryNav"), "the thumb slides to the category chosen");
         Call("OpenSearch", false); await Settle();
-        check(!bar.IsVisible, "Search hides the category bar");
+        check(!categories.IsVisible, "Search hides the category categories");
         Call("LibraryNavClick", window, new RoutedEventArgs()); await Settle();
-        check(bar.IsVisible && Under("AllLibraryNav"), "Library leaves Search for All, and the thumb is placed again when the bar returns");
+        check(categories.IsVisible && Under("AllLibraryNav"), "Library leaves Search for All, and the thumb is placed again when the categories returns");
     }
 
     // The sidebar folds into a strip of icons, with each icon named in a tooltip, and unfolds again.
@@ -645,6 +645,44 @@ static class Program
         var original = scan.Content; scan.Content = "Cancel scan"; window.UpdateLayout();
         check(toolbar.ActualHeight == height, "scan button label changes keep the toolbar height");
         scan.Content = original;
+        // The categories share their row with the count and actions, and a narrow window moves the actions under them rather than overlapping.
+        var categories = (FrameworkElement)window.FindName("LibraryCategoryBar");
+        var add = (FrameworkElement)window.FindName("AddTitleButton");
+        var count = (FrameworkElement)window.FindName("ResultCount");
+        Rect Box(FrameworkElement element) => new(element.TranslatePoint(new Point(0, 0), toolbar), new Size(element.ActualWidth, element.ActualHeight));
+        string Crowded()
+        {
+            var parts = new[] { categories, count, scan, add }.Where(element => element.IsVisible).ToList();
+            var problems = parts.SelectMany((a, i) => parts.Skip(i + 1).Where(b => Rect.Intersect(Box(a), Box(b)) is { IsEmpty: false, Width: > 0.5, Height: > 0.5 }).Select(b => $"{a.Name} overlaps {b.Name}"))
+                .Concat(parts.Where(element => Box(element).Right > toolbar.ActualWidth + 0.5).Select(element => $"{element.Name} runs past the toolbar"))
+                // A bar given less room than its segments need shrinks to that room and cuts its last segments off.
+                .Concat(SegmentsEnd() > categories.ActualWidth - 4 + 0.5 ? [$"the categories are cut off (segments end at {SegmentsEnd():0.#} in a bar {categories.ActualWidth:0.#} wide)"] : Array.Empty<string>());
+            return string.Join("; ", problems);
+        }
+        double SegmentsEnd()
+        {
+            var last = ((System.Windows.Controls.Panel)window.FindName("LibraryCategories")).Children.OfType<FrameworkElement>().LastOrDefault(segment => segment.IsVisible);
+            return !categories.IsVisible || last is null ? 0 : last.TranslatePoint(new Point(last.ActualWidth, 0), categories).X;
+        }
+        double Middle(FrameworkElement element) => Box(element).Top + element.ActualHeight / 2;
+        check(categories.IsVisible && Math.Abs(Middle(categories) - Middle(scan)) < 1 && Crowded() == "",
+            $"the library's categories, count and actions share one row ({Box(categories)}, {Box(scan)}{(Crowded() is { Length: > 0 } c ? "; " + c : "")})");
+        var wide = window.Width; window.Width = window.MinWidth; await Task.Delay(150); window.UpdateLayout();
+        check(Crowded() == "" && (Math.Abs(Middle(categories) - Middle(scan)) < 1 || Box(scan).Top >= Box(categories).Bottom),
+            $"a narrow window keeps the categories and actions apart ({toolbar.ActualWidth:0} wide{(Crowded() is { Length: > 0 } n ? ": " + n : "")})");
+        // Too narrow for the categories and actions side by side: the actions take a row of their own and the categories keep their whole width.
+        toolbar.Width = SegmentsEnd() + 140; await Task.Delay(150); window.UpdateLayout();
+        check(Crowded() == "" && Box(scan).Top >= Box(categories).Bottom,
+            $"a toolbar too narrow for one row puts the actions under the categories, uncut ({toolbar.ActualWidth:0} wide{(Crowded() is { Length: > 0 } w ? ": " + w : "")})");
+        // A little short of room: Add title shortens to its plus and everything stays on one row.
+        var addWidths = ((double Full, double Compact))typeof(MainWindow).GetField("addTitleWidths", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+        check(addWidths.Compact < addWidths.Full - 30, $"Add title is much narrower as only its plus ({addWidths.Compact:0.#} against {addWidths.Full:0.#})");
+        toolbar.Width = SegmentsEnd() + 4 + 16 + count.DesiredSize.Width + scan.DesiredSize.Width + addWidths.Compact + 2; await Task.Delay(150); window.UpdateLayout();
+        check(Crowded() == "" && Math.Abs(Middle(categories) - Middle(scan)) < 1 && ((System.Windows.Controls.Button)add).Content is not string,
+            $"a toolbar a little short of room shortens Add title to its plus and keeps one row ({toolbar.ActualWidth:0} wide{(Crowded() is { Length: > 0 } s ? ": " + s : "")})");
+        toolbar.Width = double.NaN;
+        window.Width = wide; await Task.Delay(150); window.UpdateLayout();
+        check(Math.Abs(Middle(categories) - Middle(scan)) < 1 && toolbar.ActualHeight == height, "widening the window brings the actions back beside the categories");
         Call("OpenSearch", false); await Task.Delay(100); window.UpdateLayout();
         check(header.Visibility == Visibility.Visible && crumbs.Visibility == Visibility.Collapsed && scan.Visibility == Visibility.Collapsed,
             "Search shows its field and filters in place of the category's location and actions");

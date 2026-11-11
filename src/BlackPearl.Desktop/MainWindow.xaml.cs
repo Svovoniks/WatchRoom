@@ -432,6 +432,7 @@ public partial class MainWindow : Window
         foreach (var button in LibraryCategoryButtons)
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, active && int.Parse((string)button.Tag) == libraryCategory ? "Selected" : "");
         LibraryCategoryBar.Visibility = librarySearch || libraryCategory == LibraryCatalog.Music ? Visibility.Collapsed : Visibility.Visible;
+        ArrangeLibraryToolbar();
         // Segments may have just appeared or changed their counts, so the thumb moves once they are measured.
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, PlaceCategoryThumb);
     }

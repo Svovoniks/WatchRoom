@@ -23,13 +23,6 @@ public partial class MainWindow
             .GroupBy(LibraryIdentity.ShowKey).Count(g => LibraryCatalog.TitleStatus(g.ToArray()) is not null);
         unmatchedTitles = LibraryCatalog.UnmatchedTitles(items);
     }
-    private void LibraryToolbarSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        var narrow = e.NewSize.Width < 720;
-        if (narrow == AddTitleButton.Content is not string) return;
-        if (narrow) { AddTitleButton.ContentTemplate = null; AddTitleButton.Content = new TextBlock { Text = "", Style = (Style)FindResource("Icon"), FontSize = 13 }; AddTitleButton.Padding = new Thickness(13, 0, 13, 0); }
-        else { AddTitleButton.ContentTemplate = (DataTemplate)FindResource("AddContent"); AddTitleButton.Content = "Add title"; AddTitleButton.Padding = new Thickness(14, 0, 14, 0); }
-    }
     // A search that finds nothing in the library offers to look the title up and add it.
     private void ShowFindTitle(string query, bool offer)
     {
