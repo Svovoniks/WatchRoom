@@ -24,7 +24,9 @@ public sealed class ThreadBar : ContentControl
     public static readonly DependencyProperty ReachProperty = DependencyProperty.Register(nameof(Reach), typeof(double), typeof(ThreadBar), new PropertyMetadata(7.0));
     public double Reach { get => (double)GetValue(ReachProperty); set => SetValue(ReachProperty, value); }
 
-    private const double Tail = 48;
+    /// <summary>How far the thread trails off past the last word; shorter where the selector sits against an edge.</summary>
+    public static readonly DependencyProperty TailProperty = DependencyProperty.Register(nameof(Tail), typeof(double), typeof(ThreadBar), new PropertyMetadata(48.0));
+    public double Tail { get => (double)GetValue(TailProperty); set => SetValue(TailProperty, value); }
     private static readonly Duration GlideDuration = new(TimeSpan.FromMilliseconds(260));
     private static readonly DependencyPropertyDescriptor ItemStatus = DependencyPropertyDescriptor.FromProperty(AutomationProperties.ItemStatusProperty, typeof(UIElement));
     private readonly List<Rectangle> threads = [];
@@ -105,7 +107,7 @@ public sealed class ThreadBar : ContentControl
             var (_, left, right, line) = rows[i]; var thread = threads[i];
             thread.Width = right - left + Tail; Canvas.SetLeft(thread, left); Canvas.SetTop(thread, line);
             // Solid under the words, fading out over the tail.
-            ((LinearGradientBrush)thread.OpacityMask).GradientStops[1].Offset = (right - left) / thread.Width;
+            ((LinearGradientBrush)thread.OpacityMask).GradientStops[1].Offset = thread.Width > 0 ? (right - left) / thread.Width : 1;
         }
 
         var chosen = choices.FirstOrDefault(IsChosen);

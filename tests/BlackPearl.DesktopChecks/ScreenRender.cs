@@ -124,6 +124,50 @@ static class ScreenRender
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(strip));
             await using (var file = File.Create(Path.Combine(output, "dark-category-glide.png"))) encoder.Save(file);
         }
+        // A dialog, opened the way the app opens it, drawn over the window once it has settled, then closed. Dialogs float in a
+        // popup of their own, so their layer is drawn onto the window's picture. Opening may wait for an answer, so the picture is
+        // taken and the dialog closed from a timer.
+        async Task CaptureDialog(string name, Action open)
+        {
+            var before = InAppDialog.Open.Count; var done = new TaskCompletionSource(); var shown = DateTime.MinValue; var asked = DateTime.UtcNow;
+            var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(100) };
+            timer.Tick += (_, _) =>
+            {
+                if (InAppDialog.Open.Count <= before) { if (DateTime.UtcNow - asked > TimeSpan.FromSeconds(10)) { timer.Stop(); Console.WriteLine($"DIALOG {name} never opened"); done.TrySetResult(); } return; }
+                if (shown == DateTime.MinValue) { shown = DateTime.UtcNow; return; }
+                if (DateTime.UtcNow - shown < TimeSpan.FromMilliseconds(1200)) return;
+                timer.Stop();
+                var dialog = InAppDialog.Open[^1];
+                var layer = (FrameworkElement)typeof(InAppDialog).GetField("layer", flags)!.GetValue(dialog)!;
+                var root = (FrameworkElement)window.Content;
+                var picture = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                picture.Render(root); picture.Render(layer);
+                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(picture));
+                using (var file = File.Create(Path.Combine(output, $"dialog-{name}.png"))) encoder.Save(file);
+                Console.WriteLine("Saved dialog-" + name);
+                dialog.Close(); done.TrySetResult();
+            };
+            timer.Start();
+            try { open(); } catch (Exception ex) { Console.WriteLine($"DIALOG {name} failed: {ex.Message}"); timer.Stop(); done.TrySetResult(); }
+            await done.Task; await Settle(300);
+        }
+        async Task CaptureDialogs(LibraryStore store, IReadOnlyList<WantedTitle> wanted, MediaItem? movie)
+        {
+            var click = new RoutedEventArgs();
+            await CaptureDialog("alert", () => Dialogs.Alert(window, "Choose a subfolder", @"Choose folders inside M:\Shows. To leave out a whole library folder, remove it instead."));
+            await CaptureDialog("confirm", () => Dialogs.Confirm(window, "Remove Shows", @"Stop scanning M:\Shows? Its files stay where they are, and adding the folder again brings them back.", "Remove folder"));
+            await CaptureDialog("unsaved-settings", () => Dialogs.ConfirmUnsavedSettings(window));
+            Call("ShowPage", "Queues"); await CaptureDialog("create-queue", () => Call("CreateQueue", window, click));
+            Call("ShowPage", "Rooms");
+            await CaptureDialog("create-room", () => Call("CreatePersistentRoom", window, click));
+            await CaptureDialog("join-room", () => Call("JoinClick", window, click));
+            await CaptureDialog("choose-title", () => Dialogs.Choose(window, [new(1, "movie", "Blade Runner 2049", "2017", null, "Thirty years after the events of the first film, a new blade runner unearths a long-buried secret.", "Movie"),
+                new(2, "movie", "Blade Runner", "1982", null, "A blade runner must pursue and terminate four replicants who stole a ship in space.", "Movie"),
+                new(3, "tv", "Blade Runner: Black Lotus", "2021", null, "A young woman wakes with no memory in 2032 Los Angeles.", "Anime")]));
+            if (movie is not null) { Call("Select", movie); await CaptureDialog("watch-together", () => Call("HostClick", window, click)); }
+            Call("NavigateLibrary", 0, null, null, null); await CaptureDialog("add-title", () => Call("AddTitleClick", window, click));
+            if (wanted.FirstOrDefault(x => !x.IsMovie) is { } show) await CaptureDialog("tracked-seasons", () => AddTitleDialog.EditSeasons(window, show));
+        }
         window.Width = width; window.Height = height;
         var deadline = DateTime.UtcNow.AddSeconds(60);
         while (Field("libraryLoaded") is not true && DateTime.UtcNow < deadline) await Settle(200);
@@ -158,6 +202,7 @@ static class ScreenRender
             Call("ShowPage", "Settings");
             foreach (var section in new[] { "Plugins", "Downloads", "Profile", "Metadata", "Playback", "Appearance", "Updates" })
             { Call("ShowPreferenceSection", section); await Capture($"{theme}-settings-{section.ToLowerInvariant()}"); }
+            await CaptureDialogs(store, wanted, movie);
         }
         Set("light", false); Call("ApplyTheme");
         await SurfaceAudit.Run(window, Settle, (name, finding) => Console.WriteLine($"CLIPPED {name}: {finding}"));

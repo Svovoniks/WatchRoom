@@ -51,21 +51,15 @@ public static class AddTitleDialog
         if (muted) block.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
         return block;
     }
-    // A row of buttons acting as one choice; the chosen one is highlighted.
-    private static WrapPanel Segment(string name, string[] labels, int selected, Action<int> changed)
+    // One choice of a few, on the app's thread selector (ThreadBar), as elsewhere.
+    private static ThreadBar Segment(string name, string[] labels, int selected, Action<int> changed)
     {
         var panel = new WrapPanel(); AutomationProperties.SetName(panel, name);
-        var buttons = labels.Select((label, index) => new Button { Content = label, Margin = new Thickness(0, 0, 6, 6), Padding = new Thickness(14, 6, 14, 6), MinHeight = 0 }).ToArray();
-        void Select(int index)
-        {
-            for (var i = 0; i < buttons.Length; i++)
-            {
-                if (i == index) buttons[i].SetResourceReference(FrameworkElement.StyleProperty, "Primary"); else buttons[i].ClearValue(FrameworkElement.StyleProperty);
-                AutomationProperties.SetItemStatus(buttons[i], i == index ? "Selected" : "");
-            }
-        }
+        var buttons = labels.Select(label => new Button { Content = label }).ToArray();
+        foreach (var button in buttons) button.SetResourceReference(FrameworkElement.StyleProperty, "ThreadOption");
+        void Select(int index) { for (var i = 0; i < buttons.Length; i++) AutomationProperties.SetItemStatus(buttons[i], i == index ? "Selected" : ""); }
         for (var i = 0; i < buttons.Length; i++) { var index = i; buttons[i].Click += (_, _) => { Select(index); changed(index); }; panel.Children.Add(buttons[i]); }
-        Select(selected); return panel;
+        Select(selected); return new ThreadBar { Content = panel, Reach = 5 };
     }
     private static BitmapSource? Load(string path, int width)
     {
@@ -115,7 +109,7 @@ public static class AddTitleDialog
         footer.Children.Add(new TextBlock { Text = "Can't find it? Try its original title or the year.", VerticalAlignment = VerticalAlignment.Center, FontSize = 12, Foreground = (Brush)owner.FindResource("Muted"), TextWrapping = TextWrapping.Wrap });
         var row = new DockPanel();
         var kinds = Segment("Kind", ["Any", "Movie", "Show", "Anime"], 0, index => { kind = index; Render(); });
-        kinds.VerticalAlignment = VerticalAlignment.Center; kinds.Margin = new Thickness(0, 6, 0, 0);
+        kinds.VerticalAlignment = VerticalAlignment.Center; kinds.Margin = new Thickness(16, 8, 0, 0); kinds.Tail = 8; // Against the dialog's edge, the thread stops short of it.
         DockPanel.SetDock(kinds, Dock.Right); row.Children.Add(kinds); row.Children.Add(input);
         DockPanel.SetDock(row, Dock.Top); DockPanel.SetDock(status, Dock.Top); DockPanel.SetDock(footer, Dock.Bottom);
         search.Children.Add(row); search.Children.Add(status); search.Children.Add(footer); search.Children.Add(list);
