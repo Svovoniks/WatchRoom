@@ -162,7 +162,9 @@
     <Grid>
      <Border x:Name="Frame" Background="{TemplateBinding Background}" CornerRadius="8"/>
      <Border x:Name="Tint" Background="{DynamicResource Ink}" Opacity="0" CornerRadius="8" IsHitTestVisible="False"/>
-     <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+     <!-- At least as tall as a label, so the folded sidebar taking its labels out leaves the icon's row the same height.
+          A row that shrank to the icon was centred anew and, rounded at 125% scaling, moved every icon down a pixel. -->
+     <ContentPresenter Margin="{TemplateBinding Padding}" MinHeight="20" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True"/>
     </Grid>
     <ControlTemplate.Triggers>
      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.05"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
@@ -175,7 +177,7 @@
         of the strip, so they don't shift a fraction of a pixel when the folding sidebar takes out its words. -->
   </Style>
   <!-- Sidebar text that a collapsed sidebar hides. -->
-  <Style x:Key="NavigationLabel" TargetType="TextBlock"><Style.Triggers><Trigger Property="local:SideRail.Collapsed" Value="True"><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style>
+  <Style x:Key="NavigationLabel" TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/><Style.Triggers><Trigger Property="local:SideRail.Collapsed" Value="True"><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style>
   <!-- The app's black pearl: a dark body, the accent sheen low on the right, a violet one on the left and a bright highlight.
        Drawn at 15 DIP and scaled to the size it is given. It marks the current page on the sidebar, and only there. -->
   <Style x:Key="Pearl" TargetType="ContentControl">

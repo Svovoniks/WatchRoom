@@ -42,7 +42,11 @@ function Invoke-Project {
 # under the temp folder.
 function New-SmokeDirectory { Join-Path ([IO.Path]::GetTempPath()) ('wr-smoke-' + [guid]::NewGuid().ToString('N')) }
 # The main desktop suite's input responsiveness gates are timing-sensitive, so it runs before anything else starts.
-function Invoke-MainDesktopSuite { Invoke-Project 'Desktop regression checks' 'BlackPearl.DesktopChecks' }
+# desktop-main-suite.ps1 reruns it when only the load-sensitive startup gate fails.
+function Invoke-MainDesktopSuite {
+    $shell = (Get-Process -Id $PID).Path
+    Invoke-Check 'Desktop regression checks' $shell @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'desktop-main-suite.ps1'), '-Sdk', $Sdk)
+}
 function Invoke-DesktopSuites {
     Invoke-Project 'Update safety checks' 'BlackPearl.UpdateChecks'
     Invoke-Project 'TMDB access and retention checks' 'BlackPearl.Smoke' @('--tmdb-access')

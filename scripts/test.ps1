@@ -6,10 +6,13 @@ try {
     $sdk = Join-Path $root '.tools/dotnet/dotnet.exe'
     if (!(Test-Path $sdk)) { $sdk = 'dotnet' }
     # The main desktop suite's responsiveness gates are timing-sensitive, so it runs alone before the smoke tests start.
-    & $sdk run --project tests/BlackPearl.DesktopChecks -c Release --no-build
+    & (Get-Process -Id $PID).Path -NoProfile -File (Join-Path $PSScriptRoot 'desktop-main-suite.ps1') -Sdk $sdk
     if ($LASTEXITCODE -ne 0) { throw 'Desktop layout tests failed' }
-    $smokeLog = Join-Path ([IO.Path]::GetTempPath()) ('wr-smoke-' + [guid]::NewGuid().ToString('N') + '.log')
-    $smoke = Start-Process -FilePath $sdk -ArgumentList @('run', '--project', 'tests/BlackPearl.Smoke', '-c', 'Release', '--no-build') `
+    # A fresh folder for every run: the smoke suite's default, artifacts/smoke, keeps the last run's library and cached
+    # responses, which made reruns fail in ways that looked like regressions.
+    $smokeDirectory = Join-Path ([IO.Path]::GetTempPath()) ('wr-smoke-' + [guid]::NewGuid().ToString('N'))
+    $smokeLog = "$smokeDirectory.log"
+    $smoke = Start-Process -FilePath $sdk -ArgumentList @('run', '--project', 'tests/BlackPearl.Smoke', '-c', 'Release', '--no-build', '--', "`"$smokeDirectory`"") `
         -WorkingDirectory $root -RedirectStandardOutput $smokeLog -RedirectStandardError "$smokeLog.err" -NoNewWindow -PassThru
     $null = $smoke.Handle # keeps the exit code readable after the process ends
     & $sdk run --project tests/BlackPearl.DesktopChecks -c Release --no-build -- --ui-findings

@@ -12,6 +12,7 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        if (args.FirstOrDefault() == "--copy-library") { Environment.ExitCode = ScratchLibrary.Run(args[1], args[2]); return; }
         if (HiddenDesktop.Relaunch(out var hiddenExitCode)) { Environment.ExitCode = hiddenExitCode; return; }
         // Voice runs on simulated devices so the checks never open the microphone; --voice-devices checks the real ones.
         if (args.FirstOrDefault() != "--voice-devices") Environment.SetEnvironmentVariable("BLACKPEARL_SIMULATED_AUDIO", "1");
@@ -41,9 +42,14 @@ static class Program
             var renderApp = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown, Resources = LoadAppResources() };
             SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
             var renderWindow = new MainWindow { Left = -20000, Top = 0, WindowStartupLocation = WindowStartupLocation.Manual };
+            // --scale draws as a display at that scaling would (1.5 is the user's); without it, the window's own display.
+            var scaleAt = Array.IndexOf(args, "--scale");
+            var size = args.Skip(2).Where((_, i) => scaleAt < 0 || (i + 2 != scaleAt && i + 2 != scaleAt + 1)).ToArray();
             renderWindow.Loaded += async (_, _) =>
             {
-                try { await ScreenRender.Run(renderWindow, args[1], args.Length > 3 ? int.Parse(args[2]) : 1280, args.Length > 3 ? int.Parse(args[3]) : 810); }
+                // Set once the window exists: before that, creating its window takes the display's scaling instead.
+                if (scaleAt > 0) Rescale(renderWindow, double.Parse(args[scaleAt + 1], System.Globalization.CultureInfo.InvariantCulture));
+                try { await ScreenRender.Run(renderWindow, args[1], size.Length > 1 ? int.Parse(size[0]) : 1280, size.Length > 1 ? int.Parse(size[1]) : 810); }
                 catch (Exception ex) { Console.Error.WriteLine(ex); Environment.ExitCode = 1; }
                 finally { renderWindow.Close(); renderApp.Shutdown(); }
             };
@@ -458,6 +464,7 @@ static class Program
         await CheckThreadBarReleased(window, check);
         await CheckShortRail(window, check);
         await CheckCollapsedRail(window, check);
+        await CheckScalings(window, check);
         Navigate(1); await Wait(() => cards.Count == 750 && cards.All(x => x.Card.Media.Kind == "Movie"));
         Call("Select", animeMovie);
         check(Crumbs(true).Select(x => x.Label).SequenceEqual(["Unavailable", "Navigation Anime Film"]), "unavailable film details link back to the unavailable tab");
@@ -782,6 +789,18 @@ static class Program
     private static async Task CheckRollingCount(MainWindow window, RollingText count, Action<bool, string> check)
     {
         var original = count.Text;
+        // Whether two pictures of the count are the same, and if not, how much of it changed.
+        (bool Same, string Detail) Compare(byte[] a, byte[] b)
+        {
+            var changed = 0; var most = 0;
+            for (var i = 0; i < Math.Min(a.Length, b.Length); i += 4)
+            {
+                var delta = Math.Max(Math.Abs(a[i] - b[i]), Math.Max(Math.Abs(a[i + 1] - b[i + 1]), Math.Abs(a[i + 2] - b[i + 2])));
+                if (delta > 0 || a[i + 3] != b[i + 3]) { changed++; most = Math.Max(most, delta); }
+            }
+            var same = a.Length == b.Length && changed == 0;
+            return (same, changed == 0 ? "" : $" ({changed} pixels differ by up to {most} of 255{(a.Length != b.Length ? ", in boxes of different sizes" : "")})");
+        }
         var scale = System.Windows.Media.VisualTreeHelper.GetDpi(count).PixelsPerDip;
         IEnumerable<System.Windows.Controls.TextBlock> Blocks(DependencyObject node) => Enumerable.Range(0, System.Windows.Media.VisualTreeHelper.GetChildrenCount(node))
             .Select(i => System.Windows.Media.VisualTreeHelper.GetChild(node, i)).SelectMany(child => child is System.Windows.Controls.TextBlock block ? [block] : Blocks(child));
@@ -805,18 +824,20 @@ static class Program
         IEnumerable<IGrouping<DependencyObject, System.Windows.Controls.TextBlock>> Pieces() => Blocks(count).Where(block => block.IsVisible).GroupBy(block => System.Windows.Media.VisualTreeHelper.GetParent(block));
         double Shade() => ((UIElement)count.Child).Opacity;
         // Rolls to a new count, holds the pieces where the roll ends, and compares them with how they look once they settle.
-        async Task<(int Rolling, int Still, bool Seamless, string Shown)> Roll(string from, string to)
+        async Task<(int Rolling, int Still, bool Seamless, string Shown, string Detail)> Roll(string from, string to)
         {
             count.Text = from; await Task.Delay(900);
             // Until the clock first ticks, a roll that has just begun shows its starting point, which must be what was there.
             var before = Shot(); count.Text = to; var begun = Shot();
-            check(begun.SequenceEqual(before), $"starting a roll from \"{from}\" to \"{to}\" redraws nothing until the digits move");
+            var start = Compare(before, begun);
+            check(start.Same, $"starting a roll from \"{from}\" to \"{to}\" redraws nothing until the digits move" + start.Detail);
             var pieces = Pieces().ToList();
             var rolling = pieces.Count(piece => piece.Count() > 1); var still = pieces.Count(piece => piece.Count() == 1);
             ((DispatcherTimer?)typeof(RollingText).GetField("settle", flags)!.GetValue(count))?.Stop();
             await Task.Delay(800); var ended = Shot();
             typeof(RollingText).GetMethod("Settle", flags)!.Invoke(count, null); var settled = Shot();
-            return (rolling, still, ended.SequenceEqual(settled), Shown());
+            var end = Compare(ended, settled);
+            return (rolling, still, end.Same, Shown(), end.Detail);
         }
         if (SystemParameters.ClientAreaAnimation)
         {
@@ -825,7 +846,7 @@ static class Program
             foreach (var (from, to) in new[] { ("218 items", "242 items"), ("242 items", "1 item"), ("9 items", "10 items") })
             {
                 roll = await Roll(from, to);
-                check(roll.Seamless && roll.Shown == to, $"rolling from \"{from}\" to \"{to}\" settles without a flicker or jump when the roll ends (shows \"{roll.Shown}\")");
+                check(roll.Seamless && roll.Shown == to, $"rolling from \"{from}\" to \"{to}\" settles without a flicker or jump when the roll ends (shows \"{roll.Shown}\"){roll.Detail}");
             }
         }
         // Screen readers see a rolled count as one text named by its value, not the digits it rolled with.
@@ -847,6 +868,77 @@ static class Program
         count.Text = "Loading library…"; count.ShowPending("Searching…");
         check(count.Text == "Searching…", "with no count yet, the status shows");
         count.Text = original;
+    }
+
+    // The checks that read drawn pixels run at each common display scaling, whatever this machine's display uses: CI runs at
+    // 100% and the user's display at 150%, and each scaling rounds fractional sizes its own way. A toolbar baseline that was
+    // right at 100% sat 2 px off at 150% while CI passed. SetRootDpi lays the window out and draws it as a display at that
+    // scaling would. A real move between displays reaches the app as DpiChanged; this one calls what that handler calls.
+    // The rolling count is checked only at the display's own scaling (CheckSearchLayout): it adds new text for every roll,
+    // and elements added after SetRootDpi are not all laid out at the scaling set. One count showed rolled digits at
+    // 38.667 and 52.667 (the 150% display's grid) beside new ones at 38 and 44 (100%'s), which no real display draws.
+    private static async Task CheckScalings(MainWindow window, Action<bool, string> check)
+    {
+        var native = System.Windows.Media.VisualTreeHelper.GetDpi(window);
+        var arrange = typeof(MainWindow).GetMethod("ArrangeLibraryToolbar", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        try
+        {
+            foreach (var scale in new[] { 1.0, 1.25, 1.5, 1.75 })
+            {
+                var at = $" (at {scale * 100:0}% scaling)";
+                void Scaled(bool condition, string message) => check(condition, message + at);
+                Rescale(window, scale); arrange.Invoke(window, null); await Task.Delay(300); window.UpdateLayout();
+                check(Math.Abs(System.Windows.Media.VisualTreeHelper.GetDpi((FrameworkElement)window.FindName("LibraryToolbar")).DpiScaleY - scale) < 0.001,
+                    "the window lays out and draws at the scaling set" + at);
+                await CheckToolbarBaseline(window, Scaled);
+                await CheckCollapsedRail(window, Scaled);
+            }
+        }
+        finally { Rescale(window, native.DpiScaleX); arrange.Invoke(window, null); await Task.Delay(300); }
+    }
+    // SetRootDpi changes the scaling, but text already laid out keeps the shapes it had at the old one until something
+    // measures it again, so every element is measured and drawn afresh, as in a window opened at that scaling.
+    private static void Rescale(MainWindow window, double scale)
+    {
+        System.Windows.Media.VisualTreeHelper.SetRootDpi(window, new DpiScale(scale, scale));
+        void Refresh(DependencyObject node)
+        {
+            if (node is UIElement element) { element.InvalidateMeasure(); element.InvalidateVisual(); }
+            for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(node); i++) Refresh(System.Windows.Media.VisualTreeHelper.GetChild(node, i));
+        }
+        Refresh(window);
+    }
+
+    // The words, the count and the buttons share one baseline, measured as where the ink of letters without descenders ends.
+    private static async Task CheckToolbarBaseline(MainWindow window, Action<bool, string> check)
+    {
+        var toolbar = (FrameworkElement)window.FindName("LibraryToolbar");
+        var count = (FrameworkElement)window.FindName("ResultCount");
+        var scan = (System.Windows.Controls.Button)window.FindName("RescanButton");
+        ((RollingText)count).Text = "218 items"; await Task.Delay(900);
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(toolbar).PixelsPerDip;
+        var root = (FrameworkElement)window.Content; window.UpdateLayout();
+        var full = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth * scale), (int)Math.Ceiling(root.ActualHeight * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+        full.Render(root);
+        var stride = full.PixelWidth * 4; var pixels = new byte[stride * full.PixelHeight]; full.CopyPixels(pixels, stride, 0);
+        // The last row where the element's right-hand part (from `from`, a fraction of its width) has ink unlike the canvas.
+        int InkBottom(FrameworkElement element, double from)
+        {
+            var at = element.TranslatePoint(new Point(0, 0), root);
+            int x0 = (int)((at.X + element.ActualWidth * from) * scale), x1 = (int)((at.X + element.ActualWidth) * scale) - 1;
+            int y0 = (int)(at.Y * scale), y1 = (int)((at.Y + element.ActualHeight) * scale) - 1;
+            var ground = pixels.AsSpan((y0 * stride) + (x0 * 4), 4).ToArray(); var last = -1;
+            for (var y = y0; y <= y1; y++) for (var x = x0; x <= x1; x++)
+            {
+                var i = y * stride + x * 4;
+                if (Math.Abs(pixels[i] - ground[0]) + Math.Abs(pixels[i + 1] - ground[1]) + Math.Abs(pixels[i + 2] - ground[2]) > 90) { last = y; break; }
+            }
+            return last;
+        }
+        // "items" is the right part of the count; "218" has no descending figures either.
+        int lineWord = InkBottom((FrameworkElement)window.FindName("AnimeLibraryNav"), 0), lineCount = InkBottom(count, 0.55), lineScan = InkBottom(scan, 0);
+        check(Math.Abs(lineCount - lineWord) <= 1 && Math.Abs(lineScan - lineWord) <= 1,
+            $"the categories, the count and the buttons share one baseline (words {lineWord}, count {lineCount}, Rescan {lineScan} at {scale:0.##}x)");
     }
 
     // Categories show their location and actions in one toolbar row; Search shows its field and filters there instead.
@@ -912,33 +1004,7 @@ static class Program
         window.Width = wide; await Task.Delay(150); window.UpdateLayout();
         check(Math.Abs(Middle(words) - Middle(scan)) < 1.5 && toolbar.ActualHeight == height, "widening the window brings the actions back beside the categories");
         await CheckRollingCount(window, (RollingText)count, check);
-        // The words, the count and the buttons share one baseline, measured as where the ink of letters without descenders ends.
-        ((RollingText)count).Text = "218 items"; await Task.Delay(900);
-        {
-            var scale = System.Windows.Media.VisualTreeHelper.GetDpi(toolbar).PixelsPerDip;
-            var root = (FrameworkElement)window.Content; window.UpdateLayout();
-            var full = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth * scale), (int)Math.Ceiling(root.ActualHeight * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
-            full.Render(root);
-            var stride = full.PixelWidth * 4; var pixels = new byte[stride * full.PixelHeight]; full.CopyPixels(pixels, stride, 0);
-            // The last row where the element's right-hand part (from `from`, a fraction of its width) has ink unlike the canvas.
-            int InkBottom(FrameworkElement element, double from)
-            {
-                var at = element.TranslatePoint(new Point(0, 0), root);
-                int x0 = (int)((at.X + element.ActualWidth * from) * scale), x1 = (int)((at.X + element.ActualWidth) * scale) - 1;
-                int y0 = (int)(at.Y * scale), y1 = (int)((at.Y + element.ActualHeight) * scale) - 1;
-                var ground = pixels.AsSpan((y0 * stride) + (x0 * 4), 4).ToArray(); var last = -1;
-                for (var y = y0; y <= y1; y++) for (var x = x0; x <= x1; x++)
-                {
-                    var i = y * stride + x * 4;
-                    if (Math.Abs(pixels[i] - ground[0]) + Math.Abs(pixels[i + 1] - ground[1]) + Math.Abs(pixels[i + 2] - ground[2]) > 90) { last = y; break; }
-                }
-                return last;
-            }
-            // "items" is the right part of the count; "218" has no descending figures either.
-            int lineWord = InkBottom((FrameworkElement)window.FindName("AnimeLibraryNav"), 0), lineCount = InkBottom(count, 0.55), lineScan = InkBottom(scan, 0);
-            check(Math.Abs(lineCount - lineWord) <= 1 && Math.Abs(lineScan - lineWord) <= 1,
-                $"the categories, the count and the buttons share one baseline (words {lineWord}, count {lineCount}, Rescan {lineScan} at {scale:0.##}x)");
-        }
+        await CheckToolbarBaseline(window, check);
         Call("OpenSearch", false); await Task.Delay(100); window.UpdateLayout();
         check(header.Visibility == Visibility.Visible && crumbs.Visibility == Visibility.Collapsed && scan.Visibility == Visibility.Collapsed,
             "Search shows its field and filters in place of the category's location and actions");
