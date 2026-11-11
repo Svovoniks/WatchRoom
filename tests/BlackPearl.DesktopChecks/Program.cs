@@ -559,6 +559,24 @@ static class Program
         Lit(kinds, "Search", "All videos");
         shows.IsChecked = true; await Settle();
         Lit(kinds, "Search", "Shows");
+        // Search shows its own count, which dims while a search runs and rolls to the new number like the library's.
+        if (window.FindName("SearchResultCount") is not RollingText searchCount) { check(false, "Search's count is a rolling count"); }
+        else
+        {
+            var libraryCount = (RollingText)window.FindName("ResultCount");
+            IEnumerable<System.Windows.Controls.TextBlock> Blocks(DependencyObject node) => Enumerable.Range(0, System.Windows.Media.VisualTreeHelper.GetChildrenCount(node))
+                .Select(i => System.Windows.Media.VisualTreeHelper.GetChild(node, i)).SelectMany(child => child is System.Windows.Controls.TextBlock block ? [block] : Blocks(child));
+            double Shade() => ((UIElement)searchCount.Child).Opacity;
+            libraryCount.Text = "218 items"; await Settle();
+            libraryCount.ShowPending("Searching…"); await Task.Delay(400);
+            check(Shade() < 0.6 && searchCount.Text == "218 items", $"Search's count dims and keeps its number while a search runs (at {Shade():0.##})");
+            libraryCount.Text = "242 items"; window.UpdateLayout();
+            var rolling = Blocks(searchCount).Where(block => block.IsVisible).GroupBy(System.Windows.Media.VisualTreeHelper.GetParent).Count(piece => piece.Count() > 1);
+            if (SystemParameters.ClientAreaAnimation) check(rolling == 2, $"Search's count rolls the digits that change ({rolling} rolling)");
+            await Settle();
+            var shown = string.Concat(Blocks(searchCount).Where(block => block.IsVisible && block.Opacity > 0.5).Select(block => block.Text));
+            check(Shade() == 1 && shown == "242 items", $"Search's count settles on the new number at full strength (shows \"{shown}\" at {Shade():0.##})");
+        }
         all.IsChecked = true; await Settle();
         Call("NavigateLibrary", 0, null, null, null); await Settle();
     }

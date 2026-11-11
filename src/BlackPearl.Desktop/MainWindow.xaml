@@ -284,7 +284,8 @@
       <!-- The type of title is one choice among several, on the app's thread selector like the library's categories; green is
            kept for filters that are on. The count is set like the library's, level with the words above the thread. -->
       <DockPanel Margin="0,14,0,0">
-       <TextBlock DockPanel.Dock="Right" Text="{Binding Text, ElementName=ResultCount}" Foreground="{DynamicResource Muted}" FontFamily="{StaticResource DisplayFont}" FontSize="15" Typography.NumeralStyle="OldStyle" VerticalAlignment="Center" Margin="12,0,8,12" AutomationProperties.LiveSetting="Polite"/>
+       <!-- Search's count follows the library's, rolling and dimming with it (RollingText.cs). -->
+       <local:RollingText x:Name="SearchResultCount" DockPanel.Dock="Right" Text="{Binding Text, ElementName=ResultCount}" Pending="{Binding Pending, ElementName=ResultCount}" TextElement.Foreground="{DynamicResource Muted}" TextElement.FontFamily="{StaticResource DisplayFont}" TextElement.FontSize="15" Typography.NumeralStyle="OldStyle" VerticalAlignment="Center" Margin="12,0,8,12" AutomationProperties.LiveSetting="Polite"/>
        <Button x:Name="ClearSearchFiltersButton" DockPanel.Dock="Right" Content="Clear filters" Click="ClearSearchFiltersClick" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Accent}" Height="30" MinHeight="0" Padding="10,0" FontSize="13" VerticalAlignment="Center" Margin="8,0,0,12" Visibility="Collapsed"/>
        <local:ThreadBar HorizontalAlignment="Left">
         <StackPanel x:Name="SearchKinds" Orientation="Horizontal" AutomationProperties.Name="Type of title">

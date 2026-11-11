@@ -27,7 +27,13 @@ public sealed class RollingText : Decorator
         new PropertyMetadata("", (control, change) => ((RollingText)control).Show((string?)change.OldValue ?? "", (string?)change.NewValue ?? "")));
     /// <summary>The text shown. Setting it ends a pending dim even when the text is unchanged, as when a search finds as many
     /// titles as before, since an unchanged value raises no change.</summary>
-    public string Text { get => (string)GetValue(TextProperty); set { Dim(false); SetValue(TextProperty, value); } }
+    public string Text { get => (string)GetValue(TextProperty); set { SetCurrentValue(PendingProperty, false); SetValue(TextProperty, value); } }
+
+    /// <summary>Whether a new count is on its way, which dims the one shown. Another count can follow this one by binding both
+    /// its text and this, as Search's count follows the library's.</summary>
+    public static readonly DependencyProperty PendingProperty = DependencyProperty.Register(nameof(Pending), typeof(bool), typeof(RollingText),
+        new PropertyMetadata(false, (control, change) => ((RollingText)control).Dim((bool)change.NewValue)));
+    public bool Pending { get => (bool)GetValue(PendingProperty); set => SetValue(PendingProperty, value); }
 
     private static readonly TimeSpan RollTime = TimeSpan.FromMilliseconds(420), Stagger = TimeSpan.FromMilliseconds(55), DimTime = TimeSpan.FromMilliseconds(160);
     private const double DimmedOpacity = 0.4;
@@ -47,13 +53,14 @@ public sealed class RollingText : Decorator
     public void ShowPending(string status)
     {
         if (Split(Text).Number.Length == 0) { Text = status; return; }
-        Dim(true);
+        SetCurrentValue(PendingProperty, true);
     }
 
     private void Show(string from, string to)
     {
         AutomationProperties.SetName(this, to);
-        Dim(false); EndRoll();
+        // A new count has arrived. Set without replacing a binding, so a count that follows another keeps following it.
+        SetCurrentValue(PendingProperty, false); EndRoll();
         display.Text = to;
         var (fromNumber, fromAfter) = Split(from); var (toNumber, toAfter) = Split(to);
         if (!IsLoaded || !IsVisible || !SystemParameters.ClientAreaAnimation || fromNumber.Length == 0 || toNumber.Length == 0 || from == to) return;
