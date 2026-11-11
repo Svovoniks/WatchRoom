@@ -268,15 +268,15 @@ public partial class MainWindow
         var about = Line("Follow a show with Auto-download new episodes on its page. BlackPearl looks for new episodes once they air, using the show's acquisition plugin, and downloads only the releases it showed you.");
         about.Margin = new Thickness(0, 6, 0, 0); main.Children.Add(about);
         var label = new TextBlock { Text = "Before downloading" }; label.SetResourceReference(StyleProperty, "FieldLabel"); label.Margin = new Thickness(0, 16, 0, 6); main.Children.Add(label);
-        // A segmented choice, as elsewhere in Settings, with the countdown's length beside it when that's chosen.
-        RadioButton Segment(string text, bool on) { var choice = new RadioButton { Content = text, IsChecked = on, GroupName = "FollowMode", IsEnabled = settings.Enabled }; choice.SetResourceReference(StyleProperty, "Segment"); return choice; }
-        var ask = Segment("Ask me first", !settings.Countdown); var countdown = Segment("Download after a countdown", settings.Countdown);
-        var segments = new WrapPanel(); segments.Children.Add(ask); segments.Children.Add(countdown);
-        AutomationProperties.SetName(segments, "Before downloading");
-        var frame = new Border { Child = segments, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(9), Padding = new Thickness(2), VerticalAlignment = VerticalAlignment.Center };
-        frame.SetResourceReference(Border.BackgroundProperty, "Canvas"); frame.SetResourceReference(Border.BorderBrushProperty, "Line");
+        // A choice on the app's thread selector, as elsewhere in Settings, with the countdown's length beside it when that's chosen.
+        RadioButton Choice(string text, bool on) { var choice = new RadioButton { Content = text, IsChecked = on, GroupName = "FollowMode", IsEnabled = settings.Enabled }; choice.SetResourceReference(StyleProperty, "ThreadOptionChoice"); return choice; }
+        var ask = Choice("Ask me first", !settings.Countdown); var countdown = Choice("Download after a countdown", settings.Countdown);
+        var choices = new WrapPanel(); choices.Children.Add(ask); choices.Children.Add(countdown);
+        AutomationProperties.SetName(choices, "Before downloading");
+        var frame = new ThreadBar { Content = choices, Reach = 5, VerticalAlignment = VerticalAlignment.Center };
+        // The choices leave room under themselves for their thread; the same room under the list keeps it level with the words.
         var minutes = new ComboBox { ItemsSource = FollowSettings.CountdownChoices.Select(x => $"{x} minutes").ToArray(), SelectedIndex = Array.IndexOf(FollowSettings.CountdownChoices, settings.Minutes),
-            IsEnabled = settings.Enabled, Margin = new Thickness(12, 0, 0, 0), MinWidth = 130, VerticalAlignment = VerticalAlignment.Center,
+            IsEnabled = settings.Enabled, Margin = new Thickness(12, 0, 0, 8), MinWidth = 130, VerticalAlignment = VerticalAlignment.Center,
             Visibility = settings.Countdown ? Visibility.Visible : Visibility.Collapsed };
         AutomationProperties.SetName(minutes, "Countdown before downloading");
         var modeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
@@ -291,7 +291,7 @@ public partial class MainWindow
         };
         main.Children.Add(icon);
         var iconHint = Line("Opening the icon downloads the episodes it lists. It goes away once they're downloaded or skipped.");
-        iconHint.Margin = new Thickness(28, 2, 0, 0); main.Children.Add(iconHint);
+        iconHint.Margin = new Thickness(0, 6, 0, 0); main.Children.Add(iconHint);
         void SaveMode() => FollowStore.SaveSettings(library, FollowStore.Settings(library) with { Countdown = countdown.IsChecked == true,
             CountdownMinutes = FollowSettings.CountdownChoices[Math.Max(0, minutes.SelectedIndex)] });
         ask.Checked += (_, _) => { SaveMode(); RenderDownloads(force: true); };

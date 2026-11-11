@@ -36,7 +36,9 @@ public class InAppDialog : ContentControl
     public InAppDialog()
     {
         Focusable = false;
-        heading = new TextBlock { FontSize = 20, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+        // The title is a heading, so it is set in the app's display serif like the pages' headings.
+        heading = new TextBlock { FontSize = 23, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+        heading.SetResourceReference(TextBlock.FontFamilyProperty, "DisplayFont");
         var close = new Button { Content = "", FontSize = 12, Margin = new Thickness(0), ToolTip = "Close (Esc)" };
         close.SetResourceReference(StyleProperty, "QuietIcon");
         AutomationProperties.SetName(close, "Close");

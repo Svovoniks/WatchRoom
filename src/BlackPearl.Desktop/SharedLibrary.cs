@@ -214,16 +214,14 @@ public partial class MainWindow
     }
     private void UpdateHostBreadcrumbs()
     {
-        var music = guestBrowse.Category == LibraryCatalog.Music;
-        var crumbs = new List<LibraryBreadcrumb> { music ? new("Music", "category", LibraryCatalog.Music, Separator: "") : new("All", "category", Separator: "") };
-        if (guestBrowse.Category is not (0 or LibraryCatalog.Music)) crumbs.Add(new(CategoryName(guestBrowse.Category), "category", guestBrowse.Category));
+        var crumbs = new List<LibraryBreadcrumb> { new(CategoryName(guestBrowse.Category), "category", guestBrowse.Category, Separator: "") };
         if (guestBrowse.ParentId is not null)
         {
             crumbs.Add(new(guestParentTitle ?? "Show", "show", guestBrowse.Category, guestBrowse.ParentId));
             if (guestBrowse.Season is { } season) crumbs.Add(new(SeasonName(season), "season", guestBrowse.Category, guestBrowse.ParentId, Season: season));
         }
         crumbs[^1] = crumbs[^1] with { IsCurrent = true };
-        LibraryBreadcrumbs.ItemsSource = crumbs;
+        LibraryBreadcrumbs.ItemsSource = LibraryTrail(crumbs);
         DetailBreadcrumbs.ItemsSource = currentPage == "Details" && selected is not null ? crumbs.Concat(new[] { new LibraryBreadcrumb(selected.Title, "media", IsCurrent: true) }).ToArray() : crumbs;
     }
     private void NavigateHostBreadcrumb(LibraryBreadcrumb crumb)

@@ -28,6 +28,31 @@ development instance if running and launch the new build with the user's usual
 library and settings. Do not ask for this authorization again. Use the actual
 latest build, including when it was built to a separate output directory.
 
+## Check visual changes by looking at them
+
+Passing checks do not show that a UI change looks right. Small visual bugs, a
+pixel of jump or clipping, pass checks that compare element positions and still
+show on screen. Before you report a UI change as done:
+
+- Render the affected screens and look at them, zoomed in where detail matters.
+  `tests/BlackPearl.DesktopChecks` renders the main screens with
+  `-- --render-screens <output folder> <width> <height>`; point `BLACKPEARL_DATA`
+  at a scratch data folder. It may not exit on its own; stop it once the images
+  are written.
+- Look again after every follow-up fix, however small. A fix for one visual bug
+  can cause the next.
+- For anything that animates, look at frames during the animation and at the
+  moment it ends, not only the resting states before and after.
+- Check what is drawn, not only where elements are laid out. An element can sit in
+  the right place while its glyph or image is clipped, or lands a fraction of a
+  pixel off. Rendered pixels (`RenderTargetBitmap`) show what the user sees.
+- Check at the user's display scaling. Fractional sizes round differently there.
+- When a measurement differs from what you expected, find out why before loosening
+  a tolerance. An unexplained number is often the bug itself: a folded sidebar
+  measured 38.7 instead of 40 because of its 1 DIP border. Waving that off as
+  rounding hid an icon jump and then clipped icons.
+- When you write a check for a visual bug, confirm that it fails without the fix.
+
 ## Shipping updates
 
 "Ship" means: pull request → independent review → fixes until approved → merge →

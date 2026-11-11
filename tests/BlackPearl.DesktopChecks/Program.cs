@@ -408,16 +408,17 @@ static class Program
         LibraryBreadcrumb[] Crumbs(bool details = false) => ((System.Windows.Controls.ItemsControl)window.FindName(details ? "DetailBreadcrumbs" : "LibraryBreadcrumbs")).Items.Cast<LibraryBreadcrumb>().ToArray();
         void ClickCrumb(LibraryBreadcrumb crumb) => Call("BreadcrumbClick", window,
             new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent, new System.Windows.Controls.Button { DataContext = crumb }));
+        string Status(string name) => System.Windows.Automation.AutomationProperties.GetItemStatus((DependencyObject)window.FindName(name));
         Navigate(3); await Wait(() => cards.Count == 1 && cards.All(x => x.Card.Media.Kind == "Anime"));
         var categoryButton = (System.Windows.Controls.Button)window.FindName("ShowsLibraryNav");
         categoryButton.Focus(); Call("LibraryCategoryClick", categoryButton, new RoutedEventArgs());
         await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
         check(!((System.Windows.Controls.TextBox)window.FindName("SearchBox")).IsKeyboardFocusWithin, "category navigation does not move the cursor into search");
         Navigate(3); await Wait(() => cards.Count == 1 && cards.All(x => x.Card.Media.Kind == "Anime"));
-        check(Crumbs().Select(x => x.Label).SequenceEqual(["All", "Anime"]), "Anime category excludes unavailable titles and preserves its category path");
+        check(Crumbs().Length == 0 && Status("AnimeLibraryNav") == "Selected", "Anime category excludes unavailable titles and is marked in the category bar rather than a trail");
         var status = (System.Windows.Controls.ComboBox)window.FindName("LibraryStatusFilter");
         Navigate(4); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == animeMovie.Id);
-        check(Crumbs().Last().Label == "Unavailable" && cards.All(x => !x.Card.Media.Available), "unavailable videos appear only in their separate library tab");
+        check(Status("UnavailableLibraryNav") == "Selected" && cards.All(x => !x.Card.Media.Available), "unavailable videos appear only in their separate library tab");
         // Search's type of title and status filters combine.
         var kinds = ((System.Windows.Controls.Panel)window.FindName("SearchKinds")).Children.OfType<System.Windows.Controls.RadioButton>().ToArray();
         Call("OpenSearch", false); kinds.Single(x => (string)x.Tag == "3").IsChecked = true;
@@ -427,36 +428,41 @@ static class Program
             "availability is a separate tab rather than a status filter");
         status.SelectedIndex = 0; kinds[0].IsChecked = true;
         Navigate(2, LibraryIdentity.ShowKey(show), "Show"); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
-        check(Crumbs().Select(x => x.Label).SequenceEqual(["All", "Shows", "Navigation Show"]), "show breadcrumb points to the season grid");
+        check(Crumbs().Select(x => x.Label).SequenceEqual(["Shows", "Navigation Show"]) && Crumbs()[0].Separator == "", "show breadcrumb points to the season grid and starts at its category");
         Navigate(2, LibraryIdentity.ShowKey(show), "Show", 0); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == special.Id);
         check(Crumbs().Last().Label == "Specials", "specials have an explicit clickable breadcrumb");
         Navigate(2, LibraryIdentity.ShowKey(show), "Show", -1); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == unknown.Id);
         check(Crumbs().Last().Label == "Season unknown", "unknown seasons preserve their navigation identity");
         Navigate(2, LibraryIdentity.ShowKey(show), "Show", 1); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == show.Id);
         Call("Select", show);
-        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["All", "Shows", "Navigation Show", "Season 1", "Episode 1 · The Beginning"]), "episode details display the complete hierarchy");
+        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["Shows", "Navigation Show", "Season 1", "Episode 1 · The Beginning"]), "episode details display the complete hierarchy from their category");
         window.UpdateLayout(); var clipped = BorderAudit.Find((System.Windows.Media.Visual)window.Content);
         check(clipped.Count == 0, "details breadcrumbs and disclosure outlines are not clipped" + string.Concat(clipped.Select(x => Environment.NewLine + "  " + x)));
         ClickCrumb(Crumbs(true).Single(x => x.Level == "season"));
         await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == show.Id);
         check(((FrameworkElement)window.FindName("LibraryPage")).Visibility == Visibility.Visible && Crumbs().Last().Level == "season", "season breadcrumb returns from episode details to its grid");
         ClickCrumb(Crumbs().Single(x => x.Level == "show")); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
+        Call("LibraryNavClick", window, new RoutedEventArgs()); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
+        check(Crumbs().Length == 0, "Library, clicked on the library, returns to the top of the category");
+        Navigate(2, LibraryIdentity.ShowKey(show), "Show"); await Wait(() => cards.Count == 3 && cards.All(x => x.Card.Level == "season"));
         ClickCrumb(Crumbs().Single(x => x.Label == "Shows")); await Wait(() => cards.Count == 1 && cards[0].Card.Level == "series");
-        var all = Crumbs().First();
         var search = (System.Windows.Controls.TextBox)window.FindName("SearchBox");
         Call("OpenSearch", false); search.Text = "no matching title"; await Wait(() => cards.Count == 0);
         check(((FrameworkElement)window.FindName("NoResults")).Visibility == Visibility.Visible, "a search without matches says so");
-        ClickCrumb(all); await Wait(() => cards.Count == 752);
-        check(Crumbs().Length == 1 && Crumbs()[0].IsCurrent, "All breadcrumb lists every title, whatever Search holds");
+        Call("LibraryCategoryClick", window.FindName("AllLibraryNav"), new RoutedEventArgs()); await Wait(() => cards.Count == 752);
+        check(Crumbs().Length == 0 && Status("AllLibraryNav") == "Selected", "the All category lists every title, whatever Search holds");
         search.Clear();
-        var menu = (FrameworkElement)window.FindName("LibraryCategories");
-        Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Collapsed, "Library button collapses its category menu");
-        Call("LibraryMenuClick", window, new RoutedEventArgs()); check(menu.Visibility == Visibility.Visible, "Library button expands its category menu");
+        await CheckCategoryBar(window, check);
+        await CheckThreadSelectors(window, check);
+        CheckResourceLookups(window, check);
+        await CheckThreadBarReleased(window, check);
         await CheckShortRail(window, check);
+        await CheckCollapsedRail(window, check);
         Navigate(1); await Wait(() => cards.Count == 750 && cards.All(x => x.Card.Media.Kind == "Movie"));
         Call("Select", animeMovie);
-        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["All", "Unavailable", "Navigation Anime Film"]), "unavailable film details link back to the unavailable tab");
-        ClickCrumb(Crumbs(true).First()); await Wait(() => cards.Count == 752);
+        check(Crumbs(true).Select(x => x.Label).SequenceEqual(["Unavailable", "Navigation Anime Film"]), "unavailable film details link back to the unavailable tab");
+        ClickCrumb(Crumbs(true).First()); await Wait(() => cards.Count == 1 && cards[0].Card.Media.Id == animeMovie.Id);
+        Navigate(0); await Wait(() => cards.Count == 752);
     }
 
     // A window too short for the sidebar scrolls its navigation; Settings stays in view and the buttons keep their width.
@@ -470,8 +476,8 @@ static class Program
         window.WindowState = WindowState.Normal; window.Height = 2000;
         await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
         var width = home.ActualWidth;
-        // Well below the minimum height, so the navigation overflows whichever categories are listed.
-        window.MinHeight = 400; window.Height = 400; scroll.ScrollToBottom();
+        // Well below the minimum height, so the navigation overflows whichever entries are listed.
+        window.MinHeight = 280; window.Height = 280; scroll.ScrollToBottom();
         await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
         var bottom = settings.TranslatePoint(new Point(0, settings.ActualHeight), rail).Y;
         check(scroll.ScrollableHeight > 0 && settings.IsVisible && bottom <= rail.ActualHeight,
@@ -479,6 +485,368 @@ static class Program
         check(home.ActualWidth == width, $"sidebar buttons keep their width when its scroll bar appears ({width:0.#} -> {home.ActualWidth:0.#})");
         scroll.ScrollToTop(); window.MinHeight = minimum; window.Height = height; window.WindowState = state;
         await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+    }
+
+    // A thread selector shows its choice by lighting the thread under it: centred on the chosen word, covering it, on that row's
+    // thread. Returns the choice it found and a description of anything wrong, or "".
+    internal static (FrameworkElement? Chosen, string Problem) ThreadLit(ThreadBar bar)
+    {
+        var choices = ((System.Windows.Controls.Panel)bar.Content).Children.OfType<FrameworkElement>().Where(choice => choice.IsVisible).ToList();
+        var chosen = choices.FirstOrDefault(choice => choice is System.Windows.Controls.Primitives.ToggleButton { IsChecked: true } || System.Windows.Automation.AutomationProperties.GetItemStatus(choice) == "Selected");
+        var light = bar.Light;
+        if (chosen is null || light is null) return (chosen, " (nothing chosen, or no light)");
+        var padding = ((System.Windows.Controls.Control)chosen).Padding;
+        var word = chosen.TranslatePoint(new Point(padding.Left, 0), bar).X; var wordWidth = chosen.ActualWidth - padding.Left - padding.Right;
+        var at = light.TranslatePoint(new Point(0, light.ActualHeight / 2), bar);
+        var below = chosen.TranslatePoint(new Point(0, chosen.ActualHeight), bar).Y;
+        var thread = bar.Threads.Select(line => line.TranslatePoint(new Point(0, 0.5), bar).Y).Where(y => y >= below).DefaultIfEmpty(double.NaN).Min();
+        var fine = light.IsVisible && Math.Abs(at.X + light.ActualWidth / 2 - (word + wordWidth / 2)) < 1 && at.X <= word && at.X + light.ActualWidth >= word + wordWidth && Math.Abs(at.Y - thread) < 0.5;
+        return (chosen, fine ? "" : $" (light {(light.IsVisible ? "at" : "hidden at")} {at.X:0.#},{at.Y:0.#}, {light.ActualWidth:0.#} wide; word at {word:0.#}, {wordWidth:0.#} wide; its thread at {thread:0.#})");
+    }
+    // A thread selector that has closed, or was never shown, is collected with its choices. Watching a choice's status registers
+    // it with WPF for good, so a selector that kept watching after it unloaded would keep a closed dialog alive.
+    private static async Task CheckThreadBarReleased(MainWindow window, Action<bool, string> check)
+    {
+        var host = (System.Windows.Controls.Panel)window.FindName("WindowRoot");
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static ThreadBar Make()
+        {
+            var panel = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+            for (var i = 0; i < 3; i++)
+            {
+                var choice = new System.Windows.Controls.Button { Content = "Choice " + i };
+                choice.SetResourceReference(FrameworkElement.StyleProperty, "ThreadOption");
+                System.Windows.Automation.AutomationProperties.SetItemStatus(choice, i == 0 ? "Selected" : "");
+                panel.Children.Add(choice);
+            }
+            // Shown, so it watches its choices, but invisible to the eye.
+            return new ThreadBar { Content = panel, Opacity = 0 };
+        }
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static WeakReference Show(System.Windows.Controls.Panel host) { var bar = Make(); host.Children.Add(bar); return new WeakReference(bar); }
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static void Close(System.Windows.Controls.Panel host, WeakReference shown) { if (shown.Target is UIElement bar) host.Children.Remove(bar); }
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static WeakReference NeverShown() => new(Make());
+        var shown = Show(host); await Task.Delay(400);
+        Close(host, shown); var never = NeverShown(); await Task.Delay(400);
+        for (var i = 0; i < 3; i++) { GC.Collect(); GC.WaitForPendingFinalizers(); await Dispatcher.Yield(DispatcherPriority.Background); }
+        check(!shown.IsAlive && !never.IsAlive, $"a closed or never-shown thread selector is collected (closed one {(shown.IsAlive ? "kept" : "collected")}, never-shown one {(never.IsAlive ? "kept" : "collected")})");
+    }
+    // Every style or brush the code looks up by name exists. Such a lookup fails silently, so a style removed or renamed in XAML
+    // would leave a control the code builds unstyled, as the Downloads choice once was.
+    private static void CheckResourceLookups(MainWindow window, Action<bool, string> check)
+    {
+        var keys = new HashSet<object>();
+        void Add(ResourceDictionary dictionary) { foreach (var key in dictionary.Keys) keys.Add(key); foreach (var merged in dictionary.MergedDictionaries) Add(merged); }
+        void Walk(object node)
+        {
+            if (node is FrameworkElement element) Add(element.Resources);
+            if (node is DependencyObject parent) foreach (var child in LogicalTreeHelper.GetChildren(parent)) Walk(child);
+        }
+        Add(Application.Current.Resources); Walk(window);
+        var used = Directory.EnumerateFiles("src/BlackPearl.Desktop", "*.cs", SearchOption.AllDirectories)
+            .SelectMany(file => System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(file), @"(?:SetResourceReference\([A-Za-z.]*Property, |FindResource\(|TryFindResource\()""([^""]+)""").Select(match => match.Groups[1].Value))
+            .Distinct().ToList();
+        var missing = used.Where(key => !keys.Contains(key)).ToList();
+        check(used.Count > 10 && missing.Count == 0, $"every resource the code looks up by name exists ({used.Count} looked up{(missing.Count > 0 ? "; missing: " + string.Join(", ", missing) : "")})");
+    }
+    // Every pick-one selector is the thread selector: Settings' sections, the plugin view and Search's type of title light the
+    // thread under their choice and move the light when it changes. Settings' sections wrap in a narrow window, each row on its
+    // own thread.
+    private static async Task CheckThreadSelectors(MainWindow window, Action<bool, string> check)
+    {
+        void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance).First(m => m.Name == name && m.GetParameters().Length == arguments.Length).Invoke(window, arguments);
+        // Long enough for a glide to finish after a section's page has laid itself out.
+        async Task Settle() { await Task.Delay(900); await Dispatcher.Yield(DispatcherPriority.ContextIdle); window.UpdateLayout(); }
+        ThreadBar BarOf(string name) { DependencyObject? at = (DependencyObject)window.FindName(name); while (at is not null and not ThreadBar) at = LogicalTreeHelper.GetParent(at); return (ThreadBar)at!; }
+        void Lit(ThreadBar bar, string what, string expected)
+        {
+            var (chosen, problem) = ThreadLit(bar);
+            var label = chosen is System.Windows.Controls.ContentControl { Content: var content } ? content?.ToString() : null;
+            check(problem == "" && label?.StartsWith(expected) == true, $"{what}: the thread is lit under {expected} (under {label ?? "nothing"}){problem}");
+        }
+        Call("LoadPreferences"); Call("ShowPage", "Settings"); Call("ShowPreferenceSection", "Playback"); await Settle();
+        var sections = BarOf("PreferenceSections");
+        Lit(sections, "Settings", "Playback");
+        Call("ShowPreferenceSection", "Plugins"); await Settle();
+        Lit(sections, "Settings", "Plugins");
+        var plugins = BarOf("InstalledPluginsView");
+        ((System.Windows.Controls.RadioButton)window.FindName("AvailablePluginsView")).IsChecked = true; await Settle();
+        Lit(plugins, "The plugin view", "Available");
+        ((System.Windows.Controls.RadioButton)window.FindName("InstalledPluginsView")).IsChecked = true; await Settle();
+        Lit(plugins, "The plugin view", "Installed");
+        // A narrow window wraps the sections: each row has its own thread, and the light sits on the chosen one's row.
+        var wide = window.Width; window.Width = window.MinWidth; Call("ShowPreferenceSection", "Updates"); await Settle();
+        var rows = ((System.Windows.Controls.Panel)sections.Content).Children.OfType<FrameworkElement>().Select(tab => Math.Round(tab.TranslatePoint(new Point(0, 0), sections).Y)).Distinct().Count();
+        check(rows > 1 && sections.Threads.Count == rows, $"wrapped sections have a thread for each row ({rows} rows, {sections.Threads.Count} threads)");
+        Lit(sections, "Wrapped Settings", "Updates");
+        window.Width = wide; await Settle();
+        Call("ShowPage", "Library"); Call("OpenSearch", false); await Settle();
+        var kinds = BarOf("SearchKinds");
+        var shows = ((System.Windows.Controls.Panel)window.FindName("SearchKinds")).Children.OfType<System.Windows.Controls.RadioButton>().Single(kind => (string)kind.Tag == "2");
+        var all = ((System.Windows.Controls.Panel)window.FindName("SearchKinds")).Children.OfType<System.Windows.Controls.RadioButton>().Single(kind => (string)kind.Tag == "0");
+        all.IsChecked = true; await Settle();
+        Lit(kinds, "Search", "All videos");
+        shows.IsChecked = true; await Settle();
+        Lit(kinds, "Search", "Shows");
+        // Search shows its own count, which dims while a search runs and rolls to the new number like the library's.
+        if (window.FindName("SearchResultCount") is not RollingText searchCount) { check(false, "Search's count is a rolling count"); }
+        else
+        {
+            var libraryCount = (RollingText)window.FindName("ResultCount");
+            IEnumerable<System.Windows.Controls.TextBlock> Blocks(DependencyObject node) => Enumerable.Range(0, System.Windows.Media.VisualTreeHelper.GetChildrenCount(node))
+                .Select(i => System.Windows.Media.VisualTreeHelper.GetChild(node, i)).SelectMany(child => child is System.Windows.Controls.TextBlock block ? [block] : Blocks(child));
+            double Shade() => ((UIElement)searchCount.Child).Opacity;
+            libraryCount.Text = "218 items"; await Settle();
+            libraryCount.ShowPending("Searching…"); await Task.Delay(400);
+            check(Shade() < 0.6 && searchCount.Text == "218 items", $"Search's count dims and keeps its number while a search runs (at {Shade():0.##})");
+            libraryCount.Text = "242 items"; window.UpdateLayout();
+            var rolling = Blocks(searchCount).Where(block => block.IsVisible).GroupBy(System.Windows.Media.VisualTreeHelper.GetParent).Count(piece => piece.Count() > 1);
+            if (SystemParameters.ClientAreaAnimation) check(rolling == 2, $"Search's count rolls the digits that change ({rolling} rolling)");
+            await Settle();
+            var shown = string.Concat(Blocks(searchCount).Where(block => block.IsVisible && block.Opacity > 0.5).Select(block => block.Text));
+            check(Shade() == 1 && shown == "242 items", $"Search's count settles on the new number at full strength (shows \"{shown}\" at {Shade():0.##})");
+        }
+        all.IsChecked = true; await Settle();
+        Call("NavigateLibrary", 0, null, null, null); await Settle();
+    }
+    // The library's categories are words on a thread at the top of the Library page; the stretch of thread under the current one
+    // is lit and glides to the next. The pearl stays on the sidebar alone.
+    private static async Task CheckCategoryBar(MainWindow window, Action<bool, string> check)
+    {
+        void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, arguments);
+        var categories = (ThreadBar)window.FindName("LibraryCategoryBar");
+        var glow = categories.Light!;
+        async Task Settle() { await Task.Delay(400); await Dispatcher.Yield(DispatcherPriority.ContextIdle); window.UpdateLayout(); }
+        string Under(string name) => ((FrameworkElement)window.FindName(name)) is var chosen && ThreadLit(categories) is var lit && lit.Chosen == chosen ? lit.Problem : $" (lit under {lit.Chosen?.Name ?? "nothing"} rather than {name})";
+        int Pearls() => Descendants(window).OfType<System.Windows.Controls.ContentControl>().Count(element => element.IsVisible && element.Style == window.FindResource("Pearl"));
+        static IEnumerable<DependencyObject> Descendants(DependencyObject node) => Enumerable.Range(0, System.Windows.Media.VisualTreeHelper.GetChildrenCount(node))
+            .Select(i => System.Windows.Media.VisualTreeHelper.GetChild(node, i)).SelectMany(child => Descendants(child).Prepend(child));
+        Call("NavigateLibrary", 0, null, null, null); await Settle();
+        check(Pearls() == 1, $"the Library page shows one pearl, on the sidebar ({Pearls()} shown)");
+        check(categories.IsVisible && categories.TranslatePoint(new Point(0, 0), (FrameworkElement)window.FindName("LibraryPage")).Y < 1, "the categories sit at the top of the Library page");
+        // The poster grid reaches 6 DIP past the page edge for its cards' padding, so the artwork itself lines up with the page edge.
+        var first = ((FrameworkElement)window.FindName("AllLibraryNav")).TranslatePoint(new Point(0, 0), (FrameworkElement)window.FindName("LibraryPage")).X;
+        check(Math.Abs(first) < 0.5, $"the first category starts at the page edge, in line with the artwork below ({first:0.#})");
+        // A category's count is part of its label: the word's size and ink, so it reads as one label and brightens with it.
+        foreach (var name in new[] { "MissingLibraryCount", "UnmatchedLibraryCount" })
+        {
+            var number = (System.Windows.Documents.Run)window.FindName(name); var label = (System.Windows.Controls.TextBlock)number.Parent;
+            check(number.FontSize == label.FontSize && number.FontFamily.Equals(label.FontFamily) && Equals(number.Foreground, label.Foreground),
+                $"{name} is part of its label, in the word's size and ink ({number.FontSize} against {label.FontSize})");
+        }
+        var under = Under("AllLibraryNav");
+        check(under == "", "the thread is lit under All" + under);
+        // The light glides along the thread, always forward, rather than jumping, and stays on the thread as it goes.
+        var rolled = new List<double>(); var onThread = true;
+        Call("LibraryCategoryClick", window.FindName("MoviesLibraryNav"), new RoutedEventArgs());
+        for (var until = DateTime.UtcNow.AddMilliseconds(500); DateTime.UtcNow < until;)
+        {
+            await Task.Delay(12); window.UpdateLayout();
+            var at = glow.TranslatePoint(new Point(glow.ActualWidth / 2, glow.ActualHeight / 2), categories);
+            rolled.Add(at.X); onThread &= Math.Abs(at.Y - categories.Threads[0].TranslatePoint(new Point(0, 0.5), categories).Y) < 0.5;
+        }
+        var end = rolled[^1];
+        if (SystemParameters.ClientAreaAnimation)
+            check(rolled.Any(x => x > 30 && x < end - 10) && rolled.Zip(rolled.Skip(1)).All(pair => pair.Second >= pair.First - 0.01) && onThread,
+                $"the light glides along the thread to the category chosen ({string.Join(", ", rolled.Distinct().Take(10).Select(x => x.ToString("0")))})");
+        await Settle();
+        under = Under("MoviesLibraryNav");
+        check(under == "", "the light settles under the category chosen" + under);
+        Call("OpenSearch", false); await Settle();
+        check(!categories.IsVisible, "Search hides the categories");
+        Call("LibraryNavClick", window, new RoutedEventArgs()); await Settle();
+        under = Under("AllLibraryNav");
+        check(categories.IsVisible && under == "", "Library leaves Search for All, and the light is placed again when the categories return" + under);
+    }
+
+    // The sidebar folds into a strip of icons, with each icon named in a tooltip, and unfolds again.
+    private static async Task CheckCollapsedRail(MainWindow window, Action<bool, string> check)
+    {
+        void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, arguments);
+        var rail = (FrameworkElement)window.FindName("Rail");
+        var home = (System.Windows.Controls.Button)window.FindName("HomeNav");
+        var label = ((System.Windows.Controls.Panel)home.Content).Children[1];
+        var icon = (FrameworkElement)((System.Windows.Controls.Panel)home.Content).Children[0];
+        var content = (FrameworkElement)window.FindName("ContentArea");
+        var expanded = content.ActualWidth;
+        var logo = (FrameworkElement)window.FindName("RailLogo");
+        var toggle = (FrameworkElement)window.FindName("RailToggle");
+        var toggleAt = toggle.TranslatePoint(new Point(0, 0), rail); var logoAt = logo.TranslatePoint(new Point(0, 0), rail);
+        check(logoAt.X >= toggleAt.X + toggle.ActualWidth && Math.Abs(logoAt.Y + logo.ActualHeight / 2 - (toggleAt.Y + toggle.ActualHeight / 2)) < 1,
+            $"an open sidebar shows the logo beside its toggle, on one row (logo {logoAt}, toggle {toggleAt})");
+        // The pearl on the sidebar's edge marks the current page, and rolls to the next one.
+        var pearl = (FrameworkElement)window.FindName("RailPearl");
+        string Pearled(string entry)
+        {
+            var target = (FrameworkElement)window.FindName(entry);
+            var centre = pearl.TranslatePoint(new Point(pearl.ActualWidth / 2, pearl.ActualHeight / 2), rail);
+            var middle = target.TranslatePoint(new Point(0, target.ActualHeight / 2), rail).Y;
+            return pearl.IsVisible && Math.Abs(centre.X - (rail.ActualWidth - 0.5)) < 0.5 && Math.Abs(centre.Y - middle) < 1 ? ""
+                : $" (pearl {(pearl.IsVisible ? "shown" : "hidden")} at {centre.X:0.#},{centre.Y:0.#}; edge {rail.ActualWidth - 0.5:0.#}, entry middle {middle:0.#})";
+        }
+        var page = (string)typeof(MainWindow).GetField("currentPage", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+        Call("ShowPage", "Home"); await Task.Delay(450); window.UpdateLayout();
+        var placed = Pearled("HomeNav");
+        check(placed == "", "the pearl sits on the sidebar's edge beside the current page" + placed);
+        // The roll starts once the new page has laid itself out, which takes longer on a busy machine, so the check waits for it to land.
+        Call("ShowPage", "Queues");
+        for (var until = DateTime.UtcNow.AddMilliseconds(1500); DateTime.UtcNow < until && Pearled("QueuesNav") != "";) { await Task.Delay(50); window.UpdateLayout(); }
+        placed = Pearled("QueuesNav");
+        check(placed == "", "the pearl rolls to the page opened" + placed);
+        check(Math.Abs(toggleAt.X - toggleAt.Y) < 0.5, $"the toggle sits as far from the sidebar's top as from its side ({toggleAt})");
+        // Folding glides: the sidebar narrows and the entries move down for the logo a step at a time, while the toggle stays put.
+        // A sidebar icon is cut off when its glyph runs past the room its button gives its content.
+        var cut = new List<string>();
+        IEnumerable<string> Cut() => RailEntries().Where(entry => entry.IsVisible).Select(entry =>
+        {
+            var presenter = (FrameworkElement)System.Windows.Media.VisualTreeHelper.GetChild(System.Windows.Media.VisualTreeHelper.GetChild(entry, 0), 2);
+            var glyph = (System.Windows.Controls.TextBlock)((System.Windows.Controls.Panel)((System.Windows.Controls.Button)entry).Content).Children[0];
+            var room = presenter.TranslatePoint(new Point(presenter.ActualWidth, 0), rail).X;
+            var end = glyph.TranslatePoint(new Point(glyph.FontSize, 0), rail).X;
+            return end > room + 0.01 ? $"{entry.Name} at {rail.ActualWidth:0.#} wide: glyph ends {end:0.#}, room ends {room:0.#}" : null;
+        }).OfType<string>();
+        async Task<(List<double> Widths, List<double> Tops, bool Still)> Fold(bool collapsed)
+        {
+            var widths = new List<double>(); var tops = new List<double>(); var still = true;
+            Call("SetRailCollapsed", collapsed);
+            for (var until = DateTime.UtcNow.AddMilliseconds(700); DateTime.UtcNow < until;)
+            {
+                await Task.Delay(12); window.UpdateLayout();
+                widths.Add(rail.ActualWidth); tops.Add(home.TranslatePoint(new Point(0, 0), rail).Y);
+                still &= toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt;
+                cut.AddRange(Cut());
+            }
+            return (widths, tops, still);
+        }
+        static bool Steady(List<double> values, int direction) => values.Zip(values.Skip(1)).All(pair => (pair.Second - pair.First) * direction >= -0.01);
+        var folding = await Fold(true);
+        if (SystemParameters.ClientAreaAnimation)
+            check(folding.Widths.Any(width => width > 64 && width < 212) && Steady(folding.Widths, -1) && Steady(folding.Tops, 1),
+                $"folding narrows the sidebar and moves its entries smoothly ({string.Join(", ", folding.Widths.Distinct().Take(12).Select(width => width.ToString("0")))})");
+        check(folding.Still, "the toggle stays in its spot while the sidebar folds");
+        placed = Pearled("QueuesNav");
+        check(placed == "", "the pearl stays on the edge of a folded sidebar" + placed);
+        Call("ShowPage", "Home"); await Task.Delay(450); window.UpdateLayout();
+        // Icon glyphs are an em square drawn from the left of their box.
+        var glyphMiddle = icon.TranslatePoint(new Point(((System.Windows.Controls.TextBlock)icon).FontSize / 2, 0), rail).X;
+        var logoMiddle = logo.TranslatePoint(new Point(logo.ActualWidth / 2, 0), rail).X;
+        check(rail.ActualWidth == 64 && !label.IsVisible && !((FrameworkElement)window.FindName("RailBrandName")).IsVisible,
+            $"a collapsed sidebar is a strip of icons ({rail.ActualWidth:0.#} wide)");
+        check(logo.IsVisible && Math.Abs(logoMiddle - glyphMiddle) < 1,
+            $"a collapsed sidebar keeps the logo, centred over its icons (logo middle {logoMiddle:0.#}, icon middle {glyphMiddle:0.#})");
+        var foldedLogo = logo.TranslatePoint(new Point(0, 0), rail);
+        check(toggle.IsVisible && toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && foldedLogo.Y >= toggleAt.Y + toggle.ActualHeight,
+            $"folding leaves the toggle in its spot and drops the logo under it (toggle {toggle.TranslatePoint(new Point(0, 0), rail)}, was {toggleAt}; logo {foldedLogo})");
+        check(Math.Abs(glyphMiddle - (rail.ActualWidth - 1) / 2) < 1, $"a collapsed sidebar centres its icons in the strip ({glyphMiddle:0.#} in {rail.ActualWidth - 1:0.#})");
+        var toggleMiddle = toggle.TranslatePoint(new Point(toggle.ActualWidth / 2, 0), rail).X;
+        check(Math.Abs(toggleMiddle - glyphMiddle) < 1, $"the toggle lines up with the icons ({toggleMiddle:0.#}, {glyphMiddle:0.#})");
+        check(Equals(home.ToolTip, "Home") && content.ActualWidth > expanded, "collapsed icons name themselves and the page gains the width");
+        // The fold ends by taking the faded words out of the layout; the icons must not move when it does.
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(rail).PixelsPerDip;
+        (int Width, byte[] Pixels) Shoot()
+        {
+            window.UpdateLayout();
+            var shot = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Round(rail.ActualWidth * scale), (int)Math.Round(rail.ActualHeight * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+            shot.Render(rail); var pixels = new byte[shot.PixelWidth * shot.PixelHeight * 4]; shot.CopyPixels(pixels, shot.PixelWidth * 4, 0);
+            return (shot.PixelWidth, pixels);
+        }
+        string Ink((int Width, byte[] Pixels) shot, FrameworkElement entry)
+        {
+            var at = entry.TranslatePoint(new Point(0, 0), rail);
+            int left = (int)(at.X * scale), top = (int)(at.Y * scale), right = (int)((at.X + entry.ActualWidth) * scale), bottom = (int)((at.Y + entry.ActualHeight) * scale);
+            int Pixel(int x, int y) => BitConverter.ToInt32(shot.Pixels, (y * shot.Width + x) * 4);
+            var ground = Pixel(left + 1, top + 1); int x0 = int.MaxValue, y0 = int.MaxValue, x1 = -1, y1 = -1;
+            for (var y = top; y < bottom; y++) for (var x = left; x < right; x++)
+                if (Pixel(x, y) != ground) { x0 = Math.Min(x0, x); y0 = Math.Min(y0, y); x1 = Math.Max(x1, x); y1 = Math.Max(y1, y); }
+            return $"{x0},{y0}-{x1},{y1}";
+        }
+        Call("ShowRailText", true); var before = Shoot();
+        Call("ShowRailText", false); var after = Shoot();
+        var moved = RailEntries().Where(entry => entry.IsVisible && Ink(before, entry) != Ink(after, entry)).Select(entry => $"{entry.Name} {Ink(before, entry)} -> {Ink(after, entry)}").ToList();
+        check(moved.Count == 0, "the icons stay put as the folded sidebar takes out its words" + (moved.Count > 0 ? $" (moved: {string.Join("; ", moved)})" : ""));
+        IEnumerable<FrameworkElement> RailEntries() => new[] { "HomeNav", "SearchNav", "LibraryNav", "QueuesNav", "RoomNav", "SettingsNav" }.Select(name => (FrameworkElement)window.FindName(name));
+        var unfolding = await Fold(false);
+        if (SystemParameters.ClientAreaAnimation)
+            check(unfolding.Widths.Any(width => width > 64 && width < 212) && Steady(unfolding.Widths, 1) && Steady(unfolding.Tops, -1),
+                "unfolding widens the sidebar and moves its entries back smoothly");
+        check(unfolding.Still, "the toggle stays in its spot while the sidebar unfolds");
+        check(cut.Count == 0, "no sidebar icon is cut off, folded, open or in between" + (cut.Count > 0 ? $" ({string.Join("; ", cut.Distinct().Take(4))})" : ""));
+        check(rail.ActualWidth == 212 && label.IsVisible && label.Opacity == 1 && home.ToolTip is null && content.ActualWidth == expanded, "the sidebar expands back to its labels");
+        check(toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && logo.TranslatePoint(new Point(0, 0), rail) == logoAt, "unfolding leaves the toggle in its spot and puts the logo back beside it");
+        Call("ShowPage", page); await Dispatcher.Yield(DispatcherPriority.Render);
+    }
+
+    // The item count rolls to a new number: only the digits that differ move, and it settles exactly where plain text would be.
+    private static async Task CheckRollingCount(MainWindow window, RollingText count, Action<bool, string> check)
+    {
+        var original = count.Text;
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(count).PixelsPerDip;
+        IEnumerable<System.Windows.Controls.TextBlock> Blocks(DependencyObject node) => Enumerable.Range(0, System.Windows.Media.VisualTreeHelper.GetChildrenCount(node))
+            .Select(i => System.Windows.Media.VisualTreeHelper.GetChild(node, i)).SelectMany(child => child is System.Windows.Controls.TextBlock block ? [block] : Blocks(child));
+        string Shown() => string.Concat(Blocks(count).Where(block => block.IsVisible).Select(block => block.Text));
+        // Rendering an element directly draws it at its offset in the window, off a bitmap its own size, and a brush of it
+        // stretches whatever it draws, including pieces rolling out above it. So the whole window is drawn and the count's box
+        // cut out of it.
+        byte[] Shot()
+        {
+            window.UpdateLayout();
+            var root = (FrameworkElement)window.Content;
+            var full = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth * scale), (int)Math.Ceiling(root.ActualHeight * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+            full.Render(root);
+            var at = count.TranslatePoint(new Point(0, 0), root);
+            var box = new Int32Rect((int)Math.Round(at.X * scale), (int)Math.Round(at.Y * scale), (int)Math.Ceiling(count.ActualWidth * scale), (int)Math.Ceiling(count.ActualHeight * scale));
+            var pixels = new byte[box.Width * box.Height * 4]; full.CopyPixels(box, pixels, box.Width * 4, 0);
+            check(pixels.Any(value => value != 0), "the count's picture for comparison is not blank");
+            return pixels;
+        }
+        var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        IEnumerable<IGrouping<DependencyObject, System.Windows.Controls.TextBlock>> Pieces() => Blocks(count).Where(block => block.IsVisible).GroupBy(block => System.Windows.Media.VisualTreeHelper.GetParent(block));
+        double Shade() => ((UIElement)count.Child).Opacity;
+        // Rolls to a new count, holds the pieces where the roll ends, and compares them with how they look once they settle.
+        async Task<(int Rolling, int Still, bool Seamless, string Shown)> Roll(string from, string to)
+        {
+            count.Text = from; await Task.Delay(900);
+            // Until the clock first ticks, a roll that has just begun shows its starting point, which must be what was there.
+            var before = Shot(); count.Text = to; var begun = Shot();
+            check(begun.SequenceEqual(before), $"starting a roll from \"{from}\" to \"{to}\" redraws nothing until the digits move");
+            var pieces = Pieces().ToList();
+            var rolling = pieces.Count(piece => piece.Count() > 1); var still = pieces.Count(piece => piece.Count() == 1);
+            ((DispatcherTimer?)typeof(RollingText).GetField("settle", flags)!.GetValue(count))?.Stop();
+            await Task.Delay(800); var ended = Shot();
+            typeof(RollingText).GetMethod("Settle", flags)!.Invoke(count, null); var settled = Shot();
+            return (rolling, still, ended.SequenceEqual(settled), Shown());
+        }
+        if (SystemParameters.ClientAreaAnimation)
+        {
+            var roll = await Roll("218 items", "242 items");
+            check(roll.Rolling == 2 && roll.Still == 2, $"the count rolls only the digits that change (218 to 242: {roll.Rolling} rolling, {roll.Still} still)");
+            foreach (var (from, to) in new[] { ("218 items", "242 items"), ("242 items", "1 item"), ("9 items", "10 items") })
+            {
+                roll = await Roll(from, to);
+                check(roll.Seamless && roll.Shown == to, $"rolling from \"{from}\" to \"{to}\" settles without a flicker or jump when the roll ends (shows \"{roll.Shown}\")");
+            }
+        }
+        // Screen readers see a rolled count as one text named by its value, not the digits it rolled with.
+        {
+            count.Text = "218 items"; await Task.Delay(900); count.Text = "242 items"; await Task.Delay(900);
+            var peer = System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(count);
+            check(peer.GetAutomationControlType() == System.Windows.Automation.Peers.AutomationControlType.Text && peer.GetName() == "242 items" && (peer.GetChildren()?.Count ?? 0) == 0,
+                $"a rolled count reads as one text to screen readers (\"{peer.GetName()}\", {peer.GetChildren()?.Count ?? 0} parts)");
+        }
+        // While a new count is on its way the old one dims and stays, instead of a status flashing between the two.
+        count.Text = "42 items"; await Task.Delay(900);
+        count.ShowPending("Searching…"); await Task.Delay(400);
+        check(count.Text == "42 items" && Shade() < 0.6, $"a pending count dims and keeps its number (shows \"{count.Text}\" at {Shade():0.##})");
+        count.Text = "57 items"; await Task.Delay(900);
+        check(Shade() == 1 && Shown() == "57 items", "the new count rolls in at full strength");
+        // A search that finds as many titles as before brings the count back to full strength too.
+        count.ShowPending("Searching…"); await Task.Delay(400); count.Text = "57 items"; await Task.Delay(400);
+        check(Shade() == 1 && Shown() == "57 items", $"a count that comes back unchanged is no longer dimmed (at {Shade():0.##})");
+        count.Text = "Loading library…"; count.ShowPending("Searching…");
+        check(count.Text == "Searching…", "with no count yet, the status shows");
+        count.Text = original;
     }
 
     // Categories show their location and actions in one toolbar row; Search shows its field and filters there instead.
@@ -498,10 +866,79 @@ static class Program
         check(header.Visibility == Visibility.Collapsed && crumbs.Visibility == Visibility.Visible && scan.Visibility == Visibility.Visible,
             "library categories show their location and actions rather than a search field");
         var height = toolbar.ActualHeight;
-        check(height >= 40 && scan.ActualHeight == height, "the library toolbar keeps one usable height for its location and actions");
+        check(height >= 40 && scan.ActualHeight <= height, "the library toolbar keeps one usable height for its location and actions");
         var original = scan.Content; scan.Content = "Cancel scan"; window.UpdateLayout();
         check(toolbar.ActualHeight == height, "scan button label changes keep the toolbar height");
-        scan.Content = original;
+        scan.Content = original; window.UpdateLayout();
+        // The categories share their row with the count and actions, and a narrow window moves the actions under them rather than overlapping.
+        var categories = (FrameworkElement)window.FindName("LibraryCategoryBar");
+        // The actions line up with the category words; the thread runs under them.
+        var words = (FrameworkElement)window.FindName("AllLibraryNav");
+        var add = (FrameworkElement)window.FindName("AddTitleButton");
+        var count = (FrameworkElement)window.FindName("ResultCount");
+        Rect Box(FrameworkElement element) => new(element.TranslatePoint(new Point(0, 0), toolbar), new Size(element.ActualWidth, element.ActualHeight));
+        string Crowded()
+        {
+            var parts = new[] { categories, count, scan, add }.Where(element => element.IsVisible).ToList();
+            var problems = parts.SelectMany((a, i) => parts.Skip(i + 1).Where(b => Rect.Intersect(Box(a), Box(b)) is { IsEmpty: false, Width: > 0.5, Height: > 0.5 }).Select(b => $"{a.Name} overlaps {b.Name}"))
+                .Concat(parts.Where(element => Box(element).Right > toolbar.ActualWidth + 0.5).Select(element => $"{element.Name} runs past the toolbar"))
+                // A bar given less room than its segments need shrinks to that room and cuts its last segments off.
+                .Concat(SegmentsEnd() > categories.ActualWidth + 0.5 ? [$"the categories are cut off (segments end at {SegmentsEnd():0.#} in a bar {categories.ActualWidth:0.#} wide)"] : Array.Empty<string>());
+            return string.Join("; ", problems);
+        }
+        double SegmentsEnd()
+        {
+            var last = ((System.Windows.Controls.Panel)window.FindName("LibraryCategories")).Children.OfType<FrameworkElement>().LastOrDefault(segment => segment.IsVisible);
+            return !categories.IsVisible || last is null ? 0 : last.TranslatePoint(new Point(last.ActualWidth, 0), categories).X;
+        }
+        // Box middles agree to within the nudges that put the text on one baseline, which is checked exactly further on.
+        double Middle(FrameworkElement element) => Box(element).Top + element.ActualHeight / 2;
+        check(categories.IsVisible && Math.Abs(Middle(words) - Middle(scan)) < 1.5 && Crowded() == "",
+            $"the library's categories, count and actions share one row ({Box(categories)}, {Box(scan)}{(Crowded() is { Length: > 0 } c ? "; " + c : "")})");
+        var wide = window.Width; window.Width = window.MinWidth; await Task.Delay(150); window.UpdateLayout();
+        check(Crowded() == "" && (Math.Abs(Middle(words) - Middle(scan)) < 1.5 || Box(scan).Top >= Box(categories).Bottom),
+            $"a narrow window keeps the categories and actions apart ({toolbar.ActualWidth:0} wide{(Crowded() is { Length: > 0 } n ? ": " + n : "")})");
+        // Too narrow for the categories and actions side by side: the actions take a row of their own and the categories keep their whole width.
+        toolbar.Width = SegmentsEnd() + 140; await Task.Delay(150); window.UpdateLayout();
+        check(Crowded() == "" && Box(scan).Top >= Box(categories).Bottom,
+            $"a toolbar too narrow for one row puts the actions under the categories, uncut ({toolbar.ActualWidth:0} wide{(Crowded() is { Length: > 0 } w ? ": " + w : "")})");
+        // A little short of room: Add title shortens to its plus and everything stays on one row.
+        var addWidths = ((double Full, double Compact))typeof(MainWindow).GetField("addTitleWidths", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+        check(addWidths.Compact < addWidths.Full - 30, $"Add title is much narrower as only its plus ({addWidths.Compact:0.#} against {addWidths.Full:0.#})");
+        toolbar.Width = SegmentsEnd() + 16 + count.DesiredSize.Width + scan.DesiredSize.Width + addWidths.Compact + 2; await Task.Delay(150); window.UpdateLayout();
+        check(Crowded() == "" && Math.Abs(Middle(words) - Middle(scan)) < 1.5 && ((System.Windows.Controls.Button)add).Content is not string,
+            $"a toolbar a little short of room shortens Add title to its plus and keeps one row ({toolbar.ActualWidth:0} wide{(Crowded() is { Length: > 0 } s ? ": " + s : "")})");
+        toolbar.Width = double.NaN;
+        window.Width = wide; await Task.Delay(150); window.UpdateLayout();
+        check(Math.Abs(Middle(words) - Middle(scan)) < 1.5 && toolbar.ActualHeight == height, "widening the window brings the actions back beside the categories");
+        await CheckRollingCount(window, (RollingText)count, check);
+        // The words, the count and the buttons share one baseline, measured as where the ink of letters without descenders ends.
+        ((RollingText)count).Text = "218 items"; await Task.Delay(900);
+        {
+            var scale = System.Windows.Media.VisualTreeHelper.GetDpi(toolbar).PixelsPerDip;
+            var root = (FrameworkElement)window.Content; window.UpdateLayout();
+            var full = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth * scale), (int)Math.Ceiling(root.ActualHeight * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+            full.Render(root);
+            var stride = full.PixelWidth * 4; var pixels = new byte[stride * full.PixelHeight]; full.CopyPixels(pixels, stride, 0);
+            // The last row where the element's right-hand part (from `from`, a fraction of its width) has ink unlike the canvas.
+            int InkBottom(FrameworkElement element, double from)
+            {
+                var at = element.TranslatePoint(new Point(0, 0), root);
+                int x0 = (int)((at.X + element.ActualWidth * from) * scale), x1 = (int)((at.X + element.ActualWidth) * scale) - 1;
+                int y0 = (int)(at.Y * scale), y1 = (int)((at.Y + element.ActualHeight) * scale) - 1;
+                var ground = pixels.AsSpan((y0 * stride) + (x0 * 4), 4).ToArray(); var last = -1;
+                for (var y = y0; y <= y1; y++) for (var x = x0; x <= x1; x++)
+                {
+                    var i = y * stride + x * 4;
+                    if (Math.Abs(pixels[i] - ground[0]) + Math.Abs(pixels[i + 1] - ground[1]) + Math.Abs(pixels[i + 2] - ground[2]) > 90) { last = y; break; }
+                }
+                return last;
+            }
+            // "items" is the right part of the count; "218" has no descending figures either.
+            int lineWord = InkBottom((FrameworkElement)window.FindName("AnimeLibraryNav"), 0), lineCount = InkBottom(count, 0.55), lineScan = InkBottom(scan, 0);
+            check(Math.Abs(lineCount - lineWord) <= 1 && Math.Abs(lineScan - lineWord) <= 1,
+                $"the categories, the count and the buttons share one baseline (words {lineWord}, count {lineCount}, Rescan {lineScan} at {scale:0.##}x)");
+        }
         Call("OpenSearch", false); await Task.Delay(100); window.UpdateLayout();
         check(header.Visibility == Visibility.Visible && crumbs.Visibility == Visibility.Collapsed && scan.Visibility == Visibility.Collapsed,
             "Search shows its field and filters in place of the category's location and actions");
@@ -613,7 +1050,7 @@ static class Program
         check(Field("currentPage") as string == "Settings", "small horizontal movements do not accidentally navigate");
         Horizontal(-120); Horizontal(-360);
         check(Field("currentPage") as string == "Library", "horizontal swipe goes Back once and ignores its inertia");
-        Call("OpenSearch", false); Call("ShowPage", "Home"); Call("LibraryMenuClick", window, new RoutedEventArgs());
+        Call("OpenSearch", false); Call("ShowPage", "Home"); Call("LibraryNavClick", window, new RoutedEventArgs());
         check(Field("currentPage") as string == "Library" && !Searching() &&
             System.Windows.Automation.AutomationProperties.GetItemStatus((DependencyObject)window.FindName("LibraryNav")) == "Selected",
             "the Library entry opens the library, not Search, after Search was used from another page");
@@ -728,18 +1165,18 @@ static class Program
         // With nothing watched yet, the hero still shows the selected room with a placeholder instead of hiding.
         string HeroText(string name) => ((System.Windows.Controls.TextBlock)window.FindName(name)).Text;
         FrameworkElement HeroPart(string name) => (FrameworkElement)window.FindName(name);
-        Check(HeroPart("RoomHero").Visibility == Visibility.Visible && HeroText("RoomHeroLiveText") == "CLOSED" && HeroText("RoomHeroTitle") == "Nothing watched here yet" &&
+        Check(HeroPart("RoomHero").Visibility == Visibility.Visible && HeroText("RoomHeroLiveText") == "Closed" && HeroText("RoomHeroTitle") == "Nothing watched here yet" &&
             ((System.Windows.Controls.Button)window.FindName("RoomHeroResume")).Content as string == "Open room" &&
             ((System.Windows.Controls.Button)window.FindName("RoomHeroSecondary")).Content as string == "Copy invite" && HeroPart("RoomHeroSecondary").Visibility == Visibility.Visible &&
             HeroPart("RoomHeroBadge").Visibility == Visibility.Visible && HeroText("RoomHeroBadgeText") == "M", "an unused host room shows a closed hero with Open room, Copy invite and its initial");
         list.SelectedItem = guest;
-        Check(HeroText("RoomHeroLiveText") == "OFFLINE" && ((System.Windows.Controls.Button)window.FindName("RoomHeroResume")).Content as string == "Connect" &&
+        Check(HeroText("RoomHeroLiveText") == "Offline" && ((System.Windows.Controls.Button)window.FindName("RoomHeroResume")).Content as string == "Connect" &&
             HeroPart("RoomHeroSecondary").Visibility == Visibility.Collapsed && HeroText("RoomHeroBadgeText") == "F", "an unused guest room shows an offline hero with Connect");
         Check(HeroPart("SavedRoomHostControls").Visibility == Visibility.Collapsed && System.Windows.Controls.Grid.GetRow(HeroPart("SavedRoomActions")) == 0 &&
-            HeroText("SavedRoomGuestHeading") == "PEOPLE" && HeroText("SavedRoomSessionTitle") == "Nothing watched here yet", "a guest room drops the permissions tile and lists people instead of guests");
+            HeroText("SavedRoomGuestHeading") == "People" && HeroText("SavedRoomSessionTitle") == "Nothing watched here yet", "a guest room drops the permissions tile and lists people instead of guests");
         list.SelectedItem = first;
         Check(HeroText("SavedRoomCode") == "AAAAAA AAAAAA AAAAAA AAAAAA" && HeroPart("SavedRoomHostControls").Visibility == Visibility.Visible &&
-            System.Windows.Controls.Grid.GetRow(HeroPart("SavedRoomActions")) == 2 && HeroText("SavedRoomGuestHeading") == "GUESTS", "a host room shows its grouped code and the permissions tile");
+            System.Windows.Controls.Grid.GetRow(HeroPart("SavedRoomActions")) == 2 && HeroText("SavedRoomGuestHeading") == "Guests", "a host room shows its grouped code and the permissions tile");
         string Initials(string text, int count) => (string)typeof(MainWindow).GetMethod("Initials", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [text, count])!;
         Check(Initials("Spy x Family · S1E4", 2) == "SF" && Initials("The Office", 2) == "O" && Initials("holiday_video_2019 mkv", 2) == "HV" && Initials("!!!", 2) == "?",
             "title cards use the leading words' initials");

@@ -61,6 +61,7 @@ public partial class MainWindow
         // Search shows its count beside the type of title, so its toolbar row only appears for a note.
         LibraryToolbar.MinHeight = librarySearch ? 0 : 40;
         ResultCount.Visibility = librarySearch ? Visibility.Collapsed : Visibility.Visible;
+        ArrangeLibraryToolbar();
         var music = SearchCategory() == LibraryCatalog.Music;
         SearchAudio.IsEnabled = SearchSubtitles.IsEnabled = SearchLengthFilter.IsEnabled = !music;
         ClearSearchFiltersButton.Visibility = SearchFiltersActive() ? Visibility.Visible : Visibility.Collapsed;

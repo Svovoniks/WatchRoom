@@ -199,7 +199,7 @@ internal sealed class AcquisitionPicker : InAppDialog
     private static FrameworkElement Section(string heading, params FrameworkElement[] content)
     {
         var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 20) };
-        var label = new TextBlock { Text = heading.ToUpperInvariant() }; label.SetResourceReference(StyleProperty, "Overline"); panel.Children.Add(label);
+        var label = new TextBlock { Text = heading }; label.SetResourceReference(StyleProperty, "Overline"); panel.Children.Add(label);
         foreach (var item in content) { if (item is TextBlock && item.Margin == default) item.Margin = new Thickness(0, 6, 0, 0); panel.Children.Add(item); }
         return panel;
     }

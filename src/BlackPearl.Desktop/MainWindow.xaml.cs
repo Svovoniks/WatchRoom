@@ -140,6 +140,7 @@ public partial class MainWindow : Window
         var startupCandidates = startupFile is null ? null : Task.Run(() => StartupFileCandidates(startupFile, savedFolders, savedExclusions));
         InitializeComponent();
         RegisterName("LibraryScroll", LibraryScroll);
+        InitializeSideRail();
         MixedFolderMusic.IsChecked = library.MixedFoldersListMusic;
         RoomPage.SizeChanged += (_, _) => AudioTracks.MaxHeight = SubtitleTracks.MaxHeight = QueueList.MaxHeight = Math.Clamp(RoomPage.ActualHeight - 260, 120, 360);
         // Menus are separate popup windows; close them when the bar hides, moves to fullscreen or the player closes.
@@ -401,6 +402,7 @@ public partial class MainWindow : Window
         foreach (var button in new[] { HomeNav, SearchNav, LibraryNav, QueuesNav, RoomNav, SettingsNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, (string)button.Tag == page ? "Selected" : "");
         System.Windows.Automation.AutomationProperties.SetItemStatus(MusicLibraryNav, page == "Music" ? "Selected" : "");
+        QueueRailPearl();
     }
     private void Navigate(object sender, RoutedEventArgs e)
     {
@@ -427,23 +429,26 @@ public partial class MainWindow : Window
         UnmatchedLibraryNav.Visibility = !GuestLibrary && unmatchedTitles.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         UnmatchedLibraryCount.Text = unmatchedTitles.Count.ToString();
         System.Windows.Automation.AutomationProperties.SetName(UnmatchedLibraryNav, $"Unmatched, {unmatchedTitles.Count} {(unmatchedTitles.Count == 1 ? "title" : "titles")}");
-        foreach (var button in new[] { AllLibraryNav, AnimeLibraryNav, ShowsLibraryNav, MoviesLibraryNav, UnavailableLibraryNav, MissingLibraryNav, UnmatchedLibraryNav })
+        foreach (var button in LibraryCategoryButtons)
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, active && int.Parse((string)button.Tag) == libraryCategory ? "Selected" : "");
+        LibraryCategoryBar.Visibility = librarySearch || libraryCategory == LibraryCatalog.Music ? Visibility.Collapsed : Visibility.Visible;
+        ArrangeLibraryToolbar();
     }
-    private void LibraryMenuClick(object sender, RoutedEventArgs e)
+    private void LibraryNavClick(object sender, RoutedEventArgs e)
     {
         if (!ConfirmPageNavigation("Library")) return;
-        // After Search, Library opens its categories at All rather than folding them away (or showing Search again).
-        if (librarySearch)
-        {
-            LibraryCategories.Visibility = Visibility.Visible; LibraryChevron.Text = "";
-            NavigateLibrary(0); return;
-        }
-        var visible = LibraryCategories.Visibility == Visibility.Visible;
-        LibraryCategories.Visibility = LibraryPage.Visibility == Visibility.Visible && visible ? Visibility.Collapsed : Visibility.Visible;
-        LibraryChevron.Text = LibraryCategories.Visibility == Visibility.Visible ? "" : "";
+        // Search and Music are tabs of their own, so Library leaves them for All. On the library it returns to the top of the
+        // category; from other pages it returns to where the library was.
+        if (librarySearch || libraryCategory == LibraryCatalog.Music) { NavigateLibrary(0); return; }
+        if (currentPage == "Library") { NavigateLibrary(libraryCategory); return; }
         ShowPage("Library"); UpdateBreadcrumbs();
     }
+    /// <summary>
+    /// The library page's trail. The category bar already names the category, so the trail is empty at a category's top
+    /// and appears once a show is open. Music has no bar, so its trail is always shown.
+    /// </summary>
+    private static IReadOnlyList<LibraryBreadcrumb> LibraryTrail(IReadOnlyList<LibraryBreadcrumb> crumbs) =>
+        crumbs.Count == 1 && crumbs[0].Category != LibraryCatalog.Music ? [] : crumbs;
     private void LibraryCategoryClick(object sender, RoutedEventArgs e) => NavigateLibrary(int.Parse((string)((Button)sender).Tag));
     private void NavigateLibrary(int category, string? series = null, string? kind = null, int? season = null)
     {
@@ -471,8 +476,8 @@ public partial class MainWindow : Window
         var show = detail?.Series is not null ? detail : browseSeries is null ? null : items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind));
         var category = detail is not null ? detail.Available || detail.IsVirtual ? CategoryFor(detail) : 4 : libraryCategory;
         // Music is its own section, so its trail starts at Music rather than at All videos.
-        var crumbs = new List<LibraryBreadcrumb> { category == LibraryCatalog.Music ? new("Music", "category", category, Separator: "") : new("All", "category", Separator: "") };
-        if (category is not (0 or LibraryCatalog.Music)) crumbs.Add(new(CategoryName(category), "category", category));
+        // A trail names the category it is in; it starts at All only for All itself.
+        var crumbs = new List<LibraryBreadcrumb> { new(CategoryName(category), "category", category, Separator: "") };
         if (show?.Series is not null)
         {
             var showId = LibraryIdentity.ShowKey(show);
@@ -484,7 +489,7 @@ public partial class MainWindow : Window
         crumbs[^1] = crumbs[^1] with { IsCurrent = true };
         // Metadata refreshes should not recreate an unchanged navigation bar.
         if (breadcrumbItems.SequenceEqual(crumbs)) return;
-        breadcrumbItems = crumbs; LibraryBreadcrumbs.ItemsSource = crumbs; DetailBreadcrumbs.ItemsSource = crumbs;
+        breadcrumbItems = crumbs; LibraryBreadcrumbs.ItemsSource = LibraryTrail(crumbs); DetailBreadcrumbs.ItemsSource = crumbs;
     }
     private void BreadcrumbClick(object sender, RoutedEventArgs e)
     {
@@ -638,7 +643,8 @@ public partial class MainWindow : Window
         var query = searchFilters is null ? "" : SearchBox.Text.Trim();
         if (!backgroundUpdate)
         {
-            ResultCount.Text = "Searching…";
+            // The count shown dims until the new one rolls in, rather than flashing a status between them.
+            ResultCount.ShowPending("Searching…");
 
             NoResults.Visibility = Visibility.Collapsed;
         }
@@ -2043,7 +2049,7 @@ public partial class MainWindow : Window
     {
         bool inPlayer = RoomPage.Visibility == Visibility.Visible;
         Rail.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
-        RailWidth.Width = new GridLength(inPlayer ? 0 : 212);
+        RailWidth.Width = new GridLength(inPlayer ? 0 : RailColumnWidth);
         ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(28, 22, 28, 16);
         AppStatusBar.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
         StatusRow.Height = new GridLength(inPlayer ? 0 : 30);
@@ -2189,6 +2195,8 @@ public partial class MainWindow : Window
         }
         if (e.Key == Key.N && Keyboard.Modifiers == ModifierKeys.Control && !fullscreen && !GuestLibrary && InAppDialog.Open.Count == 0 && !inPlayer)
         { AddTitleClick(sender, e); e.Handled = true; return; }
+        if (e.Key == Key.B && Keyboard.Modifiers == ModifierKeys.Control && !inPlayer && InAppDialog.Open.Count == 0)
+        { SetRailCollapsed(!railCollapsed); e.Handled = true; return; }
         if (!inPlayer && CardSelectionKey(e)) { e.Handled = true; return; }
         if (e.Key == Key.Escape && LibraryPage.Visibility == Visibility.Visible && SearchBox.IsKeyboardFocused)
         { SearchBox.Clear(); e.Handled = true; return; }

@@ -85,7 +85,7 @@ public partial class MainWindow
         else rows = connected ? (room!.Snapshot?.People ?? []).Where(p => p.IsHost || p.Approved)
             .Select(p => new RoomGuestRow(p.Id, p.Id == room.Identity!.Peer ? p.Name + " (you)" : p.Name, (p.IsHost ? "Host" : "In the room") + (room.VoiceState(p.Id)?.Joined == true ? " · In voice" : ""), false, false, false, false, true)).ToList() : [];
         if (SavedRoomGuests.ItemsSource is not IEnumerable<RoomGuestRow> shown || !shown.SequenceEqual(rows)) SavedRoomGuests.ItemsSource = rows;
-        SavedRoomGuestHeading.Text = host ? "GUESTS" : "PEOPLE";
+        SavedRoomGuestHeading.Text = host ? "Guests" : "People";
         SavedRoomGuestCount.Text = host ? remembered.Length == 0 ? "" : remembered.Length + " admitted" : rows.Count == 0 ? "" : rows.Count + " here";
         SavedRoomGuestHint.Text = !host ? connected ? "" : "Connect to see who's in the room."
             : connected ? rows.Count == 0 ? "No guests yet. Share the invitation; new people ask to join here." : "Admitted guests can reconnect. Remove revokes access."

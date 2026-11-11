@@ -8,6 +8,9 @@
   <Thickness x:Key="IconButtonPadding">8,12</Thickness>
   <!-- Fluent icons on Windows 11; MDL2 shares the code points on Windows 10. -->
   <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+  <!-- The app's display serif, the wordmark's: page headings, display titles and the thread selector's words. Everything else is
+       set in the interface's sans. -->
+  <FontFamily x:Key="DisplayFont">Sitka Heading, Georgia</FontFamily>
 
   <!-- Theme palette. MainWindow.ApplyTheme replaces these brushes with the chosen colour theme in light or dark mode. -->
   <SolidColorBrush x:Key="Canvas" Color="#0F1311"/><SolidColorBrush x:Key="Surface" Color="#151A17"/><SolidColorBrush x:Key="Elevated" Color="#1E2420"/><SolidColorBrush x:Key="Ink" Color="#EAF0EB"/><SolidColorBrush x:Key="Muted" Color="#9BA89F"/><SolidColorBrush x:Key="Line" Color="#28302B"/><SolidColorBrush x:Key="Accent" Color="#9FD4A8"/><SolidColorBrush x:Key="AccentInk" Color="#0E2A15"/>
@@ -32,14 +35,16 @@
   <DropShadowEffect x:Key="PopupShadow" BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.4" Color="#000000"/>
 
   <Style x:Key="FocusRing"><Setter Property="Control.Template"><Setter.Value><ControlTemplate><Border BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="8" SnapsToDevicePixels="True"/></ControlTemplate></Setter.Value></Setter></Style>  <Style TargetType="Window"><Setter Property="local:WindowTheme.Enabled" Value="True"/><Setter Property="Icon" Value="/BlackPearl;component/Assets/BlackPearl.ico"/><Setter Property="Background" Value="{DynamicResource Canvas}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontFamily" Value="Segoe UI"/><Setter Property="FontSize" Value="14"/></Style>
+  <!-- Links are in the accent everywhere, rather than the system's blue. -->
+  <Style TargetType="Hyperlink"><Setter Property="Foreground" Value="{DynamicResource Accent}"/></Style>
   <Style x:Key="MutedText" TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="21"/></Style>
-  <Style x:Key="PageHeading" TargetType="TextBlock"><Setter Property="FontSize" Value="28"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style x:Key="PageHeading" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/><Setter Property="FontSize" Value="32"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
   <Style x:Key="SectionHeading" TargetType="TextBlock"><Setter Property="FontSize" Value="16"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,24,0,8"/></Style>
   <Style x:Key="RowHeading" TargetType="TextBlock"><Setter Property="FontSize" Value="19"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
-  <Style x:Key="Overline" TargetType="TextBlock"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Margin" Value="0,0,0,8"/></Style>
+  <Style x:Key="Overline" TargetType="TextBlock"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Margin" Value="0,0,0,8"/></Style>
   <Style x:Key="FieldLabel" TargetType="TextBlock"><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="FontSize" Value="13"/><Setter Property="Margin" Value="0,0,0,2"/></Style>
   <Style x:Key="Icon" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="16"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
-  <Style x:Key="NavigationIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="Width" Value="28"/></Style>
+  <Style x:Key="NavigationIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="Width" Value="28"/><Style.Triggers><DataTrigger Binding="{Binding (AutomationProperties.ItemStatus), RelativeSource={RelativeSource AncestorType=Button}}" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Accent}"/></DataTrigger></Style.Triggers></Style>
   <Style x:Key="EmptyStateIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="FontSize" Value="40"/><Setter Property="Foreground" Value="{DynamicResource Accent}"/><Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="Margin" Value="0,0,0,20"/></Style>
   <!-- A rounded panel used to group related content and settings. -->
   <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="20,18"/><Setter Property="Margin" Value="0,0,0,16"/></Style>
@@ -64,6 +69,11 @@
   </Style>
   <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="{DynamicResource Accent}"/><Setter Property="Foreground" Value="{DynamicResource AccentInk}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
   <Style x:Key="QuietButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Padding" Value="12,8"/></Style>
+  <!-- An action in a page's or a section's header: quiet text beside the heading, so the heading leads. Filled buttons are for
+       actions within the content, such as Resume or Connect. -->
+  <Style x:Key="HeaderAction" TargetType="Button" BasedOn="{StaticResource QuietButton}"><Setter Property="Height" Value="34"/><Setter Property="MinHeight" Value="0"/><Setter Property="Padding" Value="12,0"/><Setter Property="Margin" Value="0"/></Style>
+  <!-- The header's action that makes something new, in the accent. -->
+  <Style x:Key="HeaderCreate" TargetType="Button" BasedOn="{StaticResource HeaderAction}"><Setter Property="Foreground" Value="{DynamicResource Accent}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
   <Style x:Key="QuietIcon" TargetType="Button" BasedOn="{StaticResource QuietButton}"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="14"/><Setter Property="Width" Value="34"/><Setter Property="Height" Value="34"/><Setter Property="MinHeight" Value="34"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,6,0"/></Style>
   <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="14"/><Setter Property="Width" Value="40"/><Setter Property="Height" Value="40"/><Setter Property="Padding" Value="0"/></Style>
   <!-- Prefixes button content with an icon given in Tag of the ContentTemplate; content stays plain text for code and automation. -->
@@ -118,7 +128,8 @@
 
   <Style x:Key="Switch" TargetType="ToggleButton">
    <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Cursor" Value="Hand"/>
-   <Setter Property="MinHeight" Value="32"/><Setter Property="Padding" Value="4"/><Setter Property="Margin" Value="-4,2,0,2"/>
+   <!-- No padding on the left, so the track lines up with the text above it whatever margin a switch is given. -->
+   <Setter Property="MinHeight" Value="32"/><Setter Property="Padding" Value="0,4,4,4"/><Setter Property="Margin" Value="0,2,0,2"/>
    <Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="VerticalContentAlignment" Value="Center"/>
    <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton">
@@ -141,39 +152,96 @@
   </Style>
   <Style TargetType="CheckBox" BasedOn="{StaticResource Switch}"/>
 
-  <!-- Sidebar navigation: a soft accent pill with a leading indicator marks the current page. -->
+  <!-- Sidebar navigation. The current page is marked by the pearl on the sidebar's edge (SideRail.cs), a bright
+       label and an accent icon, rather than a fill: pointing at an entry is the only thing that fills it. -->
   <Style x:Key="Navigation" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-   <Setter Property="Height" Value="40"/><Setter Property="Padding" Value="12,0"/>
+   <!-- No padding on the right: a folded sidebar is narrower than the icon and its left padding, and padding there would cut the icons off. -->
+   <Setter Property="Height" Value="40"/><Setter Property="Padding" Value="12,0,0,0"/>
    <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Margin" Value="0,0,0,2"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
     <Grid>
      <Border x:Name="Frame" Background="{TemplateBinding Background}" CornerRadius="8"/>
      <Border x:Name="Tint" Background="{DynamicResource Ink}" Opacity="0" CornerRadius="8" IsHitTestVisible="False"/>
-     <Border x:Name="Indicator" Width="3" Height="16" CornerRadius="1.5" Background="{DynamicResource Accent}" HorizontalAlignment="Left" Visibility="Collapsed"/>
      <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True"/>
     </Grid>
     <ControlTemplate.Triggers>
-     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.06"/></Trigger>
-     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.12"/></Trigger>
-     <Trigger Property="AutomationProperties.ItemStatus" Value="Selected"><Setter TargetName="Frame" Property="Background" Value="{DynamicResource AccentSoft}"/><Setter TargetName="Indicator" Property="Visibility" Value="Visible"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.05"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.1"/></Trigger>
+     <Trigger Property="AutomationProperties.ItemStatus" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
      <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
     </ControlTemplate.Triggers>
    </ControlTemplate></Setter.Value></Setter>
+   <!-- A collapsed sidebar is a strip of icons. The icons keep the open layout, which already puts each glyph in the middle
+        of the strip, so they don't shift a fraction of a pixel when the folding sidebar takes out its words. -->
   </Style>
-  <!-- Library categories sit under the selected Library item, so the current one is marked by a dot rather than a second pill. -->
-  <Style x:Key="LibrarySubNavigation" TargetType="Button" BasedOn="{StaticResource Navigation}"><Setter Property="Height" Value="36"/><Setter Property="Padding" Value="40,0,12,0"/><Setter Property="MinHeight" Value="36"/><Setter Property="FontSize" Value="13"/><Setter Property="Margin" Value="0,0,0,1"/>
-   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-    <Grid Background="Transparent">
-     <Border x:Name="Tint" Background="{DynamicResource Ink}" Opacity="0" CornerRadius="8" IsHitTestVisible="False"/>
-     <Ellipse x:Name="Dot" Width="6" Height="6" Fill="{DynamicResource Accent}" HorizontalAlignment="Left" Margin="21,0,0,0" Visibility="Collapsed"/>
-     <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True"/>
-    </Grid>
-    <ControlTemplate.Triggers>
-     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.06"/></Trigger>
-     <Trigger Property="AutomationProperties.ItemStatus" Value="Selected"><Setter TargetName="Dot" Property="Visibility" Value="Visible"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
-    </ControlTemplate.Triggers>
+  <!-- Sidebar text that a collapsed sidebar hides. -->
+  <Style x:Key="NavigationLabel" TargetType="TextBlock"><Style.Triggers><Trigger Property="local:SideRail.Collapsed" Value="True"><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style>
+  <!-- The app's black pearl: a dark body, the accent sheen low on the right, a violet one on the left and a bright highlight.
+       Drawn at 15 DIP and scaled to the size it is given. It marks the current page on the sidebar, and only there. -->
+  <Style x:Key="Pearl" TargetType="ContentControl">
+   <Setter Property="IsHitTestVisible" Value="False"/><Setter Property="Focusable" Value="False"/><Setter Property="IsTabStop" Value="False"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContentControl">
+    <Viewbox><Grid Width="15" Height="15">
+     <Ellipse><Ellipse.Fill><RadialGradientBrush GradientOrigin="0.74,0.82" Center="0.64,0.7" RadiusX="0.8" RadiusY="0.8"><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="#FF262A36" Offset="0.55"/><GradientStop Color="#FF09090D" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+     <Ellipse><Ellipse.Fill><RadialGradientBrush GradientOrigin="0.2,0.5" Center="0.25,0.5" RadiusX="0.55" RadiusY="0.6"><GradientStop Color="#B07A55D0" Offset="0"/><GradientStop Color="#007A55D0" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+     <Ellipse Width="4.5" Height="3.5" Margin="3.5,3,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="#F2FFFFFF"/>
+    </Grid></Viewbox>
    </ControlTemplate></Setter.Value></Setter>
   </Style>
+  <!-- The app's pick-one selector (ThreadBar.cs): words strung on a thread, the stretch under the chosen one lit in the pearl's
+       colours, the accent fading into its violet, and gliding to the next choice. The threads are drawn in code; the light is
+       here so its colours follow the theme. -->
+  <Style TargetType="local:ThreadBar">
+   <Setter Property="Focusable" Value="False"/><Setter Property="IsTabStop" Value="False"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="local:ThreadBar">
+    <Grid>
+     <ContentPresenter/>
+     <Canvas x:Name="PART_Layer" IsHitTestVisible="False">
+<!-- The light: a bright line with a soft halo around it. The halo is drawn as gradients, not a blur effect, which looked the
+           same but slowed the library's first layout. -->
+      <Grid x:Name="PART_Light" Height="10" Visibility="Hidden">
+       <Border Opacity="0.45">
+        <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="{DynamicResource AccentClear}" Offset="0"/><GradientStop Color="{DynamicResource AccentColor}" Offset="0.5"/><GradientStop Color="{DynamicResource AccentClear}" Offset="1"/></LinearGradientBrush></Border.Background>
+        <Border.OpacityMask><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#FF000000" Offset="0.2"/><GradientStop Color="#FF000000" Offset="0.8"/><GradientStop Color="#00000000" Offset="1"/></LinearGradientBrush></Border.OpacityMask>
+       </Border>
+       <Border Height="2" CornerRadius="1" VerticalAlignment="Center">
+        <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="{DynamicResource AccentClear}" Offset="0"/><GradientStop Color="{DynamicResource AccentColor}" Offset="0.14"/><GradientStop Color="#FF9A7AE6" Offset="0.86"/><GradientStop Color="#009A7AE6" Offset="1"/></LinearGradientBrush></Border.Background>
+       </Border>
+      </Grid>
+     </Canvas>
+    </Grid>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <!-- A choice on a thread at the head of a page, such as a library category or a settings section: a word in the wordmark's
+       serif. The chosen one is in full ink with the thread lit under it; the rest are muted until pointed at. All share one
+       weight, so choosing one never moves the others. The space after each word is its right padding, so the first word lines
+       up with the page and the light centres on the word; the bottom margin is the room for the thread. -->
+  <Style x:Key="ThreadWord" TargetType="ButtonBase">
+   <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/><Setter Property="FontSize" Value="19"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+   <Setter Property="Height" Value="34"/><Setter Property="Padding" Value="0,0,26,0"/><Setter Property="Margin" Value="0,0,0,12"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Background" Value="Transparent"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ButtonBase">
+    <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter VerticalAlignment="Center" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" RecognizesAccessKey="True"/></Border>
+   </ControlTemplate></Setter.Value></Setter>
+   <Style.Triggers>
+    <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+    <Trigger Property="AutomationProperties.ItemStatus" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.7"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+   </Style.Triggers>
+  </Style>
+  <Style x:Key="ThreadWordChoice" TargetType="RadioButton" BasedOn="{StaticResource ThreadWord}">
+   <Style.Triggers><Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger></Style.Triggers>
+  </Style>
+  <!-- A choice on a thread within a page, such as a folder's category: the interface's own type, smaller, closer together. -->
+  <Style x:Key="ThreadOption" TargetType="ButtonBase" BasedOn="{StaticResource ThreadWord}">
+   <Setter Property="FontFamily" Value="Segoe UI"/><Setter Property="FontSize" Value="13"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0,0,18,0"/><Setter Property="Margin" Value="0,0,0,8"/>
+  </Style>
+  <Style x:Key="ThreadOptionChoice" TargetType="RadioButton" BasedOn="{StaticResource ThreadOption}">
+   <Style.Triggers><Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger></Style.Triggers>
+  </Style>
+  <!-- How many titles a category holds, written after its word as part of the same label: the same serif, size and ink, so it
+       brightens with the word. Old-style figures sit among the lowercase like letters rather than standing up like capitals. -->
+  <Style x:Key="CategoryCount" TargetType="Run"><Setter Property="Typography.NumeralStyle" Value="OldStyle"/></Style>
   <Style x:Key="BreadcrumbButton" TargetType="Button" BasedOn="{StaticResource QuietButton}">
    <Setter Property="Height" Value="32"/><Setter Property="Padding" Value="8,4"/><Setter Property="MinHeight" Value="32"/><Setter Property="Margin" Value="0"/><Setter Property="FontSize" Value="15"/>
    <Style.Triggers><DataTrigger Binding="{Binding IsCurrent}" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger></Style.Triggers>
@@ -181,17 +249,6 @@
   <Style x:Key="LibraryBreadcrumbs" TargetType="ItemsControl">
    <Setter Property="ItemsPanel"><Setter.Value><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></Setter.Value></Setter>
    <Setter Property="ItemTemplate"><Setter.Value><DataTemplate><StackPanel Orientation="Horizontal"><TextBlock x:Name="Chevron" Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="10" Foreground="{DynamicResource Muted}" Margin="2,1,2,0" VerticalAlignment="Center"/><Button Tag="{Binding}" Style="{StaticResource BreadcrumbButton}" ToolTip="{Binding Label}" AutomationProperties.Name="{Binding Label}"><TextBlock Text="{Binding Label}" MaxWidth="300" TextTrimming="CharacterEllipsis"/></Button></StackPanel><DataTemplate.Triggers><DataTrigger Binding="{Binding Separator}" Value=""><Setter TargetName="Chevron" Property="Visibility" Value="Collapsed"/></DataTrigger><DataTrigger Binding="{Binding Separator}" Value="{x:Null}"><Setter TargetName="Chevron" Property="Visibility" Value="Collapsed"/></DataTrigger></DataTemplate.Triggers></DataTemplate></Setter.Value></Setter>
-  </Style>
-  <!-- Single-choice filter pill: the mystery deck on Home and the type of title in Search. -->
-  <Style x:Key="Chip" TargetType="RadioButton">
-   <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Margin" Value="0,0,6,6"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
-   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
-    <Border x:Name="Pill" Background="Transparent" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="14" Padding="12,5"><ContentPresenter VerticalAlignment="Center"/></Border>
-    <ControlTemplate.Triggers>
-     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger>
-     <Trigger Property="IsChecked" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Accent}"/><Setter TargetName="Pill" Property="Background" Value="{DynamicResource AccentSoft}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
-    </ControlTemplate.Triggers>
-   </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="CardWatchedButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
    <Setter Property="HorizontalAlignment" Value="Right"/><Setter Property="VerticalAlignment" Value="Top"/>
@@ -264,21 +321,6 @@
   </Style>
   <Style x:Key="SettingsButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Margin" Value="0,8,12,12"/><Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
   <Style x:Key="SettingsPrimary" TargetType="Button" BasedOn="{StaticResource SettingsButton}"><Setter Property="Background" Value="{DynamicResource Accent}"/><Setter Property="Foreground" Value="{DynamicResource AccentInk}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
-  <!-- Settings sections render as a segmented control. -->
-  <Style x:Key="PreferenceTab" TargetType="Button" BasedOn="{StaticResource Navigation}">
-   <Setter Property="Height" Value="34"/><Setter Property="MinHeight" Value="34"/><Setter Property="Padding" Value="14,0"/><Setter Property="Margin" Value="0,0,2,0"/>
-   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-    <Grid>
-     <Border x:Name="Tab" Background="Transparent" CornerRadius="7"/>
-     <Border x:Name="Tint" Background="{DynamicResource Ink}" Opacity="0" CornerRadius="7" IsHitTestVisible="False"/>
-     <ContentPresenter Margin="{TemplateBinding Padding}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-    </Grid>
-    <ControlTemplate.Triggers>
-     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.06"/></Trigger>
-     <Trigger Property="AutomationProperties.ItemStatus" Value="Selected"><Setter TargetName="Tab" Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
-    </ControlTemplate.Triggers>
-   </ControlTemplate></Setter.Value></Setter>
-  </Style>
 
   <Style TargetType="ToolTip"><Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="Padding" Value="10,6"/><Setter Property="FontSize" Value="12"/><Setter Property="HasDropShadow" Value="True"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToolTip"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}" MaxWidth="360"><ContentPresenter><ContentPresenter.Resources><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style></ContentPresenter.Resources></ContentPresenter></Border></ControlTemplate></Setter.Value></Setter></Style>

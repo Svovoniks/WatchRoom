@@ -59,15 +59,129 @@ static class ScreenRender
             foreach (var finding in BorderAudit.Find(root)) Console.WriteLine($"CLIPPED {name} (expanded): {finding}");
             foreach (var expander in closed) expander.IsExpanded = false;
         }
+        // The item count rolling from one number to another, drawn every 30 ms and stacked top to bottom at four times size.
+        async Task CaptureCountRoll()
+        {
+            var count = (RollingText)window.FindName("ResultCount"); var shown = count.Text;
+            var frames = new List<BitmapSource>();
+            foreach (var (from, to) in new[] { ("218 items", "242 items"), ("242 items", "97 items"), ("9 items", "10 items"), ("1 item", "2 items") })
+            {
+                count.Text = from; await Settle(700);
+                // As a search runs: the count dims, then the new one rolls in.
+                count.ShowPending("Searching…"); await Settle(250);
+                count.Text = to;
+                for (var at = DateTime.UtcNow; DateTime.UtcNow - at < TimeSpan.FromMilliseconds(660);)
+                {
+                    await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+                    // Rendering the count alone would draw it at its offset in the window, off the bitmap; so the window is
+                    // drawn and the count's box, with a little room above and below, cut from it.
+                    var root = (FrameworkElement)window.Content;
+                    var full = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32); full.Render(root);
+                    var spot = count.TranslatePoint(new Point(0, 0), root);
+                    frames.Add(new CroppedBitmap(full, new Int32Rect((int)spot.X - 60, (int)spot.Y - 6, (int)Math.Ceiling(count.ActualWidth) + 60, (int)Math.Ceiling(count.ActualHeight) + 12)));
+                    await Task.Delay(30);
+                }
+            }
+            var visual = new DrawingVisual(); RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.NearestNeighbor);
+            var w = frames.Max(f => f.PixelWidth) * 4; var h = frames[0].PixelHeight * 4;
+            using (var draw = visual.RenderOpen())
+            {
+                draw.DrawRectangle((Brush)window.FindResource("Canvas"), null, new Rect(0, 0, w, h * frames.Count));
+                for (var i = 0; i < frames.Count; i++) draw.DrawImage(frames[i], new Rect(w - frames[i].PixelWidth * 4, i * h, frames[i].PixelWidth * 4, h));
+            }
+            var strip = new RenderTargetBitmap(w, h * frames.Count, 96, 96, PixelFormats.Pbgra32); strip.Render(visual);
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(strip));
+            await using (var file = File.Create(Path.Combine(output, "dark-count-roll.png"))) encoder.Save(file);
+            count.Text = shown;
+        }
+        // The lit stretch of the category thread gliding from All to Movies and on to Unmatched, drawn every 30 ms at twice size.
+        async Task CaptureCategoryGlide()
+        {
+            var bar = (FrameworkElement)window.FindName("LibraryCategoryBar"); var root = (FrameworkElement)window.Content;
+            var frames = new List<BitmapSource>();
+            foreach (var target in new[] { "MoviesLibraryNav", "UnmatchedLibraryNav", "AllLibraryNav" })
+            {
+                if (window.FindName(target) is not Button { IsVisible: true } button) continue;
+                Call("LibraryCategoryClick", button, new RoutedEventArgs());
+                for (var at = DateTime.UtcNow; DateTime.UtcNow - at < TimeSpan.FromMilliseconds(360);)
+                {
+                    await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+                    var full = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32); full.Render(root);
+                    var spot = bar.TranslatePoint(new Point(0, 0), root);
+                    frames.Add(new CroppedBitmap(full, new Int32Rect((int)spot.X, (int)spot.Y, Math.Min((int)bar.ActualWidth + 60, (int)(root.ActualWidth - spot.X)), (int)bar.ActualHeight + 4)));
+                    await Task.Delay(30);
+                }
+                await Settle(500);
+            }
+            var visual = new DrawingVisual(); RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.NearestNeighbor);
+            var w = frames.Max(f => f.PixelWidth) * 2; var h = frames[0].PixelHeight * 2;
+            using (var draw = visual.RenderOpen())
+            {
+                draw.DrawRectangle((Brush)window.FindResource("Canvas"), null, new Rect(0, 0, w, h * frames.Count));
+                for (var i = 0; i < frames.Count; i++) draw.DrawImage(frames[i], new Rect(0, i * h, frames[i].PixelWidth * 2, h));
+            }
+            var strip = new RenderTargetBitmap(w, h * frames.Count, 96, 96, PixelFormats.Pbgra32); strip.Render(visual);
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(strip));
+            await using (var file = File.Create(Path.Combine(output, "dark-category-glide.png"))) encoder.Save(file);
+        }
+        // A dialog, opened the way the app opens it, drawn over the window once it has settled, then closed. Dialogs float in a
+        // popup of their own, so their layer is drawn onto the window's picture. Opening may wait for an answer, so the picture is
+        // taken and the dialog closed from a timer.
+        async Task CaptureDialog(string name, Action open)
+        {
+            var before = InAppDialog.Open.Count; var done = new TaskCompletionSource(); var shown = DateTime.MinValue; var asked = DateTime.UtcNow;
+            var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(100) };
+            timer.Tick += (_, _) =>
+            {
+                if (InAppDialog.Open.Count <= before) { if (DateTime.UtcNow - asked > TimeSpan.FromSeconds(10)) { timer.Stop(); Console.WriteLine($"DIALOG {name} never opened"); done.TrySetResult(); } return; }
+                if (shown == DateTime.MinValue) { shown = DateTime.UtcNow; return; }
+                if (DateTime.UtcNow - shown < TimeSpan.FromMilliseconds(1200)) return;
+                timer.Stop();
+                var dialog = InAppDialog.Open[^1];
+                var layer = (FrameworkElement)typeof(InAppDialog).GetField("layer", flags)!.GetValue(dialog)!;
+                var root = (FrameworkElement)window.Content;
+                var picture = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32);
+                picture.Render(root); picture.Render(layer);
+                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(picture));
+                using (var file = File.Create(Path.Combine(output, $"dialog-{name}.png"))) encoder.Save(file);
+                Console.WriteLine("Saved dialog-" + name);
+                dialog.Close(); done.TrySetResult();
+            };
+            timer.Start();
+            try { open(); } catch (Exception ex) { Console.WriteLine($"DIALOG {name} failed: {ex.Message}"); timer.Stop(); done.TrySetResult(); }
+            await done.Task; await Settle(300);
+        }
+        async Task CaptureDialogs(LibraryStore store, IReadOnlyList<WantedTitle> wanted, MediaItem? movie)
+        {
+            var click = new RoutedEventArgs();
+            await CaptureDialog("alert", () => Dialogs.Alert(window, "Choose a subfolder", @"Choose folders inside M:\Shows. To leave out a whole library folder, remove it instead."));
+            await CaptureDialog("confirm", () => Dialogs.Confirm(window, "Remove Shows", @"Stop scanning M:\Shows? Its files stay where they are, and adding the folder again brings them back.", "Remove folder"));
+            await CaptureDialog("unsaved-settings", () => Dialogs.ConfirmUnsavedSettings(window));
+            Call("ShowPage", "Queues"); await CaptureDialog("create-queue", () => Call("CreateQueue", window, click));
+            Call("ShowPage", "Rooms");
+            await CaptureDialog("create-room", () => Call("CreatePersistentRoom", window, click));
+            await CaptureDialog("join-room", () => Call("JoinClick", window, click));
+            await CaptureDialog("choose-title", () => Dialogs.Choose(window, [new(1, "movie", "Blade Runner 2049", "2017", null, "Thirty years after the events of the first film, a new blade runner unearths a long-buried secret.", "Movie"),
+                new(2, "movie", "Blade Runner", "1982", null, "A blade runner must pursue and terminate four replicants who stole a ship in space.", "Movie"),
+                new(3, "tv", "Blade Runner: Black Lotus", "2021", null, "A young woman wakes with no memory in 2032 Los Angeles.", "Anime")]));
+            if (movie is not null) { Call("Select", movie); await CaptureDialog("watch-together", () => Call("HostClick", window, click)); }
+            Call("NavigateLibrary", 0, null, null, null); await CaptureDialog("add-title", () => Call("AddTitleClick", window, click));
+            if (wanted.FirstOrDefault(x => !x.IsMovie) is { } show) await CaptureDialog("tracked-seasons", () => AddTitleDialog.EditSeasons(window, show));
+        }
         window.Width = width; window.Height = height;
         var deadline = DateTime.UtcNow.AddSeconds(60);
         while (Field("libraryLoaded") is not true && DateTime.UtcNow < deadline) await Settle(200);
         var items = ((List<MediaItem>)Field("items")!).Where(item => item.Available && !item.IsExtra).ToList();
+        Call("SetRailCollapsed", false);
         foreach (var theme in new[] { "dark", "light" })
         {
             Set("light", theme == "light"); Call("ApplyTheme");
             Call("ShowPage", "Home"); await Capture($"{theme}-home");
             Call("NavigateLibrary", 0, null, null, null); await Capture($"{theme}-library");
+            if (theme == "dark") { await CaptureCountRoll(); await CaptureCategoryGlide(); }
+            // The sidebar folded into its strip of icons.
+            Call("SetRailCollapsed", true); await Capture($"{theme}-library-collapsed");
+            Call("ShowPage", "Home"); await Capture($"{theme}-home-collapsed"); Call("SetRailCollapsed", false);
             if (theme == "light") continue;
             Call("NavigateLibrary", 1, null, null, null); await Capture($"{theme}-movies");
             var episode = items.FirstOrDefault(item => item.Series is not null && item.Season > 0);
@@ -83,10 +197,12 @@ static class ScreenRender
             if (wanted.Count > 0) { Call("NavigateLibrary", 5, null, null, null); await Capture($"{theme}-missing"); }
             if (wanted.FirstOrDefault(x => !x.IsMovie) is { } wantedShow) { Call("NavigateLibrary", wantedShow.Kind == "Anime" ? 3 : 2, wantedShow.Id, wantedShow.Kind, null); await Capture($"{theme}-wanted-show"); }
             if (wanted.FirstOrDefault(x => x.IsMovie) is { } wantedFilm && store.Get(wantedFilm.Id) is { } placeholder) { Call("Select", placeholder); await Capture($"{theme}-wanted-film"); }
+            Call("NavigateLibrary", 0, null, null, null); Call("OpenSearch", false); await Capture($"{theme}-search");
             foreach (var page in new[] { "Queues", "Rooms", "Folders", "Room" }) { Call("ShowPage", page); await Capture($"{theme}-{page.ToLowerInvariant()}"); }
             Call("ShowPage", "Settings");
-            foreach (var section in new[] { "Downloads", "Profile", "Metadata", "Playback", "Appearance", "Updates" })
+            foreach (var section in new[] { "Plugins", "Downloads", "Profile", "Metadata", "Playback", "Appearance", "Updates" })
             { Call("ShowPreferenceSection", section); await Capture($"{theme}-settings-{section.ToLowerInvariant()}"); }
+            await CaptureDialogs(store, wanted, movie);
         }
         Set("light", false); Call("ApplyTheme");
         await SurfaceAudit.Run(window, Settle, (name, finding) => Console.WriteLine($"CLIPPED {name}: {finding}"));
