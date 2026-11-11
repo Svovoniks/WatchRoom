@@ -702,6 +702,9 @@ static class Program
         check(count.Text == "42 items" && Shade() < 0.6, $"a pending count dims and keeps its number (shows \"{count.Text}\" at {Shade():0.##})");
         count.Text = "57 items"; await Task.Delay(900);
         check(Shade() == 1 && Shown() == "57 items", "the new count rolls in at full strength");
+        // A search that finds as many titles as before brings the count back to full strength too.
+        count.ShowPending("Searching…"); await Task.Delay(400); count.Text = "57 items"; await Task.Delay(400);
+        check(Shade() == 1 && Shown() == "57 items", $"a count that comes back unchanged is no longer dimmed (at {Shade():0.##})");
         count.Text = "Loading library…"; count.ShowPending("Searching…");
         check(count.Text == "Searching…", "with no count yet, the status shows");
         count.Text = original;
@@ -749,11 +752,12 @@ static class Program
             var last = ((System.Windows.Controls.Panel)window.FindName("LibraryCategories")).Children.OfType<FrameworkElement>().LastOrDefault(segment => segment.IsVisible);
             return !categories.IsVisible || last is null ? 0 : last.TranslatePoint(new Point(last.ActualWidth, 0), categories).X;
         }
+        // Box middles agree to within the nudges that put the text on one baseline, which is checked exactly further on.
         double Middle(FrameworkElement element) => Box(element).Top + element.ActualHeight / 2;
-        check(categories.IsVisible && Math.Abs(Middle(words) - Middle(scan)) < 1 && Crowded() == "",
+        check(categories.IsVisible && Math.Abs(Middle(words) - Middle(scan)) < 1.5 && Crowded() == "",
             $"the library's categories, count and actions share one row ({Box(categories)}, {Box(scan)}{(Crowded() is { Length: > 0 } c ? "; " + c : "")})");
         var wide = window.Width; window.Width = window.MinWidth; await Task.Delay(150); window.UpdateLayout();
-        check(Crowded() == "" && (Math.Abs(Middle(words) - Middle(scan)) < 1 || Box(scan).Top >= Box(categories).Bottom),
+        check(Crowded() == "" && (Math.Abs(Middle(words) - Middle(scan)) < 1.5 || Box(scan).Top >= Box(categories).Bottom),
             $"a narrow window keeps the categories and actions apart ({toolbar.ActualWidth:0} wide{(Crowded() is { Length: > 0 } n ? ": " + n : "")})");
         // Too narrow for the categories and actions side by side: the actions take a row of their own and the categories keep their whole width.
         toolbar.Width = SegmentsEnd() + 140; await Task.Delay(150); window.UpdateLayout();
@@ -763,12 +767,39 @@ static class Program
         var addWidths = ((double Full, double Compact))typeof(MainWindow).GetField("addTitleWidths", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
         check(addWidths.Compact < addWidths.Full - 30, $"Add title is much narrower as only its plus ({addWidths.Compact:0.#} against {addWidths.Full:0.#})");
         toolbar.Width = SegmentsEnd() + 16 + count.DesiredSize.Width + scan.DesiredSize.Width + addWidths.Compact + 2; await Task.Delay(150); window.UpdateLayout();
-        check(Crowded() == "" && Math.Abs(Middle(words) - Middle(scan)) < 1 && ((System.Windows.Controls.Button)add).Content is not string,
+        check(Crowded() == "" && Math.Abs(Middle(words) - Middle(scan)) < 1.5 && ((System.Windows.Controls.Button)add).Content is not string,
             $"a toolbar a little short of room shortens Add title to its plus and keeps one row ({toolbar.ActualWidth:0} wide{(Crowded() is { Length: > 0 } s ? ": " + s : "")})");
         toolbar.Width = double.NaN;
         window.Width = wide; await Task.Delay(150); window.UpdateLayout();
-        check(Math.Abs(Middle(words) - Middle(scan)) < 1 && toolbar.ActualHeight == height, "widening the window brings the actions back beside the categories");
+        check(Math.Abs(Middle(words) - Middle(scan)) < 1.5 && toolbar.ActualHeight == height, "widening the window brings the actions back beside the categories");
         await CheckRollingCount(window, (RollingText)count, check);
+        // The words, the count and the buttons share one baseline, measured as where the ink of letters without descenders ends.
+        ((RollingText)count).Text = "218 items"; await Task.Delay(900);
+        {
+            var scale = System.Windows.Media.VisualTreeHelper.GetDpi(toolbar).PixelsPerDip;
+            var root = (FrameworkElement)window.Content; window.UpdateLayout();
+            var full = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth * scale), (int)Math.Ceiling(root.ActualHeight * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+            full.Render(root);
+            var stride = full.PixelWidth * 4; var pixels = new byte[stride * full.PixelHeight]; full.CopyPixels(pixels, stride, 0);
+            // The last row where the element's right-hand part (from `from`, a fraction of its width) has ink unlike the canvas.
+            int InkBottom(FrameworkElement element, double from)
+            {
+                var at = element.TranslatePoint(new Point(0, 0), root);
+                int x0 = (int)((at.X + element.ActualWidth * from) * scale), x1 = (int)((at.X + element.ActualWidth) * scale) - 1;
+                int y0 = (int)(at.Y * scale), y1 = (int)((at.Y + element.ActualHeight) * scale) - 1;
+                var ground = pixels.AsSpan((y0 * stride) + (x0 * 4), 4).ToArray(); var last = -1;
+                for (var y = y0; y <= y1; y++) for (var x = x0; x <= x1; x++)
+                {
+                    var i = y * stride + x * 4;
+                    if (Math.Abs(pixels[i] - ground[0]) + Math.Abs(pixels[i + 1] - ground[1]) + Math.Abs(pixels[i + 2] - ground[2]) > 90) { last = y; break; }
+                }
+                return last;
+            }
+            // "items" is the right part of the count; "218" has no descending figures either.
+            int lineWord = InkBottom((FrameworkElement)window.FindName("AnimeLibraryNav"), 0), lineCount = InkBottom(count, 0.55), lineScan = InkBottom(scan, 0);
+            check(Math.Abs(lineCount - lineWord) <= 1 && Math.Abs(lineScan - lineWord) <= 1,
+                $"the categories, the count and the buttons share one baseline (words {lineWord}, count {lineCount}, Rescan {lineScan} at {scale:0.##}x)");
+        }
         Call("OpenSearch", false); await Task.Delay(100); window.UpdateLayout();
         check(header.Visibility == Visibility.Visible && crumbs.Visibility == Visibility.Collapsed && scan.Visibility == Visibility.Collapsed,
             "Search shows its field and filters in place of the category's location and actions");

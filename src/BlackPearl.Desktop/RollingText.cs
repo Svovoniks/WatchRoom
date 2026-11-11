@@ -11,10 +11,10 @@ namespace BlackPearl.Desktop;
 /// <summary>
 /// A line of text, such as "218 items", whose count rolls when it changes. Only the digits that differ move: each old digit
 /// slides out and its replacement slides in, upward when the count grows and downward when it shrinks, the ones place first
-/// and each higher place a moment later. A word that changes, such as "items" becoming "item", fades across in place. Digits
-/// share one width, and a part that changes width (a digit appearing, "items" becoming "item") eases to its new width, so
-/// nothing beside it jumps. While a new count is on its way the old one dims rather than giving way to a
-/// status, so the count rolls straight from one number to the next. Text without a count changes at once.
+/// and each higher place a moment later. A word that changes, such as "items" becoming "item", fades across in place. A part
+/// that changes width (a digit appearing, a word gaining a letter) eases to its new width, so nothing beside it jumps. While a
+/// new count is on its way the old one dims rather than giving way to a status, so the count rolls straight from one number to
+/// the next. Text without a count changes at once. The figures follow the element's typography, such as old-style figures.
 /// </summary>
 /// <remarks>
 /// Text that has not rolled, such as the first count after "Loading library…", is one text block whose text changes; putting
@@ -25,7 +25,9 @@ public sealed class RollingText : Decorator
 {
     public static readonly DependencyProperty TextProperty = DependencyProperty.Register(nameof(Text), typeof(string), typeof(RollingText),
         new PropertyMetadata("", (control, change) => ((RollingText)control).Show((string?)change.OldValue ?? "", (string?)change.NewValue ?? "")));
-    public string Text { get => (string)GetValue(TextProperty); set => SetValue(TextProperty, value); }
+    /// <summary>The text shown. Setting it ends a pending dim even when the text is unchanged, as when a search finds as many
+    /// titles as before, since an unchanged value raises no change.</summary>
+    public string Text { get => (string)GetValue(TextProperty); set { Dim(false); SetValue(TextProperty, value); } }
 
     private static readonly TimeSpan RollTime = TimeSpan.FromMilliseconds(420), Stagger = TimeSpan.FromMilliseconds(55), DimTime = TimeSpan.FromMilliseconds(160);
     private const double DimmedOpacity = 0.4;
@@ -39,7 +41,6 @@ public sealed class RollingText : Decorator
     public RollingText()
     {
         Child = host; host.Children.Add(display);
-        Typography.SetNumeralAlignment(this, FontNumeralAlignment.Tabular);
     }
 
     /// <summary>A new count is on its way: the count shown dims until it arrives, or the status shows if there is no count yet.</summary>
@@ -166,7 +167,7 @@ public sealed class RollingText : Decorator
         if (block is null) return 0;
         block.FontFamily = TextElement.GetFontFamily(this); block.FontSize = TextElement.GetFontSize(this); block.FontWeight = TextElement.GetFontWeight(this);
         block.FontStyle = TextElement.GetFontStyle(this); block.FontStretch = TextElement.GetFontStretch(this);
-        Typography.SetNumeralAlignment(block, FontNumeralAlignment.Tabular);
+        Typography.SetNumeralStyle(block, Typography.GetNumeralStyle(this)); Typography.SetNumeralAlignment(block, Typography.GetNumeralAlignment(this));
         TextOptions.SetTextFormattingMode(block, TextOptions.GetTextFormattingMode(this));
         block.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         return block.DesiredSize.Width;

@@ -56,7 +56,13 @@ public partial class MainWindow
         // Beside the categories, the actions centre on the words rather than on the words and their thread.
         var bottom = categories && !wrap ? LibraryCategoryBar.RowDefinitions[1].Height.Value : 0;
         Grid.SetRow(ResultCount, row); Grid.SetRow(RescanButton, row); Grid.SetRow(AddTitleButton, row);
-        ResultCount.Margin = new Thickness(12, top, 8, bottom); RescanButton.Margin = new Thickness(0, top, 0, bottom); AddTitleButton.Margin = new Thickness(4, top, 0, bottom);
+        // Centring sets text of different sizes on different baselines; these nudges put the count's smaller serif and the
+        // buttons' sans on the category words' baseline.
+        // The count is centred, so trimming its bottom margin lowers it; the buttons fill their slot exactly, so
+        // they are lifted by moving the whole slot up.
+        var lower = bottom > 0 ? 1 : 0; var lift = bottom > 0 ? 1 : 0;
+        ResultCount.Margin = new Thickness(12, top, 8, bottom - lower);
+        RescanButton.Margin = new Thickness(0, top - lift, 0, bottom + lift); AddTitleButton.Margin = new Thickness(4, top - lift, 0, bottom + lift);
     }
 
     /// <summary>How wide Add title is with its label and as only its plus, margin included.</summary>
