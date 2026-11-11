@@ -8,6 +8,9 @@
   <Thickness x:Key="IconButtonPadding">8,12</Thickness>
   <!-- Fluent icons on Windows 11; MDL2 shares the code points on Windows 10. -->
   <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+  <!-- The app's display serif, the wordmark's: page headings, display titles and the thread selector's words. Everything else is
+       set in the interface's sans. -->
+  <FontFamily x:Key="DisplayFont">Sitka Heading, Georgia</FontFamily>
 
   <!-- Theme palette. MainWindow.ApplyTheme replaces these brushes with the chosen colour theme in light or dark mode. -->
   <SolidColorBrush x:Key="Canvas" Color="#0F1311"/><SolidColorBrush x:Key="Surface" Color="#151A17"/><SolidColorBrush x:Key="Elevated" Color="#1E2420"/><SolidColorBrush x:Key="Ink" Color="#EAF0EB"/><SolidColorBrush x:Key="Muted" Color="#9BA89F"/><SolidColorBrush x:Key="Line" Color="#28302B"/><SolidColorBrush x:Key="Accent" Color="#9FD4A8"/><SolidColorBrush x:Key="AccentInk" Color="#0E2A15"/>
@@ -32,11 +35,13 @@
   <DropShadowEffect x:Key="PopupShadow" BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.4" Color="#000000"/>
 
   <Style x:Key="FocusRing"><Setter Property="Control.Template"><Setter.Value><ControlTemplate><Border BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="8" SnapsToDevicePixels="True"/></ControlTemplate></Setter.Value></Setter></Style>  <Style TargetType="Window"><Setter Property="local:WindowTheme.Enabled" Value="True"/><Setter Property="Icon" Value="/BlackPearl;component/Assets/BlackPearl.ico"/><Setter Property="Background" Value="{DynamicResource Canvas}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontFamily" Value="Segoe UI"/><Setter Property="FontSize" Value="14"/></Style>
+  <!-- Links are in the accent everywhere, rather than the system's blue. -->
+  <Style TargetType="Hyperlink"><Setter Property="Foreground" Value="{DynamicResource Accent}"/></Style>
   <Style x:Key="MutedText" TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="21"/></Style>
-  <Style x:Key="PageHeading" TargetType="TextBlock"><Setter Property="FontSize" Value="28"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <Style x:Key="PageHeading" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/><Setter Property="FontSize" Value="32"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
   <Style x:Key="SectionHeading" TargetType="TextBlock"><Setter Property="FontSize" Value="16"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,24,0,8"/></Style>
   <Style x:Key="RowHeading" TargetType="TextBlock"><Setter Property="FontSize" Value="19"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
-  <Style x:Key="Overline" TargetType="TextBlock"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Margin" Value="0,0,0,8"/></Style>
+  <Style x:Key="Overline" TargetType="TextBlock"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Margin" Value="0,0,0,8"/></Style>
   <Style x:Key="FieldLabel" TargetType="TextBlock"><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="FontSize" Value="13"/><Setter Property="Margin" Value="0,0,0,2"/></Style>
   <Style x:Key="Icon" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="16"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
   <Style x:Key="NavigationIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="Width" Value="28"/><Style.Triggers><DataTrigger Binding="{Binding (AutomationProperties.ItemStatus), RelativeSource={RelativeSource AncestorType=Button}}" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Accent}"/></DataTrigger></Style.Triggers></Style>
@@ -64,6 +69,11 @@
   </Style>
   <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="{DynamicResource Accent}"/><Setter Property="Foreground" Value="{DynamicResource AccentInk}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
   <Style x:Key="QuietButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Padding" Value="12,8"/></Style>
+  <!-- An action in a page's or a section's header: quiet text beside the heading, so the heading leads. Filled buttons are for
+       actions within the content, such as Resume or Connect. -->
+  <Style x:Key="HeaderAction" TargetType="Button" BasedOn="{StaticResource QuietButton}"><Setter Property="Height" Value="34"/><Setter Property="MinHeight" Value="0"/><Setter Property="Padding" Value="12,0"/><Setter Property="Margin" Value="0"/></Style>
+  <!-- The header's action that makes something new, in the accent. -->
+  <Style x:Key="HeaderCreate" TargetType="Button" BasedOn="{StaticResource HeaderAction}"><Setter Property="Foreground" Value="{DynamicResource Accent}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
   <Style x:Key="QuietIcon" TargetType="Button" BasedOn="{StaticResource QuietButton}"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="14"/><Setter Property="Width" Value="34"/><Setter Property="Height" Value="34"/><Setter Property="MinHeight" Value="34"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,6,0"/></Style>
   <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="14"/><Setter Property="Width" Value="40"/><Setter Property="Height" Value="40"/><Setter Property="Padding" Value="0"/></Style>
   <!-- Prefixes button content with an icon given in Tag of the ContentTemplate; content stays plain text for code and automation. -->
@@ -118,7 +128,8 @@
 
   <Style x:Key="Switch" TargetType="ToggleButton">
    <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Cursor" Value="Hand"/>
-   <Setter Property="MinHeight" Value="32"/><Setter Property="Padding" Value="4"/><Setter Property="Margin" Value="-4,2,0,2"/>
+   <!-- No padding on the left, so the track lines up with the text above it whatever margin a switch is given. -->
+   <Setter Property="MinHeight" Value="32"/><Setter Property="Padding" Value="0,4,4,4"/><Setter Property="Margin" Value="0,2,0,2"/>
    <Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="VerticalContentAlignment" Value="Center"/>
    <Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToggleButton">
@@ -199,7 +210,7 @@
        weight, so choosing one never moves the others. The space after each word is its right padding, so the first word lines
        up with the page and the light centres on the word; the bottom margin is the room for the thread. -->
   <Style x:Key="ThreadWord" TargetType="ButtonBase">
-   <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontFamily" Value="Sitka Heading, Georgia"/><Setter Property="FontSize" Value="19"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+   <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/><Setter Property="FontSize" Value="19"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="Height" Value="34"/><Setter Property="Padding" Value="0,0,26,0"/><Setter Property="Margin" Value="0,0,0,12"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Background" Value="Transparent"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ButtonBase">
     <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter VerticalAlignment="Center" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" RecognizesAccessKey="True"/></Border>
@@ -231,17 +242,6 @@
   <Style x:Key="LibraryBreadcrumbs" TargetType="ItemsControl">
    <Setter Property="ItemsPanel"><Setter.Value><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></Setter.Value></Setter>
    <Setter Property="ItemTemplate"><Setter.Value><DataTemplate><StackPanel Orientation="Horizontal"><TextBlock x:Name="Chevron" Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="10" Foreground="{DynamicResource Muted}" Margin="2,1,2,0" VerticalAlignment="Center"/><Button Tag="{Binding}" Style="{StaticResource BreadcrumbButton}" ToolTip="{Binding Label}" AutomationProperties.Name="{Binding Label}"><TextBlock Text="{Binding Label}" MaxWidth="300" TextTrimming="CharacterEllipsis"/></Button></StackPanel><DataTemplate.Triggers><DataTrigger Binding="{Binding Separator}" Value=""><Setter TargetName="Chevron" Property="Visibility" Value="Collapsed"/></DataTrigger><DataTrigger Binding="{Binding Separator}" Value="{x:Null}"><Setter TargetName="Chevron" Property="Visibility" Value="Collapsed"/></DataTrigger></DataTemplate.Triggers></DataTemplate></Setter.Value></Setter>
-  </Style>
-  <!-- Single-choice filter pill: the mystery deck on Home and the type of title in Search. -->
-  <Style x:Key="Chip" TargetType="RadioButton">
-   <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontSize" Value="12"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Margin" Value="0,0,6,6"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
-   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
-    <Border x:Name="Pill" Background="Transparent" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="14" Padding="12,5"><ContentPresenter VerticalAlignment="Center"/></Border>
-    <ControlTemplate.Triggers>
-     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger>
-     <Trigger Property="IsChecked" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Accent}"/><Setter TargetName="Pill" Property="Background" Value="{DynamicResource AccentSoft}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
-    </ControlTemplate.Triggers>
-   </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="CardWatchedButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
    <Setter Property="HorizontalAlignment" Value="Right"/><Setter Property="VerticalAlignment" Value="Top"/>

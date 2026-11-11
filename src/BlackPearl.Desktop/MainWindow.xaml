@@ -15,7 +15,7 @@
      <StackPanel x:Name="RailBrand" Orientation="Horizontal" Height="40" Margin="42,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Top">
       <Image x:Name="RailLogo" Source="Assets/BlackPearl.png" Width="28" Height="28" VerticalAlignment="Center" AutomationProperties.Name="BlackPearl"/>
       <!-- The name is set in a serif, like a jeweller's mark, apart from the interface type around it. -->
-      <TextBlock x:Name="RailBrandName" Text="BlackPearl" FontFamily="Sitka Heading, Georgia" FontSize="21" FontWeight="SemiBold" Margin="9,0,0,2" VerticalAlignment="Center" Style="{StaticResource NavigationLabel}"/>
+      <TextBlock x:Name="RailBrandName" Text="BlackPearl" FontFamily="{StaticResource DisplayFont}" FontSize="21" FontWeight="SemiBold" Margin="9,0,0,2" VerticalAlignment="Center" Style="{StaticResource NavigationLabel}"/>
      </StackPanel>
     </Grid>
     <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
@@ -182,7 +182,7 @@
        <Rectangle Fill="{DynamicResource HeroFade}"/>
        <StackPanel Margin="34,0,34,0" VerticalAlignment="Center" HorizontalAlignment="Left" MaxWidth="500">
         <TextBlock x:Name="HomeHeroKicker" FontSize="13" Foreground="{DynamicResource Accent}" FontWeight="SemiBold" Margin="0,0,0,8" TextTrimming="CharacterEllipsis"/>
-        <TextBlock x:Name="HomeHeroTitle" FontSize="44" FontWeight="Bold" TextWrapping="Wrap" MaxHeight="100" TextTrimming="CharacterEllipsis" LineHeight="50" LineStackingStrategy="BlockLineHeight"/>
+        <TextBlock x:Name="HomeHeroTitle" FontFamily="{StaticResource DisplayFont}" FontSize="46" FontWeight="SemiBold" TextWrapping="Wrap" MaxHeight="100" TextTrimming="CharacterEllipsis" LineHeight="50" LineStackingStrategy="BlockLineHeight"/>
         <TextBlock x:Name="HomeHeroOverview" Style="{StaticResource MutedText}" Margin="0,10,0,0" MaxHeight="63" TextTrimming="CharacterEllipsis"/>
         <ProgressBar Height="4" Width="300" HorizontalAlignment="Left" Value="{Binding Progress, Mode=OneWay}" Maximum="100" Margin="0,16,0,18" Style="{StaticResource CardProgress}"/>
         <StackPanel Orientation="Horizontal">
@@ -212,21 +212,22 @@
        <Rectangle IsHitTestVisible="False"><Rectangle.Fill><RadialGradientBrush Center="0.82,0.5" GradientOrigin="0.82,0.5" RadiusX="0.4" RadiusY="0.8" Opacity="0.22"><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="{DynamicResource AccentClear}" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
        <Grid Margin="30,26,40,24"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
         <StackPanel VerticalAlignment="Center">
-         <TextBlock Text="Can't decide?" FontSize="28" FontWeight="Bold"/>
+         <TextBlock Text="Can't decide?" FontFamily="{StaticResource DisplayFont}" FontSize="30" FontWeight="SemiBold"/>
          <TextBlock x:Name="HomeMysteryIntro" Text="Draw a random title you haven't started. Narrow it down by type and length." Style="{StaticResource MutedText}" Margin="0,6,0,14" MaxWidth="380" HorizontalAlignment="Left"/>
+         <!-- Two choices on the app's thread selector (ThreadBar.cs): the type of title, then its length. -->
          <StackPanel x:Name="HomeMysteryFilters">
-          <WrapPanel>
-           <RadioButton x:Name="MysteryAnything" GroupName="MysteryKind" Content="Anything" Tag="" IsChecked="True" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
-           <RadioButton GroupName="MysteryKind" Content="Movie" Tag="Movie" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
-           <RadioButton GroupName="MysteryKind" Content="Show" Tag="Show" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
-           <RadioButton x:Name="MysteryAnime" GroupName="MysteryKind" Content="Anime" Tag="Anime" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
-          </WrapPanel>
-          <WrapPanel>
-           <RadioButton GroupName="MysteryLength" Content="Any length" Tag="Any" IsChecked="True" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
-           <RadioButton GroupName="MysteryLength" Content="Under 30 min" Tag="Short" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
-           <RadioButton GroupName="MysteryLength" Content="Under 2 hours" Tag="Evening" Checked="MysteryFilterChanged" Style="{StaticResource Chip}"/>
-           <RadioButton GroupName="MysteryLength" Content="Long night" Tag="LongNight" Checked="MysteryFilterChanged" Style="{StaticResource Chip}" ToolTip="Movies over two hours, or series with six or more episodes"/>
-          </WrapPanel>
+          <local:ThreadBar HorizontalAlignment="Left" Reach="5"><WrapPanel AutomationProperties.Name="Type of title">
+           <RadioButton x:Name="MysteryAnything" GroupName="MysteryKind" Content="Anything" Tag="" IsChecked="True" Checked="MysteryFilterChanged" Style="{StaticResource ThreadOptionChoice}"/>
+           <RadioButton GroupName="MysteryKind" Content="Movie" Tag="Movie" Checked="MysteryFilterChanged" Style="{StaticResource ThreadOptionChoice}"/>
+           <RadioButton GroupName="MysteryKind" Content="Show" Tag="Show" Checked="MysteryFilterChanged" Style="{StaticResource ThreadOptionChoice}"/>
+           <RadioButton x:Name="MysteryAnime" GroupName="MysteryKind" Content="Anime" Tag="Anime" Checked="MysteryFilterChanged" Style="{StaticResource ThreadOptionChoice}"/>
+          </WrapPanel></local:ThreadBar>
+          <local:ThreadBar HorizontalAlignment="Left" Reach="5"><WrapPanel AutomationProperties.Name="Length">
+           <RadioButton GroupName="MysteryLength" Content="Any length" Tag="Any" IsChecked="True" Checked="MysteryFilterChanged" Style="{StaticResource ThreadOptionChoice}"/>
+           <RadioButton GroupName="MysteryLength" Content="Under 30 min" Tag="Short" Checked="MysteryFilterChanged" Style="{StaticResource ThreadOptionChoice}"/>
+           <RadioButton GroupName="MysteryLength" Content="Under 2 hours" Tag="Evening" Checked="MysteryFilterChanged" Style="{StaticResource ThreadOptionChoice}"/>
+           <RadioButton GroupName="MysteryLength" Content="Long night" Tag="LongNight" Checked="MysteryFilterChanged" Style="{StaticResource ThreadOptionChoice}" ToolTip="Movies over two hours, or series with six or more episodes"/>
+          </WrapPanel></local:ThreadBar>
          </StackPanel>
          <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
           <Button x:Name="HomeMysteryPlay" Content="Play" Click="PlayHomeCard" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" Padding="20,8"/>
@@ -283,7 +284,7 @@
       <!-- The type of title is one choice among several, on the app's thread selector like the library's categories; green is
            kept for filters that are on. The count is set like the library's, level with the words above the thread. -->
       <DockPanel Margin="0,14,0,0">
-       <TextBlock DockPanel.Dock="Right" Text="{Binding Text, ElementName=ResultCount}" Foreground="{DynamicResource Muted}" FontFamily="Sitka Heading, Georgia" FontSize="15" Typography.NumeralStyle="OldStyle" VerticalAlignment="Center" Margin="12,0,8,12" AutomationProperties.LiveSetting="Polite"/>
+       <TextBlock DockPanel.Dock="Right" Text="{Binding Text, ElementName=ResultCount}" Foreground="{DynamicResource Muted}" FontFamily="{StaticResource DisplayFont}" FontSize="15" Typography.NumeralStyle="OldStyle" VerticalAlignment="Center" Margin="12,0,8,12" AutomationProperties.LiveSetting="Polite"/>
        <Button x:Name="ClearSearchFiltersButton" DockPanel.Dock="Right" Content="Clear filters" Click="ClearSearchFiltersClick" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Accent}" Height="30" MinHeight="0" Padding="10,0" FontSize="13" VerticalAlignment="Center" Margin="8,0,0,12" Visibility="Collapsed"/>
        <local:ThreadBar HorizontalAlignment="Left">
         <StackPanel x:Name="SearchKinds" Orientation="Horizontal" AutomationProperties.Name="Type of title">
@@ -399,9 +400,9 @@
       <TextBlock x:Name="SearchNote" Visibility="Collapsed" Style="{StaticResource MutedText}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"/>
       <!-- The count and actions sit level with the category words, above the thread; they stay quiet so the pearl leads. -->
       <!-- The count rolls to each new number, digit by digit (RollingText.cs). It is set like the category counts, in the categories' serif with old-style figures, so every number on the row speaks with one voice. -->
-      <local:RollingText Grid.Column="1" x:Name="ResultCount" MinWidth="100" TextElement.Foreground="{DynamicResource Muted}" TextElement.FontFamily="Sitka Heading, Georgia" TextElement.FontSize="15" Typography.NumeralStyle="OldStyle" VerticalAlignment="Center" Margin="12,0,8,0" AutomationProperties.LiveSetting="Polite"/>
-      <Button x:Name="RescanButton" Grid.Column="2" Style="{StaticResource QuietButton}" Height="34" MinHeight="0" Padding="12,0" Content="Rescan" Click="ScanClick" Margin="0" ToolTip="Check your folders for new videos"/>
-      <Button x:Name="AddTitleButton" Grid.Column="3" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Accent}" FontWeight="SemiBold" Height="34" MinHeight="0" Padding="14,0" Margin="10,0,0,0" Content="Add title" ContentTemplate="{StaticResource AddContent}" Click="AddTitleClick" ToolTip="Add a show or film you don't have files for yet (Ctrl+N)" AutomationProperties.Name="Add title"/>
+      <local:RollingText Grid.Column="1" x:Name="ResultCount" MinWidth="100" TextElement.Foreground="{DynamicResource Muted}" TextElement.FontFamily="{StaticResource DisplayFont}" TextElement.FontSize="15" Typography.NumeralStyle="OldStyle" VerticalAlignment="Center" Margin="12,0,8,0" AutomationProperties.LiveSetting="Polite"/>
+      <Button x:Name="RescanButton" Grid.Column="2" Style="{StaticResource HeaderAction}" Content="Rescan" Click="ScanClick" Margin="0" ToolTip="Check your folders for new videos"/>
+      <Button x:Name="AddTitleButton" Grid.Column="3" Style="{StaticResource HeaderCreate}" Padding="14,0" Margin="10,0,0,0" Content="Add title" ContentTemplate="{StaticResource AddContent}" Click="AddTitleClick" ToolTip="Add a show or film you don't have files for yet (Ctrl+N)" AutomationProperties.Name="Add title"/>
      </Grid>
      <Expander x:Name="SeasonInformation" Foreground="{DynamicResource Muted}" Header="Season details" Visibility="Collapsed" Margin="-6,0,0,10"><TextBlock x:Name="SeasonSummary" Style="{StaticResource MutedText}" Margin="0,8,0,8" MaxWidth="760" HorizontalAlignment="Left"/></Expander>
      <!-- Asks an acquisition plugin for the missing and upcoming episodes of the season being browsed. -->
@@ -437,7 +438,7 @@
       <Button Click="ToggleCardWatched"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource CardWatchedButton}"><Style.Triggers><DataTrigger Binding="{Binding IsRemote}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger><DataTrigger Binding="{Binding HasNoFiles}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
      </Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
      <StackPanel x:Name="EmptyLibrary" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420"><Border Width="76" Height="76" CornerRadius="38" Background="{DynamicResource AccentSoft}" Margin="0,0,0,22"><TextBlock Text="&#xE8B7;" Style="{StaticResource Icon}" FontSize="30" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><TextBlock Text="Your library starts here" FontWeight="SemiBold" FontSize="24" TextAlignment="Center" TextWrapping="Wrap"/><TextBlock Text="Add a video folder to discover movies and shows. Your files stay where they are." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,24"/><WrapPanel HorizontalAlignment="Center"><Button Content="Add folder" Style="{StaticResource Primary}" ContentTemplate="{StaticResource AddContent}" Tag="Folders" Click="Navigate"/><Button Content="Join a friend" ContentTemplate="{StaticResource PeopleContent}" Click="JoinFromWelcome" Margin="0,0,8,8"/><Button Content="Add a title" ContentTemplate="{StaticResource AddContent}" Click="AddTitleClick" Margin="0,0,0,8" ToolTip="Add a show or film you don't have files for yet"/></WrapPanel></StackPanel>
-     <StackPanel x:Name="NoResults" Visibility="Collapsed" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420"><TextBlock Text="&#xE721;" Style="{StaticResource EmptyStateIcon}" Foreground="{DynamicResource Muted}"/><TextBlock Text="No titles found" FontSize="24" FontWeight="SemiBold" TextAlignment="Center"/><TextBlock x:Name="NoResultsHint" Text="Try another search or clear your filters." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,22"/><Button x:Name="FindTitleButton" Style="{StaticResource Primary}" Click="FindTitleClick" HorizontalAlignment="Center" Margin="0,0,0,10" Visibility="Collapsed"/><Button x:Name="ResetFiltersButton" Content="Clear search and filters" Click="ResetFilters" HorizontalAlignment="Center" Margin="0"/></StackPanel>
+     <StackPanel x:Name="NoResults" Visibility="Collapsed" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420"><TextBlock Text="&#xE721;" Style="{StaticResource EmptyStateIcon}" Foreground="{DynamicResource Muted}"/><TextBlock Text="No titles found" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold" TextAlignment="Center"/><TextBlock x:Name="NoResultsHint" Text="Try another search or clear your filters." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,22"/><Button x:Name="FindTitleButton" Style="{StaticResource Primary}" Click="FindTitleClick" HorizontalAlignment="Center" Margin="0,0,0,10" Visibility="Collapsed"/><Button x:Name="ResetFiltersButton" Content="Clear search and filters" Click="ResetFilters" HorizontalAlignment="Center" Margin="0"/></StackPanel>
      <!-- The browsing guest's mouse, shown to the host while following them. -->
      <Canvas x:Name="GuestPointerLayer" IsHitTestVisible="False" ClipToBounds="True"><Grid x:Name="GuestPointer" Width="24" Height="24" Margin="-12,-12,0,0" Visibility="Collapsed" AutomationProperties.Name="Guest pointer"><Grid.RenderTransform><TranslateTransform x:Name="GuestPointerPosition"/></Grid.RenderTransform><Ellipse Fill="{DynamicResource Accent}" Opacity="0.3"/><Ellipse Stroke="{DynamicResource Accent}" StrokeThickness="2.5"/></Grid></Canvas></Grid>
     <!-- Several selected cards: what can be done to all of them at once. Ctrl+click or Shift+click selects, Esc clears. -->
@@ -477,7 +478,7 @@
       </Grid>
       <StackPanel Grid.Column="1" Margin="32,6,0,0">
        <TextBlock x:Name="DetailContext" Foreground="{DynamicResource Accent}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,8"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
-       <TextBlock x:Name="DetailTitle" FontSize="36" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,10"/>
+       <TextBlock x:Name="DetailTitle" FontFamily="{StaticResource DisplayFont}" FontSize="38" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,10"/>
        <TextBlock x:Name="DetailMeta" Style="{StaticResource MutedText}" FontSize="14" Margin="0,0,0,24"/>
        <!-- The file's audio and subtitles, with languages identified for tracks the file doesn't tag. -->
        <Grid x:Name="DetailTracks" Visibility="Collapsed" Margin="0,-12,0,22" MaxWidth="720" HorizontalAlignment="Left" AutomationProperties.Name="Audio and subtitles">
@@ -514,7 +515,7 @@
    <!-- First launch -->
    <ScrollViewer x:Name="WelcomePage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
     <StackPanel MaxWidth="560" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24">
-     <Image Source="Assets/BlackPearl.png" Width="72" Height="72" HorizontalAlignment="Center" Margin="0,0,0,24"/><TextBlock Text="Welcome to BlackPearl" FontSize="34" FontWeight="Bold" TextAlignment="Center"/>
+     <Image Source="Assets/BlackPearl.png" Width="72" Height="72" HorizontalAlignment="Center" Margin="0,0,0,24"/><TextBlock Text="Welcome to BlackPearl" FontFamily="{StaticResource DisplayFont}" FontSize="36" FontWeight="SemiBold" TextAlignment="Center"/>
      <TextBlock Text="Add your videos or join a friend. Only the host needs the files." Style="{StaticResource MutedText}" FontSize="15" TextAlignment="Center" Margin="0,10,0,28"/>
      <WrapPanel HorizontalAlignment="Center"><Button Content="Add folder" Tag="Folders" Click="Navigate" Style="{StaticResource Primary}" ContentTemplate="{StaticResource AddContent}" Padding="20,8"/><Button Content="Join a friend" Click="JoinFromWelcome" ContentTemplate="{StaticResource PeopleContent}" Padding="20,8" Margin="0,0,8,8"/><Button Content="Add a title" Click="AddTitleClick" ContentTemplate="{StaticResource AddContent}" Padding="20,8" Margin="0,0,0,8" ToolTip="Add the shows and films you want; they show as missing until their files are here"/></WrapPanel>
     </StackPanel>
@@ -529,7 +530,7 @@
 
     <Grid x:Name="QueueGalleryView">
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-     <DockPanel Margin="0,0,0,20"><Button DockPanel.Dock="Right" Content="New queue" Click="CreateQueue" ContentTemplate="{StaticResource AddContent}" VerticalAlignment="Center" Style="{StaticResource Primary}" Margin="12,0,0,0"/><StackPanel><TextBlock x:Name="QueuesHeading" Text="Queues" Style="{StaticResource PageHeading}"/><TextBlock x:Name="QueuesSubheading" Text="Line up movies and episodes to play back to back." Style="{StaticResource MutedText}" Margin="0,4,0,0"/></StackPanel></DockPanel>
+     <DockPanel Margin="0,0,0,20"><Button DockPanel.Dock="Right" Content="New queue" Click="CreateQueue" ContentTemplate="{StaticResource AddContent}" VerticalAlignment="Center" Style="{StaticResource HeaderCreate}" Margin="12,0,0,0"/><StackPanel><TextBlock x:Name="QueuesHeading" Text="Queues" Style="{StaticResource PageHeading}"/><TextBlock x:Name="QueuesSubheading" Text="Line up movies and episodes to play back to back." Style="{StaticResource MutedText}" Margin="0,4,0,0"/></StackPanel></DockPanel>
      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="-6,0,0,0" Focusable="False">
       <ItemsControl x:Name="QueueGallery" AutomationProperties.Name="Saved queues" Focusable="False">
        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
@@ -582,8 +583,8 @@
          <Border x:Name="QueueHeroCover3"><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></Border>
         </UniformGrid>
         <StackPanel Grid.Column="1" VerticalAlignment="Center">
-         <TextBlock Text="QUEUE" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Muted}"/>
-         <TextBlock x:Name="QueueDetailTitle" FontSize="28" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+         <TextBlock Text="Queue" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Muted}"/>
+         <TextBlock x:Name="QueueDetailTitle" FontFamily="{StaticResource DisplayFont}" FontSize="30" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
          <TextBlock x:Name="QueueDetailCaption" Style="{StaticResource MutedText}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="0,4,0,14"/>
          <WrapPanel>
           <Button x:Name="PlaySavedQueueButton" Content="Play" Click="PlaySavedQueue" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" MaxWidth="340" IsEnabled="False"/>
@@ -693,9 +694,9 @@
       <StackPanel MaxWidth="860" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" HorizontalAlignment="Left" Margin="0,0,0,12">
        <DockPanel Margin="0,0,16,14">
         <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center">
-         <Button x:Name="CancelScanButton" Content="Cancel scan" Click="CancelScan" Visibility="Collapsed" Margin="12,0,0,0"/>
-         <Button x:Name="ScanButton" Content="Scan library" ContentTemplate="{StaticResource RefreshContent}" Click="ScanClick" Margin="12,0,0,0"/>
-         <Button x:Name="AddFolderButton" Content="Add folder" Style="{StaticResource Primary}" ContentTemplate="{StaticResource AddContent}" Click="AddFolder" Margin="8,0,0,0" ToolTip="Includes subfolders. Select an added folder to change its category."/>
+         <Button x:Name="CancelScanButton" Content="Cancel scan" Click="CancelScan" Visibility="Collapsed" Style="{StaticResource HeaderAction}" Margin="12,0,0,0"/>
+         <Button x:Name="ScanButton" Content="Scan library" ContentTemplate="{StaticResource RefreshContent}" Click="ScanClick" Style="{StaticResource HeaderAction}" Margin="12,0,0,0"/>
+         <Button x:Name="AddFolderButton" Content="Add folder" Style="{StaticResource HeaderCreate}" ContentTemplate="{StaticResource AddContent}" Click="AddFolder" Margin="4,0,0,0" ToolTip="Includes subfolders. Select an added folder to change its category."/>
         </WrapPanel>
         <StackPanel VerticalAlignment="Center">
          <TextBlock Text="BlackPearl scans these folders and their subfolders. Your files stay where they are." Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
@@ -760,8 +761,8 @@
       <StackPanel MaxWidth="860" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" HorizontalAlignment="Left" Margin="0,0,0,12">
        <DockPanel Margin="0,0,16,12">
         <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center">
-         <Button Content="Open plugins folder" Click="OpenPluginsFolder" Margin="12,0,0,0"/>
-         <Button x:Name="ReloadPluginsButton" Content="Reload" ContentTemplate="{StaticResource RefreshContent}" Click="ReloadPluginsClick" Margin="8,0,0,0" ToolTip="Load the plugins folder again and check BlackPearlPlugins for updates"/>
+         <Button Content="Open plugins folder" Click="OpenPluginsFolder" Style="{StaticResource HeaderAction}" Margin="12,0,0,0"/>
+         <Button x:Name="ReloadPluginsButton" Content="Reload" ContentTemplate="{StaticResource RefreshContent}" Click="ReloadPluginsClick" Style="{StaticResource HeaderAction}" Margin="4,0,0,0" ToolTip="Load the plugins folder again and check BlackPearlPlugins for updates"/>
         </WrapPanel>
         <local:ThreadBar HorizontalAlignment="Left" VerticalAlignment="Center" Reach="5" Margin="0,8,0,0">
          <StackPanel Orientation="Horizontal" AutomationProperties.Name="Plugin view">
@@ -853,7 +854,7 @@
        </StackPanel>
       </StackPanel>
      </ScrollViewer>
-     <ScrollViewer x:Name="ProfilePreferences" Tag="Profile" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="760" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
+     <ScrollViewer x:Name="ProfilePreferences" Tag="Profile" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
       <Border Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Your display name" Style="{StaticResource FieldLabel}"/><TextBox x:Name="DisplayNameBox" AutomationProperties.Name="Your display name" MaxLength="40"/>
        <TextBlock x:Name="DisplayNameError" Style="{StaticResource FieldError}"/>
@@ -865,7 +866,7 @@
        <TextBlock Text="Change the server only if you host your own." Style="{StaticResource Hint}"/>
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
-     <ScrollViewer x:Name="MetadataPreferences" Tag="Metadata" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="760" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
+     <ScrollViewer x:Name="MetadataPreferences" Tag="Metadata" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
       <Border Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Sources" Style="{StaticResource CardTitle}"/>
        <CheckBox x:Name="AutoArtwork" Content="Automatically fetch artwork and metadata"/>
@@ -886,7 +887,7 @@
       </StackPanel></Border>
       <Border Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Refresh and organization" Style="{StaticResource CardTitle}"/>
-       <WrapPanel><CheckBox x:Name="NeverRefresh" Content="Never refresh automatically" Margin="-4,6,18,6"/><TextBlock Text="Every" VerticalAlignment="Center" Margin="0,0,8,0"/>
+       <WrapPanel><CheckBox x:Name="NeverRefresh" Content="Never refresh automatically" Margin="0,6,18,6"/><TextBlock Text="Every" VerticalAlignment="Center" Margin="0,0,8,0"/>
         <Button x:Name="RefreshLess" Content="&#xE738;" Style="{StaticResource IconButton}" FontSize="11" Click="ChangeRefreshDays" AutomationProperties.Name="Decrease refresh days" Margin="0,6,4,12" VerticalAlignment="Center"/>
         <TextBox x:Name="MetadataRefreshDays" Width="60" TextAlignment="Center" AutomationProperties.Name="Refresh interval in days" MaxLength="3" VerticalAlignment="Center"/>
         <Button x:Name="RefreshMore" Content="&#xE710;" Style="{StaticResource IconButton}" FontSize="11" Click="ChangeRefreshDays" AutomationProperties.Name="Increase refresh days" Margin="4,6,8,12" VerticalAlignment="Center"/>
@@ -906,7 +907,7 @@
        <Button Content="Fetch artwork and metadata" Click="FetchArtworkClick" HorizontalAlignment="Left"/></WrapPanel>
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
-     <ScrollViewer x:Name="PlaybackPreferences" Tag="Playback" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="760" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
+     <ScrollViewer x:Name="PlaybackPreferences" Tag="Playback" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
       <Border Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Languages" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
        <TextBlock Text="BlackPearl picks the first language each video has, in this order." Style="{StaticResource Hint}" Margin="0,0,0,16"/>
@@ -950,7 +951,7 @@
        <StackPanel VerticalAlignment="Center"><TextBlock Text="Open videos with BlackPearl" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/><TextBlock Text="Double-click a video in File Explorer, choose Open with → BlackPearl, or drop a video on this window. Videos from your library play with their artwork, progress and next episode; other videos play on their own. To use BlackPearl for every video, choose it in Windows default apps." Style="{StaticResource Hint}"/></StackPanel>
       </DockPanel></Border>
      </StackPanel></ScrollViewer>
-     <ScrollViewer x:Name="VoicePreferences" Tag="Voice" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" IsVisibleChanged="VoicePreferencesVisibilityChanged"><StackPanel MaxWidth="760" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
+     <ScrollViewer x:Name="VoicePreferences" Tag="Voice" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" IsVisibleChanged="VoicePreferencesVisibilityChanged" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
       <Border Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Devices" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
        <TextBlock Text="Talk with everyone in your room while you watch. Join voice from the player's top bar or the Participants panel." Style="{StaticResource Hint}" Margin="0,0,0,14"/>
@@ -991,7 +992,7 @@
        <TextBlock Text="The movie fades to half volume while someone speaks, then returns." Style="{StaticResource Hint}" Margin="28,0,0,0"/>
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
-     <ScrollViewer x:Name="AppearancePreferences" Tag="Appearance" Visibility="Collapsed" VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,0,12">
+     <ScrollViewer x:Name="AppearancePreferences" Tag="Appearance" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
       <StackPanel.Resources>
        <!-- A colour theme tile: MainWindow fills in a small preview of the theme in the current mode. -->
        <Style x:Key="ThemeChoice" TargetType="RadioButton">
@@ -1017,10 +1018,10 @@
       </StackPanel></Border>
      </StackPanel></ScrollViewer>
      <!-- Downloads: auto-download of new episodes. Built in Following.cs; changes apply at once. -->
-     <ScrollViewer x:Name="DownloadsPreferences" Tag="Downloads" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-      <ContentControl x:Name="DownloadsContent" Focusable="False" MaxWidth="860" HorizontalAlignment="Left" Margin="0,0,16,12"/>
+     <ScrollViewer x:Name="DownloadsPreferences" Tag="Downloads" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0">
+      <ContentControl x:Name="DownloadsContent" Focusable="False" MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" HorizontalAlignment="Left" Margin="0,0,0,12"/>
      </ScrollViewer>
-     <ScrollViewer x:Name="UpdatePreferences" Tag="Updates" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel MaxWidth="760" HorizontalAlignment="Left" Margin="0,0,18,12">
+     <ScrollViewer x:Name="UpdatePreferences" Tag="Updates" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
       <Border Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="App updates" Style="{StaticResource CardTitle}" Margin="0,0,0,6"/><CheckBox x:Name="AutoCheckUpdates" Content="Automatically check for updates" Checked="AutoUpdatesChanged" Unchecked="AutoUpdatesChanged"/><TextBlock Text="Checks at startup and every six hours. Updates install only when you click Update. Update preferences save immediately." Style="{StaticResource Hint}" Margin="0,4,0,0"/><Button x:Name="CheckUpdatesButton" Content="Check for updates" ContentTemplate="{StaticResource RefreshContent}" Click="CheckUpdatesClick" HorizontalAlignment="Left" Margin="0,14,0,8"/><TextBlock x:Name="UpdateStatus" Style="{StaticResource MutedText}" AutomationProperties.LiveSetting="Polite"/>
       </StackPanel></Border>
@@ -1037,7 +1038,7 @@
    <!-- Saved watch rooms -->
    <Grid x:Name="RoomsPage" Visibility="Collapsed">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-    <Grid Margin="0,0,0,20"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Margin="0,0,16,0"><TextBlock Text="Watch rooms" Style="{StaticResource PageHeading}"/><TextBlock Text="Watch in sync with friends. Only the host needs the video." Style="{StaticResource MutedText}" Margin="0,4,0,0"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="ReturnToRoomButton" Content="Return to player" ContentTemplate="{StaticResource PlayContent}" Tag="Room" Click="Navigate" Margin="0,0,8,0"/><Button x:Name="AddSavedInvitationButton" Content="Join a room" Click="JoinClick" Margin="0,0,8,0" ToolTip="Paste an invitation link or room code to add it to your saved rooms"/><Button x:Name="CreateSavedRoomButton" Content="Create room" ContentTemplate="{StaticResource AddContent}" Click="CreatePersistentRoom" Style="{StaticResource Primary}" Margin="0"/></StackPanel></Grid>
+    <Grid Margin="0,0,0,20"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Margin="0,0,16,0"><TextBlock Text="Watch rooms" Style="{StaticResource PageHeading}"/><TextBlock Text="Watch in sync with friends. Only the host needs the video." Style="{StaticResource MutedText}" Margin="0,4,0,0"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="ReturnToRoomButton" Content="Return to player" ContentTemplate="{StaticResource PlayContent}" Tag="Room" Click="Navigate" Style="{StaticResource HeaderAction}" Margin="0,0,4,0"/><Button x:Name="AddSavedInvitationButton" Content="Join a room" Click="JoinClick" Style="{StaticResource HeaderAction}" Margin="0,0,4,0" ToolTip="Paste an invitation link or room code to add it to your saved rooms"/><Button x:Name="CreateSavedRoomButton" Content="Create room" ContentTemplate="{StaticResource AddContent}" Click="CreatePersistentRoom" Style="{StaticResource HeaderCreate}"/></StackPanel></Grid>
     <!-- Hero: what the connected room is playing, or what the most recent room watched last time. -->
     <Border x:Name="RoomHero" Grid.Row="1" Height="200" CornerRadius="14" local:RoundedClip.Radius="14" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" Margin="0,0,0,20" Visibility="Collapsed">
      <Grid>
@@ -1065,10 +1066,10 @@
       <Rectangle Fill="{DynamicResource HeroFade}"/>
       <StackPanel Margin="28,0,28,0" VerticalAlignment="Center" HorizontalAlignment="Left" MaxWidth="560">
        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-        <Border x:Name="RoomHeroLive" Background="{DynamicResource Success}" CornerRadius="4" Padding="7,1" Margin="0,0,8,0" VerticalAlignment="Center"><TextBlock x:Name="RoomHeroLiveText" Text="LIVE" FontSize="10" FontWeight="Bold" Foreground="{DynamicResource Canvas}"/></Border>
+        <Border x:Name="RoomHeroLive" Background="{DynamicResource Success}" CornerRadius="4" Padding="7,1" Margin="0,0,8,0" VerticalAlignment="Center"><TextBlock x:Name="RoomHeroLiveText" Text="Live" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Canvas}"/></Border>
         <TextBlock x:Name="RoomHeroKicker" FontSize="13" Foreground="{DynamicResource Accent}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
        </StackPanel>
-       <TextBlock x:Name="RoomHeroTitle" FontSize="28" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+       <TextBlock x:Name="RoomHeroTitle" FontFamily="{StaticResource DisplayFont}" FontSize="30" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
         <ProgressBar x:Name="RoomHeroProgress" Height="4" Width="260" Maximum="100" VerticalAlignment="Center"/>
         <TextBlock x:Name="RoomHeroTime" Style="{StaticResource MutedText}" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular"/>
@@ -1085,33 +1086,37 @@
       </StackPanel>
      </Grid>
     </Border>
-    <Grid Grid.Row="2"><StackPanel x:Name="RoomsEmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="500"><Border Width="76" Height="76" CornerRadius="38" Background="{DynamicResource AccentSoft}" Margin="0,0,0,22"><TextBlock Text="&#xE716;" Style="{StaticResource Icon}" FontSize="30" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><TextBlock Text="Watch together" FontSize="24" FontWeight="SemiBold" TextAlignment="Center"/><TextBlock Text="Create a room and invite friends, or paste an invitation to join theirs." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,24"/><WrapPanel HorizontalAlignment="Center"><Button Content="Create room" ContentTemplate="{StaticResource AddContent}" Click="CreatePersistentRoom" Style="{StaticResource Primary}"/><Button Content="Join a room" Click="JoinClick" Margin="0,0,0,8"/></WrapPanel></StackPanel>
-     <!-- Saved rooms: a row of room pills, then tiles for the selected room. -->
+    <Grid Grid.Row="2"><StackPanel x:Name="RoomsEmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="500"><Border Width="76" Height="76" CornerRadius="38" Background="{DynamicResource AccentSoft}" Margin="0,0,0,22"><TextBlock Text="&#xE716;" Style="{StaticResource Icon}" FontSize="30" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><TextBlock Text="Watch together" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold" TextAlignment="Center"/><TextBlock Text="Create a room and invite friends, or paste an invitation to join theirs." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,24"/><WrapPanel HorizontalAlignment="Center"><Button Content="Create room" ContentTemplate="{StaticResource AddContent}" Click="CreatePersistentRoom" Style="{StaticResource Primary}"/><Button Content="Join a room" Click="JoinClick" Margin="0,0,0,8"/></WrapPanel></StackPanel>
+     <!-- Saved rooms: a row of room names, then tiles for the selected room. -->
      <DockPanel x:Name="SavedRoomsContent" Visibility="Collapsed">
       <DockPanel.Resources>
-       <Style x:Key="TileLabel" TargetType="TextBlock"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Margin" Value="0,0,0,10"/></Style>
+       <Style x:Key="TileLabel" TargetType="TextBlock"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Margin" Value="0,0,0,10"/></Style>
        <Style x:Key="Tile" TargetType="Border"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="18,16"/></Style>
       </DockPanel.Resources>
-      <ListBox x:Name="SavedRoomsList" DockPanel.Dock="Top" Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,0,14" SelectionChanged="SavedRoomSelectionChanged" AutomationProperties.Name="Saved watch rooms" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
-       <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
-       <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem">
-        <Setter Property="Margin" Value="0,0,8,8"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
-        <Setter Property="ToolTip" Value="{Binding Caption}"/><Setter Property="AutomationProperties.Name" Value="{Binding Name}"/>
-        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
-         <Border x:Name="Pill" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="16" Padding="14,6">
-          <StackPanel Orientation="Horizontal">
-           <Ellipse x:Name="LiveDot" Width="7" Height="7" Fill="{DynamicResource Success}" VerticalAlignment="Center" Margin="0,0,8,0" Visibility="Collapsed"/>
-           <TextBlock x:Name="PillText" Text="{Binding Name}" FontSize="13" Foreground="{DynamicResource Muted}" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-          </StackPanel>
-         </Border>
-         <ControlTemplate.Triggers>
-          <Trigger Property="Tag" Value="live"><Setter TargetName="LiveDot" Property="Visibility" Value="Visible"/><Setter TargetName="PillText" Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
-          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger>
-          <Trigger Property="IsSelected" Value="True"><Setter TargetName="Pill" Property="Background" Value="{DynamicResource AccentSoft}"/><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Accent}"/><Setter TargetName="PillText" Property="Foreground" Value="{DynamicResource Ink}"/><Setter TargetName="PillText" Property="FontWeight" Value="SemiBold"/></Trigger>
-         </ControlTemplate.Triggers>
-        </ControlTemplate></Setter.Value></Setter>
-       </Style></ListBox.ItemContainerStyle>
-      </ListBox>
+      <!-- The saved rooms, on the app's thread selector (ThreadBar.cs) like the library's categories; a live room has a dot. -->
+      <local:ThreadBar DockPanel.Dock="Top" HorizontalAlignment="Left" Margin="0,0,0,6">
+       <ListBox x:Name="SavedRoomsList" Background="Transparent" BorderThickness="0" Padding="0" SelectionChanged="SavedRoomSelectionChanged" AutomationProperties.Name="Saved watch rooms" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+        <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
+        <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem">
+         <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/><Setter Property="FontSize" Value="19"/>
+         <Setter Property="Height" Value="34"/><Setter Property="Padding" Value="0,0,26,0"/><Setter Property="Margin" Value="0,0,0,12"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+         <Setter Property="ToolTip" Value="{Binding Caption}"/><Setter Property="AutomationProperties.Name" Value="{Binding Name}"/>
+         <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
+          <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <Ellipse x:Name="LiveDot" Width="7" Height="7" Fill="{DynamicResource Success}" VerticalAlignment="Center" Margin="0,2,8,0" Visibility="Collapsed"/>
+            <TextBlock Text="{Binding Name}" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+           </StackPanel>
+          </Border>
+          <ControlTemplate.Triggers><Trigger Property="Tag" Value="live"><Setter TargetName="LiveDot" Property="Visibility" Value="Visible"/></Trigger></ControlTemplate.Triggers>
+         </ControlTemplate></Setter.Value></Setter>
+         <Style.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+          <Trigger Property="IsSelected" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+         </Style.Triggers>
+        </Style></ListBox.ItemContainerStyle>
+       </ListBox>
+      </local:ThreadBar>
       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
        <Grid x:Name="SavedRoomDetails" Margin="0,0,0,4">
         <Grid.ColumnDefinitions><ColumnDefinition Width="11*" MinWidth="280"/><ColumnDefinition Width="12"/><ColumnDefinition Width="10*" MinWidth="220"/><ColumnDefinition Width="12"/><ColumnDefinition Width="10*" MinWidth="220"/></Grid.ColumnDefinitions>
@@ -1130,7 +1135,7 @@
            <WrapPanel Margin="0,12,0,0"><Button x:Name="ConnectSavedRoomButton" Content="Connect" Click="ConnectSavedRoom" Style="{StaticResource Primary}" VerticalAlignment="Center" Margin="0,0,8,0"/><Button x:Name="DisconnectSavedRoomButton" Content="Disconnect" Click="LeaveRoom" Visibility="Collapsed" AutomationProperties.Name="Disconnect from room" VerticalAlignment="Center" Margin="0"/></WrapPanel>
            <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Margin="0,14,0,0" Padding="0,12,0,0">
             <StackPanel>
-             <TextBlock Text="INVITE FRIENDS" Style="{StaticResource TileLabel}" Margin="0,0,0,6"/>
+             <TextBlock Text="Invite friends" Style="{StaticResource TileLabel}" Margin="0,0,0,6"/>
              <Viewbox Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left"><TextBlock x:Name="SavedRoomCode" FontFamily="Consolas" FontSize="22" Foreground="{DynamicResource Ink}" AutomationProperties.Name="Room code"/></Viewbox>
              <TextBlock x:Name="SavedRoomInviteHint" Style="{StaticResource MutedText}" FontSize="11.5" Margin="0,4,0,12"/>
              <WrapPanel><Button x:Name="CopySavedInviteButton" Content="Copy invitation" Click="CopySavedInvitation" Style="{StaticResource Primary}"/><Button x:Name="CopySavedCodeButton" Content="Copy code" Click="CopySavedCode" ToolTip="Friends on the same room server can paste just the code"/></WrapPanel>
@@ -1138,7 +1143,7 @@
            </Border>
            <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Margin="0,14,0,0" Padding="0,12,0,0">
             <StackPanel>
-             <TextBlock Text="LAST SESSION" Style="{StaticResource TileLabel}"/>
+             <TextBlock Text="Last session" Style="{StaticResource TileLabel}"/>
              <Grid>
               <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
               <Border x:Name="SavedRoomSessionThumb" Width="72" Height="44" CornerRadius="6" local:RoundedClip.Radius="6" Margin="0,0,12,0" VerticalAlignment="Center">
@@ -1157,7 +1162,7 @@
         <!-- People: the host admits and removes guests here; guests see who is in the room. -->
         <Border x:Name="SavedRoomGuestManagement" Grid.Column="2" Grid.RowSpan="3" Style="{StaticResource Tile}">
          <DockPanel>
-          <DockPanel DockPanel.Dock="Top"><TextBlock x:Name="SavedRoomGuestCount" DockPanel.Dock="Right" Style="{StaticResource MutedText}" FontSize="11.5"/><TextBlock x:Name="SavedRoomGuestHeading" Text="GUESTS" Style="{StaticResource TileLabel}"/></DockPanel>
+          <DockPanel DockPanel.Dock="Top"><TextBlock x:Name="SavedRoomGuestCount" DockPanel.Dock="Right" Style="{StaticResource MutedText}" FontSize="11.5"/><TextBlock x:Name="SavedRoomGuestHeading" Text="Guests" Style="{StaticResource TileLabel}"/></DockPanel>
           <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
           <!-- With nobody to list, the hint becomes an empty state in the middle of the tile. -->
           <StackPanel x:Name="SavedRoomGuestHintPanel" Margin="0,0,0,12">
@@ -1177,14 +1182,14 @@
         <!-- What guests may do; only the host sees this tile. -->
         <Border x:Name="SavedRoomHostControls" Grid.Column="4" Style="{StaticResource Tile}">
          <StackPanel>
-          <TextBlock Text="GUESTS CAN" Style="{StaticResource TileLabel}" Margin="0,0,0,4"/>
+          <TextBlock Text="Guests can" Style="{StaticResource TileLabel}" Margin="0,0,0,4"/>
           <ToggleButton x:Name="SavedRoomSharedControls" Content="Play, pause and seek" ToolTip="Guests can play, pause and seek. Changes save immediately." Click="SavedRoomControlsChanged" AutomationProperties.Name="Saved room shared controls" Style="{StaticResource Switch}"/>
           <CheckBox x:Name="SavedRoomLibraryBrowsing" Content="Browse my library" ToolTip="One admitted guest can browse at a time. Turning this off ends the active session." Checked="SavedRoomLibraryChanged" Unchecked="SavedRoomLibraryChanged" AutomationProperties.Name="Allow guests to browse my library" Style="{StaticResource Switch}"/>
          </StackPanel>
         </Border>
         <Border x:Name="SavedRoomActions" Grid.Column="4" Grid.Row="2" Style="{StaticResource Tile}">
          <StackPanel>
-          <TextBlock Text="ROOM" Style="{StaticResource TileLabel}"/>
+          <TextBlock Text="Room" Style="{StaticResource TileLabel}"/>
           <WrapPanel><Button x:Name="RenameSavedRoomButton" Content="Rename" Style="{StaticResource QuietButton}" Click="RenameSavedRoom" Margin="0,0,4,8"/><Button x:Name="ForgetSavedRoomButton" Content="Forget room" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Danger}" Click="ForgetSavedRoom" Margin="0,0,0,8"/></WrapPanel>
          </StackPanel>
         </Border>
@@ -1273,7 +1278,7 @@
           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
            <Border x:Name="UpNextThumb" Width="96" Height="54" CornerRadius="8" local:RoundedClip.Radius="8" Background="#23242E" Margin="0,0,12,0" VerticalAlignment="Center"><Image x:Name="UpNextImage" Stretch="UniformToFill"/></Border>
            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-            <TextBlock Text="UP NEXT" Foreground="{DynamicResource PlayerAccent}" FontSize="10" FontWeight="SemiBold" Margin="0,0,0,3"/>
+            <TextBlock Text="Up next" Foreground="{DynamicResource PlayerAccent}" FontSize="10" FontWeight="SemiBold" Margin="0,0,0,3"/>
             <TextBlock x:Name="UpNextSeries" Foreground="#F4F4F7" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
             <TextBlock x:Name="UpNextEpisode" Foreground="#A9ABB8" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
            </StackPanel>
@@ -1432,7 +1437,7 @@
         <Border x:Name="PictureInPictureUpNext" Visibility="Collapsed" VerticalAlignment="Bottom" Background="#F217181F" Padding="10,6,6,0" MouseLeftButtonDown="UpNextCardClicked" AutomationProperties.Name="Up next">
          <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
           <StackPanel VerticalAlignment="Center" Margin="0,0,6,0">
-           <TextBlock Text="UP NEXT" Foreground="{DynamicResource PlayerAccent}" FontSize="10" FontWeight="SemiBold"/>
+           <TextBlock Text="Up next" Foreground="{DynamicResource PlayerAccent}" FontSize="10" FontWeight="SemiBold"/>
            <TextBlock Text="{Binding Text, ElementName=UpNextEpisode}" ToolTip="{Binding Text, ElementName=UpNextCountdown}" Foreground="#F4F4F7" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
           </StackPanel>
           <Button Grid.Column="1" Content="&#xE711;" Click="UpNextCancelClicked" Style="{StaticResource PlayerIconButton}" Width="30" MinWidth="30" Height="30" FontSize="11" Margin="0" ToolTip="Stay on this episode (Esc)" AutomationProperties.Name="Cancel up next"/>

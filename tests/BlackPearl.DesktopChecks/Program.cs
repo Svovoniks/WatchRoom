@@ -454,6 +454,7 @@ static class Program
         search.Clear();
         await CheckCategoryBar(window, check);
         await CheckThreadSelectors(window, check);
+        CheckResourceLookups(window, check);
         await CheckShortRail(window, check);
         await CheckCollapsedRail(window, check);
         Navigate(1); await Wait(() => cards.Count == 750 && cards.All(x => x.Card.Media.Kind == "Movie"));
@@ -500,6 +501,24 @@ static class Program
         var thread = bar.Threads.Select(line => line.TranslatePoint(new Point(0, 0.5), bar).Y).Where(y => y >= below).DefaultIfEmpty(double.NaN).Min();
         var fine = light.IsVisible && Math.Abs(at.X + light.ActualWidth / 2 - (word + wordWidth / 2)) < 1 && at.X <= word && at.X + light.ActualWidth >= word + wordWidth && Math.Abs(at.Y - thread) < 0.5;
         return (chosen, fine ? "" : $" (light {(light.IsVisible ? "at" : "hidden at")} {at.X:0.#},{at.Y:0.#}, {light.ActualWidth:0.#} wide; word at {word:0.#}, {wordWidth:0.#} wide; its thread at {thread:0.#})");
+    }
+    // Every style or brush the code looks up by name exists. Such a lookup fails silently, so a style removed or renamed in XAML
+    // would leave a control the code builds unstyled, as the Downloads choice once was.
+    private static void CheckResourceLookups(MainWindow window, Action<bool, string> check)
+    {
+        var keys = new HashSet<object>();
+        void Add(ResourceDictionary dictionary) { foreach (var key in dictionary.Keys) keys.Add(key); foreach (var merged in dictionary.MergedDictionaries) Add(merged); }
+        void Walk(object node)
+        {
+            if (node is FrameworkElement element) Add(element.Resources);
+            if (node is DependencyObject parent) foreach (var child in LogicalTreeHelper.GetChildren(parent)) Walk(child);
+        }
+        Add(Application.Current.Resources); Walk(window);
+        var used = Directory.EnumerateFiles("src/BlackPearl.Desktop", "*.cs", SearchOption.AllDirectories)
+            .SelectMany(file => System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(file), @"(?:SetResourceReference\([A-Za-z.]*Property, |FindResource\(|TryFindResource\()""([^""]+)""").Select(match => match.Groups[1].Value))
+            .Distinct().ToList();
+        var missing = used.Where(key => !keys.Contains(key)).ToList();
+        check(used.Count > 10 && missing.Count == 0, $"every resource the code looks up by name exists ({used.Count} looked up{(missing.Count > 0 ? "; missing: " + string.Join(", ", missing) : "")})");
     }
     // Every pick-one selector is the thread selector: Settings' sections, the plugin view and Search's type of title light the
     // thread under their choice and move the light when it changes. Settings' sections wrap in a narrow window, each row on its
@@ -622,7 +641,9 @@ static class Program
         Call("ShowPage", "Home"); await Task.Delay(450); window.UpdateLayout();
         var placed = Pearled("HomeNav");
         check(placed == "", "the pearl sits on the sidebar's edge beside the current page" + placed);
-        Call("ShowPage", "Queues"); await Task.Delay(450); window.UpdateLayout();
+        // The roll starts once the new page has laid itself out, which takes longer on a busy machine, so the check waits for it to land.
+        Call("ShowPage", "Queues");
+        for (var until = DateTime.UtcNow.AddMilliseconds(1500); DateTime.UtcNow < until && Pearled("QueuesNav") != "";) { await Task.Delay(50); window.UpdateLayout(); }
         placed = Pearled("QueuesNav");
         check(placed == "", "the pearl rolls to the page opened" + placed);
         check(Math.Abs(toggleAt.X - toggleAt.Y) < 0.5, $"the toggle sits as far from the sidebar's top as from its side ({toggleAt})");
@@ -1088,18 +1109,18 @@ static class Program
         // With nothing watched yet, the hero still shows the selected room with a placeholder instead of hiding.
         string HeroText(string name) => ((System.Windows.Controls.TextBlock)window.FindName(name)).Text;
         FrameworkElement HeroPart(string name) => (FrameworkElement)window.FindName(name);
-        Check(HeroPart("RoomHero").Visibility == Visibility.Visible && HeroText("RoomHeroLiveText") == "CLOSED" && HeroText("RoomHeroTitle") == "Nothing watched here yet" &&
+        Check(HeroPart("RoomHero").Visibility == Visibility.Visible && HeroText("RoomHeroLiveText") == "Closed" && HeroText("RoomHeroTitle") == "Nothing watched here yet" &&
             ((System.Windows.Controls.Button)window.FindName("RoomHeroResume")).Content as string == "Open room" &&
             ((System.Windows.Controls.Button)window.FindName("RoomHeroSecondary")).Content as string == "Copy invite" && HeroPart("RoomHeroSecondary").Visibility == Visibility.Visible &&
             HeroPart("RoomHeroBadge").Visibility == Visibility.Visible && HeroText("RoomHeroBadgeText") == "M", "an unused host room shows a closed hero with Open room, Copy invite and its initial");
         list.SelectedItem = guest;
-        Check(HeroText("RoomHeroLiveText") == "OFFLINE" && ((System.Windows.Controls.Button)window.FindName("RoomHeroResume")).Content as string == "Connect" &&
+        Check(HeroText("RoomHeroLiveText") == "Offline" && ((System.Windows.Controls.Button)window.FindName("RoomHeroResume")).Content as string == "Connect" &&
             HeroPart("RoomHeroSecondary").Visibility == Visibility.Collapsed && HeroText("RoomHeroBadgeText") == "F", "an unused guest room shows an offline hero with Connect");
         Check(HeroPart("SavedRoomHostControls").Visibility == Visibility.Collapsed && System.Windows.Controls.Grid.GetRow(HeroPart("SavedRoomActions")) == 0 &&
-            HeroText("SavedRoomGuestHeading") == "PEOPLE" && HeroText("SavedRoomSessionTitle") == "Nothing watched here yet", "a guest room drops the permissions tile and lists people instead of guests");
+            HeroText("SavedRoomGuestHeading") == "People" && HeroText("SavedRoomSessionTitle") == "Nothing watched here yet", "a guest room drops the permissions tile and lists people instead of guests");
         list.SelectedItem = first;
         Check(HeroText("SavedRoomCode") == "AAAAAA AAAAAA AAAAAA AAAAAA" && HeroPart("SavedRoomHostControls").Visibility == Visibility.Visible &&
-            System.Windows.Controls.Grid.GetRow(HeroPart("SavedRoomActions")) == 2 && HeroText("SavedRoomGuestHeading") == "GUESTS", "a host room shows its grouped code and the permissions tile");
+            System.Windows.Controls.Grid.GetRow(HeroPart("SavedRoomActions")) == 2 && HeroText("SavedRoomGuestHeading") == "Guests", "a host room shows its grouped code and the permissions tile");
         string Initials(string text, int count) => (string)typeof(MainWindow).GetMethod("Initials", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [text, count])!;
         Check(Initials("Spy x Family · S1E4", 2) == "SF" && Initials("The Office", 2) == "O" && Initials("holiday_video_2019 mkv", 2) == "HV" && Initials("!!!", 2) == "?",
             "title cards use the leading words' initials");

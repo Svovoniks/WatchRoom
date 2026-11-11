@@ -95,7 +95,7 @@ public partial class MainWindow
         var current = live is not null && session?.Title == live.Title ? session : null;
         var title = live?.Title ?? session?.Title;
         var hostIdentity = connected is not null ? room!.Identity!.Host : heroRoom.HostKey is not null;
-        RoomHeroLiveText.Text = connected is not null ? "LIVE" : hostIdentity ? "CLOSED" : "OFFLINE";
+        RoomHeroLiveText.Text = connected is not null ? "Live" : hostIdentity ? "Closed" : "Offline";
         RoomHeroLive.Background = (System.Windows.Media.Brush)FindResource(connected is not null ? "Success" : "Line");
         RoomHeroLiveText.Foreground = (System.Windows.Media.Brush)FindResource(connected is not null ? "Canvas" : "Muted");
         RoomHeroKicker.Text = connected is not null
