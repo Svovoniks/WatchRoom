@@ -7,8 +7,16 @@
   <Border x:Name="Rail" Grid.RowSpan="2" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
    <DockPanel Margin="12,3,12,12">
     <!-- The sidebar toggle stays in one spot, open or folded: the top-left corner, over the column of icons, in the caption
-         area (so it takes clicks from the window frame). It sits outside the scrolling part so scrolling never moves it. -->
-    <Button x:Name="RailToggle" DockPanel.Dock="Top" Style="{StaticResource QuietIcon}" Content="&#xE90C;" Click="ToggleRailClick" Width="36" Margin="2,0,0,0" HorizontalAlignment="Left" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Collapse sidebar (Ctrl+B)" AutomationProperties.Name="Collapse sidebar"/>
+         area (so it takes clicks from the window frame). The logo sits beside it with the name while the sidebar is open, and
+         drops under it when the sidebar folds (SideRail.cs). The header sits outside the scrolling part so scrolling never moves it. -->
+    <Grid x:Name="RailHeader" DockPanel.Dock="Top" Margin="0,0,0,20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <Button x:Name="RailToggle" Style="{StaticResource QuietIcon}" Content="&#xE90C;" Click="ToggleRailClick" Width="36" Margin="2,0,0,0" HorizontalAlignment="Left" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Collapse sidebar (Ctrl+B)" AutomationProperties.Name="Collapse sidebar"/>
+     <StackPanel x:Name="RailBrand" Orientation="Horizontal" Height="34" Margin="40,0,0,0" HorizontalAlignment="Left">
+      <Image x:Name="RailLogo" Source="Assets/BlackPearl.png" Width="28" Height="28" VerticalAlignment="Center" AutomationProperties.Name="BlackPearl"/>
+      <!-- The name is set in a serif, like a jeweller's mark, apart from the interface type around it. -->
+      <TextBlock x:Name="RailBrandName" Text="BlackPearl" FontFamily="Sitka Heading, Georgia" FontSize="21" FontWeight="SemiBold" Margin="9,0,0,2" VerticalAlignment="Center" Style="{StaticResource NavigationLabel}"/>
+     </StackPanel>
+    </Grid>
     <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
      <Button x:Name="NowPlayingButton" Tag="Room" Click="Navigate" Visibility="Collapsed" Background="{DynamicResource AccentSoft}" HorizontalContentAlignment="Stretch" Padding="12,10" Margin="0,0,0,8" ToolTip="Return to the current video" AutomationProperties.Name="Return to player">
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -26,12 +34,6 @@
       <ScrollBar x:Name="PART_VerticalScrollBar" HorizontalAlignment="Right" Width="12" MinWidth="0" Minimum="0" Maximum="{TemplateBinding ScrollableHeight}" ViewportSize="{TemplateBinding ViewportHeight}" Value="{TemplateBinding VerticalOffset}" Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
      </Grid></ControlTemplate></ScrollViewer.Template>
      <StackPanel x:Name="RailNavigation" Margin="0,0,12,0">
-       <!-- The logo stays over the column of icons too, with the name beside it while the sidebar is open. -->
-       <StackPanel x:Name="RailBrand" Orientation="Horizontal" Height="34" Margin="5,8,0,17" HorizontalAlignment="Left">
-        <Image x:Name="RailLogo" Source="Assets/BlackPearl.png" Width="28" Height="28" VerticalAlignment="Center" AutomationProperties.Name="BlackPearl"/>
-         <!-- The name is set in a serif, like a jeweller's mark, apart from the interface type around it. -->
-         <TextBlock x:Name="RailBrandName" Text="BlackPearl" FontFamily="Sitka Heading, Georgia" FontSize="21" FontWeight="SemiBold" Margin="9,0,0,2" VerticalAlignment="Center" Style="{StaticResource NavigationLabel}"/>
-       </StackPanel>
        <Button x:Name="HomeNav" Tag="Home" Click="Navigate" Style="{StaticResource Navigation}" AutomationProperties.Name="Home"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE80F;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Home" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>
        <Button x:Name="SearchNav" Tag="Search" Click="SearchNavClick" Style="{StaticResource Navigation}" ToolTip="Search and filter your library (Ctrl+F)" AutomationProperties.Name="Search"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE721;" Style="{StaticResource NavigationIcon}"/><TextBlock Text="Search" Style="{StaticResource NavigationLabel}"/></StackPanel></Button>
        <!-- The library's categories are the bar at the top of the Library page. -->

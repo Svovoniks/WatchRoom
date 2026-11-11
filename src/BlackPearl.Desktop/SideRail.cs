@@ -56,7 +56,10 @@ public partial class MainWindow
     {
         SideRail.SetCollapsed(Rail, railCollapsed);
         if (Rail.Visibility == Visibility.Visible) RailWidth.Width = new GridLength(RailColumnWidth);
-        // The toggle and the logo stay where they are (MainWindow.xaml), so folding and unfolding happen from one spot.
+        // The toggle stays where it is, so folding and unfolding happen from one spot. Open, the logo and name sit beside it;
+        // folded, the logo drops under it, over the column of icons.
+        Grid.SetRow(RailBrand, railCollapsed ? 1 : 0);
+        RailBrand.Margin = railCollapsed ? new Thickness(5, 8, 0, 0) : new Thickness(40, 0, 0, 0);
         NowPlayingText.Visibility = railCollapsed ? Visibility.Collapsed : Visibility.Visible;
         var label = railCollapsed ? "Expand sidebar" : "Collapse sidebar";
         RailToggle.ToolTip = label + " (Ctrl+B)"; AutomationProperties.SetName(RailToggle, label);

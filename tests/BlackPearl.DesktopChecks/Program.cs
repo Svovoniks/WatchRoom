@@ -518,10 +518,12 @@ static class Program
         var label = ((System.Windows.Controls.Panel)home.Content).Children[1];
         var icon = (FrameworkElement)((System.Windows.Controls.Panel)home.Content).Children[0];
         var content = (FrameworkElement)window.FindName("ContentArea");
-        var expanded = content.ActualWidth; var homeTop = home.TranslatePoint(new Point(0, 0), rail).Y;
+        var expanded = content.ActualWidth;
         var logo = (FrameworkElement)window.FindName("RailLogo");
         var toggle = (FrameworkElement)window.FindName("RailToggle");
         var toggleAt = toggle.TranslatePoint(new Point(0, 0), rail); var logoAt = logo.TranslatePoint(new Point(0, 0), rail);
+        check(logoAt.X >= toggleAt.X + toggle.ActualWidth && Math.Abs(logoAt.Y + logo.ActualHeight / 2 - (toggleAt.Y + toggle.ActualHeight / 2)) < 1,
+            $"an open sidebar shows the logo beside its toggle, on one row (logo {logoAt}, toggle {toggleAt})");
         // The pearl on the sidebar's edge marks the current page, and rolls to the next one.
         var pearl = (FrameworkElement)window.FindName("RailPearl");
         string Pearled(string entry)
@@ -549,15 +551,15 @@ static class Program
             $"a collapsed sidebar is a strip of icons ({rail.ActualWidth:0.#} wide)");
         check(logo.IsVisible && Math.Abs(logoLeft * 2 + logo.ActualWidth - home.ActualWidth) < 1,
             $"a collapsed sidebar keeps the logo, centred over its icons ({logoLeft:0.#} in {home.ActualWidth:0.#})");
-        check(toggle.IsVisible && toggle.Opacity == 1 && toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && logo.TranslatePoint(new Point(0, 0), rail) == logoAt,
-            $"the toggle and the logo stay in the same spot when the sidebar folds (toggle {toggle.TranslatePoint(new Point(0, 0), rail)}, was {toggleAt}; logo {logo.TranslatePoint(new Point(0, 0), rail)}, was {logoAt})");
-        check(home.TranslatePoint(new Point(0, 0), rail).Y == homeTop, "folding the sidebar does not move its entries");
+        var foldedLogo = logo.TranslatePoint(new Point(0, 0), rail);
+        check(toggle.IsVisible && toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && foldedLogo.Y >= toggleAt.Y + toggle.ActualHeight,
+            $"folding leaves the toggle in its spot and drops the logo under it (toggle {toggle.TranslatePoint(new Point(0, 0), rail)}, was {toggleAt}; logo {foldedLogo})");
         check(((System.Windows.Controls.TextBlock)icon).TextAlignment == TextAlignment.Center, "a collapsed sidebar centres each icon's glyph in its box");
         check(Math.Abs(iconLeft * 2 + icon.ActualWidth - home.ActualWidth) < 1, $"a collapsed sidebar centres its icons ({iconLeft:0.#} in {home.ActualWidth:0.#})");
         check(Equals(home.ToolTip, "Home") && content.ActualWidth > expanded, "collapsed icons name themselves and the page gains the width");
         Call("SetRailCollapsed", false); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
         check(rail.ActualWidth == 212 && label.IsVisible && home.ToolTip is null && content.ActualWidth == expanded, "the sidebar expands back to its labels");
-        check(toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt, "the toggle is back in the same spot once the sidebar opens");
+        check(toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && logo.TranslatePoint(new Point(0, 0), rail) == logoAt, "unfolding leaves the toggle in its spot and puts the logo back beside it");
         Call("ShowPage", page); await Dispatcher.Yield(DispatcherPriority.Render);
     }
 
