@@ -5,13 +5,14 @@
 
   <!-- Sidebar -->
   <Border x:Name="Rail" Grid.RowSpan="2" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
-   <DockPanel Margin="12,3,12,12">
-    <!-- The sidebar toggle stays in one spot, open or folded: the top-left corner, over the column of icons, in the caption
-         area (so it takes clicks from the window frame). The logo sits beside it with the name while the sidebar is open, and
-         drops under it when the sidebar folds (SideRail.cs). The header sits outside the scrolling part so scrolling never moves it. -->
-    <Grid x:Name="RailHeader" DockPanel.Dock="Top" Margin="0,0,0,20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <Button x:Name="RailToggle" Style="{StaticResource QuietIcon}" Content="&#xE90C;" Click="ToggleRailClick" Width="36" Margin="2,0,0,0" HorizontalAlignment="Left" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Collapse sidebar (Ctrl+B)" AutomationProperties.Name="Collapse sidebar"/>
-     <StackPanel x:Name="RailBrand" Orientation="Horizontal" Height="34" Margin="40,0,0,0" HorizontalAlignment="Left">
+   <DockPanel Margin="12">
+    <!-- The sidebar toggle stays in one spot, open or folded: the top-left corner, as far from the top as from the side, over
+         the column of icons and the size of one, in the caption area (so it takes clicks from the window frame). The logo sits
+         beside it with the name while the sidebar is open, and slides under it as the sidebar folds (SideRail.cs). The header
+         sits outside the scrolling part so scrolling never moves it. -->
+    <Grid x:Name="RailHeader" DockPanel.Dock="Top" Margin="0,0,0,20">
+     <Button x:Name="RailToggle" Style="{StaticResource QuietIcon}" Content="&#xE90C;" Click="ToggleRailClick" Width="40" Height="40" Margin="0" HorizontalAlignment="Left" VerticalAlignment="Top" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Collapse sidebar (Ctrl+B)" AutomationProperties.Name="Collapse sidebar"/>
+     <StackPanel x:Name="RailBrand" Orientation="Horizontal" Height="40" Margin="42,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Top">
       <Image x:Name="RailLogo" Source="Assets/BlackPearl.png" Width="28" Height="28" VerticalAlignment="Center" AutomationProperties.Name="BlackPearl"/>
       <!-- The name is set in a serif, like a jeweller's mark, apart from the interface type around it. -->
       <TextBlock x:Name="RailBrandName" Text="BlackPearl" FontFamily="Sitka Heading, Georgia" FontSize="21" FontWeight="SemiBold" Margin="9,0,0,2" VerticalAlignment="Center" Style="{StaticResource NavigationLabel}"/>

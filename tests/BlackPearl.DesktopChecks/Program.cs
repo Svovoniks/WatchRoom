@@ -541,7 +541,26 @@ static class Program
         Call("ShowPage", "Queues"); await Task.Delay(450); window.UpdateLayout();
         placed = Pearled("QueuesNav");
         check(placed == "", "the pearl rolls to the page opened" + placed);
-        Call("SetRailCollapsed", true); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+        check(Math.Abs(toggleAt.X - toggleAt.Y) < 0.5, $"the toggle sits as far from the sidebar's top as from its side ({toggleAt})");
+        // Folding glides: the sidebar narrows and the entries move down for the logo a step at a time, while the toggle stays put.
+        async Task<(List<double> Widths, List<double> Tops, bool Still)> Fold(bool collapsed)
+        {
+            var widths = new List<double>(); var tops = new List<double>(); var still = true;
+            Call("SetRailCollapsed", collapsed);
+            for (var until = DateTime.UtcNow.AddMilliseconds(700); DateTime.UtcNow < until;)
+            {
+                await Task.Delay(12); window.UpdateLayout();
+                widths.Add(rail.ActualWidth); tops.Add(home.TranslatePoint(new Point(0, 0), rail).Y);
+                still &= toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt;
+            }
+            return (widths, tops, still);
+        }
+        static bool Steady(List<double> values, int direction) => values.Zip(values.Skip(1)).All(pair => (pair.Second - pair.First) * direction >= -0.01);
+        var folding = await Fold(true);
+        if (SystemParameters.ClientAreaAnimation)
+            check(folding.Widths.Any(width => width > 64 && width < 212) && Steady(folding.Widths, -1) && Steady(folding.Tops, 1),
+                $"folding narrows the sidebar and moves its entries smoothly ({string.Join(", ", folding.Widths.Distinct().Take(12).Select(width => width.ToString("0")))})");
+        check(folding.Still, "the toggle stays in its spot while the sidebar folds");
         placed = Pearled("QueuesNav");
         check(placed == "", "the pearl stays on the edge of a folded sidebar" + placed);
         Call("ShowPage", "Home"); await Task.Delay(450); window.UpdateLayout();
@@ -549,7 +568,7 @@ static class Program
         var logoLeft = logo.TranslatePoint(new Point(0, 0), home).X;
         check(rail.ActualWidth == 64 && !label.IsVisible && !((FrameworkElement)window.FindName("RailBrandName")).IsVisible,
             $"a collapsed sidebar is a strip of icons ({rail.ActualWidth:0.#} wide)");
-        check(logo.IsVisible && Math.Abs(logoLeft * 2 + logo.ActualWidth - home.ActualWidth) < 1,
+        check(logo.IsVisible && Math.Abs(logoLeft + logo.ActualWidth / 2 - home.ActualWidth / 2) < 1,
             $"a collapsed sidebar keeps the logo, centred over its icons ({logoLeft:0.#} in {home.ActualWidth:0.#})");
         var foldedLogo = logo.TranslatePoint(new Point(0, 0), rail);
         check(toggle.IsVisible && toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && foldedLogo.Y >= toggleAt.Y + toggle.ActualHeight,
@@ -557,8 +576,12 @@ static class Program
         check(((System.Windows.Controls.TextBlock)icon).TextAlignment == TextAlignment.Center, "a collapsed sidebar centres each icon's glyph in its box");
         check(Math.Abs(iconLeft * 2 + icon.ActualWidth - home.ActualWidth) < 1, $"a collapsed sidebar centres its icons ({iconLeft:0.#} in {home.ActualWidth:0.#})");
         check(Equals(home.ToolTip, "Home") && content.ActualWidth > expanded, "collapsed icons name themselves and the page gains the width");
-        Call("SetRailCollapsed", false); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
-        check(rail.ActualWidth == 212 && label.IsVisible && home.ToolTip is null && content.ActualWidth == expanded, "the sidebar expands back to its labels");
+        var unfolding = await Fold(false);
+        if (SystemParameters.ClientAreaAnimation)
+            check(unfolding.Widths.Any(width => width > 64 && width < 212) && Steady(unfolding.Widths, 1) && Steady(unfolding.Tops, -1),
+                "unfolding widens the sidebar and moves its entries back smoothly");
+        check(unfolding.Still, "the toggle stays in its spot while the sidebar unfolds");
+        check(rail.ActualWidth == 212 && label.IsVisible && label.Opacity == 1 && home.ToolTip is null && content.ActualWidth == expanded, "the sidebar expands back to its labels");
         check(toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && logo.TranslatePoint(new Point(0, 0), rail) == logoAt, "unfolding leaves the toggle in its spot and puts the logo back beside it");
         Call("ShowPage", page); await Dispatcher.Yield(DispatcherPriority.Render);
     }
