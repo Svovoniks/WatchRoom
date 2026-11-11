@@ -519,6 +519,9 @@ static class Program
         var icon = (FrameworkElement)((System.Windows.Controls.Panel)home.Content).Children[0];
         var content = (FrameworkElement)window.FindName("ContentArea");
         var expanded = content.ActualWidth; var homeTop = home.TranslatePoint(new Point(0, 0), rail).Y;
+        var logo = (FrameworkElement)window.FindName("RailLogo");
+        var toggle = (FrameworkElement)window.FindName("RailToggle");
+        var toggleAt = toggle.TranslatePoint(new Point(0, 0), rail); var logoAt = logo.TranslatePoint(new Point(0, 0), rail);
         // The pearl on the sidebar's edge marks the current page, and rolls to the next one.
         var pearl = (FrameworkElement)window.FindName("RailPearl");
         string Pearled(string entry)
@@ -541,26 +544,20 @@ static class Program
         check(placed == "", "the pearl stays on the edge of a folded sidebar" + placed);
         Call("ShowPage", "Home"); await Task.Delay(450); window.UpdateLayout();
         var iconLeft = icon.TranslatePoint(new Point(0, 0), home).X;
-        var logo = (FrameworkElement)window.FindName("RailLogo");
-        var toggle = (FrameworkElement)window.FindName("RailToggle");
         var logoLeft = logo.TranslatePoint(new Point(0, 0), home).X;
         check(rail.ActualWidth == 64 && !label.IsVisible && !((FrameworkElement)window.FindName("RailBrandName")).IsVisible,
             $"a collapsed sidebar is a strip of icons ({rail.ActualWidth:0.#} wide)");
-        check(logo.IsVisible && Math.Abs(logoLeft * 2 + logo.ActualWidth - home.ActualWidth) < 1 && toggle.Opacity == 0 && toggle.IsVisible,
-            $"a collapsed sidebar keeps the logo, centred, with its toggle over it until pointed at ({logoLeft:0.#} in {home.ActualWidth:0.#})");
+        check(logo.IsVisible && Math.Abs(logoLeft * 2 + logo.ActualWidth - home.ActualWidth) < 1,
+            $"a collapsed sidebar keeps the logo, centred over its icons ({logoLeft:0.#} in {home.ActualWidth:0.#})");
+        check(toggle.IsVisible && toggle.Opacity == 1 && toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && logo.TranslatePoint(new Point(0, 0), rail) == logoAt,
+            $"the toggle and the logo stay in the same spot when the sidebar folds (toggle {toggle.TranslatePoint(new Point(0, 0), rail)}, was {toggleAt}; logo {logo.TranslatePoint(new Point(0, 0), rail)}, was {logoAt})");
         check(home.TranslatePoint(new Point(0, 0), rail).Y == homeTop, "folding the sidebar does not move its entries");
         check(((System.Windows.Controls.TextBlock)icon).TextAlignment == TextAlignment.Center, "a collapsed sidebar centres each icon's glyph in its box");
         check(Math.Abs(iconLeft * 2 + icon.ActualWidth - home.ActualWidth) < 1, $"a collapsed sidebar centres its icons ({iconLeft:0.#} in {home.ActualWidth:0.#})");
         check(Equals(home.ToolTip, "Home") && content.ActualWidth > expanded, "collapsed icons name themselves and the page gains the width");
         Call("SetRailCollapsed", false); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
         check(rail.ActualWidth == 212 && label.IsVisible && home.ToolTip is null && content.ActualWidth == expanded, "the sidebar expands back to its labels");
-        // A click focuses the toggle; it must not stay over the folded strip's logo once the pointer leaves.
-        window.Activate(); toggle.Focus(); await Dispatcher.Yield(DispatcherPriority.Input);
-        var focusedBefore = toggle.IsKeyboardFocused;
-        Call("ToggleRailClick", toggle, new RoutedEventArgs()); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
-        check(focusedBefore && !toggle.IsKeyboardFocused && logo.IsVisible && toggle.Opacity == 0,
-            $"folding from the toggle shows the logo again rather than the focused toggle (focused before {focusedBefore}, after {toggle.IsKeyboardFocused}, logo {logo.IsVisible})");
-        Call("SetRailCollapsed", false); await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+        check(toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt, "the toggle is back in the same spot once the sidebar opens");
         Call("ShowPage", page); await Dispatcher.Yield(DispatcherPriority.Render);
     }
 

@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -43,15 +42,7 @@ public partial class MainWindow
         RailPearlLayer.IsVisibleChanged += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => PlaceRailPearl(animate: false));
     }
 
-    private void ToggleRailClick(object sender, RoutedEventArgs e)
-    {
-        SetRailCollapsed(!railCollapsed);
-        // A click focuses the toggle, and a focused toggle stays over the folded strip's logo. Only keyboard focus should
-        // keep it there, so a click hands focus to the window, where keyboard shortcuts are handled.
-        if (InputManager.Current.MostRecentInputDevice is KeyboardDevice || !RailToggle.IsKeyboardFocused) return;
-        Keyboard.Focus(this);
-        if (RailToggle.IsKeyboardFocused) Keyboard.ClearFocus();
-    }
+    private void ToggleRailClick(object sender, RoutedEventArgs e) => SetRailCollapsed(!railCollapsed);
 
     private void SetRailCollapsed(bool collapsed)
     {
@@ -65,11 +56,7 @@ public partial class MainWindow
     {
         SideRail.SetCollapsed(Rail, railCollapsed);
         if (Rail.Visibility == Visibility.Visible) RailWidth.Width = new GridLength(RailColumnWidth);
-        // Folded, the logo is centred at the top of the strip and the toggle lies over it, showing only while pointed at or
-        // focused (MainWindow.xaml); open, the toggle sits at the end of the brand row.
-        RailBrand.Margin = railCollapsed ? new Thickness(0) : new Thickness(10, 0, 0, 0);
-        RailBrand.HorizontalAlignment = railCollapsed ? HorizontalAlignment.Center : HorizontalAlignment.Left;
-        RailToggle.HorizontalAlignment = railCollapsed ? HorizontalAlignment.Center : HorizontalAlignment.Right;
+        // The toggle and the logo stay where they are (MainWindow.xaml), so folding and unfolding happen from one spot.
         NowPlayingText.Visibility = railCollapsed ? Visibility.Collapsed : Visibility.Visible;
         var label = railCollapsed ? "Expand sidebar" : "Collapse sidebar";
         RailToggle.ToolTip = label + " (Ctrl+B)"; AutomationProperties.SetName(RailToggle, label);
