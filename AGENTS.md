@@ -130,9 +130,9 @@ voice, or anything that walks the whole library:
   request and abandoned another.
 - A build without the bundled TMDB key gets other results than the user's app. Say
   so when you report numbers from one.
-- Agents cannot hear audio. For voice changes, measure with real recordings of
-  the user's setup: a phone microphone through a virtual cable at low level, and
-  Bluetooth output. Say plainly what you could not check.
+- Agents cannot hear audio. For voice changes, measure with real recordings made
+  the way the user actually talks and listens: their devices, routing, and levels,
+  including quiet input and wireless output. Say plainly what you could not check.
 
 ## Before you report a change as done
 

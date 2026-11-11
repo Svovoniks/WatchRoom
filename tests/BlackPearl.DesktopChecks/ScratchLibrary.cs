@@ -1,4 +1,5 @@
 using System.IO;
+using BlackPearl.Core;
 using Microsoft.Data.Sqlite;
 
 // Copies a library folder so work can be tried on real data without touching it: --copy-library <source> <destination>.
@@ -35,9 +36,12 @@ static class ScratchLibrary
         foreach (var file in Files.Select(name => Path.Combine(source, name)).Where(File.Exists))
         { File.Copy(file, Path.Combine(destination, Path.GetFileName(file))); bytes += new FileInfo(file).Length; }
 
-        // Paths appear plain in the path and settings columns and JSON-escaped (doubled backslashes) inside json columns.
-        // Only paths inside the source folder change: media files elsewhere (M:\Shows) keep their real paths.
-        string Escaped(string path) => path.Replace("\\", "\\\\");
+        // Paths appear plain in the path and settings columns, and inside JSON as the app writes it (Wire): backslashes
+        // doubled, and letters outside ASCII and characters such as & + ' as \uXXXX, as in a Cyrillic user name. Each form
+        // of the folder is replaced by the same form of the copy's. Only paths inside the source folder change: media files
+        // elsewhere (M:\Shows) keep their real paths.
+        static string Json(string path) => Wire.Serialize(path)[1..^1];
+        var forms = new[] { (source + "\\", destination + "\\"), (Json(source + "\\"), Json(destination + "\\")), ((source + "\\").Replace("\\", "\\\\"), (destination + "\\").Replace("\\", "\\\\")) }.Distinct().ToArray();
         var rewritten = 0; var left = 0;
         using (var db = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = copy, Pooling = false }.ToString()))
         {
@@ -46,14 +50,18 @@ static class ScratchLibrary
             foreach (var (table, column) in Columns)
             {
                 using var update = db.CreateCommand(); update.Transaction = transaction;
-                update.CommandText = $"UPDATE {table} SET {column} = replace(replace({column}, $escapedOld, $escapedNew), $plainOld, $plainNew) WHERE instr({column}, $plainOld) > 0 OR instr({column}, $escapedOld) > 0";
-                update.Parameters.AddWithValue("$escapedOld", Escaped(source + "\\")); update.Parameters.AddWithValue("$escapedNew", Escaped(destination + "\\"));
-                update.Parameters.AddWithValue("$plainOld", source + "\\"); update.Parameters.AddWithValue("$plainNew", destination + "\\");
+                var replaced = column; var matched = new List<string>();
+                for (var i = 0; i < forms.Length; i++)
+                {
+                    replaced = $"replace({replaced}, $old{i}, $new{i})"; matched.Add($"instr({column}, $old{i}) > 0");
+                    update.Parameters.AddWithValue($"$old{i}", forms[i].Item1); update.Parameters.AddWithValue($"$new{i}", forms[i].Item2);
+                }
+                update.CommandText = $"UPDATE {table} SET {column} = {replaced} WHERE {string.Join(" OR ", matched)}";
                 rewritten += update.ExecuteNonQuery();
                 // A path saved with different letter case escapes replace(), which matches case exactly.
                 using var check = db.CreateCommand(); check.Transaction = transaction;
-                check.CommandText = $"SELECT count(*) FROM {table} WHERE instr(lower({column}), lower($plainOld)) > 0 OR instr(lower({column}), lower($escapedOld)) > 0";
-                check.Parameters.AddWithValue("$plainOld", source + "\\"); check.Parameters.AddWithValue("$escapedOld", Escaped(source + "\\"));
+                check.CommandText = $"SELECT count(*) FROM {table} WHERE " + string.Join(" OR ", forms.Select((_, i) => $"instr(lower({column}), lower($old{i})) > 0"));
+                for (var i = 0; i < forms.Length; i++) check.Parameters.AddWithValue($"$old{i}", forms[i].Item1);
                 left += Convert.ToInt32(check.ExecuteScalar());
             }
             transaction.Commit();

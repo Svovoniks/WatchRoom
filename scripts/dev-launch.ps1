@@ -51,6 +51,7 @@ foreach ($dev in $running | Where-Object Mine) { Close-DevBuild $dev.Process }
 if ($Stop) { return }
 
 # The newest build in this checkout: the Release output, or a self-contained publish under artifacts.
+$chosen = [bool]$Exe
 if (!$Exe) {
     $candidates = @(Get-ChildItem (Join-Path $root 'src/BlackPearl.Desktop/bin') -Recurse -Filter BlackPearl.exe -ErrorAction SilentlyContinue) +
         @(Get-ChildItem (Join-Path $root 'artifacts') -Recurse -Filter BlackPearl.exe -Depth 2 -ErrorAction SilentlyContinue)
@@ -64,10 +65,14 @@ $Exe = (Resolve-Path $Exe).Path
 if (Test-Under $Exe $programs) { throw "$Exe is an installed copy. This script only starts development builds." }
 $folder = Split-Path $Exe
 $built = (Get-Item (Join-Path $folder 'BlackPearl.dll')).LastWriteTime
-$newestSource = Get-ChildItem (Join-Path $root 'src') -Recurse -File -Include *.cs, *.xaml, *.csproj, *.png, *.ico, *.ttf, *.otf |
+# Only the app's own projects count: a change to the room server alone leaves BlackPearl.dll as it was.
+$newestSource = @('BlackPearl.Desktop', 'BlackPearl.Core') | ForEach-Object { Get-ChildItem (Join-Path $root "src/$_") -Recurse -File -Include *.cs, *.xaml, *.csproj, *.png, *.ico, *.ttf, *.otf } |
     Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($newestSource -and $newestSource.LastWriteTime -gt $built.AddSeconds(2)) {
-    throw "The build in $folder ($built) is older than $($newestSource.FullName) ($($newestSource.LastWriteTime)). Run ./build.ps1, or pass -Exe with the build you mean."
+    $stale = "The build in $folder ($built) is older than $($newestSource.FullName) ($($newestSource.LastWriteTime))."
+    # A build named with -Exe is the one meant, such as one built to another folder; say so and start it.
+    if ($chosen) { Write-Warning "$stale Starting it because -Exe names it." }
+    else { throw "$stale Run ./build.ps1, or pass -Exe with the build you mean." }
 }
 
 if ($Scratch) {
