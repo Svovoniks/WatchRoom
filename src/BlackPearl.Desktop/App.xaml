@@ -181,12 +181,9 @@
   <!-- A library category: a word in the wordmark's serif, strung on the category thread. The current one is in full ink with the
        pearl under it; the rest are muted until pointed at. All share one weight, so choosing one never moves the others. The space
        after each word is part of its button, so the first word lines up with the page and the pearl centres on the word. -->
-  <!-- How many titles a category holds, set after its word in the same serif: a size down, in old-style figures that sit on the
-       word's baseline like lowercase, in the accent so it reads as something waiting. -->
-  <Style x:Key="CategoryCount" TargetType="Run">
-   <Setter Property="FontSize" Value="15"/><Setter Property="Foreground" Value="{DynamicResource Accent}"/>
-   <Setter Property="Typography.NumeralStyle" Value="OldStyle"/>
-  </Style>
+  <!-- How many titles a category holds, written after its word as part of the same label: the same serif, size and ink, so it
+       brightens with the word. Old-style figures sit among the lowercase like letters rather than standing up like capitals. -->
+  <Style x:Key="CategoryCount" TargetType="Run"><Setter Property="Typography.NumeralStyle" Value="OldStyle"/></Style>
   <Style x:Key="CategorySegment" TargetType="Button">
    <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontFamily" Value="Sitka Heading, Georgia"/><Setter Property="FontSize" Value="19"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="Height" Value="34"/><Setter Property="Padding" Value="0,0,26,0"/><Setter Property="HorizontalContentAlignment" Value="Left"/>

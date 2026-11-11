@@ -506,6 +506,13 @@ static class Program
         // The poster grid reaches 6 DIP past the page edge for its cards' padding, so the artwork itself lines up with the page edge.
         var first = ((FrameworkElement)window.FindName("AllLibraryNav")).TranslatePoint(new Point(0, 0), (FrameworkElement)window.FindName("LibraryPage")).X;
         check(Math.Abs(first) < 0.5, $"the first category starts at the page edge, in line with the artwork below ({first:0.#})");
+        // A category's count is part of its label: the word's size and ink, so it reads as one label and brightens with it.
+        foreach (var name in new[] { "MissingLibraryCount", "UnmatchedLibraryCount" })
+        {
+            var number = (System.Windows.Documents.Run)window.FindName(name); var label = (System.Windows.Controls.TextBlock)number.Parent;
+            check(number.FontSize == label.FontSize && number.FontFamily.Equals(label.FontFamily) && Equals(number.Foreground, label.Foreground),
+                $"{name} is part of its label, in the word's size and ink ({number.FontSize} against {label.FontSize})");
+        }
         var under = Under("AllLibraryNav");
         check(under == "", "the pearl sits on the thread under All" + under);
         // It rolls along the thread, always forward, rather than jumping, and stays on the thread as it goes.
