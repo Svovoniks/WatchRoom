@@ -484,24 +484,30 @@ static class Program
         await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
     }
 
-    // The library's categories are words on a thread at the top of the Library page, with a pearl under the current one that rolls to the next.
+    // The library's categories are words on a thread at the top of the Library page; the stretch of thread under the current one
+    // is lit and glides to the next. The pearl stays on the sidebar alone.
     private static async Task CheckCategoryBar(MainWindow window, Action<bool, string> check)
     {
         void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, arguments);
         var categories = (FrameworkElement)window.FindName("LibraryCategoryBar");
         var thread = (FrameworkElement)window.FindName("LibraryCategoryThread");
-        var pearl = (FrameworkElement)window.FindName("LibraryCategoryPearl");
+        var glow = (FrameworkElement)window.FindName("LibraryCategoryGlow");
         async Task Settle() { await Task.Delay(400); await Dispatcher.Yield(DispatcherPriority.ContextIdle); window.UpdateLayout(); }
-        // On the thread, centred under the word itself rather than the word and the space after it.
+        // On the thread, centred on the word itself rather than the word and the space after it, and covering it.
         string Under(string name)
         {
             var segment = (System.Windows.Controls.Button)window.FindName(name);
-            var word = segment.TranslatePoint(new Point(segment.Padding.Left + (segment.ActualWidth - segment.Padding.Left - segment.Padding.Right) / 2, 0), categories).X;
-            var centre = pearl.TranslatePoint(new Point(pearl.ActualWidth / 2, pearl.ActualHeight / 2), categories);
+            var word = segment.TranslatePoint(new Point(segment.Padding.Left, 0), categories).X; var wordWidth = segment.ActualWidth - segment.Padding.Left - segment.Padding.Right;
+            var at = glow.TranslatePoint(new Point(0, glow.ActualHeight / 2), categories);
             var line = thread.TranslatePoint(new Point(0, thread.ActualHeight / 2), categories).Y;
-            return pearl.IsVisible && Math.Abs(centre.X - word) < 1 && Math.Abs(centre.Y - line) < 0.5 ? "" : $" (pearl {(pearl.IsVisible ? "at" : "hidden at")} {centre.X:0.#},{centre.Y:0.#}; word middle {word:0.#}, thread {line:0.#})";
+            return glow.IsVisible && Math.Abs(at.X + glow.ActualWidth / 2 - (word + wordWidth / 2)) < 1 && at.X <= word && at.X + glow.ActualWidth >= word + wordWidth && Math.Abs(at.Y - line) < 0.5 ? ""
+                : $" (light {(glow.IsVisible ? "at" : "hidden at")} {at.X:0.#},{at.Y:0.#}, {glow.ActualWidth:0.#} wide; word at {word:0.#}, {wordWidth:0.#} wide; thread {line:0.#})";
         }
+        int Pearls() => Descendants(window).OfType<System.Windows.Controls.ContentControl>().Count(element => element.IsVisible && element.Style == window.FindResource("Pearl"));
+        static IEnumerable<DependencyObject> Descendants(DependencyObject node) => Enumerable.Range(0, System.Windows.Media.VisualTreeHelper.GetChildrenCount(node))
+            .Select(i => System.Windows.Media.VisualTreeHelper.GetChild(node, i)).SelectMany(child => Descendants(child).Prepend(child));
         Call("NavigateLibrary", 0, null, null, null); await Settle();
+        check(Pearls() == 1, $"the Library page shows one pearl, on the sidebar ({Pearls()} shown)");
         check(categories.IsVisible && categories.TranslatePoint(new Point(0, 0), (FrameworkElement)window.FindName("LibraryPage")).Y < 1, "the categories sit at the top of the Library page");
         // The poster grid reaches 6 DIP past the page edge for its cards' padding, so the artwork itself lines up with the page edge.
         var first = ((FrameworkElement)window.FindName("AllLibraryNav")).TranslatePoint(new Point(0, 0), (FrameworkElement)window.FindName("LibraryPage")).X;
@@ -514,28 +520,28 @@ static class Program
                 $"{name} is part of its label, in the word's size and ink ({number.FontSize} against {label.FontSize})");
         }
         var under = Under("AllLibraryNav");
-        check(under == "", "the pearl sits on the thread under All" + under);
-        // It rolls along the thread, always forward, rather than jumping, and stays on the thread as it goes.
+        check(under == "", "the thread is lit under All" + under);
+        // The light glides along the thread, always forward, rather than jumping, and stays on the thread as it goes.
         var rolled = new List<double>(); var onThread = true;
         Call("LibraryCategoryClick", window.FindName("MoviesLibraryNav"), new RoutedEventArgs());
         for (var until = DateTime.UtcNow.AddMilliseconds(500); DateTime.UtcNow < until;)
         {
             await Task.Delay(12); window.UpdateLayout();
-            var at = pearl.TranslatePoint(new Point(pearl.ActualWidth / 2, pearl.ActualHeight / 2), categories);
+            var at = glow.TranslatePoint(new Point(glow.ActualWidth / 2, glow.ActualHeight / 2), categories);
             rolled.Add(at.X); onThread &= Math.Abs(at.Y - thread.TranslatePoint(new Point(0, thread.ActualHeight / 2), categories).Y) < 0.5;
         }
         var end = rolled[^1];
         if (SystemParameters.ClientAreaAnimation)
             check(rolled.Any(x => x > 30 && x < end - 10) && rolled.Zip(rolled.Skip(1)).All(pair => pair.Second >= pair.First - 0.01) && onThread,
-                $"the pearl rolls along the thread to the category chosen ({string.Join(", ", rolled.Distinct().Take(10).Select(x => x.ToString("0")))})");
+                $"the light glides along the thread to the category chosen ({string.Join(", ", rolled.Distinct().Take(10).Select(x => x.ToString("0")))})");
         await Settle();
         under = Under("MoviesLibraryNav");
-        check(under == "", "the pearl rolls to the category chosen" + under);
+        check(under == "", "the light settles under the category chosen" + under);
         Call("OpenSearch", false); await Settle();
         check(!categories.IsVisible, "Search hides the categories");
         Call("LibraryNavClick", window, new RoutedEventArgs()); await Settle();
         under = Under("AllLibraryNav");
-        check(categories.IsVisible && under == "", "Library leaves Search for All, and the pearl is placed again when the categories return" + under);
+        check(categories.IsVisible && under == "", "Library leaves Search for All, and the light is placed again when the categories return" + under);
     }
 
     // The sidebar folds into a strip of icons, with each icon named in a tooltip, and unfolds again.

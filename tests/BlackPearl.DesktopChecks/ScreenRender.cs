@@ -94,6 +94,36 @@ static class ScreenRender
             await using (var file = File.Create(Path.Combine(output, "dark-count-roll.png"))) encoder.Save(file);
             count.Text = shown;
         }
+        // The lit stretch of the category thread gliding from All to Movies and on to Unmatched, drawn every 30 ms at twice size.
+        async Task CaptureCategoryGlide()
+        {
+            var bar = (FrameworkElement)window.FindName("LibraryCategoryBar"); var root = (FrameworkElement)window.Content;
+            var frames = new List<BitmapSource>();
+            foreach (var target in new[] { "MoviesLibraryNav", "UnmatchedLibraryNav", "AllLibraryNav" })
+            {
+                if (window.FindName(target) is not Button { IsVisible: true } button) continue;
+                Call("LibraryCategoryClick", button, new RoutedEventArgs());
+                for (var at = DateTime.UtcNow; DateTime.UtcNow - at < TimeSpan.FromMilliseconds(360);)
+                {
+                    await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+                    var full = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32); full.Render(root);
+                    var spot = bar.TranslatePoint(new Point(0, 0), root);
+                    frames.Add(new CroppedBitmap(full, new Int32Rect((int)spot.X, (int)spot.Y, Math.Min((int)bar.ActualWidth + 60, (int)(root.ActualWidth - spot.X)), (int)bar.ActualHeight + 4)));
+                    await Task.Delay(30);
+                }
+                await Settle(500);
+            }
+            var visual = new DrawingVisual(); RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.NearestNeighbor);
+            var w = frames.Max(f => f.PixelWidth) * 2; var h = frames[0].PixelHeight * 2;
+            using (var draw = visual.RenderOpen())
+            {
+                draw.DrawRectangle((Brush)window.FindResource("Canvas"), null, new Rect(0, 0, w, h * frames.Count));
+                for (var i = 0; i < frames.Count; i++) draw.DrawImage(frames[i], new Rect(0, i * h, frames[i].PixelWidth * 2, h));
+            }
+            var strip = new RenderTargetBitmap(w, h * frames.Count, 96, 96, PixelFormats.Pbgra32); strip.Render(visual);
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(strip));
+            await using (var file = File.Create(Path.Combine(output, "dark-category-glide.png"))) encoder.Save(file);
+        }
         window.Width = width; window.Height = height;
         var deadline = DateTime.UtcNow.AddSeconds(60);
         while (Field("libraryLoaded") is not true && DateTime.UtcNow < deadline) await Settle(200);
@@ -104,7 +134,7 @@ static class ScreenRender
             Set("light", theme == "light"); Call("ApplyTheme");
             Call("ShowPage", "Home"); await Capture($"{theme}-home");
             Call("NavigateLibrary", 0, null, null, null); await Capture($"{theme}-library");
-            if (theme == "dark") await CaptureCountRoll();
+            if (theme == "dark") { await CaptureCountRoll(); await CaptureCategoryGlide(); }
             // The sidebar folded into its strip of icons.
             Call("SetRailCollapsed", true); await Capture($"{theme}-library-collapsed");
             Call("ShowPage", "Home"); await Capture($"{theme}-home-collapsed"); Call("SetRailCollapsed", false);

@@ -391,9 +391,8 @@
      <Grid x:Name="LibraryToolbar" MinHeight="40" Margin="0,0,0,14" SizeChanged="LibraryToolbarSizeChanged">
       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-      <!-- The library's categories: words strung on a thread, with the app's pearl on the thread under the current one. It rolls
-           to the category chosen (LibraryCategoryBar.cs), as the sidebar's pearl rolls to the page opened. The thread trails off
-           past the last word. Search and Music have their own tabs, so the categories hide for them. -->
+      <!-- The library's categories: words strung on a thread, the stretch under the current one lit (LibraryCategoryBar.cs). The
+           thread trails off past the last word. Search and Music have their own tabs, so the categories hide for them. -->
       <Grid x:Name="LibraryCategoryBar" IsVisibleChanged="LibraryCategoryBarVisibilityChanged" HorizontalAlignment="Left" VerticalAlignment="Top" SizeChanged="LibraryCategoryBarSizeChanged">
        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/></Grid.RowDefinitions>
        <StackPanel x:Name="LibraryCategories" Orientation="Horizontal" SizeChanged="LibraryCategoriesSizeChanged" KeyboardNavigation.TabNavigation="Once" KeyboardNavigation.DirectionalNavigation="Cycle" AutomationProperties.Name="Library category">
@@ -410,10 +409,13 @@
        <Rectangle x:Name="LibraryCategoryThread" Grid.Row="1" Height="1" VerticalAlignment="Center" Margin="0,0,-48,0" Fill="{DynamicResource Muted}" Opacity="0.45" IsHitTestVisible="False">
         <Rectangle.OpacityMask><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#FF000000" Offset="0"/><GradientStop Color="#FF000000" Offset="0.72"/><GradientStop Color="#00000000" Offset="1"/></LinearGradientBrush></Rectangle.OpacityMask>
        </Rectangle>
-       <ContentControl x:Name="LibraryCategoryPearl" Grid.Row="1" Style="{StaticResource Pearl}" Width="11" Height="11" HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Hidden">
-        <ContentControl.RenderTransform><TranslateTransform/></ContentControl.RenderTransform>
-        <ContentControl.Effect><DropShadowEffect Color="{DynamicResource AccentColor}" ShadowDepth="0" BlurRadius="9" Opacity="0.7"/></ContentControl.Effect>
-       </ContentControl>
+       <!-- The current category: a stretch of the thread under its word, lit in the pearl's colours, the accent fading into its
+            violet, reaching a little past the word so its fades fall outside it. It glides and resizes to the word chosen. The pearl itself stays on the sidebar, so there is one pearl. -->
+       <Border x:Name="LibraryCategoryGlow" Grid.Row="1" Height="2" CornerRadius="1" HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Hidden" IsHitTestVisible="False">
+        <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+        <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="{DynamicResource AccentClear}" Offset="0"/><GradientStop Color="{DynamicResource AccentColor}" Offset="0.14"/><GradientStop Color="#FF9A7AE6" Offset="0.86"/><GradientStop Color="#009A7AE6" Offset="1"/></LinearGradientBrush></Border.Background>
+        <Border.Effect><DropShadowEffect Color="{DynamicResource AccentColor}" ShadowDepth="0" BlurRadius="10" Opacity="0.9"/></Border.Effect>
+       </Border>
       </Grid>
       <ItemsControl x:Name="LibraryBreadcrumbs" Margin="-8,0,0,0" VerticalAlignment="Center" Button.Click="BreadcrumbClick" Style="{StaticResource LibraryBreadcrumbs}" AutomationProperties.Name="Library location"/>
       <!-- Search says here what it is still reading, or what a guest can search. -->
