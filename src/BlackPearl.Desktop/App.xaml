@@ -144,7 +144,8 @@
   <!-- Sidebar navigation. The current page is marked by the pearl on the sidebar's edge (SideRail.cs), a bright
        label and an accent icon, rather than a fill: pointing at an entry is the only thing that fills it. -->
   <Style x:Key="Navigation" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-   <Setter Property="Height" Value="40"/><Setter Property="Padding" Value="12,0"/>
+   <!-- No padding on the right: a folded sidebar is narrower than the icon and its left padding, and padding there would cut the icons off. -->
+   <Setter Property="Height" Value="40"/><Setter Property="Padding" Value="12,0,0,0"/>
    <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Margin" Value="0,0,0,2"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
     <Grid>

@@ -543,6 +543,16 @@ static class Program
         check(placed == "", "the pearl rolls to the page opened" + placed);
         check(Math.Abs(toggleAt.X - toggleAt.Y) < 0.5, $"the toggle sits as far from the sidebar's top as from its side ({toggleAt})");
         // Folding glides: the sidebar narrows and the entries move down for the logo a step at a time, while the toggle stays put.
+        // A sidebar icon is cut off when its glyph runs past the room its button gives its content.
+        var cut = new List<string>();
+        IEnumerable<string> Cut() => RailEntries().Where(entry => entry.IsVisible).Select(entry =>
+        {
+            var presenter = (FrameworkElement)System.Windows.Media.VisualTreeHelper.GetChild(System.Windows.Media.VisualTreeHelper.GetChild(entry, 0), 2);
+            var glyph = (System.Windows.Controls.TextBlock)((System.Windows.Controls.Panel)((System.Windows.Controls.Button)entry).Content).Children[0];
+            var room = presenter.TranslatePoint(new Point(presenter.ActualWidth, 0), rail).X;
+            var end = glyph.TranslatePoint(new Point(glyph.FontSize, 0), rail).X;
+            return end > room + 0.01 ? $"{entry.Name} at {rail.ActualWidth:0.#} wide: glyph ends {end:0.#}, room ends {room:0.#}" : null;
+        }).OfType<string>();
         async Task<(List<double> Widths, List<double> Tops, bool Still)> Fold(bool collapsed)
         {
             var widths = new List<double>(); var tops = new List<double>(); var still = true;
@@ -552,6 +562,7 @@ static class Program
                 await Task.Delay(12); window.UpdateLayout();
                 widths.Add(rail.ActualWidth); tops.Add(home.TranslatePoint(new Point(0, 0), rail).Y);
                 still &= toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt;
+                cut.AddRange(Cut());
             }
             return (widths, tops, still);
         }
@@ -607,6 +618,7 @@ static class Program
             check(unfolding.Widths.Any(width => width > 64 && width < 212) && Steady(unfolding.Widths, 1) && Steady(unfolding.Tops, -1),
                 "unfolding widens the sidebar and moves its entries back smoothly");
         check(unfolding.Still, "the toggle stays in its spot while the sidebar unfolds");
+        check(cut.Count == 0, "no sidebar icon is cut off, folded, open or in between" + (cut.Count > 0 ? $" ({string.Join("; ", cut.Distinct().Take(4))})" : ""));
         check(rail.ActualWidth == 212 && label.IsVisible && label.Opacity == 1 && home.ToolTip is null && content.ActualWidth == expanded, "the sidebar expands back to its labels");
         check(toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && logo.TranslatePoint(new Point(0, 0), rail) == logoAt, "unfolding leaves the toggle in its spot and puts the logo back beside it");
         Call("ShowPage", page); await Dispatcher.Yield(DispatcherPriority.Render);
