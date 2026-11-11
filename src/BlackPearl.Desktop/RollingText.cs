@@ -70,8 +70,9 @@ public sealed class RollingText : Decorator
     private void Show(string from, string to)
     {
         AutomationProperties.SetName(this, to);
-        // A live count tells screen readers it changed, as one piece of text rather than its rolling digits.
-        if (AutomationProperties.GetLiveSetting(this) != AutomationLiveSetting.Off && IsLoaded) UIElementAutomationPeer.CreatePeerForElement(this)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
+        // A live count that is showing tells screen readers it changed, as one piece of text rather than its rolling digits. A hidden one,
+        // such as the library's while Search shows its own copy, stays quiet, so a change is announced once.
+        if (AutomationProperties.GetLiveSetting(this) != AutomationLiveSetting.Off && IsVisible) UIElementAutomationPeer.CreatePeerForElement(this)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
         // A new count has arrived. Set without replacing a binding, so a count that follows another keeps following it.
         SetCurrentValue(PendingProperty, false); EndRoll();
         display.Text = to;

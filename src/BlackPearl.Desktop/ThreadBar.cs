@@ -81,7 +81,8 @@ public sealed class ThreadBar : ContentControl
     private void Watch()
     {
         if (!IsLoaded || !IsVisible) return;
-        // A list replaces an item's container when the item is replaced; the old one is let go.
+        // A list replaces an item's container when the item is replaced; the old one is let go here, the next time the bar is laid
+        // out while showing, or when it unloads.
         var current = Choices().ToHashSet();
         foreach (var gone in watched.Where(choice => !current.Contains(choice)).ToList()) { ItemStatus.RemoveValueChanged(gone, statusChanged); gone.SizeChanged -= choiceResized; watched.Remove(gone); }
         foreach (var choice in current)
