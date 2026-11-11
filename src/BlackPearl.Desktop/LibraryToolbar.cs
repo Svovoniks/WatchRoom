@@ -43,9 +43,9 @@ public partial class MainWindow
         if (room <= 0 || !IsLoaded) return;
         var adding = AddTitleButton.Visibility == Visibility.Visible;
         var widths = adding ? addTitleWidths ??= MeasureAddTitle() : (0, 0);
-        // The bar's own desired size is cut to the room it was given, so its width comes from its segments.
-        var left = categories ? LibraryCategories.Children.OfType<FrameworkElement>().Where(segment => segment.Visibility == Visibility.Visible).Sum(segment => segment.DesiredSize.Width)
-            + LibraryCategoryBar.Padding.Left + LibraryCategoryBar.Padding.Right + LibraryCategoryBar.BorderThickness.Left + LibraryCategoryBar.BorderThickness.Right + LibraryToolbarGap : 0;
+        // The categories' own desired size is cut to the room they were given, so their width comes from the words. The thread's
+        // fading tail runs below the actions, so it needs no room of its own.
+        var left = categories ? LibraryCategories.Children.OfType<FrameworkElement>().Where(segment => segment.Visibility == Visibility.Visible).Sum(segment => segment.DesiredSize.Width) + LibraryToolbarGap : 0;
         var actions = (ResultCount.Visibility == Visibility.Visible ? ResultCount.DesiredSize.Width : 0) + (RescanButton.Visibility == Visibility.Visible ? RescanButton.DesiredSize.Width : 0);
         var wrap = left + actions + widths.Compact > room;
         var compact = wrap ? actions + widths.Full > room : left + actions + widths.Full > room;
@@ -53,8 +53,10 @@ public partial class MainWindow
         // The actions' columns stay as wide as the actions on every row, so categories alone on theirs span those columns too.
         Grid.SetColumnSpan(LibraryCategoryBar, wrap ? 4 : 1);
         var row = wrap ? 1 : 0; var top = wrap ? LibraryToolbarRowGap : 0;
+        // Beside the categories, the actions centre on the words rather than on the words and their thread.
+        var bottom = categories && !wrap ? LibraryCategoryBar.RowDefinitions[1].Height.Value : 0;
         Grid.SetRow(ResultCount, row); Grid.SetRow(RescanButton, row); Grid.SetRow(AddTitleButton, row);
-        ResultCount.Margin = new Thickness(12, top, 8, 0); RescanButton.Margin = new Thickness(0, top, 0, 0); AddTitleButton.Margin = new Thickness(10, top, 0, 0);
+        ResultCount.Margin = new Thickness(12, top, 8, bottom); RescanButton.Margin = new Thickness(0, top, 0, bottom); AddTitleButton.Margin = new Thickness(4, top, 0, bottom);
     }
 
     /// <summary>How wide Add title is with its label and as only its plus, margin included.</summary>

@@ -484,29 +484,51 @@ static class Program
         await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
     }
 
-    // The library's categories are a bar at the top of the Library page whose thumb slides to the current category.
+    // The library's categories are words on a thread at the top of the Library page, with a pearl under the current one that rolls to the next.
     private static async Task CheckCategoryBar(MainWindow window, Action<bool, string> check)
     {
         void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, arguments);
         var categories = (FrameworkElement)window.FindName("LibraryCategoryBar");
-        var track = (FrameworkElement)window.FindName("LibraryCategories");
-        var thumb = (FrameworkElement)window.FindName("LibraryCategoryThumb");
-        var shift = (System.Windows.Media.TranslateTransform)thumb.RenderTransform;
+        var thread = (FrameworkElement)window.FindName("LibraryCategoryThread");
+        var pearl = (FrameworkElement)window.FindName("LibraryCategoryPearl");
         async Task Settle() { await Task.Delay(400); await Dispatcher.Yield(DispatcherPriority.ContextIdle); window.UpdateLayout(); }
-        bool Under(string name)
+        // On the thread, centred under the word itself rather than the word and the space after it.
+        string Under(string name)
         {
-            var segment = (FrameworkElement)window.FindName(name);
-            return thumb.IsVisible && Math.Abs(segment.TranslatePoint(new Point(0, 0), track).X - shift.X) < 0.5 && Math.Abs(segment.ActualWidth - thumb.ActualWidth) < 0.5;
+            var segment = (System.Windows.Controls.Button)window.FindName(name);
+            var word = segment.TranslatePoint(new Point(segment.Padding.Left + (segment.ActualWidth - segment.Padding.Left - segment.Padding.Right) / 2, 0), categories).X;
+            var centre = pearl.TranslatePoint(new Point(pearl.ActualWidth / 2, pearl.ActualHeight / 2), categories);
+            var line = thread.TranslatePoint(new Point(0, thread.ActualHeight / 2), categories).Y;
+            return pearl.IsVisible && Math.Abs(centre.X - word) < 1 && Math.Abs(centre.Y - line) < 0.5 ? "" : $" (pearl {(pearl.IsVisible ? "at" : "hidden at")} {centre.X:0.#},{centre.Y:0.#}; word middle {word:0.#}, thread {line:0.#})";
         }
         Call("NavigateLibrary", 0, null, null, null); await Settle();
-        check(categories.IsVisible && categories.TranslatePoint(new Point(0, 0), (FrameworkElement)window.FindName("LibraryPage")).Y < 1, "the category categories sits at the top of the Library page");
-        check(Under("AllLibraryNav"), "the category categories's thumb sits under All");
-        Call("LibraryCategoryClick", window.FindName("MoviesLibraryNav"), new RoutedEventArgs()); await Settle();
-        check(Under("MoviesLibraryNav"), "the thumb slides to the category chosen");
+        check(categories.IsVisible && categories.TranslatePoint(new Point(0, 0), (FrameworkElement)window.FindName("LibraryPage")).Y < 1, "the categories sit at the top of the Library page");
+        // The poster grid reaches 6 DIP past the page edge for its cards' padding, so the artwork itself lines up with the page edge.
+        var first = ((FrameworkElement)window.FindName("AllLibraryNav")).TranslatePoint(new Point(0, 0), (FrameworkElement)window.FindName("LibraryPage")).X;
+        check(Math.Abs(first) < 0.5, $"the first category starts at the page edge, in line with the artwork below ({first:0.#})");
+        var under = Under("AllLibraryNav");
+        check(under == "", "the pearl sits on the thread under All" + under);
+        // It rolls along the thread, always forward, rather than jumping, and stays on the thread as it goes.
+        var rolled = new List<double>(); var onThread = true;
+        Call("LibraryCategoryClick", window.FindName("MoviesLibraryNav"), new RoutedEventArgs());
+        for (var until = DateTime.UtcNow.AddMilliseconds(500); DateTime.UtcNow < until;)
+        {
+            await Task.Delay(12); window.UpdateLayout();
+            var at = pearl.TranslatePoint(new Point(pearl.ActualWidth / 2, pearl.ActualHeight / 2), categories);
+            rolled.Add(at.X); onThread &= Math.Abs(at.Y - thread.TranslatePoint(new Point(0, thread.ActualHeight / 2), categories).Y) < 0.5;
+        }
+        var end = rolled[^1];
+        if (SystemParameters.ClientAreaAnimation)
+            check(rolled.Any(x => x > 30 && x < end - 10) && rolled.Zip(rolled.Skip(1)).All(pair => pair.Second >= pair.First - 0.01) && onThread,
+                $"the pearl rolls along the thread to the category chosen ({string.Join(", ", rolled.Distinct().Take(10).Select(x => x.ToString("0")))})");
+        await Settle();
+        under = Under("MoviesLibraryNav");
+        check(under == "", "the pearl rolls to the category chosen" + under);
         Call("OpenSearch", false); await Settle();
-        check(!categories.IsVisible, "Search hides the category categories");
+        check(!categories.IsVisible, "Search hides the categories");
         Call("LibraryNavClick", window, new RoutedEventArgs()); await Settle();
-        check(categories.IsVisible && Under("AllLibraryNav"), "Library leaves Search for All, and the thumb is placed again when the categories returns");
+        under = Under("AllLibraryNav");
+        check(categories.IsVisible && under == "", "Library leaves Search for All, and the pearl is placed again when the categories return" + under);
     }
 
     // The sidebar folds into a strip of icons, with each icon named in a tooltip, and unfolds again.
@@ -641,12 +663,14 @@ static class Program
         check(header.Visibility == Visibility.Collapsed && crumbs.Visibility == Visibility.Visible && scan.Visibility == Visibility.Visible,
             "library categories show their location and actions rather than a search field");
         var height = toolbar.ActualHeight;
-        check(height >= 40 && scan.ActualHeight == height, "the library toolbar keeps one usable height for its location and actions");
+        check(height >= 40 && scan.ActualHeight <= height, "the library toolbar keeps one usable height for its location and actions");
         var original = scan.Content; scan.Content = "Cancel scan"; window.UpdateLayout();
         check(toolbar.ActualHeight == height, "scan button label changes keep the toolbar height");
-        scan.Content = original;
+        scan.Content = original; window.UpdateLayout();
         // The categories share their row with the count and actions, and a narrow window moves the actions under them rather than overlapping.
         var categories = (FrameworkElement)window.FindName("LibraryCategoryBar");
+        // The actions line up with the category words; the thread runs under them.
+        var words = (FrameworkElement)window.FindName("LibraryCategories");
         var add = (FrameworkElement)window.FindName("AddTitleButton");
         var count = (FrameworkElement)window.FindName("ResultCount");
         Rect Box(FrameworkElement element) => new(element.TranslatePoint(new Point(0, 0), toolbar), new Size(element.ActualWidth, element.ActualHeight));
@@ -656,7 +680,7 @@ static class Program
             var problems = parts.SelectMany((a, i) => parts.Skip(i + 1).Where(b => Rect.Intersect(Box(a), Box(b)) is { IsEmpty: false, Width: > 0.5, Height: > 0.5 }).Select(b => $"{a.Name} overlaps {b.Name}"))
                 .Concat(parts.Where(element => Box(element).Right > toolbar.ActualWidth + 0.5).Select(element => $"{element.Name} runs past the toolbar"))
                 // A bar given less room than its segments need shrinks to that room and cuts its last segments off.
-                .Concat(SegmentsEnd() > categories.ActualWidth - 4 + 0.5 ? [$"the categories are cut off (segments end at {SegmentsEnd():0.#} in a bar {categories.ActualWidth:0.#} wide)"] : Array.Empty<string>());
+                .Concat(SegmentsEnd() > categories.ActualWidth + 0.5 ? [$"the categories are cut off (segments end at {SegmentsEnd():0.#} in a bar {categories.ActualWidth:0.#} wide)"] : Array.Empty<string>());
             return string.Join("; ", problems);
         }
         double SegmentsEnd()
@@ -665,10 +689,10 @@ static class Program
             return !categories.IsVisible || last is null ? 0 : last.TranslatePoint(new Point(last.ActualWidth, 0), categories).X;
         }
         double Middle(FrameworkElement element) => Box(element).Top + element.ActualHeight / 2;
-        check(categories.IsVisible && Math.Abs(Middle(categories) - Middle(scan)) < 1 && Crowded() == "",
+        check(categories.IsVisible && Math.Abs(Middle(words) - Middle(scan)) < 1 && Crowded() == "",
             $"the library's categories, count and actions share one row ({Box(categories)}, {Box(scan)}{(Crowded() is { Length: > 0 } c ? "; " + c : "")})");
         var wide = window.Width; window.Width = window.MinWidth; await Task.Delay(150); window.UpdateLayout();
-        check(Crowded() == "" && (Math.Abs(Middle(categories) - Middle(scan)) < 1 || Box(scan).Top >= Box(categories).Bottom),
+        check(Crowded() == "" && (Math.Abs(Middle(words) - Middle(scan)) < 1 || Box(scan).Top >= Box(categories).Bottom),
             $"a narrow window keeps the categories and actions apart ({toolbar.ActualWidth:0} wide{(Crowded() is { Length: > 0 } n ? ": " + n : "")})");
         // Too narrow for the categories and actions side by side: the actions take a row of their own and the categories keep their whole width.
         toolbar.Width = SegmentsEnd() + 140; await Task.Delay(150); window.UpdateLayout();
@@ -677,12 +701,12 @@ static class Program
         // A little short of room: Add title shortens to its plus and everything stays on one row.
         var addWidths = ((double Full, double Compact))typeof(MainWindow).GetField("addTitleWidths", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
         check(addWidths.Compact < addWidths.Full - 30, $"Add title is much narrower as only its plus ({addWidths.Compact:0.#} against {addWidths.Full:0.#})");
-        toolbar.Width = SegmentsEnd() + 4 + 16 + count.DesiredSize.Width + scan.DesiredSize.Width + addWidths.Compact + 2; await Task.Delay(150); window.UpdateLayout();
-        check(Crowded() == "" && Math.Abs(Middle(categories) - Middle(scan)) < 1 && ((System.Windows.Controls.Button)add).Content is not string,
+        toolbar.Width = SegmentsEnd() + 16 + count.DesiredSize.Width + scan.DesiredSize.Width + addWidths.Compact + 2; await Task.Delay(150); window.UpdateLayout();
+        check(Crowded() == "" && Math.Abs(Middle(words) - Middle(scan)) < 1 && ((System.Windows.Controls.Button)add).Content is not string,
             $"a toolbar a little short of room shortens Add title to its plus and keeps one row ({toolbar.ActualWidth:0} wide{(Crowded() is { Length: > 0 } s ? ": " + s : "")})");
         toolbar.Width = double.NaN;
         window.Width = wide; await Task.Delay(150); window.UpdateLayout();
-        check(Math.Abs(Middle(categories) - Middle(scan)) < 1 && toolbar.ActualHeight == height, "widening the window brings the actions back beside the categories");
+        check(Math.Abs(Middle(words) - Middle(scan)) < 1 && toolbar.ActualHeight == height, "widening the window brings the actions back beside the categories");
         Call("OpenSearch", false); await Task.Delay(100); window.UpdateLayout();
         check(header.Visibility == Visibility.Visible && crumbs.Visibility == Visibility.Collapsed && scan.Visibility == Visibility.Collapsed,
             "Search shows its field and filters in place of the category's location and actions");
