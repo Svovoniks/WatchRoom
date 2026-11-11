@@ -646,6 +646,67 @@ static class Program
         Call("ShowPage", page); await Dispatcher.Yield(DispatcherPriority.Render);
     }
 
+    // The item count rolls to a new number: only the digits that differ move, and it settles exactly where plain text would be.
+    private static async Task CheckRollingCount(MainWindow window, RollingText count, Action<bool, string> check)
+    {
+        var original = count.Text;
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(count).PixelsPerDip;
+        IEnumerable<System.Windows.Controls.TextBlock> Blocks(DependencyObject node) => Enumerable.Range(0, System.Windows.Media.VisualTreeHelper.GetChildrenCount(node))
+            .Select(i => System.Windows.Media.VisualTreeHelper.GetChild(node, i)).SelectMany(child => child is System.Windows.Controls.TextBlock block ? [block] : Blocks(child));
+        string Shown() => string.Concat(Blocks(count).Where(block => block.IsVisible).Select(block => block.Text));
+        // Rendering an element directly draws it at its offset in the window, off a bitmap its own size, and a brush of it
+        // stretches whatever it draws, including pieces rolling out above it. So the whole window is drawn and the count's box
+        // cut out of it.
+        byte[] Shot()
+        {
+            window.UpdateLayout();
+            var root = (FrameworkElement)window.Content;
+            var full = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth * scale), (int)Math.Ceiling(root.ActualHeight * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+            full.Render(root);
+            var at = count.TranslatePoint(new Point(0, 0), root);
+            var box = new Int32Rect((int)Math.Round(at.X * scale), (int)Math.Round(at.Y * scale), (int)Math.Ceiling(count.ActualWidth * scale), (int)Math.Ceiling(count.ActualHeight * scale));
+            var pixels = new byte[box.Width * box.Height * 4]; full.CopyPixels(box, pixels, box.Width * 4, 0);
+            check(pixels.Any(value => value != 0), "the count's picture for comparison is not blank");
+            return pixels;
+        }
+        var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+        IEnumerable<IGrouping<DependencyObject, System.Windows.Controls.TextBlock>> Pieces() => Blocks(count).Where(block => block.IsVisible).GroupBy(block => System.Windows.Media.VisualTreeHelper.GetParent(block));
+        double Shade() => ((UIElement)count.Child).Opacity;
+        // Rolls to a new count, holds the pieces where the roll ends, and compares them with how they look once they settle.
+        async Task<(int Rolling, int Still, bool Seamless, string Shown)> Roll(string from, string to)
+        {
+            count.Text = from; await Task.Delay(900);
+            // Until the clock first ticks, a roll that has just begun shows its starting point, which must be what was there.
+            var before = Shot(); count.Text = to; var begun = Shot();
+            check(begun.SequenceEqual(before), $"starting a roll from \"{from}\" to \"{to}\" redraws nothing until the digits move");
+            var pieces = Pieces().ToList();
+            var rolling = pieces.Count(piece => piece.Count() > 1); var still = pieces.Count(piece => piece.Count() == 1);
+            ((DispatcherTimer?)typeof(RollingText).GetField("settle", flags)!.GetValue(count))?.Stop();
+            await Task.Delay(800); var ended = Shot();
+            typeof(RollingText).GetMethod("Settle", flags)!.Invoke(count, null); var settled = Shot();
+            return (rolling, still, ended.SequenceEqual(settled), Shown());
+        }
+        if (SystemParameters.ClientAreaAnimation)
+        {
+            var roll = await Roll("218 items", "242 items");
+            check(roll.Rolling == 2 && roll.Still == 2, $"the count rolls only the digits that change (218 to 242: {roll.Rolling} rolling, {roll.Still} still)");
+            foreach (var (from, to) in new[] { ("218 items", "242 items"), ("242 items", "1 item"), ("9 items", "10 items") })
+            {
+                roll = await Roll(from, to);
+                check(roll.Seamless && roll.Shown == to, $"rolling from \"{from}\" to \"{to}\" settles without a flicker or jump when the roll ends (shows \"{roll.Shown}\")");
+            }
+        }
+        // While a new count is on its way the old one dims and stays, instead of a status flashing between the two.
+        count.Text = "42 items"; await Task.Delay(900);
+        count.ShowPending("Searching…"); await Task.Delay(400);
+        check(count.Text == "42 items" && Shade() < 0.6, $"a pending count dims and keeps its number (shows \"{count.Text}\" at {Shade():0.##})");
+        count.Text = "57 items"; await Task.Delay(900);
+        check(Shade() == 1 && Shown() == "57 items", "the new count rolls in at full strength");
+        count.Text = "Loading library…"; count.ShowPending("Searching…");
+        check(count.Text == "Searching…", "with no count yet, the status shows");
+        count.Text = original;
+    }
+
     // Categories show their location and actions in one toolbar row; Search shows its field and filters there instead.
     private static async Task CheckSearchLayout(MainWindow window, Action<bool, string> check)
     {
@@ -707,6 +768,7 @@ static class Program
         toolbar.Width = double.NaN;
         window.Width = wide; await Task.Delay(150); window.UpdateLayout();
         check(Math.Abs(Middle(words) - Middle(scan)) < 1 && toolbar.ActualHeight == height, "widening the window brings the actions back beside the categories");
+        await CheckRollingCount(window, (RollingText)count, check);
         Call("OpenSearch", false); await Task.Delay(100); window.UpdateLayout();
         check(header.Visibility == Visibility.Visible && crumbs.Visibility == Visibility.Collapsed && scan.Visibility == Visibility.Collapsed,
             "Search shows its field and filters in place of the category's location and actions");

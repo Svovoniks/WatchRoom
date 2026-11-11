@@ -59,6 +59,41 @@ static class ScreenRender
             foreach (var finding in BorderAudit.Find(root)) Console.WriteLine($"CLIPPED {name} (expanded): {finding}");
             foreach (var expander in closed) expander.IsExpanded = false;
         }
+        // The item count rolling from one number to another, drawn every 30 ms and stacked top to bottom at four times size.
+        async Task CaptureCountRoll()
+        {
+            var count = (RollingText)window.FindName("ResultCount"); var shown = count.Text;
+            var frames = new List<BitmapSource>();
+            foreach (var (from, to) in new[] { ("218 items", "242 items"), ("242 items", "97 items"), ("9 items", "10 items"), ("1 item", "2 items") })
+            {
+                count.Text = from; await Settle(700);
+                // As a search runs: the count dims, then the new one rolls in.
+                count.ShowPending("Searching…"); await Settle(250);
+                count.Text = to;
+                for (var at = DateTime.UtcNow; DateTime.UtcNow - at < TimeSpan.FromMilliseconds(660);)
+                {
+                    await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
+                    // Rendering the count alone would draw it at its offset in the window, off the bitmap; so the window is
+                    // drawn and the count's box, with a little room above and below, cut from it.
+                    var root = (FrameworkElement)window.Content;
+                    var full = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32); full.Render(root);
+                    var spot = count.TranslatePoint(new Point(0, 0), root);
+                    frames.Add(new CroppedBitmap(full, new Int32Rect((int)spot.X - 60, (int)spot.Y - 6, (int)Math.Ceiling(count.ActualWidth) + 60, (int)Math.Ceiling(count.ActualHeight) + 12)));
+                    await Task.Delay(30);
+                }
+            }
+            var visual = new DrawingVisual(); RenderOptions.SetBitmapScalingMode(visual, BitmapScalingMode.NearestNeighbor);
+            var w = frames.Max(f => f.PixelWidth) * 4; var h = frames[0].PixelHeight * 4;
+            using (var draw = visual.RenderOpen())
+            {
+                draw.DrawRectangle((Brush)window.FindResource("Canvas"), null, new Rect(0, 0, w, h * frames.Count));
+                for (var i = 0; i < frames.Count; i++) draw.DrawImage(frames[i], new Rect(w - frames[i].PixelWidth * 4, i * h, frames[i].PixelWidth * 4, h));
+            }
+            var strip = new RenderTargetBitmap(w, h * frames.Count, 96, 96, PixelFormats.Pbgra32); strip.Render(visual);
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(strip));
+            await using (var file = File.Create(Path.Combine(output, "dark-count-roll.png"))) encoder.Save(file);
+            count.Text = shown;
+        }
         window.Width = width; window.Height = height;
         var deadline = DateTime.UtcNow.AddSeconds(60);
         while (Field("libraryLoaded") is not true && DateTime.UtcNow < deadline) await Settle(200);
@@ -69,6 +104,7 @@ static class ScreenRender
             Set("light", theme == "light"); Call("ApplyTheme");
             Call("ShowPage", "Home"); await Capture($"{theme}-home");
             Call("NavigateLibrary", 0, null, null, null); await Capture($"{theme}-library");
+            if (theme == "dark") await CaptureCountRoll();
             // The sidebar folded into its strip of icons.
             Call("SetRailCollapsed", true); await Capture($"{theme}-library-collapsed");
             Call("ShowPage", "Home"); await Capture($"{theme}-home-collapsed"); Call("SetRailCollapsed", false);

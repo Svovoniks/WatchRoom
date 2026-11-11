@@ -52,7 +52,7 @@ static class WantedLibraryChecks
         check(add.Visibility == Visibility.Visible && Grid.GetColumn(add) == 3 && Grid.GetColumn((Button)window.FindName("RescanButton")) == 2 && (string)add.Content == "Add title",
             "Add title sits at the end of the library toolbar after Rescan");
         var missingNav = (Button)window.FindName("MissingLibraryNav");
-        check(missingNav.Visibility == Visibility.Visible && int.Parse(((TextBlock)window.FindName("MissingLibraryCount")).Text) >= 2, "the sidebar lists Missing with a count");
+        check(missingNav.Visibility == Visibility.Visible && int.Parse(((System.Windows.Documents.Run)window.FindName("MissingLibraryCount")).Text) >= 2, "the sidebar lists Missing with a count");
         Call("NavigateLibrary", 5, null, null, null);
         Until(() => cards.Any(c => c.Card.Media.Id == film.Id));
         var showCard = cards.FirstOrDefault(c => LibraryIdentity.ShowKey(c.Card.Media) == show.Id); var filmCard = cards.FirstOrDefault(c => c.Card.Media.Id == film.Id);
@@ -109,7 +109,7 @@ static class WantedLibraryChecks
 
         foreach (var title in new[] { show, film }) WantedTitles.Remove(store, directory, store.Wanted(title.Id)!);
         Await(Call("RefreshLibrary"));
-        check(missingNav.Visibility == Visibility.Collapsed || int.Parse(((TextBlock)window.FindName("MissingLibraryCount")).Text) < 2, "removing wanted titles takes them out of Missing");
+        check(missingNav.Visibility == Visibility.Collapsed || int.Parse(((System.Windows.Documents.Run)window.FindName("MissingLibraryCount")).Text) < 2, "removing wanted titles takes them out of Missing");
         Call("ShowPage", "Library");
     }
 }

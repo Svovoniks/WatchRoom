@@ -645,7 +645,8 @@ public partial class MainWindow : Window
         var query = searchFilters is null ? "" : SearchBox.Text.Trim();
         if (!backgroundUpdate)
         {
-            ResultCount.Text = "Searching…";
+            // The count shown dims until the new one rolls in, rather than flashing a status between them.
+            ResultCount.ShowPending("Searching…");
 
             NoResults.Visibility = Visibility.Collapsed;
         }

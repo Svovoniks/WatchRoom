@@ -66,14 +66,21 @@ public partial class MainWindow
         double Width(bool compact)
         {
             SetAddTitleCompact(compact);
-            // Measuring the button alone returns its template's earlier answer; a layout pass measures the new content.
-            // The button sits in an Auto column, so it is measured at its natural width.
-            AddTitleButton.UpdateLayout();
+            // Measuring the button alone returns its template's earlier answer, so everything inside it is marked for measuring
+            // first. A window-wide layout pass would do the same but lays out the whole library too, which stalls startup.
+            Remeasure(AddTitleButton);
+            AddTitleButton.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             return AddTitleButton.DesiredSize.Width;
         }
         var widths = (Width(false), Width(true));
         SetAddTitleCompact(was);
         return widths;
+    }
+
+    private static void Remeasure(DependencyObject node)
+    {
+        if (node is UIElement element) element.InvalidateMeasure();
+        for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(node); i++) Remeasure(System.Windows.Media.VisualTreeHelper.GetChild(node, i));
     }
 
     private void SetAddTitleCompact(bool compact)

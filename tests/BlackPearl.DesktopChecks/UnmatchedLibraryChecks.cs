@@ -22,7 +22,7 @@ static class UnmatchedLibraryChecks
         }
         void Refresh() { var pending = (Task)Call("RefreshLibrary")!; Until(() => pending.IsCompleted); pending.GetAwaiter().GetResult(); }
         var cards = (LibraryCardCollection)typeof(MainWindow).GetField("libraryCards", flags)!.GetValue(window)!;
-        var nav = (Button)window.FindName("UnmatchedLibraryNav"); var count = (TextBlock)window.FindName("UnmatchedLibraryCount");
+        var nav = (Button)window.FindName("UnmatchedLibraryNav"); var count = (System.Windows.Documents.Run)window.FindName("UnmatchedLibraryCount");
 
         // The fixtures share a library, so count what these entries add.
         Refresh();
