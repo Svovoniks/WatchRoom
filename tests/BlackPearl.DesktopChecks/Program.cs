@@ -564,18 +564,44 @@ static class Program
         placed = Pearled("QueuesNav");
         check(placed == "", "the pearl stays on the edge of a folded sidebar" + placed);
         Call("ShowPage", "Home"); await Task.Delay(450); window.UpdateLayout();
-        var iconLeft = icon.TranslatePoint(new Point(0, 0), home).X;
-        var logoLeft = logo.TranslatePoint(new Point(0, 0), home).X;
+        // Icon glyphs are an em square drawn from the left of their box.
+        var glyphMiddle = icon.TranslatePoint(new Point(((System.Windows.Controls.TextBlock)icon).FontSize / 2, 0), rail).X;
+        var logoMiddle = logo.TranslatePoint(new Point(logo.ActualWidth / 2, 0), rail).X;
         check(rail.ActualWidth == 64 && !label.IsVisible && !((FrameworkElement)window.FindName("RailBrandName")).IsVisible,
             $"a collapsed sidebar is a strip of icons ({rail.ActualWidth:0.#} wide)");
-        check(logo.IsVisible && Math.Abs(logoLeft + logo.ActualWidth / 2 - home.ActualWidth / 2) < 1,
-            $"a collapsed sidebar keeps the logo, centred over its icons ({logoLeft:0.#} in {home.ActualWidth:0.#})");
+        check(logo.IsVisible && Math.Abs(logoMiddle - glyphMiddle) < 1,
+            $"a collapsed sidebar keeps the logo, centred over its icons (logo middle {logoMiddle:0.#}, icon middle {glyphMiddle:0.#})");
         var foldedLogo = logo.TranslatePoint(new Point(0, 0), rail);
         check(toggle.IsVisible && toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && foldedLogo.Y >= toggleAt.Y + toggle.ActualHeight,
             $"folding leaves the toggle in its spot and drops the logo under it (toggle {toggle.TranslatePoint(new Point(0, 0), rail)}, was {toggleAt}; logo {foldedLogo})");
-        check(((System.Windows.Controls.TextBlock)icon).TextAlignment == TextAlignment.Center, "a collapsed sidebar centres each icon's glyph in its box");
-        check(Math.Abs(iconLeft * 2 + icon.ActualWidth - home.ActualWidth) < 1, $"a collapsed sidebar centres its icons ({iconLeft:0.#} in {home.ActualWidth:0.#})");
+        check(Math.Abs(glyphMiddle - (rail.ActualWidth - 1) / 2) < 1, $"a collapsed sidebar centres its icons in the strip ({glyphMiddle:0.#} in {rail.ActualWidth - 1:0.#})");
+        var toggleMiddle = toggle.TranslatePoint(new Point(toggle.ActualWidth / 2, 0), rail).X;
+        check(Math.Abs(toggleMiddle - glyphMiddle) < 1, $"the toggle lines up with the icons ({toggleMiddle:0.#}, {glyphMiddle:0.#})");
         check(Equals(home.ToolTip, "Home") && content.ActualWidth > expanded, "collapsed icons name themselves and the page gains the width");
+        // The fold ends by taking the faded words out of the layout; the icons must not move when it does.
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(rail).PixelsPerDip;
+        (int Width, byte[] Pixels) Shoot()
+        {
+            window.UpdateLayout();
+            var shot = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Round(rail.ActualWidth * scale), (int)Math.Round(rail.ActualHeight * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+            shot.Render(rail); var pixels = new byte[shot.PixelWidth * shot.PixelHeight * 4]; shot.CopyPixels(pixels, shot.PixelWidth * 4, 0);
+            return (shot.PixelWidth, pixels);
+        }
+        string Ink((int Width, byte[] Pixels) shot, FrameworkElement entry)
+        {
+            var at = entry.TranslatePoint(new Point(0, 0), rail);
+            int left = (int)(at.X * scale), top = (int)(at.Y * scale), right = (int)((at.X + entry.ActualWidth) * scale), bottom = (int)((at.Y + entry.ActualHeight) * scale);
+            int Pixel(int x, int y) => BitConverter.ToInt32(shot.Pixels, (y * shot.Width + x) * 4);
+            var ground = Pixel(left + 1, top + 1); int x0 = int.MaxValue, y0 = int.MaxValue, x1 = -1, y1 = -1;
+            for (var y = top; y < bottom; y++) for (var x = left; x < right; x++)
+                if (Pixel(x, y) != ground) { x0 = Math.Min(x0, x); y0 = Math.Min(y0, y); x1 = Math.Max(x1, x); y1 = Math.Max(y1, y); }
+            return $"{x0},{y0}-{x1},{y1}";
+        }
+        Call("ShowRailText", true); var before = Shoot();
+        Call("ShowRailText", false); var after = Shoot();
+        var moved = RailEntries().Where(entry => entry.IsVisible && Ink(before, entry) != Ink(after, entry)).Select(entry => $"{entry.Name} {Ink(before, entry)} -> {Ink(after, entry)}").ToList();
+        check(moved.Count == 0, "the icons stay put as the folded sidebar takes out its words" + (moved.Count > 0 ? $" (moved: {string.Join("; ", moved)})" : ""));
+        IEnumerable<FrameworkElement> RailEntries() => new[] { "HomeNav", "SearchNav", "LibraryNav", "QueuesNav", "RoomNav", "SettingsNav" }.Select(name => (FrameworkElement)window.FindName(name));
         var unfolding = await Fold(false);
         if (SystemParameters.ClientAreaAnimation)
             check(unfolding.Widths.Any(width => width > 64 && width < 212) && Steady(unfolding.Widths, 1) && Steady(unfolding.Tops, -1),

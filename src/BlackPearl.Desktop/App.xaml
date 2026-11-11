@@ -39,7 +39,7 @@
   <Style x:Key="Overline" TargetType="TextBlock"><Setter Property="FontSize" Value="11"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Margin" Value="0,0,0,8"/></Style>
   <Style x:Key="FieldLabel" TargetType="TextBlock"><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="FontSize" Value="13"/><Setter Property="Margin" Value="0,0,0,2"/></Style>
   <Style x:Key="Icon" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="16"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
-  <Style x:Key="NavigationIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="Width" Value="28"/><Style.Triggers><Trigger Property="local:SideRail.Collapsed" Value="True"><Setter Property="TextAlignment" Value="Center"/></Trigger><DataTrigger Binding="{Binding (AutomationProperties.ItemStatus), RelativeSource={RelativeSource AncestorType=Button}}" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Accent}"/></DataTrigger></Style.Triggers></Style>
+  <Style x:Key="NavigationIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="Width" Value="28"/><Style.Triggers><DataTrigger Binding="{Binding (AutomationProperties.ItemStatus), RelativeSource={RelativeSource AncestorType=Button}}" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Accent}"/></DataTrigger></Style.Triggers></Style>
   <Style x:Key="EmptyStateIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="FontSize" Value="40"/><Setter Property="Foreground" Value="{DynamicResource Accent}"/><Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="Margin" Value="0,0,0,20"/></Style>
   <!-- A rounded panel used to group related content and settings. -->
   <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="20,18"/><Setter Property="Margin" Value="0,0,0,16"/></Style>
@@ -159,8 +159,8 @@
      <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
     </ControlTemplate.Triggers>
    </ControlTemplate></Setter.Value></Setter>
-   <!-- A collapsed sidebar is a strip of icons: the icon is centred in the button. -->
-   <Style.Triggers><Trigger Property="local:SideRail.Collapsed" Value="True"><Setter Property="Padding" Value="0"/><Setter Property="HorizontalContentAlignment" Value="Center"/></Trigger></Style.Triggers>
+   <!-- A collapsed sidebar is a strip of icons. The icons keep the open layout, which already puts each glyph in the middle
+        of the strip, so they don't shift a fraction of a pixel when the folding sidebar takes out its words. -->
   </Style>
   <!-- Sidebar text that a collapsed sidebar hides. -->
   <Style x:Key="NavigationLabel" TargetType="TextBlock"><Style.Triggers><Trigger Property="local:SideRail.Collapsed" Value="True"><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style>
