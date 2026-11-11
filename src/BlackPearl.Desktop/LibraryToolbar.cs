@@ -54,7 +54,7 @@ public partial class MainWindow
         Grid.SetColumnSpan(LibraryCategoryBar, wrap ? 4 : 1);
         var row = wrap ? 1 : 0; var top = wrap ? LibraryToolbarRowGap : 0;
         // Beside the categories, the actions centre on the words rather than on the words and their thread.
-        var bottom = categories && !wrap ? LibraryCategoryBar.RowDefinitions[1].Height.Value : 0;
+        var bottom = categories && !wrap ? AllLibraryNav.Margin.Bottom : 0;
         Grid.SetRow(ResultCount, row); Grid.SetRow(RescanButton, row); Grid.SetRow(AddTitleButton, row);
         // Centring sets text of different sizes on different baselines; these nudges put the count's smaller serif and the
         // buttons' sans on the category words' baseline.

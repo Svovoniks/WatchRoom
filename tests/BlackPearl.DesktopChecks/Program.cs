@@ -453,6 +453,7 @@ static class Program
         check(Crumbs().Length == 0 && Status("AllLibraryNav") == "Selected", "the All category lists every title, whatever Search holds");
         search.Clear();
         await CheckCategoryBar(window, check);
+        await CheckThreadSelectors(window, check);
         await CheckShortRail(window, check);
         await CheckCollapsedRail(window, check);
         Navigate(1); await Wait(() => cards.Count == 750 && cards.All(x => x.Card.Media.Kind == "Movie"));
@@ -484,25 +485,73 @@ static class Program
         await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
     }
 
+    // A thread selector shows its choice by lighting the thread under it: centred on the chosen word, covering it, on that row's
+    // thread. Returns the choice it found and a description of anything wrong, or "".
+    internal static (FrameworkElement? Chosen, string Problem) ThreadLit(ThreadBar bar)
+    {
+        var choices = ((System.Windows.Controls.Panel)bar.Content).Children.OfType<FrameworkElement>().Where(choice => choice.IsVisible).ToList();
+        var chosen = choices.FirstOrDefault(choice => choice is System.Windows.Controls.Primitives.ToggleButton { IsChecked: true } || System.Windows.Automation.AutomationProperties.GetItemStatus(choice) == "Selected");
+        var light = bar.Light;
+        if (chosen is null || light is null) return (chosen, " (nothing chosen, or no light)");
+        var padding = ((System.Windows.Controls.Control)chosen).Padding;
+        var word = chosen.TranslatePoint(new Point(padding.Left, 0), bar).X; var wordWidth = chosen.ActualWidth - padding.Left - padding.Right;
+        var at = light.TranslatePoint(new Point(0, light.ActualHeight / 2), bar);
+        var below = chosen.TranslatePoint(new Point(0, chosen.ActualHeight), bar).Y;
+        var thread = bar.Threads.Select(line => line.TranslatePoint(new Point(0, 0.5), bar).Y).Where(y => y >= below).DefaultIfEmpty(double.NaN).Min();
+        var fine = light.IsVisible && Math.Abs(at.X + light.ActualWidth / 2 - (word + wordWidth / 2)) < 1 && at.X <= word && at.X + light.ActualWidth >= word + wordWidth && Math.Abs(at.Y - thread) < 0.5;
+        return (chosen, fine ? "" : $" (light {(light.IsVisible ? "at" : "hidden at")} {at.X:0.#},{at.Y:0.#}, {light.ActualWidth:0.#} wide; word at {word:0.#}, {wordWidth:0.#} wide; its thread at {thread:0.#})");
+    }
+    // Every pick-one selector is the thread selector: Settings' sections, the plugin view and Search's type of title light the
+    // thread under their choice and move the light when it changes. Settings' sections wrap in a narrow window, each row on its
+    // own thread.
+    private static async Task CheckThreadSelectors(MainWindow window, Action<bool, string> check)
+    {
+        void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance).First(m => m.Name == name && m.GetParameters().Length == arguments.Length).Invoke(window, arguments);
+        // Long enough for a glide to finish after a section's page has laid itself out.
+        async Task Settle() { await Task.Delay(900); await Dispatcher.Yield(DispatcherPriority.ContextIdle); window.UpdateLayout(); }
+        ThreadBar BarOf(string name) { DependencyObject? at = (DependencyObject)window.FindName(name); while (at is not null and not ThreadBar) at = LogicalTreeHelper.GetParent(at); return (ThreadBar)at!; }
+        void Lit(ThreadBar bar, string what, string expected)
+        {
+            var (chosen, problem) = ThreadLit(bar);
+            var label = chosen is System.Windows.Controls.ContentControl { Content: var content } ? content?.ToString() : null;
+            check(problem == "" && label?.StartsWith(expected) == true, $"{what}: the thread is lit under {expected} (under {label ?? "nothing"}){problem}");
+        }
+        Call("LoadPreferences"); Call("ShowPage", "Settings"); Call("ShowPreferenceSection", "Playback"); await Settle();
+        var sections = BarOf("PreferenceSections");
+        Lit(sections, "Settings", "Playback");
+        Call("ShowPreferenceSection", "Plugins"); await Settle();
+        Lit(sections, "Settings", "Plugins");
+        var plugins = BarOf("InstalledPluginsView");
+        ((System.Windows.Controls.RadioButton)window.FindName("AvailablePluginsView")).IsChecked = true; await Settle();
+        Lit(plugins, "The plugin view", "Available");
+        ((System.Windows.Controls.RadioButton)window.FindName("InstalledPluginsView")).IsChecked = true; await Settle();
+        Lit(plugins, "The plugin view", "Installed");
+        // A narrow window wraps the sections: each row has its own thread, and the light sits on the chosen one's row.
+        var wide = window.Width; window.Width = window.MinWidth; Call("ShowPreferenceSection", "Updates"); await Settle();
+        var rows = ((System.Windows.Controls.Panel)sections.Content).Children.OfType<FrameworkElement>().Select(tab => Math.Round(tab.TranslatePoint(new Point(0, 0), sections).Y)).Distinct().Count();
+        check(rows > 1 && sections.Threads.Count == rows, $"wrapped sections have a thread for each row ({rows} rows, {sections.Threads.Count} threads)");
+        Lit(sections, "Wrapped Settings", "Updates");
+        window.Width = wide; await Settle();
+        Call("ShowPage", "Library"); Call("OpenSearch", false); await Settle();
+        var kinds = BarOf("SearchKinds");
+        var shows = ((System.Windows.Controls.Panel)window.FindName("SearchKinds")).Children.OfType<System.Windows.Controls.RadioButton>().Single(kind => (string)kind.Tag == "2");
+        var all = ((System.Windows.Controls.Panel)window.FindName("SearchKinds")).Children.OfType<System.Windows.Controls.RadioButton>().Single(kind => (string)kind.Tag == "0");
+        all.IsChecked = true; await Settle();
+        Lit(kinds, "Search", "All videos");
+        shows.IsChecked = true; await Settle();
+        Lit(kinds, "Search", "Shows");
+        all.IsChecked = true; await Settle();
+        Call("NavigateLibrary", 0, null, null, null); await Settle();
+    }
     // The library's categories are words on a thread at the top of the Library page; the stretch of thread under the current one
     // is lit and glides to the next. The pearl stays on the sidebar alone.
     private static async Task CheckCategoryBar(MainWindow window, Action<bool, string> check)
     {
         void Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, arguments);
-        var categories = (FrameworkElement)window.FindName("LibraryCategoryBar");
-        var thread = (FrameworkElement)window.FindName("LibraryCategoryThread");
-        var glow = (FrameworkElement)window.FindName("LibraryCategoryGlow");
+        var categories = (ThreadBar)window.FindName("LibraryCategoryBar");
+        var glow = categories.Light!;
         async Task Settle() { await Task.Delay(400); await Dispatcher.Yield(DispatcherPriority.ContextIdle); window.UpdateLayout(); }
-        // On the thread, centred on the word itself rather than the word and the space after it, and covering it.
-        string Under(string name)
-        {
-            var segment = (System.Windows.Controls.Button)window.FindName(name);
-            var word = segment.TranslatePoint(new Point(segment.Padding.Left, 0), categories).X; var wordWidth = segment.ActualWidth - segment.Padding.Left - segment.Padding.Right;
-            var at = glow.TranslatePoint(new Point(0, glow.ActualHeight / 2), categories);
-            var line = thread.TranslatePoint(new Point(0, thread.ActualHeight / 2), categories).Y;
-            return glow.IsVisible && Math.Abs(at.X + glow.ActualWidth / 2 - (word + wordWidth / 2)) < 1 && at.X <= word && at.X + glow.ActualWidth >= word + wordWidth && Math.Abs(at.Y - line) < 0.5 ? ""
-                : $" (light {(glow.IsVisible ? "at" : "hidden at")} {at.X:0.#},{at.Y:0.#}, {glow.ActualWidth:0.#} wide; word at {word:0.#}, {wordWidth:0.#} wide; thread {line:0.#})";
-        }
+        string Under(string name) => ((FrameworkElement)window.FindName(name)) is var chosen && ThreadLit(categories) is var lit && lit.Chosen == chosen ? lit.Problem : $" (lit under {lit.Chosen?.Name ?? "nothing"} rather than {name})";
         int Pearls() => Descendants(window).OfType<System.Windows.Controls.ContentControl>().Count(element => element.IsVisible && element.Style == window.FindResource("Pearl"));
         static IEnumerable<DependencyObject> Descendants(DependencyObject node) => Enumerable.Range(0, System.Windows.Media.VisualTreeHelper.GetChildrenCount(node))
             .Select(i => System.Windows.Media.VisualTreeHelper.GetChild(node, i)).SelectMany(child => Descendants(child).Prepend(child));
@@ -528,7 +577,7 @@ static class Program
         {
             await Task.Delay(12); window.UpdateLayout();
             var at = glow.TranslatePoint(new Point(glow.ActualWidth / 2, glow.ActualHeight / 2), categories);
-            rolled.Add(at.X); onThread &= Math.Abs(at.Y - thread.TranslatePoint(new Point(0, thread.ActualHeight / 2), categories).Y) < 0.5;
+            rolled.Add(at.X); onThread &= Math.Abs(at.Y - categories.Threads[0].TranslatePoint(new Point(0, 0.5), categories).Y) < 0.5;
         }
         var end = rolled[^1];
         if (SystemParameters.ClientAreaAnimation)
@@ -747,7 +796,7 @@ static class Program
         // The categories share their row with the count and actions, and a narrow window moves the actions under them rather than overlapping.
         var categories = (FrameworkElement)window.FindName("LibraryCategoryBar");
         // The actions line up with the category words; the thread runs under them.
-        var words = (FrameworkElement)window.FindName("LibraryCategories");
+        var words = (FrameworkElement)window.FindName("AllLibraryNav");
         var add = (FrameworkElement)window.FindName("AddTitleButton");
         var count = (FrameworkElement)window.FindName("ResultCount");
         Rect Box(FrameworkElement element) => new(element.TranslatePoint(new Point(0, 0), toolbar), new Size(element.ActualWidth, element.ActualHeight));

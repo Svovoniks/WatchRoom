@@ -280,32 +280,20 @@
         <Button x:Name="ClearSearchButton" Grid.Column="2" Content="&#xE711;" Click="ClearSearch" ToolTip="Clear search" AutomationProperties.Name="Clear search" Style="{StaticResource QuietIcon}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center" Width="28" Height="28" MinHeight="0" Margin="0" Visibility="Collapsed"/>
        </Grid>
       </Border>
-      <!-- The type of title is one choice among several, so it is a segmented control; green is kept for filters that are on. -->
-      <DockPanel Margin="0,12,0,0">
-       <TextBlock DockPanel.Dock="Right" Text="{Binding Text, ElementName=ResultCount}" Foreground="{DynamicResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="12,0,8,0" AutomationProperties.LiveSetting="Polite"/>
-       <Button x:Name="ClearSearchFiltersButton" DockPanel.Dock="Right" Content="Clear filters" Click="ClearSearchFiltersClick" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Accent}" Height="30" MinHeight="0" Padding="10,0" Margin="8,0,0,0" FontSize="13" VerticalAlignment="Center" Visibility="Collapsed"/>
-       <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="3" HorizontalAlignment="Left">
+      <!-- The type of title is one choice among several, on the app's thread selector like the library's categories; green is
+           kept for filters that are on. The count is set like the library's, level with the words above the thread. -->
+      <DockPanel Margin="0,14,0,0">
+       <TextBlock DockPanel.Dock="Right" Text="{Binding Text, ElementName=ResultCount}" Foreground="{DynamicResource Muted}" FontFamily="Sitka Heading, Georgia" FontSize="15" Typography.NumeralStyle="OldStyle" VerticalAlignment="Center" Margin="12,0,8,12" AutomationProperties.LiveSetting="Polite"/>
+       <Button x:Name="ClearSearchFiltersButton" DockPanel.Dock="Right" Content="Clear filters" Click="ClearSearchFiltersClick" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Accent}" Height="30" MinHeight="0" Padding="10,0" FontSize="13" VerticalAlignment="Center" Margin="8,0,0,12" Visibility="Collapsed"/>
+       <local:ThreadBar HorizontalAlignment="Left">
         <StackPanel x:Name="SearchKinds" Orientation="Horizontal" AutomationProperties.Name="Type of title">
-         <StackPanel.Resources>
-          <Style TargetType="RadioButton">
-           <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontSize" Value="13"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
-           <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
-            <Border x:Name="Segment" Background="Transparent" CornerRadius="7" Height="26" Padding="14,0"><ContentPresenter VerticalAlignment="Center"/></Border>
-            <ControlTemplate.Triggers>
-             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Segment" Property="Background" Value="{DynamicResource Hover}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
-             <Trigger Property="IsChecked" Value="True"><Setter TargetName="Segment" Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
-             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
-            </ControlTemplate.Triggers>
-           </ControlTemplate></Setter.Value></Setter>
-          </Style>
-         </StackPanel.Resources>
-         <RadioButton x:Name="SearchAllKinds" GroupName="SearchKind" Content="All videos" Tag="0" IsChecked="True" Checked="SearchFilterChanged"/>
-         <RadioButton GroupName="SearchKind" Content="Movies" Tag="1" Checked="SearchFilterChanged"/>
-         <RadioButton GroupName="SearchKind" Content="Shows" Tag="2" Checked="SearchFilterChanged"/>
-         <RadioButton GroupName="SearchKind" Content="Anime" Tag="3" Checked="SearchFilterChanged"/>
-         <RadioButton x:Name="SearchMusicKind" GroupName="SearchKind" Content="Music" Tag="6" Checked="SearchFilterChanged"/>
+         <RadioButton x:Name="SearchAllKinds" GroupName="SearchKind" Content="All videos" Tag="0" IsChecked="True" Checked="SearchFilterChanged" Style="{StaticResource ThreadWordChoice}"/>
+         <RadioButton GroupName="SearchKind" Content="Movies" Tag="1" Checked="SearchFilterChanged" Style="{StaticResource ThreadWordChoice}"/>
+         <RadioButton GroupName="SearchKind" Content="Shows" Tag="2" Checked="SearchFilterChanged" Style="{StaticResource ThreadWordChoice}"/>
+         <RadioButton GroupName="SearchKind" Content="Anime" Tag="3" Checked="SearchFilterChanged" Style="{StaticResource ThreadWordChoice}"/>
+         <RadioButton x:Name="SearchMusicKind" GroupName="SearchKind" Content="Music" Tag="6" Checked="SearchFilterChanged" Style="{StaticResource ThreadWordChoice}"/>
         </StackPanel>
-       </Border>
+       </local:ThreadBar>
       </DockPanel>
       <!-- Filters are pills: an icon and a name until something is chosen, then the choice with a button that clears it. -->
       <WrapPanel x:Name="SearchFilters" Margin="0,12,0,0">
@@ -391,32 +379,21 @@
      <Grid x:Name="LibraryToolbar" MinHeight="40" Margin="0,0,0,14" SizeChanged="LibraryToolbarSizeChanged">
       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-      <!-- The library's categories: words strung on a thread, the stretch under the current one lit (LibraryCategoryBar.cs). The
-           thread trails off past the last word. Search and Music have their own tabs, so the categories hide for them. -->
-      <Grid x:Name="LibraryCategoryBar" IsVisibleChanged="LibraryCategoryBarVisibilityChanged" HorizontalAlignment="Left" VerticalAlignment="Top" SizeChanged="LibraryCategoryBarSizeChanged">
-       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/></Grid.RowDefinitions>
-       <StackPanel x:Name="LibraryCategories" Orientation="Horizontal" SizeChanged="LibraryCategoriesSizeChanged" KeyboardNavigation.TabNavigation="Once" KeyboardNavigation.DirectionalNavigation="Cycle" AutomationProperties.Name="Library category">
-        <Button x:Name="AllLibraryNav" Content="All" Tag="0" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}"/>
-        <Button x:Name="AnimeLibraryNav" Content="Anime" Tag="3" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}"/>
-        <Button x:Name="ShowsLibraryNav" Content="Shows" Tag="2" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}"/>
-        <Button x:Name="MoviesLibraryNav" Content="Movies" Tag="1" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}"/>
-        <Button x:Name="UnavailableLibraryNav" Content="Unavailable" Tag="4" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}" Visibility="Collapsed"/>
+      <!-- The library's categories, on the app's thread selector (ThreadBar.cs). Search and Music have their own tabs, so the
+           categories hide for them. -->
+      <local:ThreadBar x:Name="LibraryCategoryBar" HorizontalAlignment="Left" VerticalAlignment="Top" SizeChanged="LibraryCategoryBarSizeChanged">
+       <StackPanel x:Name="LibraryCategories" Orientation="Horizontal" KeyboardNavigation.TabNavigation="Once" KeyboardNavigation.DirectionalNavigation="Cycle" AutomationProperties.Name="Library category">
+        <Button x:Name="AllLibraryNav" Content="All" Tag="0" Click="LibraryCategoryClick" Style="{StaticResource ThreadWord}"/>
+        <Button x:Name="AnimeLibraryNav" Content="Anime" Tag="3" Click="LibraryCategoryClick" Style="{StaticResource ThreadWord}"/>
+        <Button x:Name="ShowsLibraryNav" Content="Shows" Tag="2" Click="LibraryCategoryClick" Style="{StaticResource ThreadWord}"/>
+        <Button x:Name="MoviesLibraryNav" Content="Movies" Tag="1" Click="LibraryCategoryClick" Style="{StaticResource ThreadWord}"/>
+        <Button x:Name="UnavailableLibraryNav" Content="Unavailable" Tag="4" Click="LibraryCategoryClick" Style="{StaticResource ThreadWord}" Visibility="Collapsed"/>
         <!-- Shows and films with episodes or files still to come; listed only while there are some. Their number is part of the label. -->
-        <Button x:Name="MissingLibraryNav" Tag="5" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}" Visibility="Collapsed" AutomationProperties.Name="Missing"><TextBlock>Missing<Run Text=" "/><Run x:Name="MissingLibraryCount" Style="{StaticResource CategoryCount}"/></TextBlock></Button>
+        <Button x:Name="MissingLibraryNav" Tag="5" Click="LibraryCategoryClick" Style="{StaticResource ThreadWord}" Visibility="Collapsed" AutomationProperties.Name="Missing"><TextBlock>Missing<Run Text=" "/><Run x:Name="MissingLibraryCount" Style="{StaticResource CategoryCount}"/></TextBlock></Button>
         <!-- Shows and films no metadata provider could identify; listed only while there are some. -->
-        <Button x:Name="UnmatchedLibraryNav" Tag="7" Click="LibraryCategoryClick" Style="{StaticResource CategorySegment}" Visibility="Collapsed" AutomationProperties.Name="Unmatched" ToolTip="Titles without a match yet. Open one and use Find artwork / fix match to identify it yourself."><TextBlock>Unmatched<Run Text=" "/><Run x:Name="UnmatchedLibraryCount" Style="{StaticResource CategoryCount}"/></TextBlock></Button>
+        <Button x:Name="UnmatchedLibraryNav" Tag="7" Click="LibraryCategoryClick" Style="{StaticResource ThreadWord}" Visibility="Collapsed" AutomationProperties.Name="Unmatched" ToolTip="Titles without a match yet. Open one and use Find artwork / fix match to identify it yourself."><TextBlock>Unmatched<Run Text=" "/><Run x:Name="UnmatchedLibraryCount" Style="{StaticResource CategoryCount}"/></TextBlock></Button>
        </StackPanel>
-       <Rectangle x:Name="LibraryCategoryThread" Grid.Row="1" Height="1" VerticalAlignment="Center" Margin="0,0,-48,0" Fill="{DynamicResource Muted}" Opacity="0.45" IsHitTestVisible="False">
-        <Rectangle.OpacityMask><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#FF000000" Offset="0"/><GradientStop Color="#FF000000" Offset="0.72"/><GradientStop Color="#00000000" Offset="1"/></LinearGradientBrush></Rectangle.OpacityMask>
-       </Rectangle>
-       <!-- The current category: a stretch of the thread under its word, lit in the pearl's colours, the accent fading into its
-            violet, reaching a little past the word so its fades fall outside it. It glides and resizes to the word chosen. The pearl itself stays on the sidebar, so there is one pearl. -->
-       <Border x:Name="LibraryCategoryGlow" Grid.Row="1" Height="2" CornerRadius="1" HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="Hidden" IsHitTestVisible="False">
-        <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
-        <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="{DynamicResource AccentClear}" Offset="0"/><GradientStop Color="{DynamicResource AccentColor}" Offset="0.14"/><GradientStop Color="#FF9A7AE6" Offset="0.86"/><GradientStop Color="#009A7AE6" Offset="1"/></LinearGradientBrush></Border.Background>
-        <Border.Effect><DropShadowEffect Color="{DynamicResource AccentColor}" ShadowDepth="0" BlurRadius="10" Opacity="0.9"/></Border.Effect>
-       </Border>
-      </Grid>
+      </local:ThreadBar>
       <ItemsControl x:Name="LibraryBreadcrumbs" Margin="-8,0,0,0" VerticalAlignment="Center" Button.Click="BreadcrumbClick" Style="{StaticResource LibraryBreadcrumbs}" AutomationProperties.Name="Library location"/>
       <!-- Search says here what it is still reading, or what a guest can search. -->
       <TextBlock x:Name="SearchNote" Visibility="Collapsed" Style="{StaticResource MutedText}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"/>
@@ -690,36 +667,25 @@
      <Style x:Key="FieldError" TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Setter Property="Foreground" Value="{DynamicResource Accent}"/><Setter Property="AutomationProperties.LiveSetting" Value="Polite"/><Setter Property="Margin" Value="0,0,0,8"/><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style>
      <Style x:Key="CardTitle" TargetType="TextBlock"><Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
      <Style x:Key="Hint" TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Setter Property="FontSize" Value="13"/><Setter Property="LineHeight" Value="20"/></Style>
-     <!-- One choice of a few, drawn as a segmented control. -->
-     <Style x:Key="Segment" TargetType="RadioButton">
-      <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontSize" Value="13"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/><Setter Property="Margin" Value="0,0,2,0"/>
-      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
-       <Border x:Name="Pill" Background="Transparent" CornerRadius="7" Padding="10,5"><ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center"/></Border>
-       <ControlTemplate.Triggers>
-        <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
-        <Trigger Property="IsChecked" Value="True"><Setter TargetName="Pill" Property="Background" Value="{DynamicResource Accent}"/><Setter Property="Foreground" Value="{DynamicResource AccentInk}"/></Trigger>
-        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
-       </ControlTemplate.Triggers>
-      </ControlTemplate></Setter.Value></Setter>
-     </Style>
      <!-- A skipped subfolder with its button to scan it again. -->
      <DataTemplate x:Key="ExclusionRow"><Border BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="8" Padding="10,1,1,1" Margin="0,0,0,6"><DockPanel><Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="10" Width="30" Height="30" MinHeight="30" Click="RestoreFolder" ToolTip="Scan this subfolder again" AutomationProperties.Name="{Binding Name, StringFormat=Stop skipping {0}}"/><TextBlock Text="{Binding Name}" ToolTip="{Binding Path}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></DockPanel></Border></DataTemplate>
     </Grid.Resources>
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
     <StackPanel><TextBlock Text="Settings" Style="{StaticResource PageHeading}" Margin="0,0,0,16"/>
-     <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="3" HorizontalAlignment="Left" Margin="0,0,0,20">
+     <!-- The sections, on the app's thread selector (ThreadBar.cs); a narrow window wraps them onto a second thread. -->
+     <local:ThreadBar HorizontalAlignment="Left" Margin="0,0,0,8">
       <WrapPanel x:Name="PreferenceSections">
-       <Button Content="Folders" Tag="Folders" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
-       <Button Content="Plugins" Tag="Plugins" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
-       <Button Content="Downloads" Tag="Downloads" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
-       <Button Content="Profile" Tag="Profile" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
-       <Button Content="Metadata" Tag="Metadata" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
-       <Button Content="Playback" Tag="Playback" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
-       <Button Content="Voice chat" Tag="Voice" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
-       <Button Content="Appearance" Tag="Appearance" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
-       <Button Content="Updates &amp; about" Tag="Updates" Click="PreferenceSectionClicked" Style="{StaticResource PreferenceTab}"/>
+       <Button Content="Folders" Tag="Folders" Click="PreferenceSectionClicked" Style="{StaticResource ThreadWord}"/>
+       <Button Content="Plugins" Tag="Plugins" Click="PreferenceSectionClicked" Style="{StaticResource ThreadWord}"/>
+       <Button Content="Downloads" Tag="Downloads" Click="PreferenceSectionClicked" Style="{StaticResource ThreadWord}"/>
+       <Button Content="Profile" Tag="Profile" Click="PreferenceSectionClicked" Style="{StaticResource ThreadWord}"/>
+       <Button Content="Metadata" Tag="Metadata" Click="PreferenceSectionClicked" Style="{StaticResource ThreadWord}"/>
+       <Button Content="Playback" Tag="Playback" Click="PreferenceSectionClicked" Style="{StaticResource ThreadWord}"/>
+       <Button Content="Voice chat" Tag="Voice" Click="PreferenceSectionClicked" Style="{StaticResource ThreadWord}"/>
+       <Button Content="Appearance" Tag="Appearance" Click="PreferenceSectionClicked" Style="{StaticResource ThreadWord}"/>
+       <Button Content="Updates &amp; about" Tag="Updates" Click="PreferenceSectionClicked" Style="{StaticResource ThreadWord}"/>
       </WrapPanel>
-     </Border>
+     </local:ThreadBar>
     </StackPanel>
     <Grid Grid.Row="1">
      <!-- Folders: the library folders on the left; the selected folder's category and skipped subfolders on the right. Changes apply at once. -->
@@ -762,15 +728,15 @@
             <TextBlock x:Name="FolderTitle" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
             <TextBlock x:Name="FolderDetail" Style="{StaticResource MutedText}" FontSize="12" TextWrapping="Wrap" Margin="0,3,0,0"/>
             <TextBlock Text="Category" Style="{StaticResource FieldLabel}" Margin="0,18,0,8"/>
-            <Border Background="{DynamicResource Canvas}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="9" Padding="2" HorizontalAlignment="Left">
+            <local:ThreadBar HorizontalAlignment="Left" Reach="5">
              <WrapPanel x:Name="FolderKinds" AutomationProperties.Name="Folder category">
-              <RadioButton GroupName="FolderKind" Content="Anime" Tag="Anime" Checked="FolderKindChecked" Style="{StaticResource Segment}"/>
-              <RadioButton GroupName="FolderKind" Content="Shows" Tag="Show" Checked="FolderKindChecked" Style="{StaticResource Segment}"/>
-              <RadioButton GroupName="FolderKind" Content="Movies" Tag="Movie" Checked="FolderKindChecked" Style="{StaticResource Segment}"/>
-              <RadioButton GroupName="FolderKind" Content="Mixed" Tag="Mixed" Checked="FolderKindChecked" Style="{StaticResource Segment}" ToolTip="BlackPearl works out whether each video is a film, a show or anime"/>
-              <RadioButton GroupName="FolderKind" Content="Music" Tag="Music" Checked="FolderKindChecked" Style="{StaticResource Segment}"/>
+              <RadioButton GroupName="FolderKind" Content="Anime" Tag="Anime" Checked="FolderKindChecked" Style="{StaticResource ThreadOptionChoice}"/>
+              <RadioButton GroupName="FolderKind" Content="Shows" Tag="Show" Checked="FolderKindChecked" Style="{StaticResource ThreadOptionChoice}"/>
+              <RadioButton GroupName="FolderKind" Content="Movies" Tag="Movie" Checked="FolderKindChecked" Style="{StaticResource ThreadOptionChoice}"/>
+              <RadioButton GroupName="FolderKind" Content="Mixed" Tag="Mixed" Checked="FolderKindChecked" Style="{StaticResource ThreadOptionChoice}" ToolTip="BlackPearl works out whether each video is a film, a show or anime"/>
+              <RadioButton GroupName="FolderKind" Content="Music" Tag="Music" Checked="FolderKindChecked" Style="{StaticResource ThreadOptionChoice}"/>
              </WrapPanel>
-            </Border>
+            </local:ThreadBar>
             <TextBlock Text="A new category applies straight away and rescans your library." Style="{StaticResource MutedText}" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"/>
             <TextBlock x:Name="FolderExclusionsLabel" Text="Skipped subfolders" Style="{StaticResource FieldLabel}" Margin="0,18,0,8"/>
             <ItemsControl x:Name="FolderExclusionList" ItemTemplate="{StaticResource ExclusionRow}" Focusable="False" AutomationProperties.Name="Skipped subfolders"/>
@@ -797,12 +763,12 @@
          <Button Content="Open plugins folder" Click="OpenPluginsFolder" Margin="12,0,0,0"/>
          <Button x:Name="ReloadPluginsButton" Content="Reload" ContentTemplate="{StaticResource RefreshContent}" Click="ReloadPluginsClick" Margin="8,0,0,0" ToolTip="Load the plugins folder again and check BlackPearlPlugins for updates"/>
         </WrapPanel>
-        <Border Background="{DynamicResource Canvas}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="9" Padding="2" HorizontalAlignment="Left" VerticalAlignment="Center">
+        <local:ThreadBar HorizontalAlignment="Left" VerticalAlignment="Center" Reach="5" Margin="0,8,0,0">
          <StackPanel Orientation="Horizontal" AutomationProperties.Name="Plugin view">
-          <RadioButton x:Name="InstalledPluginsView" GroupName="PluginView" Content="Installed" Checked="PluginViewChanged" Style="{StaticResource Segment}"/>
-          <RadioButton x:Name="AvailablePluginsView" GroupName="PluginView" Content="Available" Checked="PluginViewChanged" Style="{StaticResource Segment}"/>
+          <RadioButton x:Name="InstalledPluginsView" GroupName="PluginView" Content="Installed" Checked="PluginViewChanged" Style="{StaticResource ThreadOptionChoice}"/>
+          <RadioButton x:Name="AvailablePluginsView" GroupName="PluginView" Content="Available" Checked="PluginViewChanged" Style="{StaticResource ThreadOptionChoice}"/>
          </StackPanel>
-        </Border>
+        </local:ThreadBar>
        </DockPanel>
        <TextBlock x:Name="CatalogStatus" TextWrapping="Wrap" Margin="0,0,16,12" AutomationProperties.LiveSetting="Polite"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
        <StackPanel x:Name="InstalledPluginsPanel">

@@ -165,9 +165,8 @@
   </Style>
   <!-- Sidebar text that a collapsed sidebar hides. -->
   <Style x:Key="NavigationLabel" TargetType="TextBlock"><Style.Triggers><Trigger Property="local:SideRail.Collapsed" Value="True"><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style>
-  <!-- A segment of the library's category bar. The thumb that slides behind the selected one is the only fill, so pointing at another segment only brightens its text; segments keep their width. -->
   <!-- The app's black pearl: a dark body, the accent sheen low on the right, a violet one on the left and a bright highlight.
-       Drawn at 15 DIP and scaled to the size it is given. It marks the current page on the sidebar and the current library category. -->
+       Drawn at 15 DIP and scaled to the size it is given. It marks the current page on the sidebar, and only there. -->
   <Style x:Key="Pearl" TargetType="ContentControl">
    <Setter Property="IsHitTestVisible" Value="False"/><Setter Property="Focusable" Value="False"/><Setter Property="IsTabStop" Value="False"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContentControl">
@@ -178,24 +177,53 @@
     </Grid></Viewbox>
    </ControlTemplate></Setter.Value></Setter>
   </Style>
-  <!-- A library category: a word in the wordmark's serif, strung on the category thread. The current one is in full ink with the
-       pearl under it; the rest are muted until pointed at. All share one weight, so choosing one never moves the others. The space
-       after each word is part of its button, so the first word lines up with the page and the pearl centres on the word. -->
+  <!-- The app's pick-one selector (ThreadBar.cs): words strung on a thread, the stretch under the chosen one lit in the pearl's
+       colours, the accent fading into its violet, and gliding to the next choice. The threads are drawn in code; the light is
+       here so its colours follow the theme. -->
+  <Style TargetType="local:ThreadBar">
+   <Setter Property="Focusable" Value="False"/><Setter Property="IsTabStop" Value="False"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="local:ThreadBar">
+    <Grid>
+     <ContentPresenter/>
+     <Canvas x:Name="PART_Layer" IsHitTestVisible="False">
+      <Border x:Name="PART_Light" Height="2" CornerRadius="1" Visibility="Hidden">
+       <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="{DynamicResource AccentClear}" Offset="0"/><GradientStop Color="{DynamicResource AccentColor}" Offset="0.14"/><GradientStop Color="#FF9A7AE6" Offset="0.86"/><GradientStop Color="#009A7AE6" Offset="1"/></LinearGradientBrush></Border.Background>
+       <Border.Effect><DropShadowEffect Color="{DynamicResource AccentColor}" ShadowDepth="0" BlurRadius="10" Opacity="0.9"/></Border.Effect>
+      </Border>
+     </Canvas>
+    </Grid>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <!-- A choice on a thread at the head of a page, such as a library category or a settings section: a word in the wordmark's
+       serif. The chosen one is in full ink with the thread lit under it; the rest are muted until pointed at. All share one
+       weight, so choosing one never moves the others. The space after each word is its right padding, so the first word lines
+       up with the page and the light centres on the word; the bottom margin is the room for the thread. -->
+  <Style x:Key="ThreadWord" TargetType="ButtonBase">
+   <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontFamily" Value="Sitka Heading, Georgia"/><Setter Property="FontSize" Value="19"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+   <Setter Property="Height" Value="34"/><Setter Property="Padding" Value="0,0,26,0"/><Setter Property="Margin" Value="0,0,0,12"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Background" Value="Transparent"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ButtonBase">
+    <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter VerticalAlignment="Center" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" RecognizesAccessKey="True"/></Border>
+   </ControlTemplate></Setter.Value></Setter>
+   <Style.Triggers>
+    <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+    <Trigger Property="AutomationProperties.ItemStatus" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.7"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+   </Style.Triggers>
+  </Style>
+  <Style x:Key="ThreadWordChoice" TargetType="RadioButton" BasedOn="{StaticResource ThreadWord}">
+   <Style.Triggers><Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger></Style.Triggers>
+  </Style>
+  <!-- A choice on a thread within a page, such as a folder's category: the interface's own type, smaller, closer together. -->
+  <Style x:Key="ThreadOption" TargetType="ButtonBase" BasedOn="{StaticResource ThreadWord}">
+   <Setter Property="FontFamily" Value="Segoe UI"/><Setter Property="FontSize" Value="13"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0,0,18,0"/><Setter Property="Margin" Value="0,0,0,8"/>
+  </Style>
+  <Style x:Key="ThreadOptionChoice" TargetType="RadioButton" BasedOn="{StaticResource ThreadOption}">
+   <Style.Triggers><Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger></Style.Triggers>
+  </Style>
   <!-- How many titles a category holds, written after its word as part of the same label: the same serif, size and ink, so it
        brightens with the word. Old-style figures sit among the lowercase like letters rather than standing up like capitals. -->
   <Style x:Key="CategoryCount" TargetType="Run"><Setter Property="Typography.NumeralStyle" Value="OldStyle"/></Style>
-  <Style x:Key="CategorySegment" TargetType="Button">
-   <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontFamily" Value="Sitka Heading, Georgia"/><Setter Property="FontSize" Value="19"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
-   <Setter Property="Height" Value="34"/><Setter Property="Padding" Value="0,0,26,0"/><Setter Property="HorizontalContentAlignment" Value="Left"/>
-   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-    <Border x:Name="Segment" Background="Transparent" Padding="{TemplateBinding Padding}"><ContentPresenter VerticalAlignment="Center" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" RecognizesAccessKey="True"/></Border>
-    <ControlTemplate.Triggers>
-     <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
-     <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.7"/></Trigger>
-     <Trigger Property="AutomationProperties.ItemStatus" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
-    </ControlTemplate.Triggers>
-   </ControlTemplate></Setter.Value></Setter>
-  </Style>
   <Style x:Key="BreadcrumbButton" TargetType="Button" BasedOn="{StaticResource QuietButton}">
    <Setter Property="Height" Value="32"/><Setter Property="Padding" Value="8,4"/><Setter Property="MinHeight" Value="32"/><Setter Property="Margin" Value="0"/><Setter Property="FontSize" Value="15"/>
    <Style.Triggers><DataTrigger Binding="{Binding IsCurrent}" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger></Style.Triggers>
@@ -286,21 +314,6 @@
   </Style>
   <Style x:Key="SettingsButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Margin" Value="0,8,12,12"/><Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
   <Style x:Key="SettingsPrimary" TargetType="Button" BasedOn="{StaticResource SettingsButton}"><Setter Property="Background" Value="{DynamicResource Accent}"/><Setter Property="Foreground" Value="{DynamicResource AccentInk}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
-  <!-- Settings sections render as a segmented control. -->
-  <Style x:Key="PreferenceTab" TargetType="Button" BasedOn="{StaticResource Navigation}">
-   <Setter Property="Height" Value="34"/><Setter Property="MinHeight" Value="34"/><Setter Property="Padding" Value="14,0"/><Setter Property="Margin" Value="0,0,2,0"/>
-   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-    <Grid>
-     <Border x:Name="Tab" Background="Transparent" CornerRadius="7"/>
-     <Border x:Name="Tint" Background="{DynamicResource Ink}" Opacity="0" CornerRadius="7" IsHitTestVisible="False"/>
-     <ContentPresenter Margin="{TemplateBinding Padding}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-    </Grid>
-    <ControlTemplate.Triggers>
-     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.06"/></Trigger>
-     <Trigger Property="AutomationProperties.ItemStatus" Value="Selected"><Setter TargetName="Tab" Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
-    </ControlTemplate.Triggers>
-   </ControlTemplate></Setter.Value></Setter>
-  </Style>
 
   <Style TargetType="ToolTip"><Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="Padding" Value="10,6"/><Setter Property="FontSize" Value="12"/><Setter Property="HasDropShadow" Value="True"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToolTip"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}" MaxWidth="360"><ContentPresenter><ContentPresenter.Resources><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style></ContentPresenter.Resources></ContentPresenter></Border></ControlTemplate></Setter.Value></Setter></Style>

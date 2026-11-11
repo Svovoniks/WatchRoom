@@ -153,9 +153,10 @@ static class ScreenRender
             if (wanted.Count > 0) { Call("NavigateLibrary", 5, null, null, null); await Capture($"{theme}-missing"); }
             if (wanted.FirstOrDefault(x => !x.IsMovie) is { } wantedShow) { Call("NavigateLibrary", wantedShow.Kind == "Anime" ? 3 : 2, wantedShow.Id, wantedShow.Kind, null); await Capture($"{theme}-wanted-show"); }
             if (wanted.FirstOrDefault(x => x.IsMovie) is { } wantedFilm && store.Get(wantedFilm.Id) is { } placeholder) { Call("Select", placeholder); await Capture($"{theme}-wanted-film"); }
+            Call("NavigateLibrary", 0, null, null, null); Call("OpenSearch", false); await Capture($"{theme}-search");
             foreach (var page in new[] { "Queues", "Rooms", "Folders", "Room" }) { Call("ShowPage", page); await Capture($"{theme}-{page.ToLowerInvariant()}"); }
             Call("ShowPage", "Settings");
-            foreach (var section in new[] { "Downloads", "Profile", "Metadata", "Playback", "Appearance", "Updates" })
+            foreach (var section in new[] { "Plugins", "Downloads", "Profile", "Metadata", "Playback", "Appearance", "Updates" })
             { Call("ShowPreferenceSection", section); await Capture($"{theme}-settings-{section.ToLowerInvariant()}"); }
         }
         Set("light", false); Call("ApplyTheme");
