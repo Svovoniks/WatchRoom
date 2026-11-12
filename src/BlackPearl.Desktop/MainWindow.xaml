@@ -63,8 +63,9 @@
   <Canvas x:Name="RailPearlLayer" Grid.RowSpan="2" Visibility="{Binding Visibility, ElementName=Rail}">
    <Grid x:Name="RailPearl" Width="15" Height="15" Visibility="Hidden" Cursor="Hand">
     <Grid.RenderTransform><TranslateTransform/></Grid.RenderTransform>
-    <!-- A grip a little wider than the pearl, so it is easy to catch, and narrow enough to stay off the entries beside it. -->
-    <Ellipse Margin="-4" Fill="Transparent"/>
+    <!-- The grip reaches a little past the pearl all round, so it is easy to catch. While the sidebar scrolls it starts at the
+         sidebar's edge instead (SideRail.cs): the scroll bar runs down the 12 DIP inside it, and a press on the bar must scroll. -->
+    <Rectangle x:Name="RailPearlGrip" Margin="-4" Fill="Transparent"/>
     <!-- Pointed at or held, the pearl swells a little. -->
     <Grid x:Name="RailPearlBody" RenderTransformOrigin="0.5,0.5" IsHitTestVisible="False">
      <Grid.RenderTransform><ScaleTransform/></Grid.RenderTransform>
@@ -1461,8 +1462,9 @@
   </Grid>
   <!-- The page's title, named like its sidebar entry. It sits up in the caption row, on the line of the sidebar's name, so the
        page itself starts right under the window buttons. Clicks pass through it to the caption, which drags the window.
-       Its 8 DIP top puts its baseline within 0.2 DIP of the name's; how each size's hinting snaps it to pixels can still
-       leave the two a pixel apart at some scalings (125%). -->
+       Its 8 DIP top puts its baseline within 0.2 DIP of the name's, and on the name's pixel row at 150%. How each size's
+       glyphs snap to pixels can still leave the two a row apart: at 125%, and at 150% and 175% in a window that opened at another
+       scaling (CheckPageTitleBaseline has the measurements). -->
   <TextBlock x:Name="PageTitle" Grid.Column="1" Grid.RowSpan="2" Style="{StaticResource PageHeading}" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="28,8,160,0" TextTrimming="CharacterEllipsis" IsHitTestVisible="False" Visibility="Collapsed"/>
   <!-- Caption row: the sidebar and details backdrop extend behind it; empty space drags the window. -->
   <Grid x:Name="CaptionBar" Grid.Column="1" Panel.ZIndex="50">

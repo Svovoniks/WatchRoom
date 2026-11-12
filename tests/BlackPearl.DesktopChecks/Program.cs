@@ -491,6 +491,11 @@ static class Program
         check(scroll.ScrollableHeight > 0 && settings.IsVisible && bottom <= rail.ActualHeight,
             $"a short window scrolls the sidebar and keeps Settings in view (scrollable {scroll.ScrollableHeight:0.#}, Settings bottom {bottom:0.#} of {rail.ActualHeight:0.#})");
         check(home.ActualWidth == width, $"sidebar buttons keep their width when its scroll bar appears ({width:0.#} -> {home.ActualWidth:0.#})");
+        // The scroll bar runs down the 12 DIP inside the sidebar's edge, under the pearl's inner half, and keeps its presses:
+        // the pearl can be caught only from the edge outwards. Without the bar, the whole pearl catches presses (CheckPearlDrag).
+        var grip = (FrameworkElement)window.FindName("RailPearlGrip");
+        var gripStart = grip.TranslatePoint(new Point(0, 0), rail).X;
+        check(gripStart >= rail.ActualWidth - 1 - 0.01, $"the pearl leaves presses on the sidebar's scroll bar to it (grip from {gripStart:0.#}, bar to {rail.ActualWidth - 1:0.#})");
         scroll.ScrollToTop(); window.MinHeight = minimum; window.Height = height; window.WindowState = state;
         await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
     }
@@ -686,6 +691,8 @@ static class Program
         static bool Within(DependencyObject? hit, DependencyObject owner) { for (; hit is not null; hit = System.Windows.Media.VisualTreeHelper.GetParent(hit)) if (hit == owner) return true; return false; }
         var homeMiddle = Middle(home);
         check(Within(HitAt(Middle(pearl)), pearl), "the pearl takes the pointer");
+        // With no scroll bar in the sidebar, the whole pearl and a little round it can be caught (CheckShortRail has the other case).
+        check(Within(HitAt(Middle(pearl) - new Vector(9, 0)), pearl) && Within(HitAt(Middle(pearl) + new Vector(9, 9)), pearl), "the pearl can be caught on either side of the sidebar's edge");
         var homeHit = window.InputHitTest(layer.TranslatePoint(homeMiddle, window)) as DependencyObject;
         check(Within(homeHit, home) && !Within(homeHit, layer), "the pearl's layer lets clicks through to the sidebar's entries");
         // A press that hardly moves is not a drag, and opens nothing.
@@ -1039,9 +1046,16 @@ static class Program
         check(title.IsVisible && !title.IsHitTestVisible, "the title lets clicks through to the caption, which drags the window");
     }
 
-    // The title stands on the line of the sidebar's name: the ink of their first letters, neither with a descender, ends on one row.
-    // Their baselines are 0.2 DIP apart in layout, and each size's hinting snaps its own baseline to pixels, so at 125% the
-    // title draws a row higher; at 100%, 150% and 175% they share the row.
+    // The title stands on the line of the sidebar's name, in layout and as drawn, to within a pixel.
+    // In layout, each baseline is the text's top, rounded to whole pixels, plus its font's baseline. The title's top is 8 DIP;
+    // the name's is centred in the sidebar's header. At 100%, 125%, 150% and 175% the title's baseline lies 0.3, 0.87 above,
+    // 0.55 below and 0.02 above the name's (in pixels): a top that moves in whole pixels cannot close a gap under one.
+    // As drawn, where the ink of their first letters (neither with a descender) ends can differ by a row, and not always the
+    // same way: Display text snaps each size's glyphs to pixels on its own. At 150%, with the title's top at 12 px and the
+    // name's at 26 px in both runs, the title's ink ended on the name's row (53) in a window opened at 150%, as on a 150%
+    // display, and on row 54 in one opened at 100% and set to 150%, as on CI and in a window dragged between displays (at 175%,
+    // likewise: 62 and 63). A top a pixel higher only swaps which run is off. At 125% the title's ink ends a row above the name's in both runs. The title
+    // keeps the top that puts it on the name's row on a display opened at 150%, the user's.
     private static async Task CheckPageTitleBaseline(MainWindow window, Action<bool, string> check)
     {
         typeof(MainWindow).GetMethod("NavigateLibrary", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [0, null, null, null]);
@@ -1068,8 +1082,13 @@ static class Program
         }
         // "L" of Library and "B" of BlackPearl.
         int line = InkBottom(title, 0.12), name = InkBottom(brand, 0.08);
-        var allowed = Math.Abs(scale - 1.25) < 0.01 ? 1 : 0;
-        check(line > 0 && Math.Abs(line - name) <= allowed, $"the page title stands on the line of the sidebar's name (title {line}, name {name} at {scale:0.##}x)");
+        // The baseline in device pixels: the text's top as laid out, plus its font's baseline at its size.
+        double Baseline(System.Windows.Controls.TextBlock text) =>
+            (text.TranslatePoint(new Point(0, 0), root).Y + text.FontFamily.Baseline * text.FontSize) * scale;
+        double titleBase = Baseline((System.Windows.Controls.TextBlock)title), nameBase = Baseline((System.Windows.Controls.TextBlock)brand);
+        check(Math.Abs(titleBase - nameBase) < 1,
+            $"the page title's baseline is laid out on the sidebar name's (title {titleBase:0.##} px, name {nameBase:0.##} px at {scale:0.##}x)");
+        check(line > 0 && name > 0 && Math.Abs(line - name) <= 1, $"the page title is drawn on the line of the sidebar's name (title ink ends on row {line}, name's on {name} at {scale:0.##}x)");
     }
 
     // Categories show their location and actions in one toolbar row; Search shows its field and filters there instead.

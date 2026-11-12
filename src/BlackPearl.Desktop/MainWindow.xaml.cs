@@ -406,11 +406,13 @@ public partial class MainWindow : Window
         if (currentPage == "Library" && librarySearch) page = "Search";
         return page;
     }
+    /// <summary>The sidebar entry last selected, so a library refresh that leaves it the same does not select it again.</summary>
+    private string? markedRailPage;
     /// <summary>Selects the current page's sidebar entry, rolls the pearl to it and names the page in its title.</summary>
     private void MarkCurrentPage()
     {
         if (PageTitle is null) return;
-        var page = CurrentRailPage();
+        var page = markedRailPage = CurrentRailPage();
         foreach (var button in new[] { HomeNav, SearchNav, LibraryNav, QueuesNav, RoomNav, SettingsNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, (string)button.Tag == page ? "Selected" : "");
         System.Windows.Automation.AutomationProperties.SetItemStatus(MusicLibraryNav, page == "Music" ? "Selected" : "");

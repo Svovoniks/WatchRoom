@@ -232,8 +232,12 @@ public partial class MainWindow
     /// <summary>Puts the pearl beside the selected sidebar entry, rolling there when asked and it is already showing.</summary>
     private void PlaceRailPearl(bool animate)
     {
-        // A held pearl stays in the hand until it is let go.
-        if (RailPearl is null || railPearlHold is not null) return;
+        if (RailPearl is null) return;
+        // The pearl's half over the sidebar would lie on its scroll bar, which keeps its presses. Starting at the pearl's middle,
+        // the grip clears the bar at every scaling once its margin is rounded to pixels (half a pixel less did not at 150%).
+        RailPearlGrip.Margin = RailScroll.ComputedVerticalScrollBarVisibility == Visibility.Visible ? new Thickness(RailPearl.Width / 2, -4, -4, -4) : new Thickness(-4);
+        // A held pearl stays in the hand until it is let go, but keeps to the edge of a sidebar folding under it.
+        if (railPearlHold is not null) { Canvas.SetLeft(RailPearl, RailPearlLayer.ActualWidth - 0.5 - RailPearl.Width / 2); return; }
         var target = RailEntries.FirstOrDefault(button => button.IsVisible && AutomationProperties.GetItemStatus(button) == "Selected");
         // An entry scrolled out of the sidebar's view has no pearl beside it.
         var shown = target is not null && RailPearlLayer.IsVisible && target.ActualHeight > 0 && InRailView(target);

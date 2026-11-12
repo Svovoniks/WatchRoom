@@ -63,7 +63,7 @@ public partial class MainWindow
         ResultCount.Visibility = librarySearch ? Visibility.Collapsed : Visibility.Visible;
         ArrangeLibraryToolbar();
         // Search and the library share this page, so a change between them changes the sidebar entry and the title.
-        if (currentPage is "Library" or "Details") MarkCurrentPage();
+        if (currentPage is "Library" or "Details" && CurrentRailPage() != markedRailPage) MarkCurrentPage();
         var music = SearchCategory() == LibraryCatalog.Music;
         SearchAudio.IsEnabled = SearchSubtitles.IsEnabled = SearchLengthFilter.IsEnabled = !music;
         ClearSearchFiltersButton.Visibility = SearchFiltersActive() ? Visibility.Visible : Visibility.Collapsed;
