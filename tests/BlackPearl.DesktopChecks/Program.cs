@@ -391,6 +391,12 @@ static class Program
         resourceRoot.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + "local", "clr-namespace:BlackPearl.Desktop;assembly=BlackPearl");
         foreach (var element in resourceRoot.Descendants().Where(element => element.Name.NamespaceName == "clr-namespace:BlackPearl.Desktop"))
             element.Name = System.Xml.Linq.XName.Get(element.Name.LocalName, "clr-namespace:BlackPearl.Desktop;assembly=BlackPearl");
+        // Attached properties set in a template, such as local:RoundedClip.Radius, need the assembly as well.
+        foreach (var attribute in resourceRoot.Descendants().SelectMany(element => element.Attributes()).Where(attribute => attribute.Name.NamespaceName == "clr-namespace:BlackPearl.Desktop").ToArray())
+        {
+            attribute.Parent!.SetAttributeValue(System.Xml.Linq.XName.Get(attribute.Name.LocalName, "clr-namespace:BlackPearl.Desktop;assembly=BlackPearl"), attribute.Value);
+            attribute.Remove();
+        }
         return (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(resourceRoot.ToString());
     }
     private static async Task CheckLibraryNavigation(MainWindow window, LibraryStore store, ObservableCollection<LibraryCardView> cards,
