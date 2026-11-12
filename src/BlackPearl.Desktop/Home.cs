@@ -105,7 +105,8 @@ public partial class MainWindow
             HomeHeroOverview.Visibility = HomeHeroOverview.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             HomeHeroResumeLabel.Text = homeHero.HomePosition >= 10000 ? "Resume" : homeHero.IsEpisode ? "Play next episode" : "Play";
             HomeHeroResumeLeft.Text = RemainingMinutes(homeHero) is { } left ? Duration(Math.Max(1, left)) : "";
-            System.Windows.Automation.AutomationProperties.SetName(HomeHeroResume, HomeHeroResumeLabel.Text + " " + homeHero.HomeTitle);
+            System.Windows.Automation.AutomationProperties.SetName(HomeHeroResume, HomeHeroResumeLabel.Text + " " + homeHero.HomeTitle +
+                (HomeHeroResumeLeft.Text.Length > 0 ? ", " + HomeHeroResumeLeft.Text + " left" : ""));
             // Each card's artwork is decoded for the frame its template draws it in; a title can move between frames.
             homeHero.ShowIn(620, 340); _ = homeHero.LoadPosterAsync();
         }

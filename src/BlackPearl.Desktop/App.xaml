@@ -209,7 +209,7 @@
 
   <!-- Sidebar navigation. The current page is marked by the pearl on the sidebar's edge (SideRail.cs), a bright
        label and an accent icon, rather than a fill: pointing at an entry is the only thing that fills it. -->
-  <Style x:Key="Navigation" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+  <Style x:Key="Navigation" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <!-- No padding on the right: a folded sidebar is narrower than the icon and its left padding, and padding there would cut the icons off. -->
    <Setter Property="Height" Value="40"/><Setter Property="Padding" Value="12,0,0,0"/>
    <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Margin" Value="0,0,0,2"/>
@@ -309,7 +309,7 @@
    <Setter Property="ItemsPanel"><Setter.Value><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></Setter.Value></Setter>
    <Setter Property="ItemTemplate"><Setter.Value><DataTemplate><StackPanel Orientation="Horizontal"><TextBlock x:Name="Chevron" Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="10" Foreground="{DynamicResource Muted}" Margin="2,1,2,0" VerticalAlignment="Center"/><Button Tag="{Binding}" Style="{StaticResource BreadcrumbButton}" ToolTip="{Binding Label}" AutomationProperties.Name="{Binding Label}"><TextBlock Text="{Binding Label}" MaxWidth="300" TextTrimming="CharacterEllipsis"/></Button></StackPanel><DataTemplate.Triggers><DataTrigger Binding="{Binding Separator}" Value=""><Setter TargetName="Chevron" Property="Visibility" Value="Collapsed"/></DataTrigger><DataTrigger Binding="{Binding Separator}" Value="{x:Null}"><Setter TargetName="Chevron" Property="Visibility" Value="Collapsed"/></DataTrigger></DataTemplate.Triggers></DataTemplate></Setter.Value></Setter>
   </Style>
-  <Style x:Key="CardWatchedButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+  <Style x:Key="CardWatchedButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="HorizontalAlignment" Value="Right"/><Setter Property="VerticalAlignment" Value="Top"/>
    <Setter Property="Margin" Value="0,14,24,0"/><Setter Property="Padding" Value="0"/>
    <Setter Property="Width" Value="28"/><Setter Property="Height" Value="28"/><Setter Property="MinHeight" Value="28"/>
@@ -330,7 +330,7 @@
     <DataTrigger Binding="{Binding IsWatched}" Value="True"><Setter Property="Opacity" Value="1"/><Setter Property="Background" Value="{DynamicResource Success}"/><Setter Property="Foreground" Value="#FFFFFF"/><Setter Property="BorderBrush" Value="{DynamicResource Success}"/><Setter Property="ToolTip" Value="Mark as unwatched"/><Setter Property="AutomationProperties.Name" Value="Mark as unwatched"/></DataTrigger>
    </Style.Triggers>
   </Style>
-  <Style x:Key="PosterCard" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+  <Style x:Key="PosterCard" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="Width" Value="180"/><Setter Property="Height" Value="312"/><Setter Property="VerticalContentAlignment" Value="Top"/><Setter Property="Padding" Value="6"/><Setter Property="Margin" Value="0,0,14,18"/><Setter Property="Background" Value="Transparent"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
     <Grid>
@@ -354,7 +354,7 @@
    <Style.Triggers><DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Muted}"/></DataTrigger></Style.Triggers>
   </Style>
   <!-- Round arrow that pages a horizontal row; it floats over the artwork, so it carries its own shadow. -->
-  <Style x:Key="PagerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+  <Style x:Key="PagerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="Width" Value="40"/><Setter Property="Height" Value="40"/><Setter Property="MinHeight" Value="40"/><Setter Property="Padding" Value="0"/>
    <Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="13"/><Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
    <Setter Property="Panel.ZIndex" Value="2"/>
@@ -497,7 +497,7 @@
   </Style>
 
   <!-- Player controls: borderless icon buttons on a dark bar. -->
-  <Style x:Key="PlayerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="MinHeight" Value="40"/><Setter Property="Padding" Value="14,8"/>
+  <Style x:Key="PlayerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/><Setter Property="MinHeight" Value="40"/><Setter Property="Padding" Value="14,8"/>
    <Setter Property="Background" Value="#1AFFFFFF"/><Setter Property="Foreground" Value="{StaticResource PlayerInk}"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="MinWidth" Value="34"/><Setter Property="VerticalAlignment" Value="Center"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Grid><Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8"/><Border x:Name="Tint" Background="#FFFFFF" Opacity="0" CornerRadius="8" IsHitTestVisible="False"/><ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.1"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.18"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
   </Style>

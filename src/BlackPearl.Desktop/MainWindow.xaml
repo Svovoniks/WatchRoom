@@ -81,7 +81,7 @@
    <ScrollViewer x:Name="HomePage" Visibility="Collapsed" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
     <ScrollViewer.Resources>
      <!-- A plain clickable surface: hover lifts the artwork and outlines it in the accent colour. -->
-     <Style x:Key="HomeTile" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+     <Style x:Key="HomeTile" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
       <Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,14,0"/><Setter Property="MinHeight" Value="0"/>
       <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Top"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/></ControlTemplate></Setter.Value></Setter>

@@ -115,7 +115,7 @@ static class ScreenRender
             var label = (TextBlock)window.FindName("HomeHeroResumeLabel"); var left = (TextBlock)window.FindName("HomeHeroResumeLeft");
             var shown = (label.Text, left.Text); var progress = BindingOperations.GetBinding(resume, FrameworkElement.TagProperty);
             void Tint(Button button, double opacity) { if (button.Template.FindName("Tint", button) is Border tint) tint.Opacity = opacity; }
-            void Rest() { Tint(resume, 0); Tint(details, 0); }
+            void Rest() { Tint(resume, 0); Tint(details, 0); resume.ClearValue(Pebble.LitProperty); }
             var states = new (string Name, Action Set)[]
             {
                 ("rest", () => { }),
@@ -125,6 +125,8 @@ static class ScreenRender
                 ("nothing watched", () => { resume.Tag = 0.0; label.Text = "Play next episode"; left.Text = ""; }),
                 ("just started", () => { resume.Tag = 3.0; label.Text = "Resume"; left.Text = "1 h 52 m"; }),
                 ("almost done", () => { resume.Tag = 97.0; label.Text = "Resume"; left.Text = "2 min"; }),
+                // A main action (Primary) is the same pebble, lit all over.
+                ("lit", () => { resume.SetValue(Pebble.LitProperty, true); label.Text = "Play"; left.Text = ""; }),
             };
             var frames = new List<BitmapSource>(); var root = (FrameworkElement)window.Content; var dpi = VisualTreeHelper.GetDpi(root);
             foreach (var (name, set) in states)
