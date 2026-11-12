@@ -33,7 +33,7 @@ public partial class MainWindow
     private const string RailCollapsedKey = "railCollapsed";
     private static readonly Duration RailPearlDuration = new(TimeSpan.FromMilliseconds(260)), RailFoldDuration = new(TimeSpan.FromMilliseconds(300)),
         RailPearlLiftDuration = new(TimeSpan.FromMilliseconds(120));
-    private bool railCollapsed, railPearlPlaced;
+    private bool railCollapsed, railPearlPlaced, railPearlRollQueued;
     private DoubleAnimation? railFolding;
     /// <summary>While the pearl is held: where it was pressed and how far below its middle, both in its layer.</summary>
     private (Point Pressed, double Grip)? railPearlHold;
@@ -59,7 +59,8 @@ public partial class MainWindow
         railCollapsed = library.Setting(RailCollapsedKey) == "true";
         ApplySideRail(animate: false);
         // The pearl stays beside its entry while the sidebar scrolls, resizes, folds, gains the Music entry or comes back from the player.
-        RailScroll.ScrollChanged += (_, _) => PlaceRailPearl(animate: false);
+        // Only vertical changes move the entries; a bold label that widens the content does not.
+        RailScroll.ScrollChanged += (_, e) => { if (e.VerticalChange != 0 || e.ViewportHeightChange != 0 || e.ExtentHeightChange != 0) PlaceRailPearl(animate: false); };
         RailNavigation.SizeChanged += (_, _) => PlaceRailPearl(animate: false);
         RailHeader.SizeChanged += (_, _) => PlaceRailPearl(animate: false);
         RailPearlLayer.SizeChanged += (_, _) => PlaceRailPearl(animate: false);
@@ -227,7 +228,11 @@ public partial class MainWindow
     }
 
     /// <summary>Rolls the pearl to the newly selected entry once the sidebar has updated.</summary>
-    private void QueueRailPearl() => Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => PlaceRailPearl(animate: true));
+    private void QueueRailPearl()
+    {
+        railPearlRollQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { railPearlRollQueued = false; PlaceRailPearl(animate: true); });
+    }
 
     /// <summary>Puts the pearl beside the selected sidebar entry, rolling there when asked and it is already showing.</summary>
     private void PlaceRailPearl(bool animate)
@@ -251,9 +256,13 @@ public partial class MainWindow
         // Centred on the sidebar's one-pixel edge, whatever its width.
         Canvas.SetLeft(RailPearl, RailPearlLayer.ActualWidth - 0.5 - RailPearl.Width / 2);
         var top = Math.Round(target!.TranslatePoint(new Point(0, target.ActualHeight / 2), RailPearlLayer).Y - RailPearl.Height / 2);
+        // A layout change that leaves the selected entry where it was lets the roll go on, and one that comes before a queued
+        // roll leaves the pearl to that roll. Selecting Watch rooms makes its label bold and the sidebar's content wider; the
+        // scroll event that followed once put the pearl straight beside it, so it never rolled there.
+        if (railPearlPlaced && !animate && (railPearlRollQueued || railPearlHeading == top && shift.HasAnimatedProperties)) return;
         if (!railPearlPlaced || !animate || !SystemParameters.ClientAreaAnimation)
         {
-            // A layout change while the pearl rolls lands it where it was heading.
+            // A layout change that moves the selected entry while the pearl rolls lands it where it was heading.
             shift.BeginAnimation(TranslateTransform.YProperty, null); shift.Y = top;
             RailPearl.Visibility = Visibility.Visible; railPearlPlaced = true;
             return;

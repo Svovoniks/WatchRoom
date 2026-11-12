@@ -751,14 +751,30 @@ static class Program
                 : $" (pearl {(pearl.IsVisible ? "shown" : "hidden")} at {centre.X:0.#},{centre.Y:0.#}; edge {rail.ActualWidth - 0.5:0.#}, entry middle {middle:0.#})";
         }
         var page = (string)typeof(MainWindow).GetField("currentPage", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
-        Call("ShowPage", "Home"); await Task.Delay(450); window.UpdateLayout();
+        // The roll starts once the new page has laid itself out, which takes longer on a busy machine, so the checks wait for it to land.
+        Call("ShowPage", "Home");
+        for (var until = DateTime.UtcNow.AddMilliseconds(1500); DateTime.UtcNow < until && Pearled("HomeNav") != "";) { await Task.Delay(50); window.UpdateLayout(); }
         var placed = Pearled("HomeNav");
         check(placed == "", "the pearl sits on the sidebar's edge beside the current page" + placed);
-        // The roll starts once the new page has laid itself out, which takes longer on a busy machine, so the check waits for it to land.
         Call("ShowPage", "Queues");
         for (var until = DateTime.UtcNow.AddMilliseconds(1500); DateTime.UtcNow < until && Pearled("QueuesNav") != "";) { await Task.Delay(50); window.UpdateLayout(); }
         placed = Pearled("QueuesNav");
         check(placed == "", "the pearl rolls to the page opened" + placed);
+        // Watch rooms is the widest entry, so selecting it or leaving it changes the width of the sidebar's content by its bold
+        // label. That scroll event once put the pearl straight beside the new page, so it never rolled there or back.
+        if (SystemParameters.ClientAreaAnimation)
+            foreach (var (next, entry) in new[] { ("Rooms", "RoomNav"), ("Queues", "QueuesNav") })
+            {
+                double Centre() => pearl.TranslatePoint(new Point(0, pearl.ActualHeight / 2), rail).Y;
+                var target = (FrameworkElement)window.FindName(entry);
+                var from = Centre(); var to = target.TranslatePoint(new Point(0, target.ActualHeight / 2), rail).Y;
+                var path = new List<double>();
+                Call("ShowPage", next);
+                for (var until = DateTime.UtcNow.AddMilliseconds(1500); DateTime.UtcNow < until && Pearled(entry) != "";) { await Task.Delay(8); window.UpdateLayout(); path.Add(Centre()); }
+                var between = path.Count(y => Math.Abs(y - from) > 1 && Math.Abs(y - to) > 1);
+                placed = Pearled(entry);
+                check(between > 0 && placed == "", $"the pearl rolls to {next}, passing between the entries ({string.Join(", ", path.Select(y => y.ToString("0")))})" + placed);
+            }
         await CheckPearlDrag(window, check, Pearled);
         check(Math.Abs(toggleAt.X - toggleAt.Y) < 0.5, $"the toggle sits as far from the sidebar's top as from its side ({toggleAt})");
         // Folding glides: the sidebar narrows and the entries move down for the logo a step at a time, while the toggle stays put.
@@ -941,6 +957,9 @@ static class Program
         var arrange = typeof(MainWindow).GetMethod("ArrangeLibraryToolbar", BindingFlags.NonPublic | BindingFlags.Instance)!;
         try
         {
+            // The toolbar check counts "218 items". Rolled to before any scaling is set, its digits are redrawn at each
+            // scaling like the rest of the window; rolled to after, they would keep the display's own grid.
+            ((RollingText)window.FindName("ResultCount")).Text = "218 items"; await Task.Delay(900);
             foreach (var scale in new[] { 1.0, 1.25, 1.5, 1.75 })
             {
                 var at = $" (at {scale * 100:0}% scaling)";
