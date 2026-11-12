@@ -463,6 +463,7 @@ static class Program
         CheckResourceLookups(window, check);
         await CheckThreadBarReleased(window, check);
         await CheckShortRail(window, check);
+        await CheckPageTitles(window, check);
         await CheckCollapsedRail(window, check);
         await CheckScalings(window, check);
         Navigate(1); await Wait(() => cards.Count == 750 && cards.All(x => x.Card.Media.Kind == "Movie"));
@@ -668,6 +669,55 @@ static class Program
         check(categories.IsVisible && under == "", "Library leaves Search for All, and the light is placed again when the categories return" + under);
     }
 
+    // The pearl can be dragged along the sidebar's edge: the entry it points at lights up, and letting go there opens that page.
+    // Starts on Queues, with the pearl resting beside it.
+    private static async Task CheckPearlDrag(MainWindow window, Action<bool, string> check, Func<string, string> pearled)
+    {
+        object? Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, arguments);
+        string Page() => (string)typeof(MainWindow).GetField("currentPage", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+        var layer = (FrameworkElement)window.FindName("RailPearlLayer");
+        var pearl = (FrameworkElement)window.FindName("RailPearl");
+        Point Middle(FrameworkElement element) => element.TranslatePoint(new Point(element.ActualWidth / 2, element.ActualHeight / 2), layer);
+        static bool Aimed(DependencyObject entry) => SideRail.GetAimed(entry);
+        var queues = (FrameworkElement)window.FindName("QueuesNav"); var settings = (FrameworkElement)window.FindName("SettingsNav");
+        var home = (FrameworkElement)window.FindName("HomeNav");
+        // Only the pearl takes the pointer: the layer it lies on lets clicks through to the sidebar's entries.
+        DependencyObject? HitAt(Point at) => (layer.InputHitTest(at) as DependencyObject);
+        static bool Within(DependencyObject? hit, DependencyObject owner) { for (; hit is not null; hit = System.Windows.Media.VisualTreeHelper.GetParent(hit)) if (hit == owner) return true; return false; }
+        var homeMiddle = Middle(home);
+        check(Within(HitAt(Middle(pearl)), pearl), "the pearl takes the pointer");
+        var homeHit = window.InputHitTest(layer.TranslatePoint(homeMiddle, window)) as DependencyObject;
+        check(Within(homeHit, home) && !Within(homeHit, layer), "the pearl's layer lets clicks through to the sidebar's entries");
+        // A press that hardly moves is not a drag, and opens nothing.
+        var start = Middle(pearl);
+        Call("HoldRailPearl", start); Call("DragRailPearl", start + new Vector(0, 1)); Call("DropRailPearl");
+        check(Page() == "Queues" && !Aimed(queues), $"a click on the pearl opens nothing (on {Page()})");
+        // Dragged down to Settings, the pearl follows and Settings lights up; past the last entry it stops at it.
+        Call("HoldRailPearl", start);
+        var target = Middle(settings);
+        Call("DragRailPearl", new Point(start.X, (start.Y + target.Y) / 2 + 3));
+        var halfway = Middle(pearl).Y;
+        check(Math.Abs(halfway - ((start.Y + target.Y) / 2 + 3)) < 0.5, $"the held pearl follows the pointer (at {halfway:0.#}, pointer {(start.Y + target.Y) / 2 + 3:0.#})");
+        Call("DragRailPearl", new Point(start.X, target.Y + 200));
+        check(Math.Abs(Middle(pearl).Y - target.Y) < 0.5 && Aimed(settings) && !Aimed(queues),
+            $"the pearl stops at the last entry and lights it up (at {Middle(pearl).Y:0.#}, Settings {target.Y:0.#})");
+        Call("DropRailPearl");
+        check(Page() == "Settings" && !Aimed(settings), $"letting go of the pearl on Settings opens Settings (on {Page()})");
+        for (var until = DateTime.UtcNow.AddMilliseconds(1500); DateTime.UtcNow < until && pearled("SettingsNav") != "";) { await Task.Delay(50); window.UpdateLayout(); }
+        var placed = pearled("SettingsNav");
+        check(placed == "", "the dropped pearl settles beside the page it opened" + placed);
+        // Escape while dragging puts it back without opening anything.
+        start = Middle(pearl);
+        Call("HoldRailPearl", start); Call("DragRailPearl", new Point(start.X, homeMiddle.Y));
+        check(Aimed(home), "the pearl dragged up to Home lights it up");
+        check((bool)Call("CancelPearlDrag")!, "Escape drops a held pearl");
+        check(Page() == "Settings" && !Aimed(home), $"a cancelled drag opens nothing (on {Page()})");
+        for (var until = DateTime.UtcNow.AddMilliseconds(1500); DateTime.UtcNow < until && pearled("SettingsNav") != "";) { await Task.Delay(50); window.UpdateLayout(); }
+        placed = pearled("SettingsNav");
+        check(placed == "", "a cancelled drag rolls the pearl back to the current page" + placed);
+        Call("ShowPage", "Queues"); await Task.Delay(450); window.UpdateLayout();
+    }
+
     // The sidebar folds into a strip of icons, with each icon named in a tooltip, and unfolds again.
     private static async Task CheckCollapsedRail(MainWindow window, Action<bool, string> check)
     {
@@ -702,6 +752,7 @@ static class Program
         for (var until = DateTime.UtcNow.AddMilliseconds(1500); DateTime.UtcNow < until && Pearled("QueuesNav") != "";) { await Task.Delay(50); window.UpdateLayout(); }
         placed = Pearled("QueuesNav");
         check(placed == "", "the pearl rolls to the page opened" + placed);
+        await CheckPearlDrag(window, check, Pearled);
         check(Math.Abs(toggleAt.X - toggleAt.Y) < 0.5, $"the toggle sits as far from the sidebar's top as from its side ({toggleAt})");
         // Folding glides: the sidebar narrows and the entries move down for the logo a step at a time, while the toggle stays put.
         // A sidebar icon is cut off when its glyph runs past the room its button gives its content.
@@ -891,6 +942,7 @@ static class Program
                 check(Math.Abs(System.Windows.Media.VisualTreeHelper.GetDpi((FrameworkElement)window.FindName("LibraryToolbar")).DpiScaleY - scale) < 0.001,
                     "the window lays out and draws at the scaling set" + at);
                 await CheckToolbarBaseline(window, Scaled);
+                await CheckPageTitleBaseline(window, Scaled);
                 await CheckCollapsedRail(window, Scaled);
             }
         }
@@ -939,6 +991,85 @@ static class Program
         int lineWord = InkBottom((FrameworkElement)window.FindName("AnimeLibraryNav"), 0), lineCount = InkBottom(count, 0.55), lineScan = InkBottom(scan, 0);
         check(Math.Abs(lineCount - lineWord) <= 1 && Math.Abs(lineScan - lineWord) <= 1,
             $"the categories, the count and the buttons share one baseline (words {lineWord}, count {lineCount}, Rescan {lineScan} at {scale:0.##}x)");
+    }
+
+    // Every page but the player and the welcome page is named in the caption row, as its sidebar entry is, and starts under it.
+    private static async Task CheckPageTitles(MainWindow window, Action<bool, string> check)
+    {
+        object? Call(string name, params object?[] arguments) => typeof(MainWindow).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance)
+            .First(method => method.Name == name && method.GetParameters().Length == arguments.Length).Invoke(window, arguments);
+        var title = (System.Windows.Controls.TextBlock)window.FindName("PageTitle");
+        var content = (FrameworkElement)window.FindName("ContentArea");
+        var root = (FrameworkElement)window.Content;
+        var heading = (Style)window.FindResource("PageHeading");
+        var items = (List<MediaItem>)typeof(MainWindow).GetField("items", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(window)!;
+        var pages = new (string Name, Action Open, string Expected)[]
+        {
+            ("Home", () => Call("ShowPage", "Home"), "Home"),
+            ("Search", () => Call("OpenSearch", false), "Search"),
+            ("Library", () => Call("NavigateLibrary", 0, null, null, null), "Library"),
+            ("Music", () => Call("NavigateLibrary", LibraryCatalog.Music, null, null, null), "Music"),
+            ("Details", () => Call("Select", items.First(item => !item.IsMusic && !item.IsExtra)), "Library"),
+            ("Queues", () => Call("ShowPage", "Queues"), "Queues"),
+            ("Watch rooms", () => Call("ShowPage", "Rooms"), "Watch rooms"),
+            ("Settings", () => Call("ShowPage", "Settings"), "Settings"),
+        };
+        static IEnumerable<DependencyObject> Tree(DependencyObject node)
+        {
+            yield return node;
+            for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(node); i++)
+                foreach (var child in Tree(System.Windows.Media.VisualTreeHelper.GetChild(node, i))) yield return child;
+        }
+        foreach (var (name, open, expected) in pages)
+        {
+            open(); await Task.Delay(100); window.UpdateLayout();
+            var top = title.TranslatePoint(new Point(0, 0), root).Y; var start = content.TranslatePoint(new Point(0, 0), root).Y;
+            check(title.IsVisible && title.Text == expected, $"{name} is titled \"{expected}\" (shows \"{(title.IsVisible ? title.Text : "nothing")}\")");
+            check(top < 40 && top + title.ActualHeight <= start + 0.5,
+                $"{name}'s title sits in the caption row and its page starts under it (title {top:0.#} to {top + title.ActualHeight:0.#}, page from {start:0.#})");
+            // The page itself no longer repeats the name in a heading of its own.
+            var repeated = Tree(content).OfType<System.Windows.Controls.TextBlock>().Where(text => text.Style == heading && text.IsVisible).Select(text => text.Text).ToList();
+            check(repeated.Count == 0, $"{name} has no second page heading ({string.Join(", ", repeated)})");
+        }
+        // A guest's Queues page names the host whose queues it edits; that is checked with the host's queues (GuestLibraryLayoutChecks).
+        // The player covers the window and has no caption row, so it has no title.
+        Call("ShowPage", "Room"); await Task.Delay(100); window.UpdateLayout();
+        check(!title.IsVisible, "the player has no page title");
+        Call("NavigateLibrary", 0, null, null, null); await Task.Delay(100);
+        check(title.IsVisible && !title.IsHitTestVisible, "the title lets clicks through to the caption, which drags the window");
+    }
+
+    // The title stands on the line of the sidebar's name: the ink of their first letters, neither with a descender, ends on one row.
+    // Their baselines are 0.2 DIP apart in layout, and each size's hinting snaps its own baseline to pixels, so at 125% the
+    // title draws a row higher; at 100%, 150% and 175% they share the row.
+    private static async Task CheckPageTitleBaseline(MainWindow window, Action<bool, string> check)
+    {
+        typeof(MainWindow).GetMethod("NavigateLibrary", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(window, [0, null, null, null]);
+        await Task.Delay(100);
+        var title = (FrameworkElement)window.FindName("PageTitle"); var brand = (FrameworkElement)window.FindName("RailBrandName");
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(title).PixelsPerDip;
+        var root = (FrameworkElement)window.Content; window.UpdateLayout();
+        var full = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth * scale), (int)Math.Ceiling(root.ActualHeight * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+        full.Render(root);
+        var stride = full.PixelWidth * 4; var pixels = new byte[stride * full.PixelHeight]; full.CopyPixels(pixels, stride, 0);
+        // The last row with ink, unlike the ground at the element's corner, in the element's first `to` (a fraction of its width).
+        int InkBottom(FrameworkElement element, double to)
+        {
+            var at = element.TranslatePoint(new Point(0, 0), root);
+            int x0 = (int)(at.X * scale), x1 = (int)((at.X + element.ActualWidth * to) * scale);
+            int y0 = (int)(at.Y * scale), y1 = Math.Min(full.PixelHeight, (int)((at.Y + element.ActualHeight) * scale)) - 1;
+            var ground = pixels.AsSpan((y0 * stride) + (x0 * 4), 4).ToArray(); var last = -1;
+            for (var y = y0; y <= y1; y++) for (var x = x0; x <= x1; x++)
+            {
+                var i = y * stride + x * 4;
+                if (Math.Abs(pixels[i] - ground[0]) + Math.Abs(pixels[i + 1] - ground[1]) + Math.Abs(pixels[i + 2] - ground[2]) > 90) { last = y; break; }
+            }
+            return last;
+        }
+        // "L" of Library and "B" of BlackPearl.
+        int line = InkBottom(title, 0.12), name = InkBottom(brand, 0.08);
+        var allowed = Math.Abs(scale - 1.25) < 0.01 ? 1 : 0;
+        check(line > 0 && Math.Abs(line - name) <= allowed, $"the page title stands on the line of the sidebar's name (title {line}, name {name} at {scale:0.##}x)");
     }
 
     // Categories show their location and actions in one toolbar row; Search shows its field and filters there instead.

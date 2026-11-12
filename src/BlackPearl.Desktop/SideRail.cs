@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
@@ -17,17 +18,29 @@ public static class SideRail
         new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.Inherits));
     public static bool GetCollapsed(DependencyObject element) => (bool)element.GetValue(CollapsedProperty);
     public static void SetCollapsed(DependencyObject element, bool value) => element.SetValue(CollapsedProperty, value);
+
+    /// <summary>Whether the pearl being dragged along the sidebar's edge points at this entry.</summary>
+    public static readonly DependencyProperty AimedProperty = DependencyProperty.RegisterAttached("Aimed", typeof(bool), typeof(SideRail), new PropertyMetadata(false));
+    public static bool GetAimed(DependencyObject element) => (bool)element.GetValue(AimedProperty);
+    public static void SetAimed(DependencyObject element, bool value) => element.SetValue(AimedProperty, value);
 }
 
 // The sidebar folds into a thin strip of icons from its toggle or Ctrl+B, and stays that way across launches.
-// A pearl strung on its edge marks the current page and rolls to the next one.
+// A pearl strung on its edge marks the current page and rolls to the next one. It can be dragged along the edge to another entry.
 public partial class MainWindow
 {
-    private const double RailExpandedWidth = 212, RailCollapsedWidth = 64;
+    private const double RailExpandedWidth = 212, RailCollapsedWidth = 64, RailPearlLift = 1.25;
     private const string RailCollapsedKey = "railCollapsed";
-    private static readonly Duration RailPearlDuration = new(TimeSpan.FromMilliseconds(260)), RailFoldDuration = new(TimeSpan.FromMilliseconds(300));
+    private static readonly Duration RailPearlDuration = new(TimeSpan.FromMilliseconds(260)), RailFoldDuration = new(TimeSpan.FromMilliseconds(300)),
+        RailPearlLiftDuration = new(TimeSpan.FromMilliseconds(120));
     private bool railCollapsed, railPearlPlaced;
     private DoubleAnimation? railFolding;
+    /// <summary>While the pearl is held: where it was pressed and how far below its middle, both in its layer.</summary>
+    private (Point Pressed, double Grip)? railPearlHold;
+    private bool railPearlDragging;
+    private Button? railPearlAim;
+    /// <summary>Where the pearl's last roll was headed.</summary>
+    private double? railPearlHeading;
 
     /// <summary>How far the sidebar has folded, from 0 (open) to 1 (a strip of icons); animated between the two.</summary>
     private static readonly DependencyProperty RailFoldProperty = DependencyProperty.Register("RailFold", typeof(double), typeof(MainWindow),
@@ -51,6 +64,111 @@ public partial class MainWindow
         RailHeader.SizeChanged += (_, _) => PlaceRailPearl(animate: false);
         RailPearlLayer.SizeChanged += (_, _) => PlaceRailPearl(animate: false);
         RailPearlLayer.IsVisibleChanged += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => PlaceRailPearl(animate: false));
+        RailPearl.MouseLeftButtonDown += PearlPressed;
+        RailPearl.MouseMove += PearlMoved;
+        RailPearl.MouseLeftButtonUp += PearlReleased;
+        // Capture taken away mid-drag (another window, the pearl hidden) puts the pearl back on the current page.
+        RailPearl.LostMouseCapture += (_, _) => CancelPearlDrag();
+        RailPearl.MouseEnter += (_, _) => LiftRailPearl();
+        RailPearl.MouseLeave += (_, _) => LiftRailPearl();
+    }
+
+    /// <summary>The entries the pearl can be dragged to, with their middles in its layer: those shown and in the sidebar's view.</summary>
+    private List<(Button Entry, double Middle)> RailPearlStops() => RailEntries
+        .Where(button => button.IsVisible && button.IsEnabled && button.ActualHeight > 0 && InRailView(button))
+        .Select(button => (button, button.TranslatePoint(new Point(0, button.ActualHeight / 2), RailPearlLayer).Y)).ToList();
+
+    /// <summary>Whether an entry's middle is in the sidebar's view; Settings is outside the scrolling part.</summary>
+    private bool InRailView(Button entry) => entry == SettingsNav ||
+        entry.TranslatePoint(new Point(0, entry.ActualHeight / 2), RailScroll).Y is var middle && middle >= 0 && middle <= RailScroll.ActualHeight;
+
+    private void PearlPressed(object sender, MouseButtonEventArgs e)
+    {
+        if (!railPearlPlaced || railPearlHold is not null || !RailPearl.CaptureMouse()) return;
+        HoldRailPearl(e.GetPosition(RailPearlLayer));
+        e.Handled = true;
+    }
+
+    private void PearlMoved(object sender, MouseEventArgs e)
+    {
+        if (railPearlHold is null) return;
+        DragRailPearl(e.GetPosition(RailPearlLayer));
+        e.Handled = true;
+    }
+
+    private void PearlReleased(object sender, MouseButtonEventArgs e)
+    {
+        if (railPearlHold is null) return;
+        DropRailPearl();
+        e.Handled = true;
+    }
+
+    /// <summary>Picks the pearl up where it is, at a point in its layer; one caught while rolling stays where it was caught.</summary>
+    private void HoldRailPearl(Point at)
+    {
+        var shift = (TranslateTransform)RailPearl.RenderTransform;
+        var top = shift.Y; shift.BeginAnimation(TranslateTransform.YProperty, null); shift.Y = top;
+        railPearlHold = (at, at.Y - (top + RailPearl.Height / 2));
+        LiftRailPearl();
+    }
+
+    /// <summary>Moves the held pearl with the pointer, at a point in its layer, once the pointer has moved far enough to be a drag.</summary>
+    private void DragRailPearl(Point at)
+    {
+        if (railPearlHold is not { } hold) return;
+        if (!railPearlDragging && Math.Abs(at.Y - hold.Pressed.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        var stops = RailPearlStops();
+        if (stops.Count == 0) return;
+        railPearlDragging = true;
+        // The pearl follows the pointer along the edge, from the first entry to the last, and the entry nearest it lights up.
+        var middle = Math.Clamp(at.Y - hold.Grip, stops.Min(stop => stop.Middle), stops.Max(stop => stop.Middle));
+        ((TranslateTransform)RailPearl.RenderTransform).Y = middle - RailPearl.Height / 2;
+        AimRailPearl(stops.MinBy(stop => Math.Abs(stop.Middle - middle)).Entry);
+    }
+
+    /// <summary>Lets go of the pearl. Over another entry it opens that page and rolls the rest of the way there; otherwise it rolls back.</summary>
+    private void DropRailPearl()
+    {
+        var aim = railPearlDragging ? railPearlAim : null;
+        EndPearlHold();
+        if (aim is not null && AutomationProperties.GetItemStatus(aim) != "Selected") aim.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent, aim));
+        PlaceRailPearl(animate: true);
+    }
+
+    /// <summary>Drops a held pearl without opening anything, rolling it back to the current page. False when it was not held.</summary>
+    private bool CancelPearlDrag()
+    {
+        if (railPearlHold is null) return false;
+        EndPearlHold();
+        PlaceRailPearl(animate: true);
+        return true;
+    }
+
+    private void EndPearlHold()
+    {
+        railPearlHold = null; railPearlDragging = false;
+        AimRailPearl(null);
+        // Released last, since losing the capture comes back here through CancelPearlDrag.
+        if (RailPearl.IsMouseCaptured) RailPearl.ReleaseMouseCapture();
+        LiftRailPearl();
+    }
+
+    private void AimRailPearl(Button? entry)
+    {
+        if (railPearlAim == entry) return;
+        if (railPearlAim is not null) SideRail.SetAimed(railPearlAim, false);
+        railPearlAim = entry;
+        if (entry is not null) SideRail.SetAimed(entry, true);
+    }
+
+    /// <summary>Swells the pearl while it is pointed at or held, and settles it otherwise.</summary>
+    private void LiftRailPearl()
+    {
+        var scale = (ScaleTransform)RailPearlBody.RenderTransform;
+        var to = railPearlHold is not null || RailPearl.IsMouseOver ? RailPearlLift : 1;
+        foreach (var axis in new[] { ScaleTransform.ScaleXProperty, ScaleTransform.ScaleYProperty })
+            if (SystemParameters.ClientAreaAnimation) scale.BeginAnimation(axis, new DoubleAnimation(to, RailPearlLiftDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+            else { scale.BeginAnimation(axis, null); scale.SetValue(axis, to); }
     }
 
     private void ToggleRailClick(object sender, RoutedEventArgs e) => SetRailCollapsed(!railCollapsed);
@@ -114,11 +232,11 @@ public partial class MainWindow
     /// <summary>Puts the pearl beside the selected sidebar entry, rolling there when asked and it is already showing.</summary>
     private void PlaceRailPearl(bool animate)
     {
-        if (RailPearl is null) return;
+        // A held pearl stays in the hand until it is let go.
+        if (RailPearl is null || railPearlHold is not null) return;
         var target = RailEntries.FirstOrDefault(button => button.IsVisible && AutomationProperties.GetItemStatus(button) == "Selected");
-        // An entry scrolled out of the sidebar's view has no pearl beside it; Settings is outside the scrolling part.
-        var shown = target is not null && RailPearlLayer.IsVisible && target.ActualHeight > 0 && (target == SettingsNav ||
-            target.TranslatePoint(new Point(0, target.ActualHeight / 2), RailScroll).Y is var middle && middle >= 0 && middle <= RailScroll.ActualHeight);
+        // An entry scrolled out of the sidebar's view has no pearl beside it.
+        var shown = target is not null && RailPearlLayer.IsVisible && target.ActualHeight > 0 && InRailView(target);
         var shift = (TranslateTransform)RailPearl.RenderTransform;
         if (!shown)
         {
@@ -136,7 +254,9 @@ public partial class MainWindow
             RailPearl.Visibility = Visibility.Visible; railPearlPlaced = true;
             return;
         }
-        if (shift.Y == top) return;
+        // Already there, or already rolling there: a second call for the same entry leaves the roll running.
+        if (shift.Y == top || railPearlHeading == top && shift.HasAnimatedProperties) return;
+        railPearlHeading = top;
         shift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(top, RailPearlDuration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut } });
     }
 }

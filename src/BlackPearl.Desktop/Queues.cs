@@ -81,11 +81,11 @@ public partial class MainWindow
         RefreshSavedItems();
     }
     private void ShowQueueGallery(object sender, RoutedEventArgs e) => ShowAllQueues();
-    // A guest in a room edits the host's queues, and the page says so.
+    // A guest in a room edits the host's queues, and the page says so in its title (RefreshPageTitle) and under it.
     private void RefreshQueuesHeading()
     {
-        if (QueuesHeading is null) return;
-        QueuesHeading.Text = ShowingHostQueues ? $"{HostName}'s queues" : "Queues";
+        if (QueuesSubheading is null) return;
+        RefreshPageTitle();
         QueuesSubheading.Text = ShowingHostQueues ? $"You're in {HostName}'s room, so changes here go to their queues." : "Line up movies and episodes to play back to back.";
     }
     private void ShowAllQueues()

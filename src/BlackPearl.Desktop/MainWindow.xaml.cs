@@ -395,14 +395,43 @@ public partial class MainWindow : Window
         if (name == "Rooms") RefreshSavedRooms();
         if (name == "Queues") RefreshSavedItems();
         UpdateLibraryCategorySelection(name is "Library" or "Details");
+        MarkCurrentPage();
+    }
+    /// <summary>The sidebar entry of the page on show: Details belongs to Library or Music, the player to Watch rooms.</summary>
+    private string CurrentRailPage()
+    {
         // Music has its own sidebar entry, so the Library entry isn't selected alongside it.
-        var page = name == "Details" ? "Library" : name == "Room" ? "Rooms" : name;
-        if (page == "Library" && (name == "Details" ? selected?.IsMusic == true : libraryCategory == LibraryCatalog.Music)) page = "Music";
-        if (name == "Library" && librarySearch) page = "Search";
+        var page = currentPage == "Details" ? "Library" : currentPage == "Room" ? "Rooms" : currentPage;
+        if (page == "Library" && (currentPage == "Details" ? selected?.IsMusic == true : libraryCategory == LibraryCatalog.Music)) page = "Music";
+        if (currentPage == "Library" && librarySearch) page = "Search";
+        return page;
+    }
+    /// <summary>Selects the current page's sidebar entry, rolls the pearl to it and names the page in its title.</summary>
+    private void MarkCurrentPage()
+    {
+        if (PageTitle is null) return;
+        var page = CurrentRailPage();
         foreach (var button in new[] { HomeNav, SearchNav, LibraryNav, QueuesNav, RoomNav, SettingsNav })
             System.Windows.Automation.AutomationProperties.SetItemStatus(button, (string)button.Tag == page ? "Selected" : "");
         System.Windows.Automation.AutomationProperties.SetItemStatus(MusicLibraryNav, page == "Music" ? "Selected" : "");
+        RefreshPageTitle();
         QueueRailPearl();
+    }
+    /// <summary>
+    /// Names the page as its sidebar entry does. The player and the welcome page have no title; a guest's Queues page names
+    /// the host whose queues it edits.
+    /// </summary>
+    private void RefreshPageTitle()
+    {
+        if (PageTitle is null) return;
+        var title = currentPage is "Room" or "Welcome" ? "" : CurrentRailPage() switch
+        {
+            "Rooms" => "Watch rooms",
+            "Queues" => ShowingHostQueues ? $"{HostName}'s queues" : "Queues",
+            var page => page,
+        };
+        PageTitle.Text = title;
+        PageTitle.Visibility = title.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
     private void Navigate(object sender, RoutedEventArgs e)
     {
@@ -2050,7 +2079,8 @@ public partial class MainWindow : Window
         bool inPlayer = RoomPage.Visibility == Visibility.Visible;
         Rail.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
         RailWidth.Width = new GridLength(inPlayer ? 0 : RailColumnWidth);
-        ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(28, 22, 28, 16);
+        // The page's title (PageTitle) sits in the caption row above, so the page starts just under it.
+        ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(28, 14, 28, 16);
         AppStatusBar.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
         StatusRow.Height = new GridLength(inPlayer ? 0 : 30);
         // The player shrinks well below the library's minimum size; leaving it brings that minimum back.
@@ -2183,6 +2213,7 @@ public partial class MainWindow : Window
         if (VoiceKey(e, true)) return;
         if (e.Key is Key.BrowserBack or Key.BrowserForward || Keyboard.Modifiers == ModifierKeys.Alt && e.SystemKey is Key.Left or Key.Right)
         { BrowseHistory(e.Key == Key.BrowserBack || e.SystemKey == Key.Left); e.Handled = true; return; }
+        if (e.Key == Key.Escape && CancelPearlDrag()) { e.Handled = true; return; }
         if (e.Key == Key.Escape && upNextChoice is not null) { EndUpNext(false); e.Handled = true; return; }
         if (e.Key == Key.Escape && fullscreen) { SetFullscreen(false); e.Handled = true; return; }
         if (e.Key == Key.Escape && pictureInPicture) { SetPictureInPicture(false); e.Handled = true; return; }
