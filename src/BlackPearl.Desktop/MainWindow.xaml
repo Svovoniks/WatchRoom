@@ -58,13 +58,21 @@
 
   <!-- A black pearl, the app's logo, is strung on the sidebar's edge beside the current page and rolls along it to the next
        one (SideRail.cs). It overhangs the page, so it lies above the backdrop but below the page content. Its sheen and glow
-       take the theme accent. -->
-  <Canvas x:Name="RailPearlLayer" Grid.RowSpan="2" IsHitTestVisible="False" Visibility="{Binding Visibility, ElementName=Rail}">
-   <Grid x:Name="RailPearl" Width="15" Height="15" Visibility="Hidden">
+       take the theme accent. It can be dragged along the edge to another entry, which opens that page (SideRail.cs). Only the
+       pearl takes the pointer; the rest of its layer lets clicks through. -->
+  <Canvas x:Name="RailPearlLayer" Grid.RowSpan="2" Visibility="{Binding Visibility, ElementName=Rail}">
+   <Grid x:Name="RailPearl" Width="15" Height="15" Visibility="Hidden" Cursor="Hand">
     <Grid.RenderTransform><TranslateTransform/></Grid.RenderTransform>
-    <!-- The pearl's glow is a soft halo drawn as a gradient: a blur effect looked the same but slowed the library's first layout. -->
-    <Ellipse Margin="-9" Opacity="0.5" IsHitTestVisible="False"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="{DynamicResource AccentColor}" Offset="0.3"/><GradientStop Color="{DynamicResource AccentClear}" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
-    <ContentControl Style="{StaticResource Pearl}"/>
+    <!-- The grip reaches a little past the pearl all round, so it is easy to catch. While the sidebar scrolls it starts at the
+         sidebar's edge instead (SideRail.cs): the scroll bar runs down the 12 DIP inside it, and a press on the bar must scroll. -->
+    <Rectangle x:Name="RailPearlGrip" Margin="-4" Fill="Transparent"/>
+    <!-- Pointed at or held, the pearl swells a little. -->
+    <Grid x:Name="RailPearlBody" RenderTransformOrigin="0.5,0.5" IsHitTestVisible="False">
+     <Grid.RenderTransform><ScaleTransform/></Grid.RenderTransform>
+     <!-- The pearl's glow is a soft halo drawn as a gradient: a blur effect looked the same but slowed the library's first layout. -->
+     <Ellipse Margin="-9" Opacity="0.5"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="{DynamicResource AccentColor}" Offset="0.3"/><GradientStop Color="{DynamicResource AccentClear}" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+     <ContentControl Style="{StaticResource Pearl}"/>
+    </Grid>
    </Grid>
   </Canvas>
   <Grid Grid.Column="1" Grid.Row="1" Margin="28,6,28,16" x:Name="ContentArea">
@@ -195,8 +203,7 @@
       </Grid>
      </Border>
      <StackPanel x:Name="HomeIntro" Margin="0,0,0,22">
-      <TextBlock Text="Home" Style="{StaticResource PageHeading}"/>
-      <TextBlock x:Name="HomeContinueEmpty" Text="Your unfinished movies and shows will appear here once you start watching." Style="{StaticResource MutedText}" Margin="0,4,0,0"/>
+      <TextBlock x:Name="HomeContinueEmpty" Text="Your unfinished movies and shows will appear here once you start watching." Style="{StaticResource MutedText}"/>
      </StackPanel>
 
      <!-- Everything else in progress, newest first. -->
@@ -270,7 +277,6 @@
      </Border>
      <!-- Search: the library's grid under a search field and filters, in place of a category's breadcrumbs. -->
      <StackPanel x:Name="SearchHeader" Visibility="Collapsed" Margin="0,0,0,8">
-      <TextBlock Text="Search" Style="{StaticResource PageHeading}" Margin="0,0,0,14"/>
       <Border x:Name="SearchFrame" Height="44" MouseLeftButtonDown="SearchFrameClick" Background="{DynamicResource Surface}" BorderThickness="1" CornerRadius="10" Padding="14,0,8,0" HorizontalAlignment="Stretch" Cursor="IBeam">
        <Border.Style><Style TargetType="Border"><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger></Style.Triggers></Style></Border.Style>
        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/></Grid.ColumnDefinitions>
@@ -533,7 +539,7 @@
 
     <Grid x:Name="QueueGalleryView">
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-     <DockPanel Margin="0,0,0,20"><Button DockPanel.Dock="Right" Content="New queue" Click="CreateQueue" ContentTemplate="{StaticResource AddContent}" VerticalAlignment="Center" Style="{StaticResource HeaderCreate}" Margin="12,0,0,0"/><StackPanel><TextBlock x:Name="QueuesHeading" Text="Queues" Style="{StaticResource PageHeading}"/><TextBlock x:Name="QueuesSubheading" Text="Line up movies and episodes to play back to back." Style="{StaticResource MutedText}" Margin="0,4,0,0"/></StackPanel></DockPanel>
+     <DockPanel Margin="0,0,0,20"><Button DockPanel.Dock="Right" Content="New queue" Click="CreateQueue" ContentTemplate="{StaticResource AddContent}" VerticalAlignment="Center" Style="{StaticResource HeaderCreate}" Margin="12,0,0,0"/><TextBlock x:Name="QueuesSubheading" Text="Line up movies and episodes to play back to back." Style="{StaticResource MutedText}" VerticalAlignment="Center"/></DockPanel>
      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="-6,0,0,0" Focusable="False">
       <ItemsControl x:Name="QueueGallery" AutomationProperties.Name="Saved queues" Focusable="False">
        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
@@ -568,7 +574,7 @@
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
      <!-- Add videos opens by widening its column. A fixed width keeps the results list virtualized; an Auto column would measure every row. -->
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition x:Name="QueueAddColumn" Width="0"/></Grid.ColumnDefinitions>
-     <Button Grid.ColumnSpan="2" Style="{StaticResource BreadcrumbButton}" Click="ShowQueueGallery" HorizontalAlignment="Left" Margin="-8,0,0,10" ToolTip="All queues" AutomationProperties.Name="Back to all queues"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72B;" Style="{StaticResource Icon}" FontSize="12" Margin="0,0,8,0"/><TextBlock Text="Queues"/></StackPanel></Button>
+     <Button Grid.ColumnSpan="2" Style="{StaticResource BreadcrumbButton}" Click="ShowQueueGallery" HorizontalAlignment="Left" Margin="-8,0,0,10" ToolTip="All queues" AutomationProperties.Name="Back to all queues"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72B;" Style="{StaticResource Icon}" FontSize="12" Margin="0,0,8,0"/><TextBlock Text="All queues"/></StackPanel></Button>
 
      <!-- The header and videos share a nested grid; a list spanning the header's Auto row would measure every row. -->
      <Grid Grid.Row="1"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
@@ -675,7 +681,7 @@
      <DataTemplate x:Key="ExclusionRow"><Border BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="8" Padding="10,1,1,1" Margin="0,0,0,6"><DockPanel><Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="10" Width="30" Height="30" MinHeight="30" Click="RestoreFolder" ToolTip="Scan this subfolder again" AutomationProperties.Name="{Binding Name, StringFormat=Stop skipping {0}}"/><TextBlock Text="{Binding Name}" ToolTip="{Binding Path}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></DockPanel></Border></DataTemplate>
     </Grid.Resources>
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-    <StackPanel><TextBlock Text="Settings" Style="{StaticResource PageHeading}" Margin="0,0,0,16"/>
+    <StackPanel>
      <!-- The sections, on the app's thread selector (ThreadBar.cs); a narrow window wraps them onto a second thread. -->
      <local:ThreadBar HorizontalAlignment="Left" Margin="0,0,0,8">
       <WrapPanel x:Name="PreferenceSections">
@@ -1041,7 +1047,7 @@
    <!-- Saved watch rooms -->
    <Grid x:Name="RoomsPage" Visibility="Collapsed">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-    <Grid Margin="0,0,0,20"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Margin="0,0,16,0"><TextBlock Text="Watch rooms" Style="{StaticResource PageHeading}"/><TextBlock Text="Watch in sync with friends. Only the host needs the video." Style="{StaticResource MutedText}" Margin="0,4,0,0"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="ReturnToRoomButton" Content="Return to player" ContentTemplate="{StaticResource PlayContent}" Tag="Room" Click="Navigate" Style="{StaticResource HeaderAction}" Margin="0,0,4,0"/><Button x:Name="AddSavedInvitationButton" Content="Join a room" Click="JoinClick" Style="{StaticResource HeaderAction}" Margin="0,0,4,0" ToolTip="Paste an invitation link or room code to add it to your saved rooms"/><Button x:Name="CreateSavedRoomButton" Content="Create room" ContentTemplate="{StaticResource AddContent}" Click="CreatePersistentRoom" Style="{StaticResource HeaderCreate}"/></StackPanel></Grid>
+    <Grid Margin="0,0,0,20"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Watch in sync with friends. Only the host needs the video." Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,16,0"/><StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="ReturnToRoomButton" Content="Return to player" ContentTemplate="{StaticResource PlayContent}" Tag="Room" Click="Navigate" Style="{StaticResource HeaderAction}" Margin="0,0,4,0"/><Button x:Name="AddSavedInvitationButton" Content="Join a room" Click="JoinClick" Style="{StaticResource HeaderAction}" Margin="0,0,4,0" ToolTip="Paste an invitation link or room code to add it to your saved rooms"/><Button x:Name="CreateSavedRoomButton" Content="Create room" ContentTemplate="{StaticResource AddContent}" Click="CreatePersistentRoom" Style="{StaticResource HeaderCreate}"/></StackPanel></Grid>
     <!-- Hero: what the connected room is playing, or what the most recent room watched last time. -->
     <Border x:Name="RoomHero" Grid.Row="1" Height="200" CornerRadius="14" local:RoundedClip.Radius="14" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" Margin="0,0,0,20" Visibility="Collapsed">
      <Grid>
@@ -1454,6 +1460,12 @@
     </Grid>
    </Grid>
   </Grid>
+  <!-- The page's title, named like its sidebar entry. It sits up in the caption row, on the line of the sidebar's name, so the
+       page itself starts right under the window buttons. Clicks pass through it to the caption, which drags the window.
+       Its 8 DIP top puts its baseline within 0.2 DIP of the name's, and on the name's pixel row at 150%. How each size's
+       glyphs snap to pixels can still leave the two a row apart: at 125%, and at 150% and 175% in a window that opened at another
+       scaling (CheckPageTitleBaseline has the measurements). -->
+  <TextBlock x:Name="PageTitle" Grid.Column="1" Grid.RowSpan="2" Style="{StaticResource PageHeading}" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="28,8,160,0" TextTrimming="CharacterEllipsis" IsHitTestVisible="False" Visibility="Collapsed"/>
   <!-- Caption row: the sidebar and details backdrop extend behind it; empty space drags the window. -->
   <Grid x:Name="CaptionBar" Grid.Column="1" Panel.ZIndex="50">
    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">

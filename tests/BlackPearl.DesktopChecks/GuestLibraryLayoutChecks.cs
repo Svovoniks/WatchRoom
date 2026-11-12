@@ -47,7 +47,7 @@ static class GuestLibraryLayoutChecks
         Call(host, "ShareQueues", [null]);
         Call(guest, "ShowPage", "Queues");
         var gallery = Named<ItemsControl>(guest, "QueueGallery");
-        Check(Named<TextBlock>(guest, "QueuesHeading").Text == "Fixture Host's queues" && GalleryNames(gallery).SequenceEqual(["Evening films", "New queue"]),
+        Check(Named<TextBlock>(guest, "PageTitle").Text == "Fixture Host's queues" && GalleryNames(gallery).SequenceEqual(["Evening films", "New queue"]),
             "a guest's Queues page shows the host's queues instead of their own");
         Call(guest, "OpenQueue", "evening");
         var rows = Named<ListBox>(guest, "SavedQueueItems");
@@ -91,7 +91,7 @@ static class GuestLibraryLayoutChecks
         Check(toGuest.Count == 0, "guests who already have the queues are not sent them again for every room update");
 
         typeof(MainWindow).GetField("room", Flags)!.SetValue(guest, null); Call(guest, "ClearHostQueues");
-        Check(Named<TextBlock>(guest, "QueuesHeading").Text == "Queues" && GalleryNames(gallery).SequenceEqual(["My own queue", "New queue"]),
+        Check(Named<TextBlock>(guest, "PageTitle").Text == "Queues" && GalleryNames(gallery).SequenceEqual(["My own queue", "New queue"]),
             "leaving the room brings back the guest's own queues");
         host.Close(); guest.Close();
         Console.WriteLine("Room queue checks passed.");

@@ -168,6 +168,8 @@
     </Grid>
     <ControlTemplate.Triggers>
      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.05"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
+     <!-- The entry the dragged pearl points at, which opens when the pearl is let go, looks pointed at. -->
+     <Trigger Property="local:SideRail.Aimed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.05"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger>
      <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.1"/></Trigger>
      <Trigger Property="AutomationProperties.ItemStatus" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
      <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
