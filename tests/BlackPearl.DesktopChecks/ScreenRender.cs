@@ -2,6 +2,7 @@ using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -105,6 +106,63 @@ static class ScreenRender
             await using (var file = File.Create(Path.Combine(output, "dark-count-roll.png"))) encoder.Save(file);
             count.Text = shown;
         }
+        // The Home hero's Resume pebble and Details beside it, in each state they can be in, stacked top to bottom at twice size.
+        // Hover and press set what their triggers set; the focus ring is drawn from the buttons' focus style over the picture.
+        async Task CaptureHeroButtons(string theme)
+        {
+            if (window.FindName("HomeHeroResume") is not Button { IsVisible: true } resume || resume.Parent is not Panel row) return;
+            var details = row.Children.OfType<Button>().First(button => button != resume);
+            var label = (TextBlock)window.FindName("HomeHeroResumeLabel"); var left = (TextBlock)window.FindName("HomeHeroResumeLeft");
+            var shown = (label.Text, left.Text); var progress = BindingOperations.GetBinding(resume, FrameworkElement.TagProperty);
+            void Tint(Button button, double opacity) { if (button.Template.FindName("Tint", button) is Border tint) tint.Opacity = opacity; }
+            void Rest() { Tint(resume, 0); Tint(details, 0); resume.ClearValue(Pebble.LitProperty); }
+            var states = new (string Name, Action Set)[]
+            {
+                ("rest", () => { }),
+                ("hover", () => { Tint(resume, 0.06); Tint(details, 0.07); }),
+                ("pressed", () => { Tint(resume, 0.11); Tint(details, 0.14); }),
+                ("focus", () => { }),
+                ("nothing watched", () => { resume.Tag = 0.0; label.Text = "Play next episode"; left.Text = ""; }),
+                ("just started", () => { resume.Tag = 3.0; label.Text = "Resume"; left.Text = "1 h 52 m"; }),
+                ("almost done", () => { resume.Tag = 97.0; label.Text = "Resume"; left.Text = "2 min"; }),
+                // A main action (Primary) is the same pebble, lit all over.
+                ("lit", () => { resume.SetValue(Pebble.LitProperty, true); label.Text = "Play"; left.Text = ""; }),
+            };
+            var frames = new List<BitmapSource>(); var root = (FrameworkElement)window.Content; var dpi = VisualTreeHelper.GetDpi(root);
+            foreach (var (name, set) in states)
+            {
+                Rest(); set(); await Settle(400);
+                var full = Picture(root); full.Render(root);
+                var at = row.TranslatePoint(new Point(-20, -16), root);
+                var area = new Int32Rect((int)(at.X * dpi.DpiScaleX), (int)(at.Y * dpi.DpiScaleY), (int)((row.ActualWidth + 60) * dpi.DpiScaleX), (int)((row.ActualHeight + 36) * dpi.DpiScaleY));
+                BitmapSource frame = new CroppedBitmap(full, area);
+                if (name == "focus")
+                {
+                    // The focus visual as WPF draws it: the style's template laid over the button's box.
+                    var ring = new Control { Style = resume.FocusVisualStyle, Width = resume.ActualWidth, Height = resume.ActualHeight };
+                    ring.Measure(new Size(ring.Width, ring.Height)); ring.Arrange(new Rect(0, 0, ring.Width, ring.Height));
+                    var spot = resume.TranslatePoint(new Point(0, 0), row);
+                    var visual = new DrawingVisual();
+                    using (var draw = visual.RenderOpen())
+                    {
+                        draw.DrawImage(frame, new Rect(0, 0, frame.PixelWidth / dpi.DpiScaleX, frame.PixelHeight / dpi.DpiScaleY));
+                        draw.PushTransform(new TranslateTransform(spot.X + 20, spot.Y + 16)); draw.DrawRectangle(new VisualBrush(ring), null, new Rect(0, 0, ring.Width, ring.Height)); draw.Pop();
+                    }
+                    var withRing = new RenderTargetBitmap(frame.PixelWidth, frame.PixelHeight, dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32); withRing.Render(visual);
+                    frame = withRing;
+                }
+                frames.Add(frame);
+            }
+            Rest(); (label.Text, left.Text) = shown; if (progress is not null) resume.SetBinding(FrameworkElement.TagProperty, progress);
+            var strip = new DrawingVisual(); RenderOptions.SetBitmapScalingMode(strip, BitmapScalingMode.NearestNeighbor);
+            var w = frames.Max(f => f.PixelWidth) * 2; var h = frames.Max(f => f.PixelHeight) * 2;
+            using (var draw = strip.RenderOpen())
+                for (var i = 0; i < frames.Count; i++) draw.DrawImage(frames[i], new Rect(0, i * h, frames[i].PixelWidth * 2, frames[i].PixelHeight * 2));
+            var picture = new RenderTargetBitmap(w, h * frames.Count, 96, 96, PixelFormats.Pbgra32); picture.Render(strip);
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(picture));
+            await using (var file = File.Create(Path.Combine(output, $"{theme}-hero-buttons.png"))) encoder.Save(file);
+            Console.WriteLine($"Saved {theme}-hero-buttons: " + string.Join(", ", states.Select(state => state.Name)));
+        }
         // The lit stretch of the category thread gliding from All to Movies and on to Unmatched, drawn every 30 ms at twice size.
         async Task CaptureCategoryGlide()
         {
@@ -187,7 +245,7 @@ static class ScreenRender
         foreach (var theme in new[] { "dark", "light" })
         {
             Set("light", theme == "light"); Call("ApplyTheme");
-            Call("ShowPage", "Home"); await Capture($"{theme}-home");
+            Call("ShowPage", "Home"); await Capture($"{theme}-home"); await CaptureHeroButtons(theme);
             Call("NavigateLibrary", 0, null, null, null); await Capture($"{theme}-library");
             if (theme == "dark") { await CaptureCountRoll(); await CaptureCategoryGlide(); }
             // The sidebar folded into its strip of icons.

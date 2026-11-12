@@ -103,8 +103,10 @@ public partial class MainWindow
             HomeHeroTitle.Text = homeHero.HomeTitle;
             HomeHeroOverview.Text = homeHero.Card.Media.DetailOverview ?? "";
             HomeHeroOverview.Visibility = HomeHeroOverview.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-            HomeHeroResume.Content = homeHero.HomePosition >= 10000 ? "Resume" : homeHero.IsEpisode ? "Play next episode" : "Play";
-            System.Windows.Automation.AutomationProperties.SetName(HomeHeroResume, HomeHeroResume.Content + " " + homeHero.HomeTitle);
+            HomeHeroResumeLabel.Text = homeHero.HomePosition >= 10000 ? "Resume" : homeHero.IsEpisode ? "Play next episode" : "Play";
+            HomeHeroResumeLeft.Text = RemainingMinutes(homeHero) is { } left ? Duration(Math.Max(1, left)) : "";
+            System.Windows.Automation.AutomationProperties.SetName(HomeHeroResume, HomeHeroResumeLabel.Text + " " + homeHero.HomeTitle +
+                (HomeHeroResumeLeft.Text.Length > 0 ? ", " + HomeHeroResumeLeft.Text + " left" : ""));
             // Each card's artwork is decoded for the frame its template draws it in; a title can move between frames.
             homeHero.ShowIn(620, 340); _ = homeHero.LoadPosterAsync();
         }
@@ -137,12 +139,13 @@ public partial class MainWindow
         RenderHome(OwnsLibrary && guestBrowse.Home ? guestLibraryCards : []);
     }
     private static string Duration(int minutes) => minutes >= 60 ? $"{minutes / 60} h {minutes % 60:00} m" : $"{minutes} min";
+    private static int? RemainingMinutes(LibraryCardView view) => view.Card.Media.RuntimeMinutes is > 0 and var runtime && view.HomePosition >= 10000
+        ? (int)Math.Ceiling(Math.Max(0, runtime * 60000L - view.HomePosition) / 60000d) : null;
     private static string ContinueDetail(LibraryCardView view)
     {
         var media = view.Card.Media;
         var episode = view.IsEpisode && media.Episode is { } number ? (media.Season is { } season ? $"S{season} E{number}" : $"Episode {number}") : null;
-        var remaining = media.RuntimeMinutes is > 0 and var runtime && view.HomePosition >= 10000
-            ? (int)Math.Ceiling(Math.Max(0, runtime * 60000L - view.HomePosition) / 60000d) : (int?)null;
+        var remaining = RemainingMinutes(view);
         var state = view.HomePosition < 10000 ? episode is null ? "Not started" : "Up next" : remaining is { } left ? Duration(Math.Max(1, left)) + " left" : "In progress";
         return episode is null ? state : episode + " · " + state;
     }

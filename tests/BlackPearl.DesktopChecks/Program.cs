@@ -391,6 +391,12 @@ static class Program
         resourceRoot.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + "local", "clr-namespace:BlackPearl.Desktop;assembly=BlackPearl");
         foreach (var element in resourceRoot.Descendants().Where(element => element.Name.NamespaceName == "clr-namespace:BlackPearl.Desktop"))
             element.Name = System.Xml.Linq.XName.Get(element.Name.LocalName, "clr-namespace:BlackPearl.Desktop;assembly=BlackPearl");
+        // Attached properties set in a template, such as local:RoundedClip.Radius, need the assembly as well.
+        foreach (var attribute in resourceRoot.Descendants().SelectMany(element => element.Attributes()).Where(attribute => attribute.Name.NamespaceName == "clr-namespace:BlackPearl.Desktop").ToArray())
+        {
+            attribute.Parent!.SetAttributeValue(System.Xml.Linq.XName.Get(attribute.Name.LocalName, "clr-namespace:BlackPearl.Desktop;assembly=BlackPearl"), attribute.Value);
+            attribute.Remove();
+        }
         return (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(resourceRoot.ToString());
     }
     private static async Task CheckLibraryNavigation(MainWindow window, LibraryStore store, ObservableCollection<LibraryCardView> cards,
@@ -461,6 +467,7 @@ static class Program
         await CheckCategoryBar(window, check);
         await CheckThreadSelectors(window, check);
         CheckResourceLookups(window, check);
+        CheckButtonFocusRings(check);
         await CheckThreadBarReleased(window, check);
         await CheckShortRail(window, check);
         await CheckPageTitles(window, check);
@@ -563,6 +570,33 @@ static class Program
             .Distinct().ToList();
         var missing = used.Where(key => !keys.Contains(key)).ToList();
         check(used.Count > 10 && missing.Count == 0, $"every resource the code looks up by name exists ({used.Count} looked up{(missing.Count > 0 ? "; missing: " + string.Join(", ", missing) : "")})");
+    }
+    // Each button style draws a focus ring the shape of its button: the round ring on the soft and pebble templates, the square
+    // one on every template of its own. A style inherits both from its base style, so one with its own template and no ring
+    // of its own once took the round ring. The app also takes off any focus visual that isn't one of its rings, which once hid
+    // the round ring altogether.
+    private static void CheckButtonFocusRings(Action<bool, string> check)
+    {
+        var resources = Application.Current.Resources;
+        var soft = (Style)resources["SoftFocusRing"]; var square = (Style)resources["FocusRing"];
+        var softTemplates = new object?[] { Effective((Style)resources[typeof(System.Windows.Controls.Button)], System.Windows.Controls.Control.TemplateProperty), resources["PebbleTemplate"] };
+        static object? Effective(Style? style, DependencyProperty property)
+        {
+            for (; style is not null; style = style.BasedOn)
+                if (style.Setters.OfType<Setter>().FirstOrDefault(setter => setter.Property == property) is { } setter) return setter.Value;
+            return null;
+        }
+        var wrong = new List<string>(); var count = 0;
+        foreach (var key in resources.Keys)
+        {
+            if (resources[key] is not Style { TargetType: var type } style || !typeof(System.Windows.Controls.Button).IsAssignableFrom(type)) continue;
+            var ring = Effective(style, FrameworkElement.FocusVisualStyleProperty) as Style;
+            if (ring is null) continue; // a style that sets no ring (the caption buttons) shows none
+            count++;
+            var expected = softTemplates.Contains(Effective(style, System.Windows.Controls.Control.TemplateProperty)) ? soft : square;
+            if (!ReferenceEquals(ring, expected) || !BlackPearl.Desktop.App.IsAppFocusRing(ring)) wrong.Add(key is Type t ? t.Name : key.ToString()!);
+        }
+        check(count > 10 && wrong.Count == 0, $"every button style has the focus ring of its shape, which the app keeps ({count} styles{(wrong.Count > 0 ? "; wrong: " + string.Join(", ", wrong) : "")})");
     }
     // Every pick-one selector is the thread selector: Settings' sections, the plugin view and Search's type of title light the
     // thread under their choice and move the light when it changes. Settings' sections wrap in a narrow window, each row on its

@@ -4,6 +4,7 @@
   <local:ArtworkCardWidthConverter x:Key="ArtworkCardWidth"/>
   <local:DetailBackdropConverter x:Key="DetailBackdrop"/>
   <local:RowBackdropConverter x:Key="RowBackdrop"/>
+  <local:ProgressColumnConverter x:Key="ProgressColumn"/>
   <Thickness x:Key="ActionButtonPadding">16,8</Thickness>
   <Thickness x:Key="IconButtonPadding">8,12</Thickness>
   <!-- Fluent icons on Windows 11; MDL2 shares the code points on Windows 10. -->
@@ -43,21 +44,69 @@
   <Style x:Key="RowHeading" TargetType="TextBlock"><Setter Property="FontSize" Value="19"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
   <Style x:Key="Overline" TargetType="TextBlock"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Margin" Value="0,0,0,8"/></Style>
   <Style x:Key="FieldLabel" TargetType="TextBlock"><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="FontSize" Value="13"/><Setter Property="Margin" Value="0,0,0,2"/></Style>
-  <Style x:Key="Icon" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="16"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+  <!-- Icons inside a lit pebble, a main action such as Play, take the accent. -->
+  <Style x:Key="Icon" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="16"/><Setter Property="VerticalAlignment" Value="Center"/><Style.Triggers><Trigger Property="local:Pebble.Lit" Value="True"><Setter Property="Foreground" Value="{DynamicResource Accent}"/></Trigger></Style.Triggers></Style>
   <Style x:Key="NavigationIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="Width" Value="28"/><Style.Triggers><DataTrigger Binding="{Binding (AutomationProperties.ItemStatus), RelativeSource={RelativeSource AncestorType=Button}}" Value="Selected"><Setter Property="Foreground" Value="{DynamicResource Accent}"/></DataTrigger></Style.Triggers></Style>
   <Style x:Key="EmptyStateIcon" TargetType="TextBlock" BasedOn="{StaticResource Icon}"><Setter Property="FontSize" Value="40"/><Setter Property="Foreground" Value="{DynamicResource Accent}"/><Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="Margin" Value="0,0,0,20"/></Style>
   <!-- A rounded panel used to group related content and settings. -->
   <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="20,18"/><Setter Property="Margin" Value="0,0,0,16"/></Style>
 
-  <!-- Buttons share one template: a fill, a hover/press tint layer and a focus outline. -->
+  <!-- Filled buttons are soft and round: a pill of their fill with no outline, a hover/press tint and a round focus outline.
+       Main actions are lit pebbles (Primary, below). Quiet and icon buttons keep the flat template with gentler corners. -->
+  <Style x:Key="SoftFocusRing"><Setter Property="Control.Template"><Setter.Value><ControlTemplate><Border BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="16" SnapsToDevicePixels="True"/></ControlTemplate></Setter.Value></Setter></Style>
+  <ControlTemplate x:Key="FlatButtonTemplate" TargetType="Button">
+   <Grid>
+    <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8"/>
+    <Border x:Name="Tint" Background="{DynamicResource Ink}" Opacity="0" CornerRadius="8" IsHitTestVisible="False"/>
+    <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True"/>
+   </Grid>
+   <ControlTemplate.Triggers>
+    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.07"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.14"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+   </ControlTemplate.Triggers>
+  </ControlTemplate>
+  <!-- The pebble: a soft, slightly domed button with no outline. How far a title has been watched (Tag, 0 to 100) lights its
+       body in the accent, fading out softly rather than ending at a line; a lit pebble (Pebble.Lit) glows all over. -->
+  <ControlTemplate x:Key="PebbleTemplate" TargetType="Button">
+   <Grid>
+    <!-- The shadow is drawn by its own layer, so the effect never touches the text. -->
+    <Border CornerRadius="16" Background="{TemplateBinding Background}" IsHitTestVisible="False"><Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="4" Direction="270" Opacity="0.28" Color="#000000"/></Border.Effect></Border>
+    <Grid local:RoundedClip.Radius="16" IsHitTestVisible="False">
+     <Border Background="{TemplateBinding Background}"/>
+     <Grid>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource ProgressColumn}}"/><ColumnDefinition Width="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource ProgressColumn}, ConverterParameter=rest}"/></Grid.ColumnDefinitions>
+      <!-- Reaches past the top, bottom and start, so the blur softens only the end that marks the progress. -->
+      <Border x:Name="Watched" Margin="-14,-14,0,-14" Background="{DynamicResource Accent}" Opacity="0.24" Visibility="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource ProgressColumn}}">
+       <Border.OpacityMask><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FF000000" Offset="0.2"/><GradientStop Color="#80000000" Offset="0.8"/></LinearGradientBrush></Border.OpacityMask>
+       <Border.Effect><BlurEffect Radius="12"/></Border.Effect>
+      </Border>
+     </Grid>
+     <Border x:Name="Lit" Background="{DynamicResource Accent}" Opacity="0.24" Visibility="Collapsed">
+      <Border.OpacityMask><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FF000000" Offset="0.2"/><GradientStop Color="#80000000" Offset="0.8"/></LinearGradientBrush></Border.OpacityMask>
+     </Border>
+     <!-- The dome: lighter at the top, a touch darker at the bottom. -->
+     <Border><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#14FFFFFF" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="0.55"/><GradientStop Color="#1F000000" Offset="1"/></LinearGradientBrush></Border.Background></Border>
+     <Border x:Name="Tint" Background="{DynamicResource Ink}" Opacity="0"/>
+    </Grid>
+    <Border CornerRadius="16" BorderThickness="0,1,0,0" BorderBrush="#1FFFFFFF" IsHitTestVisible="False"/>
+    <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True"/>
+   </Grid>
+   <ControlTemplate.Triggers>
+    <Trigger Property="local:Pebble.Lit" Value="True"><Setter TargetName="Lit" Property="Visibility" Value="Visible"/><Setter TargetName="Watched" Property="Visibility" Value="Collapsed"/></Trigger>
+    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.06"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.11"/></Trigger>
+    <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
+   </ControlTemplate.Triggers>
+  </ControlTemplate>
   <Style TargetType="Button">
    <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="BorderThickness" Value="1"/>
    <Setter Property="Padding" Value="{StaticResource ActionButtonPadding}"/><Setter Property="MinHeight" Value="40"/><Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/>
-   <Setter Property="Margin" Value="0,0,8,8"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/><Setter Property="SnapsToDevicePixels" Value="True"/>
+   <Setter Property="Margin" Value="0,0,8,8"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource SoftFocusRing}"/><Setter Property="SnapsToDevicePixels" Value="True"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
     <Grid>
-     <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8"/>
-     <Border x:Name="Tint" Background="{DynamicResource Ink}" Opacity="0" CornerRadius="8" IsHitTestVisible="False"/>
+     <Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="16"/>
+     <Border x:Name="Tint" Background="{DynamicResource Ink}" Opacity="0" CornerRadius="16" IsHitTestVisible="False"/>
      <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True"/>
     </Grid>
     <ControlTemplate.Triggers>
@@ -67,15 +116,21 @@
     </ControlTemplate.Triggers>
    </ControlTemplate></Setter.Value></Setter>
   </Style>
-  <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="{DynamicResource Accent}"/><Setter Property="Foreground" Value="{DynamicResource AccentInk}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
-  <Style x:Key="QuietButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Padding" Value="12,8"/></Style>
+  <!-- A main action, such as Play, Connect or Save: a lit pebble. -->
+  <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Template" Value="{StaticResource PebbleTemplate}"/><Setter Property="local:Pebble.Lit" Value="True"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+  <Style x:Key="QuietButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Template" Value="{StaticResource FlatButtonTemplate}"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/><Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Padding" Value="12,8"/></Style>
   <!-- An action in a page's or a section's header: quiet text beside the heading, so the heading leads. Filled buttons are for
        actions within the content, such as Resume or Connect. -->
   <Style x:Key="HeaderAction" TargetType="Button" BasedOn="{StaticResource QuietButton}"><Setter Property="Height" Value="34"/><Setter Property="MinHeight" Value="0"/><Setter Property="Padding" Value="12,0"/><Setter Property="Margin" Value="0"/></Style>
   <!-- The header's action that makes something new, in the accent. -->
   <Style x:Key="HeaderCreate" TargetType="Button" BasedOn="{StaticResource HeaderAction}"><Setter Property="Foreground" Value="{DynamicResource Accent}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
   <Style x:Key="QuietIcon" TargetType="Button" BasedOn="{StaticResource QuietButton}"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="14"/><Setter Property="Width" Value="34"/><Setter Property="Height" Value="34"/><Setter Property="MinHeight" Value="34"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,6,0"/></Style>
-  <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="14"/><Setter Property="Width" Value="40"/><Setter Property="Height" Value="40"/><Setter Property="Padding" Value="0"/></Style>
+  <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Template" Value="{StaticResource FlatButtonTemplate}"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="14"/><Setter Property="Width" Value="40"/><Setter Property="Height" Value="40"/><Setter Property="Padding" Value="0"/></Style>
+  <!-- Resume on Home: a pebble that shows how far the title has been watched. -->
+  <Style x:Key="Pebble" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+   <Setter Property="Template" Value="{StaticResource PebbleTemplate}"/>
+   <Setter Property="Height" Value="44"/><Setter Property="MinHeight" Value="44"/><Setter Property="Padding" Value="20,0,22,0"/><Setter Property="Margin" Value="0,0,10,0"/><Setter Property="FontWeight" Value="SemiBold"/>
+  </Style>
   <!-- Prefixes button content with an icon given in Tag of the ContentTemplate; content stays plain text for code and automation. -->
   <DataTemplate x:Key="PlayContent"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xF5B0;" Style="{StaticResource Icon}" FontSize="12" Margin="0,0,9,0"/><TextBlock Text="{Binding}" VerticalAlignment="Center"/></StackPanel></DataTemplate>
   <DataTemplate x:Key="PeopleContent"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE716;" Style="{StaticResource Icon}" FontSize="14" Margin="0,0,9,0"/><TextBlock Text="{Binding}" VerticalAlignment="Center"/></StackPanel></DataTemplate>
@@ -154,7 +209,7 @@
 
   <!-- Sidebar navigation. The current page is marked by the pearl on the sidebar's edge (SideRail.cs), a bright
        label and an accent icon, rather than a fill: pointing at an entry is the only thing that fills it. -->
-  <Style x:Key="Navigation" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+  <Style x:Key="Navigation" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <!-- No padding on the right: a folded sidebar is narrower than the icon and its left padding, and padding there would cut the icons off. -->
    <Setter Property="Height" Value="40"/><Setter Property="Padding" Value="12,0,0,0"/>
    <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Margin" Value="0,0,0,2"/>
@@ -254,7 +309,7 @@
    <Setter Property="ItemsPanel"><Setter.Value><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></Setter.Value></Setter>
    <Setter Property="ItemTemplate"><Setter.Value><DataTemplate><StackPanel Orientation="Horizontal"><TextBlock x:Name="Chevron" Text="&#xE76C;" FontFamily="{StaticResource IconFont}" FontSize="10" Foreground="{DynamicResource Muted}" Margin="2,1,2,0" VerticalAlignment="Center"/><Button Tag="{Binding}" Style="{StaticResource BreadcrumbButton}" ToolTip="{Binding Label}" AutomationProperties.Name="{Binding Label}"><TextBlock Text="{Binding Label}" MaxWidth="300" TextTrimming="CharacterEllipsis"/></Button></StackPanel><DataTemplate.Triggers><DataTrigger Binding="{Binding Separator}" Value=""><Setter TargetName="Chevron" Property="Visibility" Value="Collapsed"/></DataTrigger><DataTrigger Binding="{Binding Separator}" Value="{x:Null}"><Setter TargetName="Chevron" Property="Visibility" Value="Collapsed"/></DataTrigger></DataTemplate.Triggers></DataTemplate></Setter.Value></Setter>
   </Style>
-  <Style x:Key="CardWatchedButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+  <Style x:Key="CardWatchedButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="HorizontalAlignment" Value="Right"/><Setter Property="VerticalAlignment" Value="Top"/>
    <Setter Property="Margin" Value="0,14,24,0"/><Setter Property="Padding" Value="0"/>
    <Setter Property="Width" Value="28"/><Setter Property="Height" Value="28"/><Setter Property="MinHeight" Value="28"/>
@@ -275,7 +330,7 @@
     <DataTrigger Binding="{Binding IsWatched}" Value="True"><Setter Property="Opacity" Value="1"/><Setter Property="Background" Value="{DynamicResource Success}"/><Setter Property="Foreground" Value="#FFFFFF"/><Setter Property="BorderBrush" Value="{DynamicResource Success}"/><Setter Property="ToolTip" Value="Mark as unwatched"/><Setter Property="AutomationProperties.Name" Value="Mark as unwatched"/></DataTrigger>
    </Style.Triggers>
   </Style>
-  <Style x:Key="PosterCard" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+  <Style x:Key="PosterCard" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="Width" Value="180"/><Setter Property="Height" Value="312"/><Setter Property="VerticalContentAlignment" Value="Top"/><Setter Property="Padding" Value="6"/><Setter Property="Margin" Value="0,0,14,18"/><Setter Property="Background" Value="Transparent"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
     <Grid>
@@ -299,7 +354,7 @@
    <Style.Triggers><DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Muted}"/></DataTrigger></Style.Triggers>
   </Style>
   <!-- Round arrow that pages a horizontal row; it floats over the artwork, so it carries its own shadow. -->
-  <Style x:Key="PagerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+  <Style x:Key="PagerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
    <Setter Property="Width" Value="40"/><Setter Property="Height" Value="40"/><Setter Property="MinHeight" Value="40"/><Setter Property="Padding" Value="0"/>
    <Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="13"/><Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
    <Setter Property="Panel.ZIndex" Value="2"/>
@@ -324,7 +379,7 @@
    </ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="SettingsButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Margin" Value="0,8,12,12"/><Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
-  <Style x:Key="SettingsPrimary" TargetType="Button" BasedOn="{StaticResource SettingsButton}"><Setter Property="Background" Value="{DynamicResource Accent}"/><Setter Property="Foreground" Value="{DynamicResource AccentInk}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+  <Style x:Key="SettingsPrimary" TargetType="Button" BasedOn="{StaticResource SettingsButton}"><Setter Property="Template" Value="{StaticResource PebbleTemplate}"/><Setter Property="local:Pebble.Lit" Value="True"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
 
   <Style TargetType="ToolTip"><Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="Padding" Value="10,6"/><Setter Property="FontSize" Value="12"/><Setter Property="HasDropShadow" Value="True"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ToolTip"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}" MaxWidth="360"><ContentPresenter><ContentPresenter.Resources><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style></ContentPresenter.Resources></ContentPresenter></Border></ControlTemplate></Setter.Value></Setter></Style>
@@ -442,7 +497,7 @@
   </Style>
 
   <!-- Player controls: borderless icon buttons on a dark bar. -->
-  <Style x:Key="PlayerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="MinHeight" Value="40"/><Setter Property="Padding" Value="14,8"/>
+  <Style x:Key="PlayerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/><Setter Property="MinHeight" Value="40"/><Setter Property="Padding" Value="14,8"/>
    <Setter Property="Background" Value="#1AFFFFFF"/><Setter Property="Foreground" Value="{StaticResource PlayerInk}"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="MinWidth" Value="34"/><Setter Property="VerticalAlignment" Value="Center"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Grid><Border x:Name="Frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8"/><Border x:Name="Tint" Background="#FFFFFF" Opacity="0" CornerRadius="8" IsHitTestVisible="False"/><ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.1"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="Tint" Property="Opacity" Value="0.18"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
   </Style>

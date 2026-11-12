@@ -38,10 +38,11 @@ public partial class App : Application
             if (MainWindow is { IsLoaded: true } window) Dialogs.Alert(window, "Something went wrong", args.Exception.Message);
             else MessageBox.Show(args.Exception.Message, "BlackPearl", MessageBoxButton.OK, MessageBoxImage.Warning);
         };
-        // Only the app's own focus ring marks keyboard focus; WPF's dotted rectangles never draw.
+        // Only the app's own focus rings mark keyboard focus (FocusRing, and SoftFocusRing on round buttons); WPF's dotted
+        // rectangles never draw.
         EventManager.RegisterClassHandler(typeof(FrameworkElement), Keyboard.PreviewGotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((sender, _) =>
         {
-            if (sender is FrameworkElement { FocusVisualStyle: { } style } element && !ReferenceEquals(style, Resources["FocusRing"])) element.FocusVisualStyle = null;
+            if (sender is FrameworkElement { FocusVisualStyle: { } style } element && !IsAppFocusRing(style)) element.FocusVisualStyle = null;
         }));
         base.OnStartup(e);
         if (e.Args.Contains("--updated"))
@@ -64,6 +65,9 @@ public partial class App : Application
         window.Show();
         if (Program.OpenDownloads) window.ShowDownloads();
     }
+    // The focus rings App.xaml defines, which keyboard focus keeps; any other focus visual is taken off.
+    public static bool IsAppFocusRing(Style style) => Current?.Resources is { } resources &&
+        (ReferenceEquals(style, resources["FocusRing"]) || ReferenceEquals(style, resources["SoftFocusRing"]));
     public static bool SoftwareRendering { get; } = AppEnvironment.Get("RENDER") is { } mode
         ? !mode.Equals("hardware", StringComparison.OrdinalIgnoreCase)
         : SystemParameters.IsRemoteSession || System.Windows.Media.RenderCapability.Tier >> 16 == 0;
