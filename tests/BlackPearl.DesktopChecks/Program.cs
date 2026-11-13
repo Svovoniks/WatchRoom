@@ -1325,6 +1325,15 @@ static class Program
             "the Library entry opens the library, not Search, after Search was used from another page");
         Call("ShowPage", "Home"); Call("OpenSearch", false); Call("BrowseHistory", true);
         check(Field("currentPage") as string == "Home" && !Searching(), "Back from Search to Home leaves Search behind");
+        // An episode opened from Search, then left without Back (closing the player shows the library), must not leave
+        // Search holding the episode's season: Search then showed Season details and Auto-download for that show.
+        Call("OpenSearch", false); Call("Select", media); Call("ShowPage", "Library"); await Task.Delay(150);
+        check(!Searching() && ((UIElement)window.FindName("SearchHeader")).Visibility != Visibility.Visible,
+            "a title opened from Search leaves Search, so the library shows its season rather than Search with season details");
+        Call("OpenSearch", false); await Task.Delay(150);
+        check(Searching() && ((UIElement)window.FindName("SeasonInformation")).Visibility != Visibility.Visible &&
+            ((UIElement)window.FindName("FollowShowButton")).Visibility != Visibility.Visible,
+            "Search shows no season details or show actions after a title was opened from it");
         Call("NavigateLibrary", 0, null!, null!, null!);
     }
 

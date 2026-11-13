@@ -505,7 +505,7 @@ public partial class MainWindow : Window
         if (GuestLibrary) { UpdateHostBreadcrumbs(); return; }
         var detail = Details.Visibility == Visibility.Visible ? selected : null;
         var show = detail?.Series is not null ? detail : browseSeries is null ? null : items.FirstOrDefault(x => LibraryIdentity.InShow(x, browseSeries, browseKind));
-        var category = detail is not null ? detail.Available || detail.IsVirtual ? CategoryFor(detail) : 4 : libraryCategory;
+        var category = detail is not null ? detail.IsVirtual && libraryCategory == 5 ? 5 : detail.Available || detail.IsVirtual ? CategoryFor(detail) : 4 : libraryCategory;
         // Music is its own section, so its trail starts at Music rather than at All videos.
         // A trail names the category it is in; it starts at All only for All itself.
         var crumbs = new List<LibraryBreadcrumb> { new(CategoryName(category), "category", category, Separator: "") };
@@ -661,7 +661,8 @@ public partial class MainWindow : Window
         var source = items.Where(x => libraryCategory == 4 ? !x.Available && !x.IsVirtual : x.Available || x.IsVirtual && (playableShows.Contains(LibraryIdentity.ShowKey(x)) || wantedKeys.Contains(LibraryIdentity.ShowKey(x)))).ToList();
         // All lists videos; music has its own category, and an album opened from search stays browsable.
         if (libraryCategory is 0 or 5 && browseSeries is null && searchFilters is null) source.RemoveAll(x => x.IsMusic);
-        var missingOnly = libraryCategory == 5 && browseSeries is null;
+        // Missing stays missing inside a title too: its seasons with gaps, then the episodes still to get.
+        var missingOnly = libraryCategory == 5 && searchFilters is null;
         // Unmatched titles leave Shows, Anime and Movies for their own category, and All still lists everything.
         if (libraryCategory == LibraryCatalog.Unmatched && browseSeries is null) source.RemoveAll(x => !unmatchedTitles.Contains(LibraryIdentity.ShowKey(x)));
         else if (libraryCategory is 1 or 2 or 3 && browseSeries is null) source.RemoveAll(x => unmatchedTitles.Contains(LibraryIdentity.ShowKey(x)));
@@ -700,7 +701,7 @@ public partial class MainWindow : Window
             }
             finally { librarySearchGate.Release(); }
             if (status == 1) cards = cards.Where(card => card.Poster is null).ToList();
-            if (missingOnly) cards = cards.Where(card => card.Status is not null).ToList();
+            if (missingOnly) cards = LibraryCatalog.MissingOnly(cards);
             var views = libraryCards.ToDictionary(view => view.Key);
             // Read playback flags once and calculate aggregate show progress off-thread.
             var playback = await Task.Run(() =>
@@ -823,7 +824,8 @@ public partial class MainWindow : Window
         DetachGuestMirror();
         var card = (LibraryCard)((Button)sender).Tag;
         if (GuestLibrary) { OpenHostCard(card); return; }
-        if (card.Level == "series") NavigateLibrary(CategoryFor(card.Media), LibraryIdentity.ShowKey(card.Media), card.Media.Kind);
+        // A title opened from Missing stays under Missing rather than moving to Shows or Anime.
+        if (card.Level == "series") NavigateLibrary(libraryCategory == 5 && !librarySearch ? 5 : CategoryFor(card.Media), LibraryIdentity.ShowKey(card.Media), card.Media.Kind);
         else if (card.Level == "season") NavigateLibrary(libraryCategory, browseSeries, browseKind, card.Season);
         else { Select(card.Media); Details.ScrollToTop(); }
     }
@@ -832,7 +834,11 @@ public partial class MainWindow : Window
         DetailHost.Visibility = DetailQueue.Visibility = DetailWatched.Visibility = Visibility.Visible;
         if (currentPage != "Details" || selected?.Id != item.Id) RememberLocation();
         var restoring = restoringNavigation; restoringNavigation = true;
-        selected = item; libraryCategory = CategoryFor(item);
+        // A missing episode or film opened from Missing keeps Missing, so its trail leads back there.
+        selected = item; libraryCategory = libraryCategory == 5 && !librarySearch && item.IsVirtual ? 5 : CategoryFor(item);
+        // A title's page belongs to the library, browsing its show and season. Search stays searching only as Back
+        // remembers it; left on, any way back to the library page drew Search with this title's season details.
+        librarySearch = false;
         browseSeries = item.Series is null ? null : LibraryIdentity.ShowKey(item); browseKind = item.Series is null ? null : item.Kind;
         browseSeason = item.Series is null || item.IsMusic ? null : item.Season ?? -1;
         ShowPage("Details"); UpdateBreadcrumbs(); DetailTitle.Text = item.EpisodeDisplayTitle;

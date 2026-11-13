@@ -172,6 +172,16 @@ public static class LibraryCatalog
         return seasons.Length == 1 && seasons[0] is { } season && members.Where(x => x.Season == season).All(x => x.IsVirtual)
             ? (season == 0 ? "Specials" : "S" + season) + " missing" : $"{aired.Length} missing";
     }
+    // The Missing category at any depth: titles and seasons with something missing, then a season's placeholders. Those
+    // that have aired come first; a season that has not aired yet lists its upcoming episodes, which is why it was listed.
+    public static List<LibraryCard> MissingOnly(IReadOnlyCollection<LibraryCard> cards)
+    {
+        if (!cards.Any(card => card.Level == "episode")) return cards.Where(card => card.Status is not null).ToList();
+        var placeholders = cards.Where(card => card.Level == "episode" && card.Media.IsVirtual).ToList();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var aired = placeholders.Where(card => !(DateOnly.TryParse(card.Media.AirDate, out var date) && date > today)).ToList();
+        return aired.Count > 0 ? aired : placeholders;
+    }
     private static string SeasonCaption(IEnumerable<MediaItem> members)
     {
         var episodes = LibraryIdentity.EpisodeCount(members); var bonus = members.Count(x => x.IsBonus);

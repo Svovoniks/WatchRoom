@@ -154,6 +154,14 @@ static class LibraryVersionsFixture
         check(seasonCards.Single(card => card.Season == 3) is { Status: "Missing" } missingSeason && missingSeason.Caption.EndsWith("2 episodes · Missing") &&
             seasonCards.Single(card => card.Season == 4) is { Status: "Upcoming" } && seasonCards.Single(card => card.Season == 1) is { Status: "1 missing" } partialSeason && partialSeason.Caption.EndsWith("2 episodes · 1 missing"),
             "seasons made only of placeholders are marked missing or upcoming, and a season with files shows how many of its episodes are missing");
+        MediaItem[] gaps = [episode, placeholder, placeholder with { Id = "missing-2", Episode = 2 }, placeholder with { Id = "soon-1", Season = 4, AirDate = future },
+            placeholder with { Id = "partial", Season = 1, Episode = 2 }, placeholder with { Id = "partial-soon", Season = 1, Episode = 3, AirDate = future }];
+        check(LibraryCatalog.MissingOnly(LibraryCatalog.Browse(gaps, episode.ShowId, "Show")).Select(card => card.Season).Order().SequenceEqual([1, 3, 4]),
+            "Missing lists a show's seasons with something missing or upcoming");
+        check(LibraryCatalog.MissingOnly(LibraryCatalog.Browse(gaps, episode.ShowId, "Show", 1)).Select(card => card.Media.Id).SequenceEqual(["partial"]),
+            "Missing lists a season's aired gaps, not its files or the episodes still to air");
+        check(LibraryCatalog.MissingOnly(LibraryCatalog.Browse(gaps, episode.ShowId, "Show", 4)).Select(card => card.Media.Id).SequenceEqual(["soon-1"]),
+            "Missing lists the episodes of a season that has not aired yet");
         // A second copy of the show in another library folder is the same show: the batch joins the anime copy, extras included.
         await FileAt(anime, "Komi Can't Communicate", "Season 1", "[EMBER] Komi Can't Communicate - S01E02.mkv");
         var mergeStore = new LibraryStore(Path.Combine(directory, "merge-db"));
