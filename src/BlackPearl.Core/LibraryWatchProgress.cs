@@ -13,9 +13,12 @@ public static class LibraryWatchProgress
             long.TryParse(settings.GetValueOrDefault("position:" + item.Id), out var position) && position >= 10000);
     }
 
-    public static bool IsWatched(IEnumerable<MediaItem> source, LibraryCard card, Func<string, bool> watched)
+    // A film card with several copies is watched when its copy is, or when another copy is and its own copy isn't part-way:
+    // the copy it leads with is the one chosen or played last, as Home's Continue watching row picks it.
+    public static bool IsWatched(IEnumerable<MediaItem> source, LibraryCard card, Func<string, bool> watched, Func<string, long>? position = null)
     {
-        if (card.Media.Series is null) return watched(card.Media.Id);
+        if (card.Media.Series is null) return watched(card.Media.Id) || card.Versions > 1 && (position?.Invoke(card.Media.Id) ?? 0) < 10000 &&
+            source.Any(item => LibraryCatalog.IsVersionOf(card.Media, item) && watched(item.Id));
         var episodes = source.Where(item => LibraryIdentity.SameShow(item, card.Media) && !item.IsExtra && !item.IsVirtual).ToArray();
         static IEnumerable<string> Keys(MediaItem item) => item.Season is not null && item.Episode is not null && item.NumberingConflict is null
             ? LibraryIdentity.EpisodeNumbers(item).Select(number => $"{item.Season}:{number}") : ["file:" + item.Id];

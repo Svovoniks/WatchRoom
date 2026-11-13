@@ -682,7 +682,7 @@ public partial class MainWindow
         }
         if (card.Level is "movie" or "episode")
         {
-            if (card.Level == "episode" && card.Media.Episode is not null)
+            if (card.Level == "movie" || card.Media.Episode is not null)
             {
                 var versions = LibraryCatalog.Versions(items, card.Media);
                 if (versions.Length > 1)

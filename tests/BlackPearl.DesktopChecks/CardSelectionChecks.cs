@@ -30,8 +30,9 @@ static class CardSelectionChecks
 
         var file = Path.Combine(directory, "selection-check.mkv"); File.WriteAllText(file, "selection");
         var first = new MediaItem("selection-first", file, "Selection check alpha", "Movie", Year: 2001, ProviderIds: new() { ["imdb"] = "tt-selection" });
-        var second = first with { Id = "selection-second", Path = file + ".second", Title = "Selection check beta", Year = 2002 };
-        var gone = first with { Id = "selection-gone", Path = file + ".gone", Title = "Selection check gone", Year = 2003, Available = false };
+        // Different films have identities of their own; copies of one film would share a card.
+        var second = first with { Id = "selection-second", Path = file + ".second", Title = "Selection check beta", Year = 2002, ProviderIds = new() { ["imdb"] = "tt-selection-beta" } };
+        var gone = first with { Id = "selection-gone", Path = file + ".gone", Title = "Selection check gone", Year = 2003, Available = false, ProviderIds = new() { ["imdb"] = "tt-selection-gone" } };
         foreach (var item in new[] { first, second, gone }) store.Save(item);
         var wanted = WantedTitles.Add(store, directory, WantedTitles.FromMatch(new(9301, "movie", "Selection check wanted", "2004", null, "", "Movie"), "Movie", [], false, null), []);
         Await(Call("RefreshLibrary"));

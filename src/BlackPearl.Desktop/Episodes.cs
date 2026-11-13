@@ -22,7 +22,7 @@ public partial class MainWindow
     {
         library.Setting("watched:" + item.Id, watched ? "true" : "false"); watchedState[item.Id] = watched;
         RefreshHome();
-        foreach (var card in libraryCards.Where(card => card.Card.Media.Id == item.Id || LibraryIdentity.SameShow(card.Card.Media, item)))
+        foreach (var card in libraryCards.Where(card => card.Card.Media.Id == item.Id || LibraryIdentity.SameShow(card.Card.Media, item) || LibraryIdentity.SameFilm(card.Card.Media, item)))
             UpdateCardPlayback(card);
     }
     private bool HasPlaybackQueue => queue.Count > 0 || room?.Snapshot?.Queue?.Length > 0;
@@ -118,8 +118,9 @@ public partial class MainWindow
     }
     private void MarkWatched(MediaItem item, string level, int? season, bool watched, bool refresh = true)
     {
-        // Clearing a logical episode also clears watched versions that cover it.
-        var affected = level is "series" or "season"
+        // Clearing a logical episode or a film also clears watched versions that cover it.
+        var affected = !watched && level is "movie" or "video" && item.Series is null ? LibraryCatalog.Versions(items, item)
+            : level is "series" or "season"
             ? items.Where(candidate => !candidate.IsExtra && !candidate.IsVirtual && LibraryIdentity.SameShow(candidate, item) &&
                 (level == "series" || (candidate.Season ?? -1) == season)).ToArray()
             : !watched && item.Series is not null && item.Season is not null && item.Episode is not null && item.NumberingConflict is null
@@ -129,7 +130,7 @@ public partial class MainWindow
         var marked = affected.Append(item).Select(entry => entry.Id).Distinct().ToArray();
         library.SetSettings(marked.Select(id => KeyValuePair.Create("watched:" + id, watched ? "true" : "false")));
         foreach (var id in marked) watchedState[id] = watched;
-        foreach (var card in libraryCards.Where(card => card.Card.Media.Id == item.Id || LibraryIdentity.SameShow(card.Card.Media, item)))
+        foreach (var card in libraryCards.Where(card => card.Card.Media.Id == item.Id || LibraryIdentity.SameShow(card.Card.Media, item) || LibraryIdentity.SameFilm(card.Card.Media, item)))
             UpdateCardPlayback(card);
         if (!refresh) return;
         SetStatus(watched ? "Marked as watched." : "Marked as unwatched.");

@@ -383,7 +383,7 @@ public sealed partial class LibraryStore
     public Dictionary<string, string> PlaybackSettings()
     {
         using var db = Open(); using var command = db.CreateCommand();
-        command.CommandText = "SELECT key, value FROM settings WHERE key LIKE 'watched:%' OR key LIKE 'position:%' OR key LIKE 'played:%'";
+        command.CommandText = "SELECT key, value FROM settings WHERE key LIKE 'watched:%' OR key LIKE 'position:%' OR key LIKE 'played:%' OR key LIKE 'version:%'";
         using var rows = command.ExecuteReader(); var result = new Dictionary<string, string>();
         while (rows.Read()) result[rows.GetString(0)] = rows.GetString(1);
         return result;

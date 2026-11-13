@@ -52,6 +52,8 @@ public static class SharedLibrary
         var items = source.Where(x => x.Available && !x.IsVirtual && !x.IsExtra).ToArray();
         var item = items.FirstOrDefault(x => x.Id == request.Id);
         if (item is null) return null;
+        // Guests list a film's copies apart, and Home may lead with any copy, so a film's artwork is its own file's.
+        if (request.Level == "movie") return LibraryCatalog.Browse([item]).FirstOrDefault()?.Poster;
         return LibraryCatalog.Browse(items, request.Level is "series" or "movie" ? null : LibraryIdentity.ShowKey(item),
             item.Kind, request.Level == "episode" ? item.Season ?? -1 : null)
             .FirstOrDefault(card => card.Media.Id == request.Id && card.Level == request.Level && (request.Level != "season" || card.Season == request.Season))?.Poster;

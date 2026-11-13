@@ -366,6 +366,7 @@ static class Program
                 UnavailableLibraryChecks.Run(window, activeStore, directory, Check);
                 UnmatchedLibraryChecks.Run(window, activeStore, directory, Check);
                 CardSelectionChecks.Run(window, activeStore, directory, Check);
+                FilmVersionChecks.Run(window, activeStore, directory, Check);
                 WantedLibraryChecks.Run(window, activeStore, directory, Check);
                 AcquisitionChecks.Run(window, activeStore, directory, Check);
                 FollowingChecks.Run(window, activeStore, directory, Check);
@@ -993,11 +994,22 @@ static class Program
         {
             // The toolbar check counts "218 items". Rolled to before any scaling is set, its digits are redrawn at each
             // scaling like the rest of the window; rolled to after, they would keep the display's own grid.
-            ((RollingText)window.FindName("ResultCount")).Text = "218 items"; await Task.Delay(900);
+            // The checks at each scaling refresh the library, which sets its own count, and a refresh from an earlier check can
+            // land after this one sets it. Before each scaling, the count goes back to "218 items" at the display's own scaling
+            // and is set until it holds; set after the scaling changes, it would roll on the display's grid (2 px off at 200%).
+            var count = (RollingText)window.FindName("ResultCount"); var first = true;
+            async Task HoldCount()
+            {
+                if (!first && count.Text == "218 items" && !count.Pending) return;
+                first = false;
+                Rescale(window, native.DpiScaleX); arrange.Invoke(window, null); await Task.Delay(300);
+                for (var attempt = 0; attempt < 10 && (attempt == 0 || count.Text != "218 items" || count.Pending); attempt++) { count.Text = "218 items"; await Task.Delay(900); }
+            }
             foreach (var scale in new[] { 1.0, 1.25, 1.5, 1.75 })
             {
                 var at = $" (at {scale * 100:0}% scaling)";
                 void Scaled(bool condition, string message) => check(condition, message + at);
+                await HoldCount();
                 Rescale(window, scale); arrange.Invoke(window, null); await Task.Delay(300); window.UpdateLayout();
                 check(Math.Abs(System.Windows.Media.VisualTreeHelper.GetDpi((FrameworkElement)window.FindName("LibraryToolbar")).DpiScaleY - scale) < 0.001,
                     "the window lays out and draws at the scaling set" + at);
