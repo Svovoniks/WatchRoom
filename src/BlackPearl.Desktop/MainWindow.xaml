@@ -94,8 +94,6 @@
        <DataTrigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="0" Duration="0:0:0.3"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation></Storyboard></BeginStoryboard></DataTrigger.ExitActions>
       </DataTrigger></Style.Triggers>
      </Style>
-     <!-- Accent outline that fades in over hovered artwork; drawn inside the frame so its corners match the clip. -->
-
      <Style x:Key="CardBack" TargetType="Border">
       <Setter Property="Width" Value="128"/><Setter Property="Height" Value="190"/><Setter Property="CornerRadius" Value="11"/><Setter Property="BorderThickness" Value="1"/>
       <Setter Property="BorderBrush" Value="{DynamicResource AccentEdge}"/><Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
@@ -147,7 +145,6 @@
              <Image Source="{Binding Poster, Converter={StaticResource DetailBackdrop}}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="LowQuality"/>
              <Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Width="250" HorizontalAlignment="Right" Loaded="HomeArtworkLoaded"/>
              <Rectangle Fill="{DynamicResource HeroFade}"/>
-             
              <DockPanel Margin="18,16,18,16">
               <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal">
                <Button Content="Play" Click="PlayHomeCard" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" Padding="14,0" MinHeight="32" Height="32" Margin="0,0,6,0" AutomationProperties.Name="{Binding DisplayTitle, StringFormat=Play {0}}"/>

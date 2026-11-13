@@ -334,6 +334,22 @@ static class PlayerLayoutChecks
         // The overlay is its own window and does not inherit the app's text colour, which left the title black on the dark card.
         Check(updateCard.ReadLocalValue(System.Windows.Documents.TextElement.ForegroundProperty) != DependencyProperty.UnsetValue &&
             ((TextBlock)window.FindName("UpdateCardTitle")).Foreground == window.FindResource("Ink"),"the update card title uses the app's text colour inside the video overlay");
+        // The player stays dark in light mode, so its pebbles, wells and stones resolve the player's dark material, not the
+        // page's. In light mode they once took the page's: Join and Admit were chalk under near-white text, the queue picker
+        // a light well. The overlay is its own window, so only the resources merged into it reach the queue picker there.
+        typeof(MainWindow).GetField("light", flags)!.SetValue(window, true); Invoke(window, "ApplyTheme");
+        var app = Application.Current.Resources;
+        bool PlayerMaterial(FrameworkElement element) =>
+            element.TryFindResource("PebbleFill") is SolidColorBrush fill && fill.Color != ((SolidColorBrush)app["PebbleFill"]).Color &&
+            element.TryFindResource("Well") is SolidColorBrush well && well.Color != ((SolidColorBrush)app["Well"]).Color &&
+            element.TryFindResource("WellLip") is SolidColorBrush lip && lip.Color != ((SolidColorBrush)app["WellLip"]).Color &&
+            element.TryFindResource("StoneLight") is false;
+        var join = (Button)window.FindName("VoiceCardJoin"); join.ApplyTemplate();
+        var dark = new[] { "VoiceCard", "VoiceCardJoin", "PlayerQueuePicker", "PlayerEmpty" }.Where(name => !PlayerMaterial((FrameworkElement)window.FindName(name))).ToList();
+        Check(dark.Count == 0 && ((Stone)window.FindName("VoiceCard")).Light == false && ((Stone)join.Template.FindName("Body", join)).Light == false && app["StoneLight"] is true,
+            $"in light mode the player's controls keep the player's dark material{(dark.Count > 0 ? " (light: " + string.Join(", ", dark) + ")" : "")}");
+        Check(((TextBlock)window.FindName("UpdateCardTitle")).Foreground == window.FindResource("Ink"), "in light mode the update card in the player keeps the app's colours");
+        typeof(MainWindow).GetField("light", flags)!.SetValue(window, false); Invoke(window, "ApplyTheme");
         var captionButtons = (FrameworkElement)window.FindName("PlayerCaptionButtons");
         var dockedOverlay = (Grid)window.FindName("PlayerOverlay");
         dockedOverlay.Measure(new Size(video.ActualWidth, video.ActualHeight)); dockedOverlay.Arrange(new Rect(0, 0, video.ActualWidth, video.ActualHeight)); dockedOverlay.UpdateLayout();
