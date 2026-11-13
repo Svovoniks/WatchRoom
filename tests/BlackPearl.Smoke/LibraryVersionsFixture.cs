@@ -267,7 +267,7 @@ static class LibraryVersionsFixture
         // A guest lists a film's copies apart, and each copy's artwork is its own.
         MediaItem Posted(MediaItem film, string name) { var poster = Path.Combine(directory, "posters", name); Directory.CreateDirectory(Path.GetDirectoryName(poster)!); File.WriteAllBytes(poster, Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")); return film with { Poster = poster }; }
         var postedHd = Posted(hd, "hd.png"); var postedUhd = Posted(uhd, "uhd.png");
-        check(SharedLibrary.ArtworkPath([postedHd, postedUhd], new("hd", "movie"))?.EndsWith("hd.png") == true && SharedLibrary.ArtworkPath([postedHd, postedUhd], new("uhd", "movie"))?.EndsWith("uhd.png") == true,
+        check(Path.GetFileName(SharedLibrary.ArtworkPath([postedHd, postedUhd], new("hd", "movie"))) == "hd.png" && Path.GetFileName(SharedLibrary.ArtworkPath([postedHd, postedUhd], new("uhd", "movie"))) == "uhd.png",
             "a guest gets the artwork of every copy of a film, not only the one its card leads with");
         var store = new LibraryStore(Path.Combine(directory, "film-copies-db"));
         store.Setting("version:" + key, "1080p BluRay x265");
