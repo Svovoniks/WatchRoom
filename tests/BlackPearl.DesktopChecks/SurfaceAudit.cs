@@ -11,7 +11,8 @@ using BlackPearl.Desktop;
 // context menus, dropdowns and player menus) and runs BorderAudit over each one.
 static class SurfaceAudit
 {
-    public static async Task Run(MainWindow window, Func<int, Task> settle, Action<string, string> report)
+    // capture, when given, also receives each surface as it is audited, so a render can save what popups look like.
+    public static async Task Run(MainWindow window, Func<int, Task> settle, Action<string, string> report, Action<string, FrameworkElement>? capture = null)
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
         object? Call(string name, params object?[] args) => typeof(MainWindow).GetMethods(flags).First(m => m.Name == name && m.GetParameters().Length == args.Length).Invoke(window, args);
@@ -20,7 +21,10 @@ static class SurfaceAudit
             await settle(500);
             foreach (var source in PresentationSource.CurrentSources.OfType<PresentationSource>().ToList())
                 if (source.RootVisual is Visual root && !ReferenceEquals(root, window) && root is not UIElement { IsVisible: false })
+                {
                     foreach (var finding in BorderAudit.Find(root)) report(name, finding);
+                    if (capture is not null && root is FrameworkElement { ActualWidth: > 0, ActualHeight: > 0 } element) capture(name, element);
+                }
         }
 
         // Dialogs: audit each in-app dialog as it appears, then dismiss it so ShowDialog returns.

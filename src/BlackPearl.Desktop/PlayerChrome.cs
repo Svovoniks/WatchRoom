@@ -44,8 +44,11 @@ public partial class MainWindow
         InitializeSubtitleLift();
         PlayerPills.Overflow = OverflowPill;
         PlayerPills.FoldedChanged += (_, _) => RefreshOverflowMenu();
-        // The participants menu sits in LibVLC's overlay window, outside the player page that maps the app palette to dark.
-        ((FrameworkElement)ParticipantsMenu.Child).Resources.MergedDictionaries.Add(RoomPage.Resources);
+        // The player's controls and menus sit in LibVLC's overlay window, outside the player page that maps the app palette, and
+        // the pebble material built from it, to dark. Without it they drew light in light mode: the queue picker as a light well.
+        PlayerOverlay.Resources.MergedDictionaries.Add(RoomPage.Resources);
+        // The update card moves into the overlay while the player is open, and keeps the app's own colours there.
+        PlayerUpdateHost.Resources.MergedDictionaries.Add(Application.Current.Resources);
         VolumeFlyout.PlacementTarget = MuteButton;
         MuteButton.GotKeyboardFocus += (_, _) => { if (InputManager.Current.MostRecentInputDevice is KeyboardDevice) ShowVolumeFlyout(); };
         foreach (var (pill, menu) in new[] { (AudioPill, AudioMenu), (SubtitlePill, SubtitleMenu), (QueuePill, PlayerQueueMenu), (ParticipantsPill, ParticipantsMenu), (OverflowPill, OverflowMenu) })

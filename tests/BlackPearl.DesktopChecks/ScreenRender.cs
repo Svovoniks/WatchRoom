@@ -280,7 +280,20 @@ static class ScreenRender
             { Call("ShowPreferenceSection", section); await Capture($"{theme}-settings-{section.ToLowerInvariant()}"); }
             await CaptureDialogs(store, wanted, movie);
         }
-        Set("light", false); Call("ApplyTheme");
-        await SurfaceAudit.Run(window, Settle, (name, finding) => Console.WriteLine($"CLIPPED {name}: {finding}"));
+        // Surfaces outside the main window (the player's overlay, its menus, dropdowns and dialogs), audited and saved in both
+        // modes: the player stays dark in light mode, and a light-mode menu once drew the page's light well inside it.
+        foreach (var theme in new[] { "light", "dark" })
+        {
+            // Each pass starts from Home, so the player one pass ends on doesn't stay open behind the next pass's dialogs.
+            Set("light", theme == "light"); Call("ApplyTheme"); Call("ShowPage", "Home");
+            var surfaces = new Dictionary<string, int>();
+            await SurfaceAudit.Run(window, Settle, (name, finding) => Console.WriteLine($"CLIPPED {(theme == "light" ? "light " : "")}{name}: {finding}"), (name, root) =>
+            {
+                var count = surfaces[name] = surfaces.GetValueOrDefault(name) + 1;
+                var bitmap = Picture(root); bitmap.Render(root);
+                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                using var file = File.Create(Path.Combine(output, $"surface-{theme}-{name}{(count > 1 ? "-" + count : "")}.png")); encoder.Save(file);
+            });
+        }
     }
 }

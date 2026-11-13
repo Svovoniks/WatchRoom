@@ -47,15 +47,14 @@ public class InAppDialog : ContentControl
         DockPanel.SetDock(close, Dock.Right); header.Children.Add(close); header.Children.Add(heading);
         var body = new DockPanel();
         DockPanel.SetDock(header, Dock.Top); body.Children.Add(header); body.Children.Add(this);
-        card = new Border
+        // The dialog is the highest stone: the deepest shadow and the roundest corners, and no outline.
+        card = new Stone
         {
-            CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), Padding = new Thickness(24, 16, 16, 22), Child = body,
+            Depth = StoneDepth.Dialog, CornerRadius = new CornerRadius(24), Padding = new Thickness(26, 18, 18, 24), Child = body,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             RenderTransformOrigin = new Point(0.5, 0.5), RenderTransform = scale
         };
-        card.SetResourceReference(Border.BackgroundProperty, "Surface");
-        card.SetResourceReference(Border.BorderBrushProperty, "Line");
-        card.SetResourceReference(EffectProperty, "PopupShadow");
+        card.SetResourceReference(Border.BackgroundProperty, "Raised");
         card.SetResourceReference(TextElement.ForegroundProperty, "Ink");
         AutomationProperties.SetIsDialog(card, true);
         layer = new Grid { Children = { card } };
@@ -260,10 +259,10 @@ public class InAppDialog : ContentControl
         var row = new DockPanel();
         DockPanel.SetDock(close, Dock.Right); row.Children.Add(close); row.Children.Add(message);
         var shift = new TranslateTransform();
-        var toastCard = new Border { Width = 360, Padding = new Thickness(18, 14, 18, 14), CornerRadius = new CornerRadius(12), BorderThickness = new Thickness(1), Child = row, Margin = new Thickness(16), RenderTransform = shift };
-        toastCard.SetResourceReference(Border.BackgroundProperty, "Surface");
+        // A raised stone, lit along its top in the accent so it reads as news rather than a dialog.
+        var toastCard = new Stone { Depth = StoneDepth.Popup, Width = 360, Padding = new Thickness(18, 14, 18, 14), CornerRadius = new CornerRadius(16), BorderThickness = new Thickness(0, 2, 0, 0), Child = row, Margin = new Thickness(16, 12, 16, 24), RenderTransform = shift };
+        toastCard.SetResourceReference(Border.BackgroundProperty, "Raised");
         toastCard.SetResourceReference(Border.BorderBrushProperty, "Accent");
-        toastCard.SetResourceReference(EffectProperty, "PopupShadow");
         TextElement.SetFontFamily(toastCard, new FontFamily("Segoe UI"));
         AutomationProperties.SetLiveSetting(message, AutomationLiveSetting.Assertive);
         var target = owner.Content as FrameworkElement;

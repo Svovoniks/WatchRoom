@@ -236,7 +236,7 @@ public partial class MainWindow
         {
             var panel = new StackPanel();
             var heading = new TextBlock { Text = title }; heading.SetResourceReference(StyleProperty, "CardTitle"); panel.Children.Add(heading);
-            var border = new Border { Child = panel, Margin = new Thickness(0, 0, 0, 16) }; border.SetResourceReference(StyleProperty, "Card");
+            var border = new Stone { Child = panel, Margin = new Thickness(0, 0, 0, 20) }; border.SetResourceReference(StyleProperty, "Card");
             AutomationProperties.SetName(border, name); page.Children.Add(border);
             return panel;
         }

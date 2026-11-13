@@ -111,7 +111,7 @@ public partial class MainWindow
     {
         var progress = WantedProgress(title);
         var panel = new StackPanel();
-        var border = new Border { Child = panel, Style = (Style)FindResource("Card"), Margin = new Thickness(0) };
+        var border = new Stone { Child = panel, Style = (Style)FindResource("Card"), Margin = new Thickness(0) };
         AutomationProperties.SetName(border, "Wanted title");
         TextBlock Line(string text, bool muted = true, double size = 13) { var line = new TextBlock { Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap }; if (muted) line.SetResourceReference(TextBlock.ForegroundProperty, "Muted"); return line; }
         if (!title.IsMovie)
