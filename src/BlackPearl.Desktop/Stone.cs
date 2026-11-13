@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 
 namespace BlackPearl.Desktop;
@@ -150,21 +149,34 @@ public static class StoneShadow
     {
         var pad = (int)Math.Ceiling((spec.Blur + spec.Drop + 2) * scale);
         int width = sw + 2 * pad, height = sh + 2 * pad;
-        double dip(int pixels) => pixels / scale;
-        var host = new Grid { Width = dip(width), Height = dip(height) };
-        host.Children.Add(new Border
+        // Drawn and blurred in plain arithmetic rather than through a BlurEffect rendered to a bitmap, which cost 30 to 40 ms a
+        // shape on the UI thread while the library first drew. The shape's coverage of each pixel comes from its rounded
+        // outline; three box blurs then approximate the Gaussian a BlurEffect of the same radius draws (its radius is 3 sigma).
+        var alpha = new float[width * height];
+        var drop = spec.Drop * scale;
+        for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+                alpha[y * width + x] = Coverage(x + 0.5 - pad, y + 0.5 - pad - drop, sw, sh, r);
+        var sigma = spec.Blur * scale / 3;
+        if (sigma > 0.3)
         {
-            Width = dip(sw), Height = dip(sh), CornerRadius = new(dip(r)), Background = Brushes.Black, Opacity = spec.Opacity,
-            HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top,
-            Margin = new(dip(pad), dip(pad) + spec.Drop, 0, 0),
-            Effect = new BlurEffect { Radius = spec.Blur, RenderingBias = RenderingBias.Quality }
-        });
-        var blurred = Render(host, width, height, scale);
+            var scratch = new float[alpha.Length];
+            foreach (var box in BoxSizes(sigma))
+            {
+                BoxBlur(alpha, scratch, width, height, (box - 1) / 2, horizontal: true);
+                BoxBlur(scratch, alpha, width, height, (box - 1) / 2, horizontal: false);
+            }
+        }
         // Leave a pixel of shadow under the shape's edge, so rounding never shows a light rim between shadow and stone.
-        var hole = new RectangleGeometry(new Rect(dip(pad + 1), dip(pad + 1), dip(Math.Max(0, sw - 2)), dip(Math.Max(0, sh - 2))), Math.Max(0, dip(r - 1)), Math.Max(0, dip(r - 1)));
-        var cut = new Image { Source = blurred, Width = dip(width), Height = dip(height), Stretch = Stretch.Fill,
-            Clip = new CombinedGeometry(GeometryCombineMode.Exclude, new RectangleGeometry(new Rect(0, 0, dip(width), dip(height))), hole) };
-        var shadow = Render(cut, width, height, scale);
+        var pixels = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+            {
+                var hole = Coverage(x + 0.5 - pad - 1, y + 0.5 - pad - 1, Math.Max(0, sw - 2), Math.Max(0, sh - 2), Math.Max(0, r - 1));
+                var value = alpha[y * width + x] * spec.Opacity * (1 - hole);
+                pixels[(y * width + x) * 4 + 3] = (byte)Math.Clamp(Math.Round(value * 255), 0, 255); // black, premultiplied
+            }
+        var shadow = BitmapSource.Create(width, height, 96 * scale, 96 * scale, PixelFormats.Pbgra32, null, pixels, width * 4);
         int left = pad + cornerX, right = pad + sw - cornerX, top = pad + cornerY, bottom = pad + sh - cornerY;
         bool splitX = cornerX < sw, splitY = cornerY < sh;
         int[] xs = splitX ? [0, left, right, width] : [0, width];
@@ -186,20 +198,51 @@ public static class StoneShadow
                 }
                 if (rect.Width <= 0 || rect.Height <= 0) continue;
                 // Copied out rather than cropped: a CroppedBitmap can be cut again from its source each time it is drawn.
-                var pixels = new byte[rect.Width * rect.Height * 4];
-                shadow.CopyPixels(rect, pixels, rect.Width * 4, 0);
-                var part = BitmapSource.Create(rect.Width, rect.Height, shadow.DpiX, shadow.DpiY, PixelFormats.Pbgra32, null, pixels, rect.Width * 4);
+                var slice = new byte[rect.Width * rect.Height * 4];
+                shadow.CopyPixels(rect, slice, rect.Width * 4, 0);
+                var part = BitmapSource.Create(rect.Width, rect.Height, shadow.DpiX, shadow.DpiY, PixelFormats.Pbgra32, null, slice, rect.Width * 4);
                 part.Freeze(); parts[row * 3 + col] = part; sources[row * 3 + col] = rect;
             }
         return new Slices(pad, left, right, top, bottom, width, height, parts, sources);
     }
 
-    private static BitmapSource Render(FrameworkElement element, int width, int height, double scale)
+    // How much of the pixel centred at (x, y) a rounded rectangle at the origin covers, from its signed distance.
+    private static float Coverage(double x, double y, int width, int height, int radius)
     {
-        var size = new Size(width / scale, height / scale);
-        element.Measure(size); element.Arrange(new Rect(size));
-        var bitmap = new RenderTargetBitmap(width, height, 96 * scale, 96 * scale, PixelFormats.Pbgra32);
-        bitmap.Render(element); bitmap.Freeze();
-        return bitmap;
+        if (width <= 0 || height <= 0) return 0;
+        double halfX = width / 2.0, halfY = height / 2.0, r = Math.Min(radius, Math.Min(halfX, halfY));
+        double qx = Math.Abs(x - halfX) - (halfX - r), qy = Math.Abs(y - halfY) - (halfY - r);
+        var distance = Math.Sqrt(Math.Max(qx, 0) * Math.Max(qx, 0) + Math.Max(qy, 0) * Math.Max(qy, 0)) + Math.Min(Math.Max(qx, qy), 0) - r;
+        return (float)Math.Clamp(0.5 - distance, 0, 1);
+    }
+
+    // Widths of three box blurs that together approximate a Gaussian of the given sigma.
+    private static int[] BoxSizes(double sigma)
+    {
+        const int passes = 3;
+        var ideal = Math.Sqrt(12 * sigma * sigma / passes + 1);
+        var lower = (int)Math.Floor(ideal); if (lower % 2 == 0) lower--;
+        var upper = lower + 2;
+        var atLower = (int)Math.Round((12 * sigma * sigma - passes * lower * lower - 4 * passes * lower - 3 * passes) / (-4.0 * lower - 4));
+        return Enumerable.Range(0, passes).Select(i => i < atLower ? lower : upper).ToArray();
+    }
+
+    // A running-sum box blur of the given radius along rows or columns; outside the image counts as clear.
+    private static void BoxBlur(float[] source, float[] target, int width, int height, int radius, bool horizontal)
+    {
+        int lines = horizontal ? height : width, length = horizontal ? width : height;
+        int step = horizontal ? 1 : width, lineStep = horizontal ? width : 1;
+        var scale = 1f / (2 * radius + 1);
+        for (var line = 0; line < lines; line++)
+        {
+            var start = line * lineStep; var sum = 0f;
+            for (var i = 0; i < Math.Min(radius, length); i++) sum += source[start + i * step];
+            for (var i = 0; i < length; i++)
+            {
+                if (i + radius < length) sum += source[start + (i + radius) * step];
+                if (i - radius - 1 >= 0) sum -= source[start + (i - radius - 1) * step];
+                target[start + i * step] = sum * scale;
+            }
+        }
     }
 }
