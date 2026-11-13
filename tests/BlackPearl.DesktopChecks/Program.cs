@@ -366,6 +366,7 @@ static class Program
                 UnavailableLibraryChecks.Run(window, activeStore, directory, Check);
                 UnmatchedLibraryChecks.Run(window, activeStore, directory, Check);
                 CardSelectionChecks.Run(window, activeStore, directory, Check);
+                FilmVersionChecks.Run(window, activeStore, directory, Check);
                 WantedLibraryChecks.Run(window, activeStore, directory, Check);
                 AcquisitionChecks.Run(window, activeStore, directory, Check);
                 FollowingChecks.Run(window, activeStore, directory, Check);

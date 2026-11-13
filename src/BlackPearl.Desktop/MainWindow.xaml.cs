@@ -834,7 +834,9 @@ public partial class MainWindow : Window
     private void Select(MediaItem item)
     {
         DetailHost.Visibility = DetailQueue.Visibility = DetailWatched.Visibility = Visibility.Visible;
-        if (currentPage != "Details" || selected?.Id != item.Id) RememberLocation();
+        // Switching to another version of the title on screen stays the same page: Back leads where the page was opened from.
+        var otherVersion = currentPage == "Details" && selected is not null && selected.Id != item.Id && LibraryCatalog.Versions(items, selected).Any(x => x.Id == item.Id);
+        if ((currentPage != "Details" || selected?.Id != item.Id) && !otherVersion) RememberLocation();
         var restoring = restoringNavigation; restoringNavigation = true;
         // A missing episode or film opened from Missing keeps Missing, so its trail leads back there.
         selected = item; libraryCategory = libraryCategory == 5 && item.IsVirtual ? 5 : CategoryFor(item);
