@@ -450,7 +450,9 @@
   </Style>
   <!-- A vertical scroll view whose slim bar floats over the content's right edge (or, with a negative right margin, in the
        space beside it), so the content keeps its width whether or not the bar shows. Padding insets the content. -->
-  <Style x:Key="SlimScrollViewer" TargetType="ScrollViewer">
+  <!-- Based on the app's scroll viewer, so touchpad scrolling keeps its precision here too: without it each small touchpad
+       step moved the library a whole wheel notch, 18 times as far as a mouse. -->
+  <Style x:Key="SlimScrollViewer" TargetType="ScrollViewer" BasedOn="{StaticResource {x:Type ScrollViewer}}">
    <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/><Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollViewer"><Grid>
     <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" Margin="{TemplateBinding Padding}" CanContentScroll="{TemplateBinding CanContentScroll}"/>

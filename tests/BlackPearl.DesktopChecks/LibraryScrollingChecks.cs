@@ -80,6 +80,25 @@ static class LibraryScrollingChecks
         try { for (var index = 0; index < order.Length; index++) { var at = cards.IndexOf(order[index]); if (at != index) cards.Move(at, index); } await Flush(); }
         catch (Exception ex) { moveError = ex.GetType().Name + ": " + ex.Message; }
         check(moveError is null && Consistent() && cards.SequenceEqual(order), "restoring the card order lays out cleanly");
+
+        // A touchpad sends many small wheel steps. The library's slim scroll viewer once took a whole 72 DIP per step, however
+        // small, so a touchpad scrolled 18 times as far as a mouse notch for the same movement (864 DIP for 12 steps of 10).
+        async Task<double> Wheel(int delta, int count)
+        {
+            scroll.ScrollToTop(); await Flush();
+            var target = (UIElement)Containers().OrderBy(pair => pair.Key).First().Value;
+            for (var step = 0; step < count; step++)
+            {
+                var preview = new System.Windows.Input.MouseWheelEventArgs(System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount, -delta) { RoutedEvent = UIElement.PreviewMouseWheelEvent };
+                target.RaiseEvent(preview);
+                if (!preview.Handled) target.RaiseEvent(new System.Windows.Input.MouseWheelEventArgs(System.Windows.Input.Mouse.PrimaryDevice, Environment.TickCount, -delta) { RoutedEvent = UIElement.MouseWheelEvent });
+                await Flush();
+            }
+            return scroll.VerticalOffset;
+        }
+        var notch = await Wheel(120, 1); var touchpad = await Wheel(10, 12);
+        check(notch > 0 && Math.Abs(touchpad - notch) < 1, $"touchpad steps scroll the library as far as a mouse notch of the same size ({touchpad:0.#} DIP for 12 steps of 10, {notch:0.#} DIP for one of 120)");
+        scroll.ScrollToTop(); await Flush();
     }
 
     internal static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
