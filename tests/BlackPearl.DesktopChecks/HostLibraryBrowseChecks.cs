@@ -178,6 +178,13 @@ static class HostLibraryBrowseChecks
             typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryActivity = snapshot.LibraryActivity! with { View = guestView with { SelectedId = hostMovies[0].Id } } });
             Call("RefreshSharedLibrary");
             Check(Control<FrameworkElement>("Details").Visibility == Visibility.Visible && Field<MediaItem>("selected").Id == hostMovies[0].Id, "following host opens the same video details as the guest");
+            // A guest who opens a search result and returns to the results is shown on Search again, not as a category.
+            var searching = guestView with { Browse = guestView.Browse with { Query = "Movie" } };
+            void Mirror(LibraryBrowseView view) { typeof(RoomClient).GetProperty("Snapshot")!.SetValue(client, snapshot with { LibraryActivity = snapshot.LibraryActivity! with { View = view } }); Call("RefreshSharedLibrary"); }
+            Mirror(searching); Mirror(searching with { SelectedId = hostMovies[0].Id }); Mirror(searching);
+            Check(Field<string>("currentPage") == "Library" && Field<bool>("librarySearch") && Control<FrameworkElement>("SearchHeader").Visibility == Visibility.Visible &&
+                Control<FrameworkElement>("LibraryCategoryBar").Visibility != Visibility.Visible,
+                "a host following a guest's search returns to Search when the guest leaves a result");
         }
         finally
         {

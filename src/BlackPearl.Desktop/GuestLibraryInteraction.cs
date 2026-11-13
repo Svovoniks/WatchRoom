@@ -306,9 +306,11 @@ public partial class MainWindow
             }
             else
             {
+                // Opening a title leaves Search, so a guest back on their results is shown on Search again.
+                librarySearch = parent is null && view.Browse.Query.Length > 0;
                 if (currentPage == "Details") ShowPage("Library");
                 libraryCategory = librarySearch ? 0 : view.Browse.Category; browseSeries = show; browseKind = parent?.Kind; browseSeason = view.Browse.Season;
-                UpdateBreadcrumbs();
+                ApplyLibraryMode(); UpdateBreadcrumbs(); UpdateLibraryCategorySelection(true);
                 PosterGrid.ItemsSource = mirroredCards; EmptyLibrary.Visibility = NoResults.Visibility = Visibility.Collapsed;
                 var fraction = view.ScrollFraction;
                 Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() => { if (FollowingGuest) LibraryScroll.ScrollToVerticalOffset(LibraryScroll.ScrollableHeight * fraction); PlaceGuestPointer(); }));

@@ -825,7 +825,7 @@ public partial class MainWindow : Window
         var card = (LibraryCard)((Button)sender).Tag;
         if (GuestLibrary) { OpenHostCard(card); return; }
         // A title opened from Missing stays under Missing rather than moving to Shows or Anime.
-        if (card.Level == "series") NavigateLibrary(libraryCategory == 5 && !librarySearch ? 5 : CategoryFor(card.Media), LibraryIdentity.ShowKey(card.Media), card.Media.Kind);
+        if (card.Level == "series") NavigateLibrary(libraryCategory == 5 ? 5 : CategoryFor(card.Media), LibraryIdentity.ShowKey(card.Media), card.Media.Kind);
         else if (card.Level == "season") NavigateLibrary(libraryCategory, browseSeries, browseKind, card.Season);
         else { Select(card.Media); Details.ScrollToTop(); }
     }
@@ -835,7 +835,7 @@ public partial class MainWindow : Window
         if (currentPage != "Details" || selected?.Id != item.Id) RememberLocation();
         var restoring = restoringNavigation; restoringNavigation = true;
         // A missing episode or film opened from Missing keeps Missing, so its trail leads back there.
-        selected = item; libraryCategory = libraryCategory == 5 && !librarySearch && item.IsVirtual ? 5 : CategoryFor(item);
+        selected = item; libraryCategory = libraryCategory == 5 && item.IsVirtual ? 5 : CategoryFor(item);
         // A title's page belongs to the library, browsing its show and season. Search stays searching only as Back
         // remembers it; left on, any way back to the library page drew Search with this title's season details.
         librarySearch = false;
