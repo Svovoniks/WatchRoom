@@ -186,5 +186,71 @@ static class LibraryVersionsFixture
         check(kikiStore.All().Single(x => x.Path == storyboards) is { IsExtra: false, IsBonus: true, Series: null, ShowId: null, Available: true } clip && clip.ExtraOf == kiki.Id &&
             LibraryCatalog.Browse(kikiStore.All()).Count(card => card.Level == "movie") == 1 && !LibraryCatalog.Browse(kikiStore.All()).Any(card => card.Level == "series" && card.DisplayTitle.StartsWith("Kiki")),
             "a rescan moves a film's featurettes that an earlier scan had indexed as a show back to the film");
+        FilmCopies(directory, check);
+    }
+
+    // Copies of one identified film, in different folders or drives, share a card and a version picker.
+    static void FilmCopies(string directory, Action<bool, string> check)
+    {
+        MediaItem Film(string id, string path, int tmdb = 949, string? title = null, string? providerTitle = "Heat") => new(id, path, title ?? "Heat", "Movie", 1995,
+            Available: true, MetadataProvider: "tmdb", MetadataId: tmdb, MetadataType: "movie", ProviderTitle: providerTitle,
+            ProviderIds: new() { ["tmdb"] = tmdb.ToString(), ["imdb"] = "tt" + tmdb });
+        var hd = Film("hd", Path.Combine(directory, "Movies", "Heat", "Heat.1995.1080p.BluRay.x265-RARBG", "Heat.1995.1080p.BluRay.x265-RARBG.mp4"));
+        var uhd = Film("uhd", Path.Combine(directory, "Desktop", "Heat.1995.REPACK.2160p.UHD.BDRemux.DTS-HD.MA.5.1.mkv"));
+        var other = Film("other", Path.Combine(directory, "Movies", "Ronin.1998.1080p.mkv"), 8195, "Ronin", "Ronin");
+        var films = new[] { hd, uhd, other };
+        var cards = LibraryCatalog.Browse(films);
+        var heat = cards.Single(card => card.DisplayTitle == "Heat");
+        check(cards.Count == 2 && heat is { Level: "movie", Versions: 2 } && heat.Caption.EndsWith("1995 · 2 versions") && cards.Single(card => card.DisplayTitle == "Ronin").Versions == 1,
+            "copies of one identified film share a card that counts its versions");
+        check(LibraryIdentity.TitleKey(hd) == LibraryIdentity.TitleKey(uhd) && LibraryIdentity.ShowKey(hd) == hd.Id && LibraryIdentity.ShowKey(uhd) == uhd.Id,
+            "a film's copies share a title key while matching still keys each file on its own");
+        var versions = LibraryCatalog.Versions(films, uhd);
+        check(versions.Select(x => x.Id).SequenceEqual(["uhd", "hd"]) && LibraryCatalog.VersionLabel(hd, versions) == "1080p BluRay x265" && LibraryCatalog.VersionLabel(uhd, versions) == "REPACK 2160p UHD",
+            "film copies on different drives are named by what differs in their file names, not by their folders");
+        MediaItem[] unknown = [hd with { ProviderIds = null, MetadataId = null }, uhd with { ProviderIds = null, MetadataId = null }];
+        check(LibraryCatalog.Versions(films, other).Single() == other && LibraryCatalog.Versions(unknown, unknown[0]).Length == 1 && LibraryCatalog.Browse(unknown).Count == 2,
+            "films without an identity stay apart, however alike their names");
+        check(LibraryCatalog.Browse([hd, uhd with { Available = false }]).Single().Versions == 2 && LibraryCatalog.CurrentVersion(LibraryCatalog.Versions([hd, uhd with { Available = false }], hd), null).Id == "hd",
+            "a copy whose drive is away never leads its film's card");
+
+        // Parts of one film share its identity but are different videos.
+        var parts = new[] { Film("p1", Path.Combine(directory, "Movies", "Chudo", "Chudo-1.mp4"), 27935, "Chudo-1", "An Ordinary Miracle"),
+            Film("p2", Path.Combine(directory, "Movies", "Chudo", "Chudo-2.mp4"), 27935, "Chudo-2", "An Ordinary Miracle"),
+            Film("q1", Path.Combine(directory, "Movies", "Ivan Vasilievich (1973) 1.mkv"), 1, "Ivan", "Ivan"), Film("q2", Path.Combine(directory, "Movies", "Ivan Vasilievich (1973) 2.mkv"), 1, "Ivan", "Ivan"),
+            Film("c1", Path.Combine(directory, "Movies", "Seven.Samurai.CD1.avi"), 2, "Seven Samurai", "Seven Samurai"), Film("c2", Path.Combine(directory, "Movies", "Seven.Samurai.CD2.avi"), 2, "Seven Samurai", "Seven Samurai") };
+        check(LibraryCatalog.Browse(parts).Count == 6 && LibraryCatalog.Browse(parts).All(card => card.Versions == 1), "numbered parts of a film keep cards of their own");
+        var partCopies = new[] { parts[0], parts[0] with { Id = "p1b", Path = Path.Combine(directory, "Desktop", "Chudo-1.720p.mkv") } };
+        check(LibraryIdentity.FilmPart(partCopies[1]) is null && LibraryCatalog.Browse(partCopies).Count == 2, "a part number only counts at the end of a name or after Part, CD or Disc");
+        var numbered = new[] { Film("a1", Path.Combine(directory, "Movies", "Oceans 8.mkv"), 402900, "Oceans 8", "Ocean's 8"), Film("a2", Path.Combine(directory, "Desktop", "Oceans.8.2018.2160p.mkv"), 402900, "Oceans 8", "Ocean's 8"),
+            Film("s1", Path.Combine(directory, "Movies", "Se7en.1995.1080p.DTS.5.1.mkv"), 807, "Se7en", "Se7en"), Film("s2", Path.Combine(directory, "Desktop", "Se7en.1995.720p.mkv"), 807, "Se7en", "Se7en") };
+        check(LibraryCatalog.Browse(numbered).Count == 2 && LibraryCatalog.Browse(numbered).All(card => card.Versions == 2),
+            "a number the film's own title ends with, or audio channels like 5.1, are not part numbers");
+
+        // The card and page lead with the copy chosen for the film, otherwise the one played last.
+        var key = LibraryIdentity.TitleKey(hd);
+        check(LibraryCatalog.CurrentVersion(versions, null).Id == "uhd", "with nothing played, a film leads with its first available copy");
+        var played = new Dictionary<string, string> { ["played:hd"] = "200", ["played:uhd"] = "100", ["position:hd"] = "61000" };
+        check(LibraryCatalog.CurrentVersion(versions, played).Id == "hd" && LibraryCatalog.WithCurrentVersions(films, cards, played).Single(card => card.DisplayTitle == "Heat").Media.Id == "hd",
+            "a film card leads with the copy played last");
+        var chosen = new Dictionary<string, string>(played) { ["version:" + key] = "REPACK 2160p UHD" };
+        check(LibraryCatalog.WithCurrentVersions(films, cards, chosen).Single(card => card.DisplayTitle == "Heat").Media.Id == "uhd", "a chosen version leads the film's card over the copy played last");
+
+        // A clip that came with one copy belongs to the film.
+        var clip = new MediaItem("clip", Path.Combine(directory, "Desktop", "Heat Extras", "Making Of.mkv"), "Making Of", "Movie", Available: true, IsBonus: true, ExtraOf: "uhd");
+        check(LibraryCatalog.Browse([hd, uhd, clip]).Single().Caption.EndsWith("1995 · 1 extra · 2 versions") && LibraryCatalog.Extras([hd, uhd, clip], hd).Single().Id == "clip",
+            "every copy of a film lists the clips that came with any of them");
+
+        // Home and Search list the film once.
+        var home = LibraryHome.Overview(films, played);
+        check(home.Entries.Count(entry => entry.Section == "continue") == 1 && home.Entries.Single(entry => entry.Section == "continue") is { PositionMs: 61000 } resume && resume.Card.Media.Id == "hd" &&
+            !home.Unseen.Any(title => title.Card.DisplayTitle == "Heat"), "Home continues a film once, with the copy left part-way");
+        var watched = LibraryHome.Overview(films, new Dictionary<string, string> { ["watched:hd"] = "true" });
+        check(!watched.Entries.Any(entry => entry.Section == "continue") && !watched.Unseen.Any(title => title.Card.DisplayTitle == "Heat") && LibraryHome.Overview(films).Unseen.Count(title => title.Card.DisplayTitle == "Heat") == 1,
+            "a film watched in any copy is done, and an unstarted one is suggested once");
+        check(LibrarySearch.Search(films, "heat", new(), new Dictionary<string, FileLanguages>()).Single().Versions == 2, "Search finds a film's copies as one title");
+        var store = new LibraryStore(Path.Combine(directory, "film-copies-db"));
+        store.Setting("version:" + key, "1080p BluRay x265");
+        check(store.PlaybackSettings().GetValueOrDefault("version:" + key) == "1080p BluRay x265", "playback settings carry the versions chosen for titles");
     }
 }

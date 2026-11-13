@@ -208,8 +208,8 @@ public partial class MainWindow
         LibraryCardView? pick = homeMysteryFallback; var note = "";
         if (local)
         {
-            var current = homeMystery is { HomeSection: "draw" } shown ? LibraryIdentity.ShowKey(shown.Card.Media) : null;
-            var title = redraw ? null : homeUnseen.FirstOrDefault(title => LibraryIdentity.ShowKey(title.Card.Media) == current && LibraryHome.Matches(title, mysteryKind, mysteryLength));
+            var current = homeMystery is { HomeSection: "draw" } shown ? LibraryIdentity.TitleKey(shown.Card.Media) : null;
+            var title = redraw ? null : homeUnseen.FirstOrDefault(title => LibraryIdentity.TitleKey(title.Card.Media) == current && LibraryHome.Matches(title, mysteryKind, mysteryLength));
             title ??= LibraryHome.Draw(homeUnseen, mysteryKind, mysteryLength, mysteryDraw, redraw ? current : null);
             pick = title is null ? null : homeMystery is { HomeSection: "draw" } same && same.Key == LibraryCardView.Identity(title.Card) ? same : new LibraryCardView(title.Card) { HomeSection = "draw" };
             if (title is not null) { pick!.Update(title.Card); note = "Not started yet"; }

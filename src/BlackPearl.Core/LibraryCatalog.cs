@@ -89,19 +89,24 @@ public static class LibraryCatalog
         {
             // A film's clips show on the film's page, not as cards of their own.
             var filmExtras = items.Where(x => x.ExtraOf is not null).ToLookup(x => x.ExtraOf!);
-            return items.Where(x => x.ExtraOf is null).GroupBy(LibraryIdentity.ShowKey, StringComparer.OrdinalIgnoreCase).Select(g =>
+            // Copies of one film share its card, which leads with the first available copy until a version is chosen.
+            return items.Where(x => x.ExtraOf is null).GroupBy(LibraryIdentity.TitleKey, StringComparer.OrdinalIgnoreCase).Select(g =>
             {
                 cancellation.ThrowIfCancellationRequested();
-                var item = g.OrderBy(x => x.IsVirtual).ThenByDescending(x => x.Available).First();
+                var film = g.First().Series is null;
+                var copies = film ? OrderVersions(g) : [];
+                var item = film ? copies[0] : g.OrderBy(x => x.IsVirtual).ThenByDescending(x => x.Available).First();
                 var seasons = g.Select(x => x.Season).Distinct().Count();
-                var clips = item.Series is null ? filmExtras[item.Id].Count() : 0;
+                var clips = film ? copies.Sum(copy => filmExtras[copy.Id].Count()) : 0;
                 var status = TitleStatus(g.ToArray());
                 if (item.IsMusic) return AlbumCard(g.ToArray(), item, cancellation);
                 return new LibraryCard(item.ShownTitle, item.Series is null ? item.Caption + (clips > 0 ? $" · {clips} {(clips == 1 ? "extra" : "extras")}" : "") +
+                    (copies.Length > 1 ? $" · {copies.Length} versions" : "") +
                     (item.IsVirtual ? " · " + status + (status == "Upcoming" && DateOnly.TryParse(item.AirDate, out var release) ? " · " + release.ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture) : "") : item.Available ? "" : " · Unavailable") :
                     (item.Year is null ? "" : item.Year + " · ") + $"{seasons} {(seasons == 1 ? "season" : "seasons")} · {LibraryIdentity.EpisodeCount(g)} episodes" +
                     (g.Any(x => x.IsVirtual) ? $" · {g.Count(x => x.IsVirtual)} missing/upcoming" : "") + (g.Any(x => x.Available) || g.All(x => x.IsVirtual) ? "" : " · Unavailable"),
-                    Existing(g.Select(x => x.SeriesPoster).Concat(g.Select(x => x.Poster)).Concat(g.Select(x => x.SeasonPoster)), cancellation), item, item.Series is null ? "movie" : "series", Status: status);
+                    Existing(film ? copies.Select(x => x.Poster).Concat(copies.Select(x => x.SeriesPoster)) : g.Select(x => x.SeriesPoster).Concat(g.Select(x => x.Poster)).Concat(g.Select(x => x.SeasonPoster)), cancellation),
+                    item, item.Series is null ? "movie" : "series", Versions: Math.Max(1, copies.Length), Status: status);
             }).OrderBy(x => x.DisplayTitle).ToList();
         }
         var episodes = items.Where(x => LibraryIdentity.InShow(x, series, kind));
@@ -144,8 +149,14 @@ public static class LibraryCatalog
         return new LibraryCard(first.Series!, caption, Existing(tracks.Select(x => x.SeriesPoster).Concat(tracks.Select(x => x.Poster)), cancellation), first, "series");
     }
     // The clips that came with a film, in name order.
-    public static MediaItem[] Extras(IEnumerable<MediaItem> source, MediaItem film) => film.Series is not null ? [] :
-        source.Where(x => x.ExtraOf == film.Id && !x.IsVirtual).OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
+    // Clips that came with any copy of the film count for all of them.
+    public static MediaItem[] Extras(IEnumerable<MediaItem> source, MediaItem film)
+    {
+        if (film.Series is not null) return [];
+        var all = source as IReadOnlyCollection<MediaItem> ?? source.ToArray();
+        var copies = Versions(all, film).Select(x => x.Id).Append(film.Id).ToHashSet();
+        return all.Where(x => x.ExtraOf is { } owner && copies.Contains(owner) && !x.IsVirtual).OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
+    }
     // A bonus clip from a season's own extras folder also lists at the end of that season.
     public static bool SeasonExtra(MediaItem item, int? season) => season > 0 && item.IsBonus && item.Season == 0 && item.AirsAfterSeason == season;
     // A season holding nothing but bonus clips is the show's extras, not a run of numbered specials.
@@ -187,16 +198,52 @@ public static class LibraryCatalog
         var episodes = LibraryIdentity.EpisodeCount(members); var bonus = members.Count(x => x.IsBonus);
         return string.Join(" · ", new[] { episodes > 0 || bonus == 0 ? $"{episodes} episodes" : null, bonus > 0 ? $"{bonus} bonus {(bonus == 1 ? "clip" : "clips")}" : null }.Where(x => x is not null));
     }
-    // Every file holding the same episode of a show, such as a colour and a black-and-white release.
-    public static MediaItem[] Versions(IEnumerable<MediaItem> source, MediaItem item) =>
-        item.Series is null || item.Season is null || item.Episode is null || item.NumberingConflict is not null ? [item] :
-        source.Where(x => !x.IsVirtual && x.NumberingConflict is null && LibraryIdentity.SameShow(x, item) && x.Season == item.Season && x.Episode == item.Episode && x.EpisodeEnd == item.EpisodeEnd)
-            .OrderByDescending(x => x.Available).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToArray();
+    // Every file holding the same episode of a show, such as a colour and a black-and-white release, or the same film.
+    public static MediaItem[] Versions(IEnumerable<MediaItem> source, MediaItem item)
+    {
+        if (item.Series is null)
+        {
+            var key = LibraryIdentity.TitleKey(item);
+            return key == item.Id ? [item] : OrderVersions(source.Where(x => x.Series is null && LibraryIdentity.TitleKey(x) == key));
+        }
+        return item.Season is null || item.Episode is null || item.NumberingConflict is not null ? [item] :
+            OrderVersions(source.Where(x => !x.IsVirtual && x.NumberingConflict is null && LibraryIdentity.SameShow(x, item) && x.Season == item.Season && x.Episode == item.Episode && x.EpisodeEnd == item.EpisodeEnd));
+    }
+    private static MediaItem[] OrderVersions(IEnumerable<MediaItem> versions) =>
+        versions.OrderBy(x => x.IsVirtual).ThenByDescending(x => x.Available).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToArray();
+    // The copy of a film its card and page lead with: the release chosen for it, otherwise the one played last, otherwise
+    // the first available. Playback holds the library's played: and version: settings (LibraryStore.PlaybackSettings).
+    public static MediaItem CurrentVersion(IReadOnlyCollection<MediaItem> versions, IReadOnlyDictionary<string, string>? playback)
+    {
+        var playable = versions.Where(x => x.Available && !x.IsVirtual).ToArray();
+        if (playable.Length < 2) return playable.FirstOrDefault() ?? versions.First();
+        if (playback?.GetValueOrDefault("version:" + LibraryIdentity.TitleKey(playable[0])) is { Length: > 0 } preferred &&
+            playable.FirstOrDefault(x => VersionLabel(x, versions).Equals(preferred, StringComparison.OrdinalIgnoreCase)) is { } chosen)
+            return chosen;
+        long Played(MediaItem x) => playback is not null && playback.TryGetValue("played:" + x.Id, out var value) && long.TryParse(value, out var time) ? time : 0;
+        return playable.MaxBy(Played) is { } latest && Played(latest) > 0 ? latest : playable[0];
+    }
+    // Film cards led by the copy CurrentVersion picks, so a card's progress, artwork and page are that copy's.
+    public static List<LibraryCard> WithCurrentVersions(IEnumerable<MediaItem> source, List<LibraryCard> cards, IReadOnlyDictionary<string, string>? playback)
+    {
+        if (!cards.Any(card => card is { Level: "movie", Versions: > 1 })) return cards;
+        var films = source.Where(x => x.Series is null && !x.IsVirtual).ToLookup(LibraryIdentity.TitleKey);
+        return cards.Select(card =>
+        {
+            if (card is not { Level: "movie", Versions: > 1 }) return card;
+            var versions = OrderVersions(films[LibraryIdentity.TitleKey(card.Media)]);
+            if (versions.Length < 2) return card;
+            var current = CurrentVersion(versions, playback);
+            return current.Id == card.Media.Id ? card : card with { Media = current, Poster = Existing([current.Poster, current.SeriesPoster]) ?? card.Poster };
+        }).ToList();
+    }
     // The words that tell one release apart from the others, read from the folders and file name below the
     // path they share: "BW" against "Color", or "1080p" against "720p". The file name stands in when nothing differs.
     public static string VersionLabel(MediaItem item, IReadOnlyCollection<MediaItem> versions)
     {
         if (versions.Count < 2) return "";
+        // Copies of a film often sit in different folders or drives, so their file names tell them apart first.
+        if (item.Series is null && FilmLabel(item, versions) is { } film) return film;
         var paths = versions.ToDictionary(v => v.Id, v => v.Path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         var shared = paths.Values.Min(parts => parts.Length) - 1;
         while (shared > 0 && paths.Values.Any(parts => !parts[shared - 1].Equals(paths[item.Id][shared - 1], StringComparison.OrdinalIgnoreCase))) shared--;
@@ -205,5 +252,13 @@ public static class LibraryCatalog
         var tokens = paths.ToDictionary(p => p.Key, p => Tokens(p.Value));
         var unique = tokens[item.Id].Where(token => tokens.All(other => other.Key == item.Id || !other.Value.Contains(token, StringComparer.OrdinalIgnoreCase))).Take(3).ToArray();
         return unique.Length > 0 ? string.Join(" ", unique) : Path.GetFileNameWithoutExtension(item.Path);
+    }
+    private static string? FilmLabel(MediaItem item, IReadOnlyCollection<MediaItem> versions)
+    {
+        static string[] Tokens(MediaItem x) => Regex.Split(Path.GetFileNameWithoutExtension(x.Path), @"[^\p{L}\p{N}]+").Where(token => token.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var others = versions.Where(x => x.Id != item.Id).Select(Tokens).ToArray();
+        var unique = Tokens(item).Where(token => others.All(other => !other.Contains(token, StringComparer.OrdinalIgnoreCase))).Take(3).ToArray();
+        return unique.Length > 0 ? string.Join(" ", unique) : null;
     }
 }

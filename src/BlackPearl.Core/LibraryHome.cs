@@ -22,13 +22,13 @@ public static class LibraryHome
         long Played(string id) => playback.TryGetValue("played:" + id, out var value) && long.TryParse(value, out var time) ? time : 0;
         // Home suggests things to watch; music lives in its own library tab.
         var all = source.Where(item => !item.IsExtra && !item.IsVirtual && !item.IsMusic).ToArray();
-        var titles = LibraryCatalog.Browse(all.Where(item => item.Available));
-        var groups = all.GroupBy(LibraryIdentity.ShowKey).ToDictionary(group => group.Key, group => group.ToArray());
+        var titles = LibraryCatalog.WithCurrentVersions(all, LibraryCatalog.Browse(all.Where(item => item.Available)), playback);
+        var groups = all.GroupBy(LibraryIdentity.TitleKey).ToDictionary(group => group.Key, group => group.ToArray());
         var continuing = new List<(HomeLibraryCard Entry, long Played)>();
         var unseen = new List<HomeTitle>();
         foreach (var title in titles)
         {
-            var members = groups[LibraryIdentity.ShowKey(title.Media)];
+            var members = groups[LibraryIdentity.TitleKey(title.Media)];
             bool Completed(MediaItem item) => LibraryWatchProgress.IsWatched(members,
                 new("", "", null, item, item.Series is null ? "movie" : "episode"), Watched);
             var started = members.Any(item => Watched(item.Id) || Position(item.Id) >= 10000);
@@ -37,6 +37,13 @@ public static class LibraryHome
             {
                 unseen.Add(new(title, title.Level == "series" ? files.Length : 0,
                     files.Select(item => item.RuntimeMinutes).FirstOrDefault(minutes => minutes > 0)));
+                continue;
+            }
+            // A film continues with the copy left part-way, the one played last; once any copy is watched, it's done.
+            if (title.Level == "movie")
+            {
+                if (members.Where(item => item.Available && !Watched(item.Id) && Position(item.Id) >= 10000).MaxBy(item => Played(item.Id)) is { } resume)
+                    continuing.Add((new(resume.Id == title.Media.Id ? title : title with { Media = resume }, "continue", Position(resume.Id)), members.Max(item => Played(item.Id))));
                 continue;
             }
             var remaining = files.Where(item => !Completed(item)).OrderBy(item => item.Season ?? int.MaxValue)
@@ -50,7 +57,7 @@ public static class LibraryHome
         // Most recently played first; titles without a play time keep catalog order.
         var result = continuing.OrderByDescending(entry => entry.Played).Select(entry => entry.Entry).Take(ContinueLimit).ToList();
         // Rank stable identities so metadata/title sorting cannot reshuffle a row.
-        string Rank(LibraryCard card, string section, int rankSeed) => LibraryIdentity.Hash($"{rankSeed}:{section}:{LibraryIdentity.ShowKey(card.Media)}");
+        string Rank(LibraryCard card, string section, int rankSeed) => LibraryIdentity.Hash($"{rankSeed}:{section}:{LibraryIdentity.TitleKey(card.Media)}");
         foreach (var kind in Kinds)
         {
             var rowSeed = rowSeeds?.GetValueOrDefault(kind, seed) ?? seed;
@@ -77,8 +84,8 @@ public static class LibraryHome
     public static HomeTitle? Draw(IEnumerable<HomeTitle> pool, string? kind, MysteryLength length, int seed, string? avoid = null)
     {
         var matches = pool.Where(title => Matches(title, kind, length)).ToArray();
-        var choices = matches.Where(title => LibraryIdentity.ShowKey(title.Card.Media) != avoid).ToArray();
+        var choices = matches.Where(title => LibraryIdentity.TitleKey(title.Card.Media) != avoid).ToArray();
         if (choices.Length == 0) choices = matches;
-        return choices.MinBy(title => LibraryIdentity.Hash($"{seed}:draw:{LibraryIdentity.ShowKey(title.Card.Media)}"), StringComparer.Ordinal);
+        return choices.MinBy(title => LibraryIdentity.Hash($"{seed}:draw:{LibraryIdentity.TitleKey(title.Card.Media)}"), StringComparer.Ordinal);
     }
 }

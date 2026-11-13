@@ -20,6 +20,30 @@ public static class LibraryIdentity
             if (ProviderId(item, provider) is { } id) return "show-" + Hash(provider + ":" + id);
         return "show-" + Hash($"{Normalize(item.Series)}:{item.Year}");
     }
+    // The card a file lists under: its show's, or its film's. Copies of one identified film, such as a 1080p and a 2160p
+    // release, share a card as versions; matching and metadata still treat each file on its own, keyed by ShowKey. Parts of
+    // a film numbered in their file names, as "Film-1" and "Film-2", are different videos and keep cards of their own.
+    public static string TitleKey(MediaItem item)
+    {
+        if (item.Series is not null) return ShowKey(item);
+        if (item.IsVirtual || item.IsMusic || item.IsExtra || item.IsBonus || item.ExtraOf is not null) return item.Id;
+        var identity = ProviderId(item, "tmdb") is { } tmdb ? $"tmdb:{item.MetadataType ?? "movie"}:{tmdb}"
+            : ProviderId(item, "imdb") is { } imdb ? "imdb:" + imdb : null;
+        return identity is null ? item.Id : "film-" + Hash($"{identity}:{FilmPart(item) ?? 0}");
+    }
+    public static bool SameFilm(MediaItem left, MediaItem right) => left.Series is null && right.Series is null && TitleKey(left) == TitleKey(right);
+    // The part a film's file name numbers, as "Part 2", "CD1" or a trailing "-2". A number its provider title ends with
+    // too, as in Apollo 13, names the film rather than a part.
+    public static int? FilmPart(MediaItem item)
+    {
+        var name = Path.GetFileNameWithoutExtension(item.Path);
+        var match = Regex.Match(name, @"(?i)(?<![\p{L}\p{N}])(?:part|pt|cd|dis[ck]|часть|серия)[\s._-]*(\d{1,2})(?!\p{N})");
+        // Audio channels such as "DTS 5.1" end a name with a number too.
+        if (!match.Success) match = Regex.Match(name, @"(?<=^|[\s._-])(?<!\p{N}[._])(\d{1,2})$");
+        if (!match.Success || int.Parse(match.Groups[1].Value) is not (> 0 and <= 12 and var part)) return null;
+        return new[] { item.ProviderTitle, item.OriginalTitle }.Any(title => title is not null &&
+            Regex.IsMatch(title, $@"(?<!\p{{N}}){part}\s*$")) ? null : part;
+    }
     public static bool SameShow(MediaItem left, MediaItem right) => left.Series is not null && right.Series is not null && ShowKey(left) == ShowKey(right);
     public static bool InShow(MediaItem item, string? identity, string? kind = null) => item.Series is not null &&
         (ShowKey(item) == identity || string.Equals(item.Series, identity, StringComparison.OrdinalIgnoreCase) && (kind is null || item.Kind == kind));

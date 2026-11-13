@@ -36,13 +36,13 @@ public static class LibrarySearch
         {
             1 => item.Kind == "Movie", 2 => item.Kind == "Show", 3 => item.Kind == "Anime", LibraryCatalog.Music => item.IsMusic, _ => !item.IsMusic
         }).ToArray();
-        var titles = items.Where(item => !item.IsExtra).GroupBy(LibraryIdentity.ShowKey, StringComparer.OrdinalIgnoreCase)
+        var titles = items.Where(item => !item.IsExtra).GroupBy(LibraryIdentity.TitleKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
         var results = new List<LibraryCard>();
         foreach (var card in LibraryCatalog.Browse(items, cancellation: cancellation))
         {
             cancellation.ThrowIfCancellationRequested();
-            var members = titles.GetValueOrDefault(LibraryIdentity.ShowKey(card.Media)) ?? [card.Media];
+            var members = titles.GetValueOrDefault(LibraryIdentity.TitleKey(card.Media)) ?? [card.Media];
             var named = query.Length == 0 || Contains(query, card.DisplayTitle, card.Caption, card.Media.Title, card.Media.Path, card.Media.OriginalTitle, card.Media.ProviderTitle);
             var episodes = query.Length == 0 || named || card.Level != "series" ? 0
                 : members.Count(item => !item.IsVirtual && Contains(query, item.IsMusic ? item.Title : item.EpisodeTitle));

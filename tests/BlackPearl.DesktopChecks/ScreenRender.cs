@@ -44,9 +44,9 @@ static class ScreenRender
                 dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
         }
         Console.WriteLine($"Rendering at {VisualTreeHelper.GetDpi(window).DpiScaleX * 100:F0}% scaling, {width}x{height} DIP");
-        async Task Capture(string name)
+        async Task Capture(string name, int settle = 1500)
         {
-            await Settle();
+            await Settle(settle);
             var root = (FrameworkElement)window.Content;
             var bitmap = Picture(root); bitmap.Render(root);
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
@@ -262,6 +262,13 @@ static class ScreenRender
             }
             var movie = items.FirstOrDefault(item => item.Series is null && item.Kind == "Movie");
             if (movie is not null) { Call("Select", movie); await Capture($"{theme}-movie-details"); }
+            // A film with several copies: its page's Version picker, and its one card found by Search.
+            if (items.FirstOrDefault(item => item.Series is null && LibraryCatalog.Versions(items, item).Count(x => x.Available) > 1) is { } copies)
+            {
+                Call("Select", copies); await Capture($"{theme}-movie-versions");
+                Call("NavigateLibrary", 0, null, null, null); Call("OpenSearch", false);
+                var search = (TextBox)window.FindName("SearchBox"); search.Text = copies.ShownName; await Capture($"{theme}-search-versions", 2500); search.Text = "";
+            }
             var store = (LibraryStore)Field("library")!; var wanted = store.Wanted();
             if (wanted.Count > 0) { Call("NavigateLibrary", 5, null, null, null); await Capture($"{theme}-missing"); }
             if (wanted.FirstOrDefault(x => !x.IsMovie) is { } wantedShow) { Call("NavigateLibrary", wantedShow.Kind == "Anime" ? 3 : 2, wantedShow.Id, wantedShow.Kind, null); await Capture($"{theme}-wanted-show"); }

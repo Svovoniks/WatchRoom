@@ -84,9 +84,10 @@ public sealed class LibraryCardView : INotifyPropertyChanged
     public bool PosterFills => Poster is { PixelWidth: > 0 } image && image.PixelWidth >= image.PixelHeight;
     private void SetPoster(BitmapSource? image) { Poster = image; Changed(nameof(Poster)); Changed(nameof(PosterFills)); }
     public string Key => Identity(Card);
+    // A film card keeps its identity whichever of the film's copies it leads with.
     public static string Identity(LibraryCard card) => card.Level is "series" or "season"
         ? $"{card.Level}:{LibraryIdentity.ShowKey(card.Media)}:{card.Season}"
-        : card.Level + ":" + card.Media.Id;
+        : card.Level + ":" + (card.Level == "movie" ? LibraryIdentity.TitleKey(card.Media) : card.Media.Id);
     public LibraryCardView(LibraryCard card) { Card = card; posterVersion = Version(card.Poster); }
     public static LibraryCardView FromSharedEntry(SharedLibraryEntry entry) => new(entry);
     private LibraryCardView(SharedLibraryEntry entry) : this(new LibraryCard(entry.Title, entry.Caption, null,

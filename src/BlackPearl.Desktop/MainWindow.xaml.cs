@@ -707,11 +707,13 @@ public partial class MainWindow : Window
             var playback = await Task.Run(() =>
             {
                 var settings = library.PlaybackSettings();
+                // A film's card leads with the copy chosen or played last, so its progress and page are that copy's.
+                var shown = LibraryCatalog.WithCurrentVersions(source, cards, settings);
                 var shows = source.Where(item => item.Series is not null).GroupBy(LibraryIdentity.ShowKey)
                     .ToDictionary(group => group.Key, group => group.ToArray());
                 var today = DateOnly.FromDateTime(DateTime.UtcNow);
                 bool Aired(MediaItem x) => !DateOnly.TryParse(x.AirDate, out var date) || date <= today;
-                return cards.Select(card =>
+                return shown.Select(card =>
                 {
                     cancellation.ThrowIfCancellationRequested();
                     var members = card.Media.Series is null ? Array.Empty<MediaItem>() : shows.GetValueOrDefault(LibraryIdentity.ShowKey(card.Media)) ?? [];
@@ -909,13 +911,13 @@ public partial class MainWindow : Window
             DetailExtras.Children.Add(pill);
         }
     }
-    private string? PreferredVersion(MediaItem? item) => item?.Series is null ? null : PreferredVersion(LibraryIdentity.ShowKey(item));
+    private string? PreferredVersion(MediaItem? item) => item is null ? null : PreferredVersion(LibraryIdentity.TitleKey(item));
     private string? PreferredVersion(string? showKey) => showKey is null ? null : library.Setting("version:" + showKey);
     private void ChooseVersion(MediaItem version, string label)
     {
-        library.Setting("version:" + LibraryIdentity.ShowKey(version), label);
+        library.Setting("version:" + LibraryIdentity.TitleKey(version), label);
         Select(version);
-        // Season cards and queues now lead with this release.
+        // Season and film cards and queues now lead with this release.
         FilterLibrary(); RefreshHome();
     }
     private async Task UpdateDetailPosterAsync(MediaItem item)
@@ -1152,6 +1154,11 @@ public partial class MainWindow : Window
             if (time >= 10000) saved.Add(KeyValuePair.Create("played:" + playingItem.Id, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()));
             library.SetSettings(saved);
             foreach (var card in libraryCards.Where(x => x.Card.Media.Id == playingItem.Id)) UpdateCardPlayback(card);
+            // A film card showing another copy now leads with this one, the copy played last, unless a version was chosen
+            // for the film. Positions save every few seconds, so this refreshes the library once, when the copy changes.
+            if (time >= 10000 && libraryCards.Any(x => x.Card is { Level: "movie", Versions: > 1 } && x.Card.Media.Id != playingItem.Id && LibraryIdentity.SameFilm(x.Card.Media, playingItem)) &&
+                string.IsNullOrWhiteSpace(PreferredVersion(playingItem)))
+                FilterLibrary(backgroundUpdate: true);
         }
     }
     private async void HostClick(object sender, RoutedEventArgs e) => await Guard(async () =>
