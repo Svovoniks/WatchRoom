@@ -75,7 +75,9 @@
     </Grid>
    </Grid>
   </Canvas>
-  <Grid Grid.Column="1" Grid.Row="1" Margin="28,6,28,16" x:Name="ContentArea">
+  <!-- No space at the bottom: a page that scrolls runs right up to the status bar, and keeps room below its last content
+       inside what scrolls. A page whose panels stand still keeps that room as their margin. -->
+  <Grid Grid.Column="1" Grid.Row="1" Margin="28,6,28,0" x:Name="ContentArea">
 
    <!-- Home -->
    <ScrollViewer x:Name="HomePage" Visibility="Collapsed" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled">
@@ -445,7 +447,7 @@
      <!-- The browsing guest's mouse, shown to the host while following them. -->
      <Canvas x:Name="GuestPointerLayer" IsHitTestVisible="False" ClipToBounds="True"><Grid x:Name="GuestPointer" Width="24" Height="24" Margin="-12,-12,0,0" Visibility="Collapsed" AutomationProperties.Name="Guest pointer"><Grid.RenderTransform><TranslateTransform x:Name="GuestPointerPosition"/></Grid.RenderTransform><Ellipse Fill="{DynamicResource Accent}" Opacity="0.3"/><Ellipse Stroke="{DynamicResource Accent}" StrokeThickness="2.5"/></Grid></Canvas></Grid>
     <!-- Several selected cards: what can be done to all of them at once. Ctrl+click or Shift+click selects, Esc clears. -->
-    <local:Stone x:Name="CardSelectionBar" Depth="Popup" Grid.Row="2" Visibility="Collapsed" Background="{DynamicResource Raised}" CornerRadius="16" Padding="16,6,8,6" Margin="0,10,8,0" AutomationProperties.Name="Selected titles">
+    <local:Stone x:Name="CardSelectionBar" Depth="Popup" Grid.Row="2" Visibility="Collapsed" Background="{DynamicResource Raised}" CornerRadius="16" Padding="16,6,8,6" Margin="0,10,8,16" AutomationProperties.Name="Selected titles">
      <DockPanel>
       <Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource QuietIcon}" Click="ClearCardSelectionClick" ToolTip="Clear selection (Esc)" AutomationProperties.Name="Clear selection" Width="32" Height="32" MinHeight="0" VerticalAlignment="Center"/>
       <TextBlock x:Name="CardSelectionCount" DockPanel.Dock="Left" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,16,0" AutomationProperties.LiveSetting="Polite"/>
@@ -463,7 +465,7 @@
 
    <!-- Title details -->
    <!-- The viewport reaches 8px left of the content so outlines pulled flush with the page edge are not clipped. -->
-   <ScrollViewer x:Name="Details" Visibility="Collapsed" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" Margin="-8,0,0,0"><Grid Margin="8,0,0,0">
+   <ScrollViewer x:Name="Details" Visibility="Collapsed" VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled" Margin="-8,0,0,0"><Grid Margin="8,0,0,24">
     <StackPanel MaxWidth="1100" Margin="0,0,8,0">
      <DockPanel Margin="-8,0,0,24"><Button DockPanel.Dock="Right" Content="{Binding Content, ElementName=BrowseWithGuestButton}" Visibility="{Binding Visibility, ElementName=BrowseWithGuestButton}" Click="BrowseWithGuest" Margin="12,0,0,0"/><ItemsControl x:Name="DetailBreadcrumbs" Button.Click="BreadcrumbClick" Style="{StaticResource LibraryBreadcrumbs}" AutomationProperties.Name="Video location"/></DockPanel>
      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -535,7 +537,7 @@
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
      <DockPanel Margin="0,0,0,20"><Button DockPanel.Dock="Right" Content="New queue" Click="CreateQueue" ContentTemplate="{StaticResource AddContent}" VerticalAlignment="Center" Style="{StaticResource HeaderCreate}" Margin="12,0,0,0"/><TextBlock x:Name="QueuesSubheading" Text="Line up movies and episodes to play back to back." Style="{StaticResource MutedText}" VerticalAlignment="Center"/></DockPanel>
      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="-6,0,0,0" Focusable="False">
-      <ItemsControl x:Name="QueueGallery" AutomationProperties.Name="Saved queues" Focusable="False">
+      <ItemsControl x:Name="QueueGallery" AutomationProperties.Name="Saved queues" Focusable="False" Margin="0,0,0,16">
        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
        <ItemsControl.ItemTemplate><DataTemplate>
         <Button Style="{StaticResource PosterCard}" Width="214" Height="Auto" Tag="{Binding}" Click="QueueCardClick" ContextMenuOpening="QueueCardContextMenu" ToolTip="{Binding Name}" AutomationProperties.Name="{Binding AccessibleName}"><Button.ContextMenu><ContextMenu/></Button.ContextMenu>
@@ -603,7 +605,7 @@
      </local:Stone>
 
      <Grid Grid.Row="1">
-      <ListBox x:Name="SavedQueueItems" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel" SelectionChanged="SavedQueueSelectionChanged" MouseDoubleClick="QueueItemDoubleClicked" PreviewKeyDown="QueueItemKeyDown" ContextMenuOpening="QueueItemContextMenu" AutomationProperties.Name="Queue videos" AutomationProperties.HelpText="Press Enter or double-click to play from a video. Ctrl+Up and Ctrl+Down move it, Delete removes it." Background="Transparent" BorderThickness="0" Padding="0" AllowDrop="True" PreviewMouseMove="QueueDragMove" PreviewDragOver="QueueDragOver" DragLeave="QueueDragLeave" PreviewDrop="QueueDrop" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
+      <ListBox x:Name="SavedQueueItems" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel" SelectionChanged="SavedQueueSelectionChanged" MouseDoubleClick="QueueItemDoubleClicked" PreviewKeyDown="QueueItemKeyDown" ContextMenuOpening="QueueItemContextMenu" AutomationProperties.Name="Queue videos" AutomationProperties.HelpText="Press Enter or double-click to play from a video. Ctrl+Up and Ctrl+Down move it, Delete removes it." Background="Transparent" BorderThickness="0" Padding="0" Margin="0,0,0,16" AllowDrop="True" PreviewMouseMove="QueueDragMove" PreviewDragOver="QueueDragOver" DragLeave="QueueDragLeave" PreviewDrop="QueueDrop" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
        <ListBox.ContextMenu><ContextMenu/></ListBox.ContextMenu>
        <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,2"/></Style></ListBox.ItemContainerStyle>
        <ListBox.ItemTemplate><DataTemplate><Grid Margin="6,6"><Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="34"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -633,7 +635,7 @@
      </Grid>
 
      <!-- Add videos: search the library and add without leaving the queue. -->
-     <local:Stone x:Name="QueueAddPanel" Depth="Slab" Grid.Column="1" Grid.Row="1" Margin="20,0,0,0" Background="{DynamicResource Surface}" CornerRadius="20" Padding="16,14,10,10" Visibility="Collapsed">
+     <local:Stone x:Name="QueueAddPanel" Depth="Slab" Grid.Column="1" Grid.Row="1" Margin="20,0,0,20" Background="{DynamicResource Surface}" CornerRadius="20" Padding="16,14,10,10" Visibility="Collapsed">
       <DockPanel>
        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12"><Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="12" Margin="0" Click="CloseQueueAdd" ToolTip="Done adding (Esc)" AutomationProperties.Name="Close Add videos"/><TextBlock Text="Add videos" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
        <Border DockPanel.Dock="Top" Background="{DynamicResource Well}" BorderThickness="1" CornerRadius="14" Padding="12,0,8,0" Height="40" Margin="0,0,6,10" Cursor="IBeam">
@@ -1121,7 +1123,7 @@
        </ListBox>
       </local:ThreadBar>
       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-       <Grid x:Name="SavedRoomDetails" Margin="0,0,0,4">
+       <Grid x:Name="SavedRoomDetails" Margin="0,0,0,20">
         <Grid.ColumnDefinitions><ColumnDefinition Width="11*" MinWidth="280"/><ColumnDefinition Width="12"/><ColumnDefinition Width="10*" MinWidth="220"/><ColumnDefinition Width="12"/><ColumnDefinition Width="10*" MinWidth="220"/></Grid.ColumnDefinitions>
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <!-- The room: its state, the invitation, and what it watched last. -->

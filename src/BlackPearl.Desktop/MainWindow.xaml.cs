@@ -2104,7 +2104,7 @@ public partial class MainWindow : Window
         Rail.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
         RailWidth.Width = new GridLength(inPlayer ? 0 : RailColumnWidth);
         // The page's title (PageTitle) sits in the caption row above, so the page starts just under it.
-        ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(28, 14, 28, 16);
+        ContentArea.Margin = inPlayer ? new Thickness(0) : new Thickness(28, 14, 28, 0);
         AppStatusBar.Visibility = inPlayer ? Visibility.Collapsed : Visibility.Visible;
         StatusRow.Height = new GridLength(inPlayer ? 0 : 30);
         // The player shrinks well below the library's minimum size; leaving it brings that minimum back.
