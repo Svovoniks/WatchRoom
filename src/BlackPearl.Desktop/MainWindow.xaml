@@ -95,8 +95,7 @@
       </DataTrigger></Style.Triggers>
      </Style>
      <!-- Accent outline that fades in over hovered artwork; drawn inside the frame so its corners match the clip. -->
-     <!-- Artwork that is pointed at lifts rather than gaining an outline, so this ring no longer shows. -->
-     <Style x:Key="HoverRing" TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Setter Property="IsHitTestVisible" Value="False"/></Style>
+
      <Style x:Key="CardBack" TargetType="Border">
       <Setter Property="Width" Value="128"/><Setter Property="Height" Value="190"/><Setter Property="CornerRadius" Value="11"/><Setter Property="BorderThickness" Value="1"/>
       <Setter Property="BorderBrush" Value="{DynamicResource AccentEdge}"/><Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
@@ -117,7 +116,7 @@
       <Button Click="OpenHomeCard" Loaded="HomeItemLoaded" Style="{StaticResource HomeTile}" Width="140" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}">
        <StackPanel>
         <local:Stone Height="210" Style="{StaticResource HomeArtwork}"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
-         <Grid><TextBlock Text="{Binding DisplayTitle}" Margin="12" FontSize="15" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/><Border Style="{StaticResource HoverRing}" CornerRadius="9"/></Grid>
+         <Grid><TextBlock Text="{Binding DisplayTitle}" Margin="12" FontSize="15" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/></Grid>
         </local:Stone>
         <TextBlock Text="{Binding DisplayTitle}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="2,9,2,1"/>
         <TextBlock Text="{Binding HomeDetail}" FontSize="11.5" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis" Margin="2,0"/>
@@ -148,7 +147,7 @@
              <Image Source="{Binding Poster, Converter={StaticResource DetailBackdrop}}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="LowQuality"/>
              <Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Width="250" HorizontalAlignment="Right" Loaded="HomeArtworkLoaded"/>
              <Rectangle Fill="{DynamicResource HeroFade}"/>
-             <Border Style="{StaticResource HoverRing}" CornerRadius="11"/>
+             
              <DockPanel Margin="18,16,18,16">
               <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal">
                <Button Content="Play" Click="PlayHomeCard" Style="{StaticResource Primary}" ContentTemplate="{StaticResource PlayContent}" Padding="14,0" MinHeight="32" Height="32" Margin="0,0,6,0" AutomationProperties.Name="{Binding DisplayTitle, StringFormat=Play {0}}"/>
@@ -245,7 +244,7 @@
           <Grid Width="128" Height="190" VerticalAlignment="Top" RenderTransformOrigin="0.5,1"><Grid.RenderTransform><TransformGroup><RotateTransform x:Name="MysteryRightTilt" Angle="11"/><TranslateTransform x:Name="MysteryRightShift" X="78" Y="8"/></TransformGroup></Grid.RenderTransform><Image Source="{x:Static local:SoftShadow.Card}" Margin="-30" IsHitTestVisible="False"/><Border Style="{StaticResource CardBack}"><Grid><Border CornerRadius="10" Background="{DynamicResource CardStripes}"/><TextBlock Text="?" FontSize="46" FontWeight="Bold" Foreground="{DynamicResource Accent}" Opacity="0.55" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Border></Grid>
           <Button x:Name="HomeMysteryCard" Click="OpenHomeCard" Style="{StaticResource HomeTile}" Width="128" Height="190" Margin="0" VerticalContentAlignment="Stretch" VerticalAlignment="Top" AutomationProperties.Name="{Binding DisplayTitle, StringFormat=Mystery pick: {0}}">
            <local:Stone Style="{StaticResource HomeArtwork}" CornerRadius="11" local:RoundedClip.Radius="11"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
-            <Grid><TextBlock Text="{Binding DisplayTitle}" Margin="12" FontSize="15" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/><Border Style="{StaticResource HoverRing}" CornerRadius="10"/></Grid>
+            <Grid><TextBlock Text="{Binding DisplayTitle}" Margin="12" FontSize="15" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/></Grid>
            </local:Stone>
           </Button>
          </Grid>
@@ -1005,7 +1004,7 @@
        <Style x:Key="ThemeChoice" TargetType="RadioButton">
         <Setter Property="Width" Value="156"/><Setter Property="Margin" Value="0,0,10,10"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
-         <local:StoneHost><local:Stone x:Name="Frame" Depth="Chip" Background="{DynamicResource PebbleFill}" CornerRadius="14" Padding="9"><ContentPresenter/></local:Stone><Border x:Name="Ring" BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="14" Visibility="Collapsed" IsHitTestVisible="False"/></local:StoneHost>
+         <local:StoneHost><local:Stone x:Name="Frame" Depth="Chip" Background="{DynamicResource PebbleFill}" CornerRadius="14" Padding="9"><ContentPresenter/></local:Stone></local:StoneHost>
          <ControlTemplate.Triggers>
           <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="Background" Value="{DynamicResource Hover}"/></Trigger>
           <Trigger Property="IsChecked" Value="True"><Setter TargetName="Frame" Property="Background" Value="{DynamicResource AccentSoft}"/></Trigger>
@@ -1216,7 +1215,7 @@
       <vlc:VideoView x:Name="Video">
        <!-- A nonzero alpha keeps the native overlay hit-testable over the video. -->
        <Grid x:Name="PlayerOverlay" Background="#01000000" Focusable="True" PreviewMouseLeftButtonDown="PlayerOverlayPressed" MouseMove="PlayerMouseMoved" MouseLeftButtonDown="VideoClicked" MouseLeave="PlayerMouseLeft" MouseWheel="VideoWheel" PreviewKeyDown="KeyPressed" PreviewKeyUp="KeyReleased">
-        <Border x:Name="PlayerEmpty" Background="#0B0B0E"><Viewbox x:Name="PlayerEmptyContent" Stretch="Uniform" StretchDirection="DownOnly" Margin="16,72,16,128"><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"><Border Width="76" Height="76" CornerRadius="38" Background="{DynamicResource AccentSoft}" HorizontalAlignment="Center"><TextBlock Text="&#xF5B0;" FontFamily="{StaticResource IconFont}" FontSize="28" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0,0,0"/></Border><TextBlock Text="Choose a video to play" FontSize="21" FontWeight="SemiBold" Foreground="#F4F4F7" HorizontalAlignment="Center" Margin="0,20,0,20"/><Button Content="Browse library" Tag="Library" Click="Navigate" Style="{StaticResource PlayerButton}" HorizontalAlignment="Center" Margin="0"/></StackPanel></Viewbox></Border>
+        <Border x:Name="PlayerEmpty" Background="#0B0B0E"><Viewbox x:Name="PlayerEmptyContent" Stretch="Uniform" StretchDirection="DownOnly" Margin="16,72,16,128"><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"><Border Width="76" Height="76" CornerRadius="38" Background="{DynamicResource PlayerAccentSoft}" HorizontalAlignment="Center"><TextBlock Text="&#xF5B0;" FontFamily="{StaticResource IconFont}" FontSize="28" Foreground="{DynamicResource PlayerAccent}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="4,0,0,0"/></Border><TextBlock Text="Choose a video to play" FontSize="21" FontWeight="SemiBold" Foreground="#F4F4F7" HorizontalAlignment="Center" Margin="0,20,0,20"/><Button Content="Browse library" Tag="Library" Click="Navigate" Style="{StaticResource PlayerButton}" HorizontalAlignment="Center" Margin="0"/></StackPanel></Viewbox></Border>
         <!-- Audio has no picture, so the player shows the track's artwork and names while music plays; see MusicPlayback. -->
         <Grid x:Name="AudioPlayback" Visibility="Collapsed" Background="#0B0B0E" IsHitTestVisible="False" ClipToBounds="True">
          <Image x:Name="AudioBackdrop" Stretch="UniformToFill" Opacity="0.45" Margin="-80"><Image.Effect><BlurEffect Radius="70" RenderingBias="Performance"/></Image.Effect></Image>

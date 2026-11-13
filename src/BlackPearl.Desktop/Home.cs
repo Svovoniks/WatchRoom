@@ -182,6 +182,7 @@ public partial class MainWindow
         homeStripExpanded = !homeStripExpanded;
         HomeStrip.BeginAnimation(HeightProperty, null);
         if (!SystemParameters.ClientAreaAnimation || !HomeStrip.IsLoaded) { RenderHomeStrip(); return; }
+        // Clipped while its height animates, then let go, so the pebbles' shadows are not cut off once it settles.
         HomeStrip.ClipToBounds = true;
         var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
         if (homeStripExpanded)
@@ -189,14 +190,14 @@ public partial class MainWindow
             homeStripCollapsedHeight = from;
             RenderHomeStrip(); HomeStrip.UpdateLayout();
             var grow = new DoubleAnimation(from, HomeStrip.ActualHeight, TimeSpan.FromMilliseconds(340)) { EasingFunction = ease };
-            grow.Completed += (_, _) => { if (homeStripExpanded) HomeStrip.BeginAnimation(HeightProperty, null); };
+            grow.Completed += (_, _) => { if (homeStripExpanded) { HomeStrip.BeginAnimation(HeightProperty, null); HomeStrip.ClipToBounds = false; } };
             HomeStrip.BeginAnimation(HeightProperty, grow);
         }
         else
         {
             HomeStripMore.Content = $"All {homeContinueAll.Length}";
             var shrink = new DoubleAnimation(from, homeStripCollapsedHeight > 0 ? homeStripCollapsedHeight : from, TimeSpan.FromMilliseconds(300)) { EasingFunction = ease };
-            shrink.Completed += (_, _) => { if (homeStripExpanded) return; RenderHomeStrip(); HomeStrip.BeginAnimation(HeightProperty, null); };
+            shrink.Completed += (_, _) => { if (homeStripExpanded) return; RenderHomeStrip(); HomeStrip.BeginAnimation(HeightProperty, null); HomeStrip.ClipToBounds = false; };
             HomeStrip.BeginAnimation(HeightProperty, shrink);
         }
     }

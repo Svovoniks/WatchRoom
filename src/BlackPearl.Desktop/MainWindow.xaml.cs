@@ -2342,12 +2342,15 @@ public partial class MainWindow : Window
         var fadeLeft = new LinearGradientBrush(canvas, Alpha(canvas, 0), 0); fadeLeft.Freeze(); resources["EdgeFadeLeft"] = fadeLeft;
         var fadeRight = new LinearGradientBrush(Alpha(canvas, 0), canvas, 0); fadeRight.Freeze(); resources["EdgeFadeRight"] = fadeRight;
         ApplyStoneTheme(resources, colors, light);
-        Stone.SetLight(this, light);
         // The player stays dark in both modes and uses the theme's dark accent.
         var player = palette.Colors(light: false); var playerAccent = player[6];
         resources["PlayerAccent"] = Solid(playerAccent); resources["PlayerAccentInk"] = Solid(player[7]); resources["PlayerAccentSoft"] = Solid(player[9]);
         resources["PlayerAccentTint"] = Solid(Alpha(playerAccent, 0x38)); resources["PlayerAccentEdge"] = Solid(Alpha(playerAccent, 0x73));
         RoomPage.Resources["Accent"] = resources["PlayerAccent"]; RoomPage.Resources["AccentInk"] = resources["PlayerAccentInk"]; RoomPage.Resources["AccentSoft"] = resources["PlayerAccentSoft"];
+        // The player keeps its own dark colours, so its pebbles, wells and menus are built from those, in dark mode, rather
+        // than taking the page's: in light mode they would be chalk with the player's near-white text on them.
+        var roomColors = ThemePalette.Keys.Select((key, i) => RoomPage.Resources[key] is SolidColorBrush brush ? brush.Color : player[i]).ToArray();
+        ApplyStoneTheme(RoomPage.Resources, roomColors, light: false);
         UpdateThemeChoices();
         ApplyTitleBarTheme();
     }
@@ -2386,7 +2389,7 @@ public partial class MainWindow : Window
         var lit = new LinearGradientBrush(Alpha(accent, light ? (byte)0x14 : (byte)0x1F), Alpha(accent, 0), 90); lit.Freeze(); resources["WellLit"] = lit;
         // Focus: a crisp accent ring with a soft halo of the same light around it.
         resources["AccentRing"] = Solid(Alpha(accent, 0xA6)); resources["AccentHalo"] = Solid(Alpha(accent, 0x29));
-        Stone.LightTheme = light;
+        resources["StoneLight"] = light;
     }
     protected override void OnSourceInitialized(EventArgs e)
     {

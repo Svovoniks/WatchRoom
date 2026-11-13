@@ -29,19 +29,19 @@ public class Stone : Border
     /// <summary>A stone over video or artwork, which stay dark in either mode: the player's menus and the badges on posters.</summary>
     public bool AlwaysDark { get => (bool)GetValue(AlwaysDarkProperty); set => SetValue(AlwaysDarkProperty, value); }
 
-    // Light mode: a lighter shadow and a brighter top highlight. ApplyTheme sets it on each window; the value is inherited.
-    public static readonly DependencyProperty LightProperty = DependencyProperty.RegisterAttached("Light", typeof(bool), typeof(Stone),
-        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.Inherits | FrameworkPropertyMetadataOptions.AffectsRender));
-    public static bool GetLight(DependencyObject element) => (bool)element.GetValue(LightProperty);
-    public static void SetLight(DependencyObject element, bool value) => element.SetValue(LightProperty, value);
+    // Light mode: a lighter shadow and a brighter top highlight. Each stone takes it from the StoneLight resource, which the
+    // theme sets and the player's resources keep false, so a stone in the player (always dark) or in one of its own windows,
+    // which a value inherited down the window's tree would not reach, still draws for a dark page.
+    public static readonly DependencyProperty LightProperty = DependencyProperty.Register(nameof(Light), typeof(bool), typeof(Stone),
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+    public bool Light { get => (bool)GetValue(LightProperty); set => SetValue(LightProperty, value); }
 
-    // The theme's mode, for stones whose window has not been told (popups, tooltips and dialogs opened before the switch).
-    public static bool LightTheme { get; set; }
+    public Stone() => SetResourceReference(LightProperty, "StoneLight");
 
     protected override void OnRender(DrawingContext dc)
     {
         var size = RenderSize; var filled = Background is not null and not SolidColorBrush { Color.A: 0 };
-        _ = GetLight(this); var light = LightTheme && !AlwaysDark; // the inherited value only makes a theme switch redraw the stone
+        var light = Light && !AlwaysDark;
         var radius = Math.Max(0, Math.Min(CornerRadius.TopLeft, Math.Min(size.Width, size.Height) / 2));
         if (filled && Depth != StoneDepth.None && size.Width >= 1 && size.Height >= 1)
         {

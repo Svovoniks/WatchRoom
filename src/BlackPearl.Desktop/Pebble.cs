@@ -36,3 +36,11 @@ public sealed class CornerRadiusConverter : IValueConverter
     }
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
 }
+
+// Visible for a brush that fills something, collapsed for none or a clear one: a list given no background is no well.
+public sealed class FillVisibilityConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is null or System.Windows.Media.SolidColorBrush { Color.A: 0 } ? Visibility.Collapsed : Visibility.Visible;
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
+}
