@@ -60,6 +60,26 @@ static class WantedLibraryChecks
             "wanted titles appear under Missing, dimmed with a dashed edge and a Missing or Upcoming badge");
         check(cards.All(c => c.Card.Status is not null), "the Missing category lists only titles with something missing or upcoming");
 
+        // Opening a title from Missing stays under Missing, and lists only what is missing at every depth.
+        object? Field(string name) => typeof(MainWindow).GetField(name, flags)!.GetValue(window);
+        void Open(LibraryCardView view) => Call("SelectMovie", new Button { Tag = view.Card }, new RoutedEventArgs());
+        Open(showCard!);
+        Until(() => cards.Count > 0 && cards.All(c => c.Card.Level == "season"));
+        check((int)Field("libraryCategory")! == 5 && (string?)Field("browseSeries") == show.Id && cards.Select(c => c.Card.Season).SequenceEqual(new int?[] { 1, 2 }) && cards.All(c => c.Card.Status is not null),
+            "a show opened from Missing stays under Missing and lists its seasons with something missing");
+        Open(cards.Single(c => c.Card.Season == 1));
+        Until(() => cards.Count > 0 && cards.All(c => c.Card.Level == "episode"));
+        check((int)Field("libraryCategory")! == 5 && cards.Count == 3 && cards.All(c => c.Card.Media.IsVirtual && c.EpisodeStatus == "Missing"),
+            "a season opened from Missing lists the episodes still to get");
+        var crumbs = (IReadOnlyList<LibraryBreadcrumb>)Field("breadcrumbItems")!;
+        check(crumbs.Count == 3 && crumbs[0] is { Label: "Missing", Category: 5 } && crumbs.Skip(1).All(c => c.Category == 5), "the trail inside a missing show starts at Missing");
+        Open(cards[0]);
+        crumbs = (IReadOnlyList<LibraryBreadcrumb>)Field("breadcrumbItems")!;
+        check((int)Field("libraryCategory")! == 5 && crumbs[0] is { Label: "Missing", Category: 5 }, "a missing episode opened from Missing keeps Missing in its trail");
+        Call("NavigateLibrary", 5, show.Id, "Show", 2);
+        Until(() => cards.Count > 0 && cards.All(c => c.Card.Level == "episode" && c.Card.Season == 2));
+        check(cards.Count == 1 && cards[0].EpisodeStatus == "Upcoming", "a season that has not aired lists its upcoming episodes under Missing");
+
         Call("NavigateLibrary", 2, show.Id, "Show", null);
         var panel = (ContentControl)window.FindName("WantedLibraryPanel");
         Until(() => panel.Visibility == Visibility.Visible);
