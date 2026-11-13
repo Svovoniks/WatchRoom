@@ -281,6 +281,14 @@ static class ScreenRender
             await CaptureDialogs(store, wanted, movie);
         }
         Set("light", false); Call("ApplyTheme");
-        await SurfaceAudit.Run(window, Settle, (name, finding) => Console.WriteLine($"CLIPPED {name}: {finding}"));
+        // Surfaces outside the main window (the player's overlay, its menus, dropdowns and dialogs), saved as they are audited.
+        var surfaces = new Dictionary<string, int>();
+        await SurfaceAudit.Run(window, Settle, (name, finding) => Console.WriteLine($"CLIPPED {name}: {finding}"), (name, root) =>
+        {
+            var count = surfaces[name] = surfaces.GetValueOrDefault(name) + 1;
+            var bitmap = Picture(root); bitmap.Render(root);
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using var file = File.Create(Path.Combine(output, $"surface-{name}{(count > 1 ? "-" + count : "")}.png")); encoder.Save(file);
+        });
     }
 }

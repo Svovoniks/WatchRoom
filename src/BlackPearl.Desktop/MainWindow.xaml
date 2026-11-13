@@ -86,50 +86,39 @@
       <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="VerticalContentAlignment" Value="Top"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/></ControlTemplate></Setter.Value></Setter>
      </Style>
-     <Style x:Key="HomeArtwork" TargetType="Border">
-      <Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="CornerRadius" Value="10"/><Setter Property="local:RoundedClip.Radius" Value="10"/>
-      <Setter Property="BorderThickness" Value="1"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+     <Style x:Key="HomeArtwork" TargetType="local:Stone">
+      <Setter Property="Depth" Value="Poster"/><Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="CornerRadius" Value="12"/><Setter Property="local:RoundedClip.Radius" Value="12"/>
       <!-- Each frame declares its own TranslateTransform: a transform shared through a style setter is frozen and cannot animate. -->
-      <Style.Triggers><DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True">
+      <Style.Triggers><DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True"><Setter Property="Depth" Value="Lifted"/>
        <DataTrigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="-6" Duration="0:0:0.22"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation></Storyboard></BeginStoryboard></DataTrigger.EnterActions>
        <DataTrigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" To="0" Duration="0:0:0.3"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation></Storyboard></BeginStoryboard></DataTrigger.ExitActions>
       </DataTrigger></Style.Triggers>
      </Style>
      <!-- Accent outline that fades in over hovered artwork; drawn inside the frame so its corners match the clip. -->
-     <Style x:Key="HoverRing" TargetType="Border">
-      <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/><Setter Property="BorderThickness" Value="2"/><Setter Property="Opacity" Value="0"/><Setter Property="IsHitTestVisible" Value="False"/>
-      <!-- Hidden while idle, so dozens of transparent outlines cost nothing to repaint while scrolling. -->
-      <Setter Property="Visibility" Value="Hidden"/>
-      <Style.Triggers><DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True">
-       <DataTrigger.EnterActions><BeginStoryboard><Storyboard><ObjectAnimationUsingKeyFrames Storyboard.TargetProperty="Visibility"><DiscreteObjectKeyFrame KeyTime="0" Value="{x:Static Visibility.Visible}"/></ObjectAnimationUsingKeyFrames><DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.18"/></Storyboard></BeginStoryboard></DataTrigger.EnterActions>
-       <DataTrigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.28"/><ObjectAnimationUsingKeyFrames Storyboard.TargetProperty="Visibility"><DiscreteObjectKeyFrame KeyTime="0:0:0.28" Value="{x:Static Visibility.Hidden}"/></ObjectAnimationUsingKeyFrames></Storyboard></BeginStoryboard></DataTrigger.ExitActions>
-      </DataTrigger></Style.Triggers>
-     </Style>
+     <!-- Artwork that is pointed at lifts rather than gaining an outline, so this ring no longer shows. -->
+     <Style x:Key="HoverRing" TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Setter Property="IsHitTestVisible" Value="False"/></Style>
      <Style x:Key="CardBack" TargetType="Border">
       <Setter Property="Width" Value="128"/><Setter Property="Height" Value="190"/><Setter Property="CornerRadius" Value="11"/><Setter Property="BorderThickness" Value="1"/>
       <Setter Property="BorderBrush" Value="{DynamicResource AccentEdge}"/><Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
      </Style>
+     <!-- Each title not finished is a Resume pebble: how far it has been watched lights the stone, as on the hero's Resume. -->
      <DataTemplate x:Key="HomePill">
-      <Button Click="OpenHomeCard" Loaded="HomeItemLoaded" Style="{StaticResource HomeTile}" Margin="0,0,8,8" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}">
-       <Border x:Name="PillFrame" Background="{DynamicResource Elevated}" CornerRadius="9" Padding="6">
-        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="36"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-         <Border Width="36" Height="52" CornerRadius="5" local:RoundedClip.Radius="5" Background="{DynamicResource Line}"><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/></Border>
-         <StackPanel Grid.Column="1" Margin="10,0,4,0" VerticalAlignment="Center">
-          <TextBlock Text="{Binding HomeTitle}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-          <TextBlock Text="{Binding HomeDetail}" FontSize="11.5" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
-          <ProgressBar Height="3" Value="{Binding Progress, Mode=OneWay}" Maximum="100" Margin="0,7,0,0" Style="{StaticResource CardProgress}"/>
-         </StackPanel>
-        </Grid>
-       </Border>
+      <Button Click="OpenHomeCard" Loaded="HomeItemLoaded" Tag="{Binding Progress, Mode=OneWay}" Padding="6,6,12,6" Margin="0,0,12,12" MinHeight="0" HorizontalContentAlignment="Stretch" FontWeight="Normal" local:Pebble.Radius="14" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}">
+       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="36"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <Border Width="36" Height="52" CornerRadius="8" local:RoundedClip.Radius="8" Background="{DynamicResource Well}"><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/></Border>
+        <StackPanel Grid.Column="1" Margin="10,0,4,0" VerticalAlignment="Center">
+         <TextBlock Text="{Binding HomeTitle}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+         <TextBlock Text="{Binding HomeDetail}" FontSize="11.5" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
+        </StackPanel>
+       </Grid>
       </Button>
-      <DataTemplate.Triggers><DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=Button}}" Value="True"><Setter TargetName="PillFrame" Property="Background" Value="{DynamicResource Hover}"/></DataTrigger></DataTemplate.Triggers>
      </DataTemplate>
      <DataTemplate x:Key="HomeTilePoster">
       <Button Click="OpenHomeCard" Loaded="HomeItemLoaded" Style="{StaticResource HomeTile}" Width="140" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}">
        <StackPanel>
-        <Border Height="210" Style="{StaticResource HomeArtwork}"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+        <local:Stone Height="210" Style="{StaticResource HomeArtwork}"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
          <Grid><TextBlock Text="{Binding DisplayTitle}" Margin="12" FontSize="15" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/><Border Style="{StaticResource HoverRing}" CornerRadius="9"/></Grid>
-        </Border>
+        </local:Stone>
         <TextBlock Text="{Binding DisplayTitle}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="2,9,2,1"/>
         <TextBlock Text="{Binding HomeDetail}" FontSize="11.5" Foreground="{DynamicResource Muted}" TextTrimming="CharacterEllipsis" Margin="2,0"/>
        </StackPanel>
@@ -137,7 +126,7 @@
      </DataTemplate>
      <!-- One category of recommendations: a wide spotlight title, then posters. -->
      <DataTemplate x:Key="HomeRowTemplate">
-      <Grid Margin="0,0,0,30" Visibility="{Binding Visibility}">
+      <Grid Margin="0,0,0,8" Visibility="{Binding Visibility}">
        <!-- A brush, not an Image: an Image would size the row from its own aspect ratio. -->
        <!-- One pre-faded image whose edges melt into the next row; layered gradients would repaint on every scroll frame. -->
        <Canvas IsHitTestVisible="False"><Image Source="{Binding Spotlight.Poster, Converter={StaticResource RowBackdrop}}" Width="720" Height="380" Stretch="Fill" Canvas.Top="-40" RenderOptions.BitmapScalingMode="LowQuality"/></Canvas>
@@ -150,10 +139,11 @@
          <TextBlock Text="{Binding Label}" FontSize="19" FontWeight="SemiBold" VerticalAlignment="Bottom"/>
          <TextBlock Text="{Binding CountText}" Foreground="{DynamicResource Muted}" FontSize="12" Margin="10,0,0,3" VerticalAlignment="Bottom"/>
         </DockPanel>
-        <local:HorizontalScroller Padding="0,6,0,4" ArrowCenter="111">
+        <!-- Room above for artwork that lifts when pointed at, and below for its shadow, which the scroller would cut off. -->
+        <local:HorizontalScroller Padding="0,10,0,26" ArrowCenter="115">
          <StackPanel Orientation="Horizontal">
           <Button Click="OpenHomeCard" DataContext="{Binding Spotlight}" DataContextChanged="HomeSpotlightChanged" Loaded="HomeItemLoaded" Style="{StaticResource HomeTile}" Width="400" Height="210" VerticalAlignment="Top" VerticalContentAlignment="Stretch" Margin="0,0,16,0" ToolTip="{Binding DisplayTitle}" AutomationProperties.Name="{Binding DisplayTitle}">
-           <Border Style="{StaticResource HomeArtwork}" CornerRadius="12" local:RoundedClip.Radius="12"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+           <local:Stone Style="{StaticResource HomeArtwork}" CornerRadius="12" local:RoundedClip.Radius="12"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
             <Grid>
              <Image Source="{Binding Poster, Converter={StaticResource DetailBackdrop}}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="LowQuality"/>
              <Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Width="250" HorizontalAlignment="Right" Loaded="HomeArtworkLoaded"/>
@@ -172,7 +162,7 @@
               </StackPanel>
              </DockPanel>
             </Grid>
-           </Border>
+           </local:Stone>
           </Button>
           <ItemsControl ItemsSource="{Binding Tiles}" ItemTemplate="{StaticResource HomeTilePoster}" AutomationProperties.Name="{Binding Label}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel></ItemsControl>
          </StackPanel>
@@ -185,7 +175,7 @@
      <TextBlock x:Name="HomeStatus" TextWrapping="Wrap" Margin="0,0,0,14" AutomationProperties.LiveSetting="Polite"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
 
      <!-- Hero: the title watched most recently, ready to resume. -->
-     <Border x:Name="HomeHero" Height="340" CornerRadius="14" local:RoundedClip.Radius="14" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" Margin="0,0,0,16" Visibility="Collapsed">
+     <local:Stone x:Name="HomeHero" Depth="Slab" Height="340" CornerRadius="20" local:RoundedClip.Radius="20" Background="{DynamicResource Surface}" Margin="0,0,0,22" Visibility="Collapsed">
       <Grid>
        <Image Source="{Binding Poster, Converter={StaticResource DetailBackdrop}}" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="LowQuality"/>
        <Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" HorizontalAlignment="Right" Width="620" Loaded="HomeArtworkLoaded"/>
@@ -207,22 +197,22 @@
         </StackPanel>
        </StackPanel>
       </Grid>
-     </Border>
+     </local:Stone>
      <StackPanel x:Name="HomeIntro" Margin="0,0,0,22">
       <TextBlock x:Name="HomeContinueEmpty" Text="Your unfinished movies and shows will appear here once you start watching." Style="{StaticResource MutedText}"/>
      </StackPanel>
 
      <!-- Everything else in progress, newest first. -->
-     <Border x:Name="HomeStrip" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="12" Padding="10,8,4,0" Margin="0,0,0,18" SizeChanged="HomeStripResized">
+     <Border x:Name="HomeStrip" Padding="0,4,0,8" Margin="0,0,0,18" SizeChanged="HomeStripResized">
       <DockPanel>
-       <StackPanel DockPanel.Dock="Left" Width="104" Margin="6,0,0,8" VerticalAlignment="Center"><TextBlock Text="Not finished" FontSize="13" FontWeight="SemiBold"/><TextBlock x:Name="HomeStripCount" FontSize="11.5" Foreground="{DynamicResource Muted}"/></StackPanel>
+       <StackPanel DockPanel.Dock="Left" Width="104" Margin="2,0,0,12" VerticalAlignment="Center"><TextBlock Text="Not finished" FontSize="13" FontWeight="SemiBold"/><TextBlock x:Name="HomeStripCount" FontSize="11.5" Foreground="{DynamicResource Muted}"/></StackPanel>
        <Button x:Name="HomeStripMore" DockPanel.Dock="Right" Click="ToggleHomeStrip" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Accent}" Padding="10,4" MinHeight="0" Margin="4,0,4,8" VerticalAlignment="Center"/>
        <ItemsControl x:Name="HomeContinue" ItemTemplate="{StaticResource HomePill}" AutomationProperties.Name="Not finished"><ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="{Binding Tag, ElementName=HomeStrip}"/></ItemsPanelTemplate></ItemsControl.ItemsPanel></ItemsControl>
       </DockPanel>
      </Border>
 
      <!-- Mystery deck: filter, then play the drawn card or draw another. -->
-     <Border x:Name="HomeMysteryPanel" CornerRadius="14" BorderThickness="1" BorderBrush="{DynamicResource AccentEdge}" Background="{DynamicResource Surface}" Margin="0,0,0,34" ClipToBounds="True">
+     <local:Stone x:Name="HomeMysteryPanel" Depth="Slab" CornerRadius="20" local:RoundedClip.Radius="20" Background="{DynamicResource Surface}" Margin="0,0,0,34">
       <Grid>
        <Rectangle IsHitTestVisible="False"><Rectangle.Fill><RadialGradientBrush Center="0.82,0.5" GradientOrigin="0.82,0.5" RadiusX="0.4" RadiusY="0.8" Opacity="0.22"><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="{DynamicResource AccentClear}" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
        <Grid Margin="30,26,40,24"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions>
@@ -254,9 +244,9 @@
           <Grid Width="128" Height="190" VerticalAlignment="Top" RenderTransformOrigin="0.5,1"><Grid.RenderTransform><TransformGroup><RotateTransform x:Name="MysteryLeftTilt" Angle="-11"/><TranslateTransform x:Name="MysteryLeftShift" X="-78" Y="8"/></TransformGroup></Grid.RenderTransform><Image Source="{x:Static local:SoftShadow.Card}" Margin="-30" IsHitTestVisible="False"/><Border Style="{StaticResource CardBack}"><Grid><Border CornerRadius="10" Background="{DynamicResource CardStripes}"/><TextBlock Text="?" FontSize="46" FontWeight="Bold" Foreground="{DynamicResource Accent}" Opacity="0.55" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Border></Grid>
           <Grid Width="128" Height="190" VerticalAlignment="Top" RenderTransformOrigin="0.5,1"><Grid.RenderTransform><TransformGroup><RotateTransform x:Name="MysteryRightTilt" Angle="11"/><TranslateTransform x:Name="MysteryRightShift" X="78" Y="8"/></TransformGroup></Grid.RenderTransform><Image Source="{x:Static local:SoftShadow.Card}" Margin="-30" IsHitTestVisible="False"/><Border Style="{StaticResource CardBack}"><Grid><Border CornerRadius="10" Background="{DynamicResource CardStripes}"/><TextBlock Text="?" FontSize="46" FontWeight="Bold" Foreground="{DynamicResource Accent}" Opacity="0.55" HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid></Border></Grid>
           <Button x:Name="HomeMysteryCard" Click="OpenHomeCard" Style="{StaticResource HomeTile}" Width="128" Height="190" Margin="0" VerticalContentAlignment="Stretch" VerticalAlignment="Top" AutomationProperties.Name="{Binding DisplayTitle, StringFormat=Mystery pick: {0}}">
-           <Border Style="{StaticResource HomeArtwork}" CornerRadius="11" local:RoundedClip.Radius="11"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+           <local:Stone Style="{StaticResource HomeArtwork}" CornerRadius="11" local:RoundedClip.Radius="11"><Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
             <Grid><TextBlock Text="{Binding DisplayTitle}" Margin="12" FontSize="15" TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/><Image Source="{Binding Poster, NotifyOnTargetUpdated=True}" TargetUpdated="HomeArtworkUpdated" Stretch="UniformToFill" Loaded="HomeArtworkLoaded"/><Border Style="{StaticResource HoverRing}" CornerRadius="10"/></Grid>
-           </Border>
+           </local:Stone>
           </Button>
          </Grid>
          <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Center">
@@ -266,7 +256,7 @@
         </Grid>
        </Grid>
       </Grid>
-     </Border>
+     </local:Stone>
 
      <DockPanel Margin="0,0,0,16"><TextBlock DockPanel.Dock="Right" Text="From your library, not started yet" FontSize="12" Foreground="{DynamicResource Muted}" VerticalAlignment="Bottom" Margin="0,0,0,3"/><TextBlock Text="Recommended for you" FontSize="22" FontWeight="SemiBold"/></DockPanel>
      <TextBlock x:Name="HomeSuggestionsEmpty" Text="Everything here has been started. Try a mystery pick or browse your library." Style="{StaticResource MutedText}" Margin="0,0,0,16"/>
@@ -283,15 +273,15 @@
      </Border>
      <!-- Search: the library's grid under a search field and filters, in place of a category's breadcrumbs. -->
      <StackPanel x:Name="SearchHeader" Visibility="Collapsed" Margin="0,0,0,8">
-      <Border x:Name="SearchFrame" Height="44" MouseLeftButtonDown="SearchFrameClick" Background="{DynamicResource Surface}" BorderThickness="1" CornerRadius="10" Padding="14,0,8,0" HorizontalAlignment="Stretch" Cursor="IBeam">
-       <Border.Style><Style TargetType="Border"><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger></Style.Triggers></Style></Border.Style>
+      <Border x:Name="SearchFrame" Height="46" MouseLeftButtonDown="SearchFrameClick" Background="{DynamicResource Well}" BorderThickness="1" CornerRadius="16" Padding="14,0,8,0" HorizontalAlignment="Stretch" Cursor="IBeam">
+       <Border.Style><Style TargetType="Border"><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource WellHover}"/></Trigger><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentRing}"/><Setter Property="Background" Value="{DynamicResource WellLit}"/></Trigger></Style.Triggers></Style></Border.Style>
        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/></Grid.ColumnDefinitions>
         <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Muted}" Margin="0,0,12,0" IsHitTestVisible="False"/>
         <TextBox x:Name="SearchBox" Grid.Column="1" MinHeight="0" TextChanged="SearchChanged" ToolTip="Search your library (Ctrl+F)" AutomationProperties.Name="Search library" VerticalContentAlignment="Center" Margin="0" Padding="0" Background="Transparent" BorderThickness="0">
          <TextBox.Template><ControlTemplate TargetType="TextBox"><Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center"/></Border></ControlTemplate></TextBox.Template>
         </TextBox>
         <TextBlock x:Name="SearchHint" Grid.Column="1" Text="Search your library" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" IsHitTestVisible="False"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value=""><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
-        <Border Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Background="{DynamicResource Elevated}" CornerRadius="5" Padding="6,2" Margin="0,0,2,0" IsHitTestVisible="False"><Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding Text, ElementName=SearchBox}" Value=""/><Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" Value="False"/></MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Visible"/></MultiDataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="Ctrl+F" FontSize="11" Foreground="{DynamicResource Muted}"/></Border>
+        <local:Stone Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" Background="{DynamicResource PebbleFill}" CornerRadius="7" Padding="7,2" Margin="0,0,2,0" Depth="Disc" IsHitTestVisible="False"><Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding Text, ElementName=SearchBox}" Value=""/><Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=SearchBox}" Value="False"/></MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Visible"/></MultiDataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="Ctrl+F" FontSize="11" Foreground="{DynamicResource Muted}"/></local:Stone>
         <Button x:Name="ClearSearchButton" Grid.Column="2" Content="&#xE711;" Click="ClearSearch" ToolTip="Clear search" AutomationProperties.Name="Clear search" Style="{StaticResource QuietIcon}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center" Width="28" Height="28" MinHeight="0" Margin="0" Visibility="Collapsed"/>
        </Grid>
       </Border>
@@ -315,7 +305,7 @@
       <WrapPanel x:Name="SearchFilters" Margin="0,12,0,0">
        <WrapPanel.Resources>
         <!-- The keyboard focus ring follows the pill's round ends. -->
-        <Style x:Key="PillFocus"><Setter Property="Control.Template"><Setter.Value><ControlTemplate><Border Margin="-3" BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="20" SnapsToDevicePixels="True"/></ControlTemplate></Setter.Value></Setter></Style>
+        <Style x:Key="PillFocus" BasedOn="{StaticResource ChipFocusRing}"/>
         <Style x:Key="FilterPill" TargetType="ComboBox">
          <Setter Property="Height" Value="34"/><Setter Property="Margin" Value="0,0,8,8"/><Setter Property="FontSize" Value="13"/>
          <Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="Cursor" Value="Hand"/>
@@ -329,7 +319,7 @@
              <Border x:Name="Row" Background="Transparent" CornerRadius="7" Padding="10,7" Margin="0,1">
               <DockPanel><TextBlock x:Name="Check" DockPanel.Dock="Right" Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource Accent}" Margin="18,0,0,0" VerticalAlignment="Center" Visibility="Hidden"/><ContentPresenter VerticalAlignment="Center"/></DockPanel>
              </Border>
-             <Border x:Name="Divider" Height="1" Background="{DynamicResource Line}" Margin="8,4,8,4" Visibility="Collapsed"/>
+             <Border x:Name="Divider" Height="1" Background="{DynamicResource Line}" Margin="8,4,8,4" Visibility="Collapsed" Opacity="0.7"/>
             </StackPanel>
             <ControlTemplate.Triggers>
              <Trigger Property="ItemsControl.AlternationIndex" Value="0"><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter TargetName="Divider" Property="Visibility" Value="Visible"/></Trigger>
@@ -343,15 +333,15 @@
           <Grid>
            <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
             <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><ContentPresenter/></ControlTemplate></ToggleButton.Template>
-            <Border x:Name="Pill" Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource AccentEdge}" BorderThickness="1" CornerRadius="17" Padding="13,0">
-             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <local:Stone x:Name="Pill" Depth="Chip" Background="{DynamicResource PebbleFill}" CornerRadius="17"><Grid><Border x:Name="PillLit" CornerRadius="17" Background="{DynamicResource Accent}" Opacity="0.24"><Border.OpacityMask><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#FF000000" Offset="0.2"/><GradientStop Color="#80000000" Offset="0.8"/></LinearGradientBrush></Border.OpacityMask></Border><Border CornerRadius="17" Background="{DynamicResource PebbleDome}"/><Border x:Name="PillTint" CornerRadius="17" Background="{DynamicResource Ink}" Opacity="0"/>
+             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="13,0">
               <TextBlock x:Name="Glyph" Text="{TemplateBinding local:FilterPill.Icon}" FontFamily="{StaticResource IconFont}" FontSize="13" Foreground="{DynamicResource Accent}" Margin="0,0,8,0" VerticalAlignment="Center"/>
               <TextBlock x:Name="Label" Text="{TemplateBinding local:FilterPill.Label}" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
               <ContentPresenter x:Name="Choice" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}" Margin="7,0,0,0" MaxWidth="200" VerticalAlignment="Center" TextElement.FontWeight="SemiBold" TextElement.Foreground="{DynamicResource Ink}" IsHitTestVisible="False"><ContentPresenter.Resources><Style TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis"/></Style></ContentPresenter.Resources></ContentPresenter>
               <TextBlock x:Name="Chevron" Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="9" Foreground="{DynamicResource Muted}" Margin="9,1,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
               <Border x:Name="ClearSpace" Width="20"/>
-             </StackPanel>
-            </Border>
+             </StackPanel></Grid>
+            </local:Stone>
            </ToggleButton>
            <Button x:Name="ClearChoice" Command="{x:Static local:FilterPill.Clear}" CommandParameter="{Binding RelativeSource={RelativeSource TemplatedParent}}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,7,0" Width="22" Height="22" Focusable="False" Cursor="Hand" ToolTip="Clear this filter" AutomationProperties.Name="{Binding (local:FilterPill.Label), RelativeSource={RelativeSource TemplatedParent}, StringFormat=Clear {0}}">
             <Button.Template><ControlTemplate TargetType="Button"><Border x:Name="Disc" Background="Transparent" CornerRadius="11"><TextBlock Text="&#xE711;" FontFamily="{StaticResource IconFont}" FontSize="9" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Disc" Property="Background" Value="{DynamicResource AccentEdge}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template>
@@ -360,7 +350,7 @@
            <local:PlayerMenuPopup x:Name="PART_Popup" GrowsDown="True" TakesMouse="False" SoftwareSurface="False" Placement="Bottom" HorizontalOffset="-12" VerticalOffset="-6" StaysOpen="True" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="None">
             <Border>
              <ContentControl Margin="12" Focusable="False" IsTabStop="False" MinWidth="230">
-              <ContentControl.Template><ControlTemplate TargetType="ContentControl"><Border Effect="{StaticResource PopupShadow}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="12" Padding="6,6,4,6"><ContentPresenter/></Border></ControlTemplate></ContentControl.Template>
+              <ContentControl.Template><ControlTemplate TargetType="ContentControl"><local:Stone Depth="Chip" Background="{DynamicResource Raised}" CornerRadius="14" Padding="6,6,4,6"><ContentPresenter/></local:Stone></ControlTemplate></ContentControl.Template>
               <DockPanel>
                <TextBlock DockPanel.Dock="Top" Text="{TemplateBinding AutomationProperties.Name}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Muted}" Margin="10,6,10,4"/>
                <ScrollViewer Style="{StaticResource SlimScrollViewer}" MaxHeight="340" CanContentScroll="False" Padding="0,0,8,0"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer>
@@ -371,10 +361,10 @@
           </Grid>
           <ControlTemplate.Triggers>
            <!-- The first item is "any": the pill then names the filter instead of showing a choice. -->
-           <Trigger Property="SelectedIndex" Value="0"><Setter TargetName="Pill" Property="Background" Value="Transparent"/><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Line}"/><Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Muted}"/><Setter TargetName="Label" Property="Foreground" Value="{DynamicResource Ink}"/><Setter TargetName="Choice" Property="Visibility" Value="Collapsed"/><Setter TargetName="Chevron" Property="Visibility" Value="Visible"/><Setter TargetName="ClearSpace" Property="Visibility" Value="Collapsed"/><Setter TargetName="ClearChoice" Property="Visibility" Value="Collapsed"/></Trigger>
-           <Trigger Property="SelectedIndex" Value="-1"><Setter TargetName="Pill" Property="Background" Value="Transparent"/><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Line}"/><Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Muted}"/><Setter TargetName="Label" Property="Foreground" Value="{DynamicResource Ink}"/><Setter TargetName="Choice" Property="Visibility" Value="Collapsed"/><Setter TargetName="Chevron" Property="Visibility" Value="Visible"/><Setter TargetName="ClearSpace" Property="Visibility" Value="Collapsed"/><Setter TargetName="ClearChoice" Property="Visibility" Value="Collapsed"/></Trigger>
-           <MultiTrigger><MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="SelectedIndex" Value="0"/></MultiTrigger.Conditions><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Muted}"/><Setter TargetName="Pill" Property="Background" Value="{DynamicResource Hover}"/></MultiTrigger>
-           <Trigger Property="IsDropDownOpen" Value="True"><Setter TargetName="Pill" Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger>
+           <Trigger Property="SelectedIndex" Value="0"><Setter TargetName="PillLit" Property="Visibility" Value="Collapsed"/><Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Muted}"/><Setter TargetName="Label" Property="Foreground" Value="{DynamicResource Ink}"/><Setter TargetName="Choice" Property="Visibility" Value="Collapsed"/><Setter TargetName="Chevron" Property="Visibility" Value="Visible"/><Setter TargetName="ClearSpace" Property="Visibility" Value="Collapsed"/><Setter TargetName="ClearChoice" Property="Visibility" Value="Collapsed"/></Trigger>
+           <Trigger Property="SelectedIndex" Value="-1"><Setter TargetName="PillLit" Property="Visibility" Value="Collapsed"/><Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource Muted}"/><Setter TargetName="Label" Property="Foreground" Value="{DynamicResource Ink}"/><Setter TargetName="Choice" Property="Visibility" Value="Collapsed"/><Setter TargetName="Chevron" Property="Visibility" Value="Visible"/><Setter TargetName="ClearSpace" Property="Visibility" Value="Collapsed"/><Setter TargetName="ClearChoice" Property="Visibility" Value="Collapsed"/></Trigger>
+           <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="PillTint" Property="Opacity" Value="0.06"/></Trigger>
+           <Trigger Property="IsDropDownOpen" Value="True"><Setter TargetName="PillTint" Property="Opacity" Value="0.1"/><Setter TargetName="Pill" Property="Depth" Value="Pressed"/></Trigger>
            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
           </ControlTemplate.Triggers>
          </ControlTemplate></Setter.Value></Setter>
@@ -433,21 +423,23 @@
       <Border Panel.ZIndex="1" IsHitTestVisible="False" BorderBrush="{DynamicResource Accent}" BorderThickness="3" CornerRadius="12" Margin="0,0,14,18"><Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsGuestHovered}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style></Border>
       <Button Click="LibraryCardClick" MouseEnter="LibraryCardHoverEnter" MouseLeave="LibraryCardHoverLeave" Tag="{Binding Card}" Style="{StaticResource PosterCard}" VerticalAlignment="Top" ContextMenuOpening="CardContextMenu" ToolTip="{Binding DisplayTitle}" ToolTipService.Placement="Bottom" ToolTipOpening="CardToolTipOpening" AutomationProperties.Name="{Binding DisplayTitle}"><Button.ContextMenu><ContextMenu/></Button.ContextMenu>
        <StackPanel>
-        <Border><Border.Style><Style TargetType="Border" BasedOn="{StaticResource ArtworkFrame}"><Setter Property="Height" Value="248"/><Style.Triggers><DataTrigger Binding="{Binding IsEpisode}" Value="True"><Setter Property="Height" Value="162"/></DataTrigger><DataTrigger Binding="{Binding IsAlbum}" Value="True"><Setter Property="Height" Value="168"/></DataTrigger></Style.Triggers></Style></Border.Style>
+        <local:Stone><Border.Style><Style TargetType="local:Stone" BasedOn="{StaticResource ArtworkFrame}"><Setter Property="Height" Value="248"/><Style.Triggers><DataTrigger Binding="{Binding IsEpisode}" Value="True"><Setter Property="Height" Value="162"/></DataTrigger><DataTrigger Binding="{Binding IsAlbum}" Value="True"><Setter Property="Height" Value="168"/></DataTrigger></Style.Triggers></Style></Border.Style>
          <Grid>
           <Grid><Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Source, ElementName=CardArtwork}" Value="{x:Null}"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Grid.Style><StackPanel VerticalAlignment="Center" Margin="14,0"><TextBlock Text="&#xE714;" Style="{StaticResource Icon}" FontSize="30" HorizontalAlignment="Center" Foreground="{DynamicResource Muted}"/><TextBlock Text="{Binding DisplayTitle}" TextWrapping="Wrap" TextAlignment="Center" FontSize="16" FontWeight="SemiBold" Margin="0,12,0,0"/></StackPanel></Grid>
           <Image x:Name="CardArtwork" Source="{Binding Poster, NotifyOnTargetUpdated=True}" ImageFailed="CardArtworkFailed" Loaded="CardArtworkLoaded" TargetUpdated="CardArtworkUpdated"><Image.Style><Style TargetType="Image"><Setter Property="Stretch" Value="UniformToFill"/><Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding IsEpisode}" Value="True"/><Condition Binding="{Binding PosterFills}" Value="False"/></MultiDataTrigger.Conditions><Setter Property="Stretch" Value="Uniform"/></MultiDataTrigger><DataTrigger Binding="{Binding IsMusic}" Value="True"><Setter Property="Stretch" Value="Uniform"/></DataTrigger><DataTrigger Binding="{Binding DimArtwork}" Value="True"><Setter Property="Opacity" Value="0.55"/></DataTrigger><DataTrigger Binding="{Binding HasNoFiles}" Value="True"><Setter Property="Opacity" Value="0.4"/></DataTrigger></Style.Triggers></Style></Image.Style></Image>
           <Rectangle RadiusX="12" RadiusY="12" Stroke="{DynamicResource Muted}" StrokeThickness="1.5" StrokeDashArray="4 3" Margin="1" IsHitTestVisible="False"><Rectangle.Style><Style TargetType="Rectangle"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasNoFiles}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Rectangle.Style></Rectangle>
-          <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="8,3" CornerRadius="6" IsHitTestVisible="False"><Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Setter Property="Background" Value="{DynamicResource Danger}"/><Style.Triggers><DataTrigger Binding="{Binding HasEpisodeStatus}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger><DataTrigger Binding="{Binding IsUpcoming}" Value="True"><Setter Property="Background" Value="{DynamicResource Accent}"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="{Binding EpisodeStatus}" FontSize="11" FontWeight="SemiBold"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="#FFFFFF"/><Style.Triggers><DataTrigger Binding="{Binding IsUpcoming}" Value="True"><Setter Property="Foreground" Value="{DynamicResource AccentInk}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></Border>
-          <Border VerticalAlignment="Bottom" Padding="10,22,10,9" IsHitTestVisible="False"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#E0000000" Offset="0.55"/></LinearGradientBrush></Border.Background><Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding IsMovie}" Value="True"/><Condition Binding="{Binding HasPlaybackProgress}" Value="True"/></MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Visible"/></MultiDataTrigger></Style.Triggers></Style></Border.Style><StackPanel><TextBlock Text="{Binding PlaybackLabel}" Foreground="#F4F4F7" FontSize="12" FontWeight="SemiBold"/><ProgressBar Value="{Binding Progress, Mode=OneWay}" Maximum="100" Height="3" Background="#40FFFFFF" Margin="0,6,0,0"/></StackPanel></Border>
+          <local:Stone HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10" Padding="9,3" CornerRadius="9" Depth="Disc" AlwaysDark="True" IsHitTestVisible="False"><Border.Style><Style TargetType="local:Stone"><Setter Property="Visibility" Value="Collapsed"/><Setter Property="Background" Value="{DynamicResource Danger}"/><Style.Triggers><DataTrigger Binding="{Binding HasEpisodeStatus}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger><DataTrigger Binding="{Binding IsUpcoming}" Value="True"><Setter Property="Background" Value="{DynamicResource Accent}"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="{Binding EpisodeStatus}" FontSize="11" FontWeight="SemiBold"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="#FFFFFF"/><Style.Triggers><DataTrigger Binding="{Binding IsUpcoming}" Value="True"><Setter Property="Foreground" Value="{DynamicResource AccentInk}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock></local:Stone>
+          <Border VerticalAlignment="Bottom" Padding="10,22,10,9" IsHitTestVisible="False"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#00000000" Offset="0"/><GradientStop Color="#E0000000" Offset="0.55"/></LinearGradientBrush></Border.Background><Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding IsMovie}" Value="True"/><Condition Binding="{Binding HasPlaybackProgress}" Value="True"/></MultiDataTrigger.Conditions><Setter Property="Visibility" Value="Visible"/></MultiDataTrigger></Style.Triggers></Style></Border.Style><Grid><local:ProgressLip Progress="{Binding Progress, Mode=OneWay}" Fill="{DynamicResource Accent}" Height="NaN" VerticalAlignment="Stretch" Margin="-10,-22,-10,-9"/><TextBlock Text="{Binding PlaybackLabel}" Foreground="#F4F4F7" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,8"/></Grid></Border>
+           <!-- An episode's progress lights the bottom of its still. -->
+           <local:ProgressLip Progress="{Binding Progress, Mode=OneWay}" Fill="{DynamicResource Accent}"><local:ProgressLip.Style><Style TargetType="local:ProgressLip"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsEpisode}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></local:ProgressLip.Style></local:ProgressLip>
            <!-- A selected card: dimmed artwork with an accent edge and a check. -->
            <Grid IsHitTestVisible="False"><Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Grid.Style><Rectangle RadiusX="12" RadiusY="12" Fill="#66000000" Stroke="{DynamicResource Accent}" StrokeThickness="3"/><Border Width="40" Height="40" CornerRadius="20" Background="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock Text="&#xE73E;" Style="{StaticResource Icon}" FontSize="18" Foreground="{DynamicResource AccentInk}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border></Grid>
          </Grid>
-        </Border>
+        </local:Stone>
         <TextBlock x:Name="CardTitle" Text="{Binding DisplayTitle}" TextTrimming="CharacterEllipsis" FontWeight="SemiBold" Margin="2,10,2,3"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding IsEpisode}" Value="True"><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="20"/><Setter Property="LineStackingStrategy" Value="BlockLineHeight"/><Setter Property="MaxHeight" Value="40"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
         <TextBlock Text="{Binding Caption}" Foreground="{DynamicResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="2,0"><TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding IsEpisode}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
         <TextBlock Foreground="{DynamicResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="2,0"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsEpisode}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style><Run Text="{Binding EpisodeMeta, Mode=OneWay}"/><Run Text="{Binding EpisodeStatusSuffix, Mode=OneWay}" Foreground="{DynamicResource Danger}" FontWeight="SemiBold"/></TextBlock>
-        <StackPanel Margin="2,7,2,0"><StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsEpisode}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></StackPanel.Style><ProgressBar Height="3" Maximum="100" Value="{Binding Progress, Mode=OneWay}" Style="{StaticResource CardProgress}"/><TextBlock Text="{Binding PlaybackLabel}" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,5,0,0"/></StackPanel>
+        <StackPanel Margin="2,7,2,0"><StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsEpisode}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></StackPanel.Style><TextBlock Text="{Binding PlaybackLabel}" Foreground="{DynamicResource Muted}" FontSize="11"/></StackPanel>
        </StackPanel>
       </Button>
       <Button Click="ToggleCardWatched"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource CardWatchedButton}"><Style.Triggers><DataTrigger Binding="{Binding IsRemote}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger><DataTrigger Binding="{Binding HasNoFiles}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
@@ -457,7 +449,7 @@
      <!-- The browsing guest's mouse, shown to the host while following them. -->
      <Canvas x:Name="GuestPointerLayer" IsHitTestVisible="False" ClipToBounds="True"><Grid x:Name="GuestPointer" Width="24" Height="24" Margin="-12,-12,0,0" Visibility="Collapsed" AutomationProperties.Name="Guest pointer"><Grid.RenderTransform><TranslateTransform x:Name="GuestPointerPosition"/></Grid.RenderTransform><Ellipse Fill="{DynamicResource Accent}" Opacity="0.3"/><Ellipse Stroke="{DynamicResource Accent}" StrokeThickness="2.5"/></Grid></Canvas></Grid>
     <!-- Several selected cards: what can be done to all of them at once. Ctrl+click or Shift+click selects, Esc clears. -->
-    <Border x:Name="CardSelectionBar" Grid.Row="2" Visibility="Collapsed" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="12" Padding="16,6,8,6" Margin="0,10,8,0" AutomationProperties.Name="Selected titles">
+    <local:Stone x:Name="CardSelectionBar" Depth="Popup" Grid.Row="2" Visibility="Collapsed" Background="{DynamicResource Raised}" CornerRadius="16" Padding="16,6,8,6" Margin="0,10,8,0" AutomationProperties.Name="Selected titles">
      <DockPanel>
       <Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource QuietIcon}" Click="ClearCardSelectionClick" ToolTip="Clear selection (Esc)" AutomationProperties.Name="Clear selection" Width="32" Height="32" MinHeight="0" VerticalAlignment="Center"/>
       <TextBlock x:Name="CardSelectionCount" DockPanel.Dock="Left" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,16,0" AutomationProperties.LiveSetting="Polite"/>
@@ -470,7 +462,7 @@
        <Button x:Name="SelectionMore" Content="&#xE712;" Style="{StaticResource IconButton}" Click="SelectionMoreClick" ToolTip="More actions" AutomationProperties.Name="More actions for the selected titles"><Button.ContextMenu><ContextMenu/></Button.ContextMenu></Button>
       </WrapPanel>
      </DockPanel>
-    </Border>
+    </local:Stone>
    </Grid>
 
    <!-- Title details -->
@@ -539,7 +531,7 @@
    <!-- Queues: a gallery of queue covers. Opening one shows its videos, with library search beside them while adding. -->
    <Grid x:Name="QueuesPage" Visibility="Collapsed">
     <Grid.Resources>
-     <Style x:Key="QueueCover" TargetType="Border"><Setter Property="Width" Value="68"/><Setter Property="Height" Value="100"/><Setter Property="CornerRadius" Value="6"/><Setter Property="local:RoundedClip.Radius" Value="6"/><Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="RenderTransformOrigin" Value="0.5,1"/><Setter Property="Effect"><Setter.Value><DropShadowEffect BlurRadius="12" ShadowDepth="3" Direction="270" Opacity="0.45" Color="#000000"/></Setter.Value></Setter></Style>
+     <Style x:Key="QueueCover" TargetType="local:Stone"><Setter Property="Depth" Value="Chip"/><Setter Property="Width" Value="68"/><Setter Property="Height" Value="100"/><Setter Property="CornerRadius" Value="8"/><Setter Property="local:RoundedClip.Radius" Value="8"/><Setter Property="Background" Value="{DynamicResource Elevated}"/><Setter Property="RenderTransformOrigin" Value="0.5,1"/></Style>
      <Style x:Key="QueuePill" TargetType="Border"><Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="8,2"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="Margin" Value="0,0,12,0"/><Setter Property="BorderThickness" Value="1"/></Style>
     </Grid.Resources>
 
@@ -552,13 +544,13 @@
        <ItemsControl.ItemTemplate><DataTemplate>
         <Button Style="{StaticResource PosterCard}" Width="214" Height="Auto" Tag="{Binding}" Click="QueueCardClick" ContextMenuOpening="QueueCardContextMenu" ToolTip="{Binding Name}" AutomationProperties.Name="{Binding AccessibleName}"><Button.ContextMenu><ContextMenu/></Button.ContextMenu>
          <StackPanel>
-          <Border Style="{StaticResource ArtworkFrame}" Height="150" Background="{DynamicResource Surface}">
+          <local:Stone Style="{StaticResource ArtworkFrame}" Height="150" Background="{DynamicResource Surface}">
            <Grid>
             <Rectangle Visibility="{Binding CreateVisibility}" Stroke="{DynamicResource Muted}" StrokeThickness="1" StrokeDashArray="4 3" RadiusX="10" RadiusY="10" Margin="-1" Opacity="0.6"/>
             <TextBlock Visibility="{Binding PlaceholderVisibility}" Text="{Binding PlaceholderIcon}" Style="{StaticResource Icon}" FontSize="28" HorizontalAlignment="Center" Foreground="{DynamicResource Muted}"/>
-            <Border Style="{StaticResource QueueCover}" DataContext="{Binding Cover2}" Visibility="{Binding Visibility}" Margin="0,22,0,0" VerticalAlignment="Top"><Border.RenderTransform><TransformGroup><RotateTransform Angle="-9"/><TranslateTransform X="-46" Y="6"/></TransformGroup></Border.RenderTransform><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></Border>
-            <Border Style="{StaticResource QueueCover}" DataContext="{Binding Cover3}" Visibility="{Binding Visibility}" Margin="0,22,0,0" VerticalAlignment="Top"><Border.RenderTransform><TransformGroup><RotateTransform Angle="9"/><TranslateTransform X="46" Y="6"/></TransformGroup></Border.RenderTransform><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></Border>
-            <Border Style="{StaticResource QueueCover}" DataContext="{Binding Cover1}" Visibility="{Binding Visibility}" Margin="0,18,0,0" VerticalAlignment="Top"><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></Border>
+            <local:Stone Style="{StaticResource QueueCover}" DataContext="{Binding Cover2}" Visibility="{Binding Visibility}" Margin="0,22,0,0" VerticalAlignment="Top"><Border.RenderTransform><TransformGroup><RotateTransform Angle="-9"/><TranslateTransform X="-46" Y="6"/></TransformGroup></Border.RenderTransform><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></local:Stone>
+            <local:Stone Style="{StaticResource QueueCover}" DataContext="{Binding Cover3}" Visibility="{Binding Visibility}" Margin="0,22,0,0" VerticalAlignment="Top"><Border.RenderTransform><TransformGroup><RotateTransform Angle="9"/><TranslateTransform X="46" Y="6"/></TransformGroup></Border.RenderTransform><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></local:Stone>
+            <local:Stone Style="{StaticResource QueueCover}" DataContext="{Binding Cover1}" Visibility="{Binding Visibility}" Margin="0,18,0,0" VerticalAlignment="Top"><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></local:Stone>
             <Border Visibility="{Binding PlayingVisibility}" Background="{DynamicResource AccentSoft}" CornerRadius="10" Padding="8,2" Margin="8" HorizontalAlignment="Left" VerticalAlignment="Top"><TextBlock Text="Playing" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/></Border>
             <Grid Visibility="{Binding RingVisibility}" Width="30" Height="30" Margin="8" HorizontalAlignment="Right" VerticalAlignment="Bottom" ToolTip="{Binding WatchedText}">
              <Ellipse Fill="{DynamicResource Canvas}" Opacity="0.85"/>
@@ -566,7 +558,7 @@
              <Ellipse Stroke="{DynamicResource Accent}" StrokeThickness="3" Margin="3" StrokeDashArray="{Binding RingDash}" RenderTransformOrigin="0.5,0.5"><Ellipse.RenderTransform><RotateTransform Angle="-90"/></Ellipse.RenderTransform></Ellipse>
             </Grid>
            </Grid>
-          </Border>
+          </local:Stone>
           <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="2,10,2,0"/>
           <TextBlock Text="{Binding Caption}" Foreground="{DynamicResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="2,3,2,4"/>
          </StackPanel>
@@ -584,7 +576,7 @@
 
      <!-- The header and videos share a nested grid; a list spanning the header's Auto row would measure every row. -->
      <Grid Grid.Row="1"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-     <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="14" local:RoundedClip.Radius="14" Margin="0,0,0,14">
+     <local:Stone Depth="Slab" Background="{DynamicResource Surface}" CornerRadius="20" local:RoundedClip.Radius="20" Margin="0,0,0,20">
       <Grid>
        <!-- A brush, unlike an Image, never sizes the header to the poster. -->
        <Border x:Name="QueueHeroBackdrop" Opacity="0.3" IsHitTestVisible="False"><Border.Background><ImageBrush ImageSource="{Binding View.Poster}" Stretch="UniformToFill"/></Border.Background><Border.Effect><BlurEffect Radius="40" KernelType="Gaussian"/></Border.Effect></Border>
@@ -612,7 +604,7 @@
         </StackPanel>
        </Grid>
       </Grid>
-     </Border>
+     </local:Stone>
 
      <Grid Grid.Row="1">
       <ListBox x:Name="SavedQueueItems" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel" SelectionChanged="SavedQueueSelectionChanged" MouseDoubleClick="QueueItemDoubleClicked" PreviewKeyDown="QueueItemKeyDown" ContextMenuOpening="QueueItemContextMenu" AutomationProperties.Name="Queue videos" AutomationProperties.HelpText="Press Enter or double-click to play from a video. Ctrl+Up and Ctrl+Down move it, Delete removes it." Background="Transparent" BorderThickness="0" Padding="0" AllowDrop="True" PreviewMouseMove="QueueDragMove" PreviewDragOver="QueueDragOver" DragLeave="QueueDragLeave" PreviewDrop="QueueDrop" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
@@ -634,7 +626,7 @@
          <TextBlock Text="{Binding Caption}" Foreground="{DynamicResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
         </StackPanel>
         <Border Grid.Column="4" Style="{StaticResource QueuePill}" BorderBrush="{DynamicResource Danger}" Visibility="{Binding ProblemVisibility}"><TextBlock Text="{Binding Problem}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Danger}"/></Border>
-        <Border Grid.Column="4" BorderBrush="{DynamicResource Line}" Background="{DynamicResource Elevated}" DataContext="{Binding View}"><Border.Style><Style TargetType="Border" BasedOn="{StaticResource QueuePill}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsWatched}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="Watched" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Muted}"/></Border>
+        <Border Grid.Column="4" BorderBrush="Transparent" Background="{DynamicResource Well}" DataContext="{Binding View}"><Border.Style><Style TargetType="Border" BasedOn="{StaticResource QueuePill}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsWatched}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style><TextBlock Text="Watched" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Muted}"/></Border>
         <TextBlock Grid.Column="5" Text="{Binding Runtime}" Foreground="{DynamicResource Muted}" FontSize="12" Width="56" TextAlignment="Right" VerticalAlignment="Center" Margin="0,0,8,0" Typography.NumeralAlignment="Tabular"/>
         <Button Grid.Column="6" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="12" Width="36" Height="36" Margin="0" VerticalAlignment="Center" Tag="{Binding}" Click="RemoveSavedItem" ToolTip="Remove from queue" AutomationProperties.Name="Remove video from queue"/>
        </Grid></DataTemplate></ListBox.ItemTemplate>
@@ -645,11 +637,11 @@
      </Grid>
 
      <!-- Add videos: search the library and add without leaving the queue. -->
-     <Border x:Name="QueueAddPanel" Grid.Column="1" Grid.Row="1" Margin="20,0,0,0" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="14" Padding="16,14,10,10" Visibility="Collapsed">
+     <local:Stone x:Name="QueueAddPanel" Depth="Slab" Grid.Column="1" Grid.Row="1" Margin="20,0,0,0" Background="{DynamicResource Surface}" CornerRadius="20" Padding="16,14,10,10" Visibility="Collapsed">
       <DockPanel>
        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12"><Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="12" Margin="0" Click="CloseQueueAdd" ToolTip="Done adding (Esc)" AutomationProperties.Name="Close Add videos"/><TextBlock Text="Add videos" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/></DockPanel>
-       <Border DockPanel.Dock="Top" Background="{DynamicResource Canvas}" BorderThickness="1" CornerRadius="10" Padding="12,0,8,0" Height="38" Margin="0,0,6,10" Cursor="IBeam">
-        <Border.Style><Style TargetType="Border"><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Accent}"/></Trigger></Style.Triggers></Style></Border.Style>
+       <Border DockPanel.Dock="Top" Background="{DynamicResource Well}" BorderThickness="1" CornerRadius="14" Padding="12,0,8,0" Height="40" Margin="0,0,6,10" Cursor="IBeam">
+        <Border.Style><Style TargetType="Border"><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource WellHover}"/></Trigger><Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentRing}"/><Setter Property="Background" Value="{DynamicResource WellLit}"/></Trigger></Style.Triggers></Style></Border.Style>
         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
          <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" FontSize="13" Foreground="{DynamicResource Muted}" Margin="0,0,10,0" IsHitTestVisible="False"/>
          <TextBox x:Name="QueueAddSearch" Grid.Column="1" MinHeight="0" TextChanged="QueueAddSearchChanged" PreviewKeyDown="QueueAddSearchKeyDown" AutomationProperties.Name="Search videos to add" VerticalContentAlignment="Center" Margin="0" Padding="0" Background="Transparent" BorderThickness="0">
@@ -673,7 +665,7 @@
         </Grid></DataTemplate></ListBox.ItemTemplate>
        </ListBox>
       </DockPanel>
-     </Border>
+     </local:Stone>
     </Grid>
    </Grid>
 
@@ -684,7 +676,7 @@
      <Style x:Key="CardTitle" TargetType="TextBlock"><Setter Property="FontSize" Value="15"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
      <Style x:Key="Hint" TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Setter Property="FontSize" Value="13"/><Setter Property="LineHeight" Value="20"/></Style>
      <!-- A skipped subfolder with its button to scan it again. -->
-     <DataTemplate x:Key="ExclusionRow"><Border BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="8" Padding="10,1,1,1" Margin="0,0,0,6"><DockPanel><Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="10" Width="30" Height="30" MinHeight="30" Click="RestoreFolder" ToolTip="Scan this subfolder again" AutomationProperties.Name="{Binding Name, StringFormat=Stop skipping {0}}"/><TextBlock Text="{Binding Name}" ToolTip="{Binding Path}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></DockPanel></Border></DataTemplate>
+     <DataTemplate x:Key="ExclusionRow"><Border Background="{DynamicResource Well}" CornerRadius="12" Padding="12,1,1,1" Margin="0,0,0,6"><DockPanel><Button DockPanel.Dock="Right" Content="&#xE711;" Style="{StaticResource QuietIcon}" FontSize="10" Width="30" Height="30" MinHeight="30" Click="RestoreFolder" ToolTip="Scan this subfolder again" AutomationProperties.Name="{Binding Name, StringFormat=Stop skipping {0}}"/><TextBlock Text="{Binding Name}" ToolTip="{Binding Path}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></DockPanel></Border></DataTemplate>
     </Grid.Resources>
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
     <StackPanel>
@@ -718,7 +710,7 @@
          <TextBlock x:Name="ScanStatus" Margin="0,4,0,0" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
         </StackPanel>
        </DockPanel>
-       <Border Style="{StaticResource Card}" Padding="0" Margin="0,0,16,0">
+       <local:Stone Style="{StaticResource Card}" Padding="0" Margin="0,0,16,0">
         <Grid>
          <Grid.ColumnDefinitions><ColumnDefinition Width="5*" MinWidth="200"/><ColumnDefinition Width="8*"/></Grid.ColumnDefinitions>
          <DockPanel>
@@ -766,7 +758,7 @@
           </Grid>
          </Border>
         </Grid>
-       </Border>
+       </local:Stone>
       </StackPanel>
      </ScrollViewer>
      <!-- Plugins: programs that get missing and upcoming videos. Installed lists those in the plugins folder; Available lists the
@@ -790,7 +782,7 @@
        <StackPanel x:Name="InstalledPluginsPanel">
         <ItemsControl x:Name="AcquisitionPluginList" AutomationProperties.Name="Installed plugins" Focusable="False">
          <ItemsControl.ItemTemplate><DataTemplate>
-          <Border AutomationProperties.Name="{Binding Spoken}"><Border.Style><Style TargetType="Border"><Setter Property="Margin" Value="0"/><Style.Triggers><DataTrigger Binding="{Binding Grouped}" Value="True"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="16,14,4,2"/><Setter Property="Margin" Value="0,0,16,12"/></DataTrigger><DataTrigger Binding="{Binding Update}" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Accent}"/></DataTrigger></Style.Triggers></Style></Border.Style>
+          <local:Stone AutomationProperties.Name="{Binding Spoken}"><Border.Style><Style TargetType="local:Stone"><Setter Property="Margin" Value="0"/><Setter Property="Depth" Value="Slab"/><Style.Triggers><DataTrigger Binding="{Binding Grouped}" Value="True"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="CornerRadius" Value="20"/><Setter Property="Padding" Value="16,14,4,2"/><Setter Property="Margin" Value="0,0,16,16"/></DataTrigger><DataTrigger Binding="{Binding Update}" Value="True"><Setter Property="Background" Value="{DynamicResource AccentSoft}"/></DataTrigger></Style.Triggers></Style></Border.Style>
            <DockPanel>
             <DockPanel DockPanel.Dock="Top" Visibility="{Binding HeaderVisibility}" Margin="0,0,12,14">
              <Border DockPanel.Dock="Left" Width="30" Height="30" CornerRadius="8" Background="{DynamicResource Elevated}" Margin="0,0,10,0" VerticalAlignment="Top"><TextBlock Text="&#xE7B8;" Style="{StaticResource Icon}" FontSize="13" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
@@ -804,7 +796,7 @@
             <ItemsControl ItemsSource="{Binding Plugins}" Margin="0,0,4,0" Focusable="False">
              <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2" VerticalAlignment="Top"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
              <ItemsControl.ItemTemplate><DataTemplate>
-          <Border Padding="16,14" Margin="0,0,12,12" AutomationProperties.Name="{Binding Spoken}"><Border.Style><Style TargetType="Border" BasedOn="{StaticResource Card}"><Style.Triggers><DataTrigger Binding="{Binding Grouped}" Value="True"><Setter Property="Background" Value="{DynamicResource Canvas}"/></DataTrigger><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding Update}" Value="True"/><Condition Binding="{Binding Grouped}" Value="False"/></MultiDataTrigger.Conditions><Setter Property="BorderBrush" Value="{DynamicResource Accent}"/></MultiDataTrigger></Style.Triggers></Style></Border.Style>
+          <local:Stone Padding="16,14" Margin="0,0,12,12" AutomationProperties.Name="{Binding Spoken}"><Border.Style><Style TargetType="local:Stone" BasedOn="{StaticResource Card}"><Style.Triggers><DataTrigger Binding="{Binding Grouped}" Value="True"><Setter Property="Background" Value="{DynamicResource TrayFill}"/><Setter Property="Depth" Value="None"/><Setter Property="CornerRadius" Value="14"/></DataTrigger><MultiDataTrigger><MultiDataTrigger.Conditions><Condition Binding="{Binding Update}" Value="True"/><Condition Binding="{Binding Grouped}" Value="False"/></MultiDataTrigger.Conditions><Setter Property="Background" Value="{DynamicResource AccentSoft}"/></MultiDataTrigger></Style.Triggers></Style></Border.Style>
            <DockPanel>
             <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0" LastChildFill="False">
              <Button Content="Update" Style="{StaticResource Primary}" Visibility="{Binding UpdateVisibility}" Click="UpdatePluginClick" Margin="0,0,8,0" AutomationProperties.Name="{Binding Name, StringFormat=Update {0}}"/>
@@ -819,11 +811,11 @@
             <TextBlock DockPanel.Dock="Top" Text="{Binding Types}" Foreground="{DynamicResource Accent}" FontSize="12" Margin="0,8,0,0"/>
             <TextBlock Text="{Binding Description}" Style="{StaticResource MutedText}" FontSize="12.5" TextWrapping="Wrap" Margin="0,4,0,0"/>
            </DockPanel>
-          </Border>
+          </local:Stone>
          </DataTemplate></ItemsControl.ItemTemplate>
             </ItemsControl>
            </DockPanel>
-          </Border>
+          </local:Stone>
          </DataTemplate></ItemsControl.ItemTemplate>
         </ItemsControl>
         <TextBlock x:Name="AcquisitionPluginStatus" Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,16,0" AutomationProperties.LiveSetting="Polite"/>
@@ -831,7 +823,7 @@
        <StackPanel x:Name="AvailablePluginsPanel" Visibility="Collapsed">
         <ItemsControl x:Name="CatalogPluginList" AutomationProperties.Name="Available plugins" Focusable="False">
          <ItemsControl.ItemTemplate><DataTemplate>
-          <Border AutomationProperties.Name="{Binding Spoken}"><Border.Style><Style TargetType="Border"><Setter Property="Margin" Value="0"/><Style.Triggers><DataTrigger Binding="{Binding Grouped}" Value="True"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="16,14,4,2"/><Setter Property="Margin" Value="0,0,16,12"/></DataTrigger></Style.Triggers></Style></Border.Style>
+          <local:Stone AutomationProperties.Name="{Binding Spoken}"><Border.Style><Style TargetType="local:Stone"><Setter Property="Margin" Value="0"/><Setter Property="Depth" Value="Slab"/><Style.Triggers><DataTrigger Binding="{Binding Grouped}" Value="True"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="CornerRadius" Value="20"/><Setter Property="Padding" Value="16,14,4,2"/><Setter Property="Margin" Value="0,0,16,16"/></DataTrigger></Style.Triggers></Style></Border.Style>
            <DockPanel>
             <DockPanel DockPanel.Dock="Top" Visibility="{Binding HeaderVisibility}" Margin="0,0,12,14">
              <Border DockPanel.Dock="Left" Width="30" Height="30" CornerRadius="8" Background="{DynamicResource Elevated}" Margin="0,0,10,0" VerticalAlignment="Top"><TextBlock Text="&#xE7B8;" Style="{StaticResource Icon}" FontSize="13" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
@@ -844,7 +836,7 @@
             <ItemsControl ItemsSource="{Binding Plugins}" Margin="0,0,4,0" Focusable="False">
              <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2" VerticalAlignment="Top"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
              <ItemsControl.ItemTemplate><DataTemplate>
-          <Border Padding="16,14" Margin="0,0,12,12" AutomationProperties.Name="{Binding Name}"><Border.Style><Style TargetType="Border" BasedOn="{StaticResource Card}"><Style.Triggers><DataTrigger Binding="{Binding DataContext.Grouped, RelativeSource={RelativeSource AncestorType=ItemsControl}}" Value="True"><Setter Property="Background" Value="{DynamicResource Canvas}"/></DataTrigger></Style.Triggers></Style></Border.Style>
+          <local:Stone Padding="16,14" Margin="0,0,12,12" AutomationProperties.Name="{Binding Name}"><Border.Style><Style TargetType="local:Stone" BasedOn="{StaticResource Card}"><Style.Triggers><DataTrigger Binding="{Binding DataContext.Grouped, RelativeSource={RelativeSource AncestorType=ItemsControl}}" Value="True"><Setter Property="Background" Value="{DynamicResource TrayFill}"/><Setter Property="Depth" Value="None"/><Setter Property="CornerRadius" Value="14"/></DataTrigger></Style.Triggers></Style></Border.Style>
            <DockPanel>
             <Button DockPanel.Dock="Bottom" HorizontalAlignment="Left" Content="Install" Style="{StaticResource Primary}" Click="InstallCatalogPluginClick" Margin="0,12,0,0" AutomationProperties.Name="{Binding Name, StringFormat=Install {0}}"/>
             <DockPanel DockPanel.Dock="Top">
@@ -854,11 +846,11 @@
             <TextBlock DockPanel.Dock="Top" Text="{Binding Types}" Foreground="{DynamicResource Accent}" FontSize="12" Margin="0,8,0,0"/>
             <TextBlock Text="{Binding Description}" Style="{StaticResource MutedText}" FontSize="12.5" TextWrapping="Wrap" Margin="0,4,0,0"/>
            </DockPanel>
-          </Border>
+          </local:Stone>
          </DataTemplate></ItemsControl.ItemTemplate>
             </ItemsControl>
            </DockPanel>
-          </Border>
+          </local:Stone>
          </DataTemplate></ItemsControl.ItemTemplate>
         </ItemsControl>
         <TextBlock x:Name="CatalogEmpty" Margin="0,0,16,12"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
@@ -870,19 +862,19 @@
       </StackPanel>
      </ScrollViewer>
      <ScrollViewer x:Name="ProfilePreferences" Tag="Profile" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
-      <Border Style="{StaticResource Card}"><StackPanel>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Your display name" Style="{StaticResource FieldLabel}"/><TextBox x:Name="DisplayNameBox" AutomationProperties.Name="Your display name" MaxLength="40"/>
        <TextBlock x:Name="DisplayNameError" Style="{StaticResource FieldError}"/>
        <TextBlock Text="Shown to everyone in your watch rooms." Style="{StaticResource Hint}"/>
-      </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
+      </StackPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="BlackPearl server" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ServerBox" AutomationProperties.Name="Room server address"/>
        <TextBlock x:Name="ServerError" Style="{StaticResource FieldError}"/>
        <TextBlock Text="Change the server only if you host your own." Style="{StaticResource Hint}"/>
-      </StackPanel></Border>
+      </StackPanel></local:Stone>
      </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="MetadataPreferences" Tag="Metadata" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
-      <Border Style="{StaticResource Card}"><StackPanel>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Sources" Style="{StaticResource CardTitle}"/>
        <CheckBox x:Name="AutoArtwork" Content="Automatically fetch artwork and metadata"/>
        <TextBlock Text="Providers · in priority order" Style="{StaticResource FieldLabel}" Margin="0,14,0,8"/>
@@ -894,13 +886,13 @@
         </StackPanel><CheckBox Content="{Binding Name}" IsChecked="{Binding Enabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Click="PreferencesChanged" Margin="0" VerticalAlignment="Center"/></DockPanel></DataTemplate></ListBox.ItemTemplate>
        </ListBox>
        <TextBlock Text="Providers receive title searches, never video files. Disable all to use local metadata." Style="{StaticResource Hint}" Margin="0,10,0,0"/>
-      </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
+      </StackPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Region" Style="{StaticResource CardTitle}"/>
        <WrapPanel><StackPanel Width="270" Margin="0,0,16,0"><TextBlock Text="Language" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="MetadataLanguage" AutomationProperties.Name="Metadata language" DisplayMemberPath="Name" SelectedValuePath="Code" IsTextSearchEnabled="True" TextSearch.TextPath="Name" Margin="0,6,0,8"/></StackPanel><StackPanel Width="270"><TextBlock Text="Country" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="MetadataCountry" AutomationProperties.Name="Metadata country" DisplayMemberPath="Name" SelectedValuePath="Code" IsTextSearchEnabled="True" TextSearch.TextPath="Name" Margin="0,6,0,8"/></StackPanel></WrapPanel>
        <TextBlock x:Name="LocaleError" Style="{StaticResource FieldError}"/>
-      </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
+      </StackPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Refresh and organization" Style="{StaticResource CardTitle}"/>
        <WrapPanel><CheckBox x:Name="NeverRefresh" Content="Never refresh automatically" Margin="0,6,18,6"/><TextBlock Text="Every" VerticalAlignment="Center" Margin="0,0,8,0"/>
         <Button x:Name="RefreshLess" Content="&#xE738;" Style="{StaticResource IconButton}" FontSize="11" Click="ChangeRefreshDays" AutomationProperties.Name="Decrease refresh days" Margin="0,6,4,12" VerticalAlignment="Center"/>
@@ -909,21 +901,21 @@
         <TextBlock Text="days (1–365)" VerticalAlignment="Center" Foreground="{DynamicResource Muted}"/>
        </WrapPanel><TextBlock x:Name="RefreshDaysError" Style="{StaticResource FieldError}"/>
        <CheckBox x:Name="GroupShows" Content="Combine show folders when provider IDs match"/><CheckBox x:Name="ImportMissing" Content="Show missing episodes"/><CheckBox x:Name="ImportUpcoming" Content="Show upcoming episodes"/><CheckBox x:Name="DisplaySpecials" Content="Show specials within their aired seasons when placement is known"/><CheckBox x:Name="SaveNfo" Content="Save metadata beside videos as NFO files"/>
-      </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
+      </StackPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="TMDB key override" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
        <TextBlock Text="Optional personal key; leave blank to use the bundled BlackPearl key." Style="{StaticResource Hint}"/><PasswordBox x:Name="MetadataToken" AutomationProperties.Name="TMDB API key or read access token" PasswordChanged="MetadataKeyChanged"/>
        <TextBlock x:Name="MetadataKeyStatus" Style="{StaticResource MutedText}" AutomationProperties.LiveSetting="Polite" Margin="0,0,0,8"/>
        <TextBlock Text="The key is stored in Windows Credential Manager once you paste or type it. Clear the field to remove it." Style="{StaticResource Hint}"/>
-      </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
+      </StackPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Manual refresh" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/><TextBlock Text="Uses saved preferences." Style="{StaticResource Hint}"/>
        <WrapPanel Margin="0,8,0,-8"><ComboBox x:Name="MetadataRefreshMode" SelectedIndex="0" MinWidth="300" Margin="0,0,8,8" AutomationProperties.Name="Metadata refresh action"><ComboBoxItem Content="Fill missing metadata"/><ComboBoxItem Content="Refresh text metadata"/><ComboBoxItem Content="Refresh text and replace downloaded artwork"/><ComboBoxItem Content="Retry missing artwork"/></ComboBox>
        <Button Content="Fetch artwork and metadata" Click="FetchArtworkClick" HorizontalAlignment="Left"/></WrapPanel>
-      </StackPanel></Border>
+      </StackPanel></local:Stone>
      </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="PlaybackPreferences" Tag="Playback" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
-      <Border Style="{StaticResource Card}"><StackPanel>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Languages" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
        <TextBlock Text="BlackPearl picks the first language each video has, in this order." Style="{StaticResource Hint}" Margin="0,0,0,16"/>
        <Grid>
@@ -940,7 +932,7 @@
          <TextBlock Text="Override the subtitle list for specific audio languages — for example, when the audio is English, show no subtitles." Style="{StaticResource Hint}" Margin="0,2,0,12"/>
          <ItemsControl x:Name="SubtitleLanguageRules" Focusable="False"><ItemsControl.ItemTemplate><DataTemplate>
           <!-- Each exception reads as a sentence: when the audio is X, show subtitles in Y. -->
-          <Border Background="{DynamicResource Canvas}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="14,10,8,6" Margin="0,0,0,8">
+          <Border Style="{StaticResource Tray}" Padding="14,10,8,6" Margin="0,0,0,8">
            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <TextBlock Text="When the audio is" Foreground="{DynamicResource Muted}" VerticalAlignment="Top" Margin="0,7,0,0"/>
             <ComboBox Grid.Column="1" ItemsSource="{x:Static local:LanguagePriorityPicker.AudioOptions}" DisplayMemberPath="Name" SelectedValuePath="Code" SelectedValue="{Binding AudioLanguage, UpdateSourceTrigger=PropertyChanged}" IsTextSearchEnabled="True" TextSearch.TextPath="Name" AutomationProperties.Name="Audio language for subtitle rule" ToolTip="When the audio is in this language" Width="200" Height="32" MinHeight="32" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,0,0,8"/>
@@ -954,20 +946,20 @@
        </Border>
        <Expander Header="How language preferences work" Foreground="{DynamicResource Muted}" Margin="-6,8,0,0"><TextBlock Text="Each list is tried in order until the video has a matching track; an empty list uses the video's own defaults. Exceptions follow the selected audio language, and adding Off last turns subtitles off when nothing matches. Manual subtitle choices last until the next video. Saved preferences apply to the next video; guests follow the host’s tracks." Style="{StaticResource Hint}" Margin="0,4,0,0"/></Expander>
        <TextBlock x:Name="TrackPreferencesError" Style="{StaticResource FieldError}"/>
-      </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
+      </StackPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Streaming buffer" Style="{StaticResource CardTitle}"/>
        <TextBlock Text="Video to buffer ahead (seconds)" Style="{StaticResource FieldLabel}"/><TextBox x:Name="StreamingBufferSeconds" MaxLength="3" Width="120" HorizontalAlignment="Left" AutomationProperties.Name="Video buffer ahead in seconds" ToolTip="Choose from 2 to 60 seconds"/>
        <TextBlock x:Name="StreamingBufferError" Style="{StaticResource FieldError}" AutomationProperties.LiveSetting="Polite"/>
        <TextBlock Text="Default: 30 seconds. Playback starts as soon as a few seconds are ready; BlackPearl then keeps downloading up to this much video ahead while you watch. Applies to the next streamed video. Larger buffers use more memory but do not delay starting or seeking. During a brief host connection interruption, playback continues from buffered video for up to this time, then pauses if recovery has not finished. Actual coverage depends on available bandwidth." Style="{StaticResource Hint}"/>
-      </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><DockPanel>
+      </StackPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><DockPanel>
        <Button DockPanel.Dock="Right" Content="Open default apps" Click="OpenDefaultAppsSettings" VerticalAlignment="Center" Margin="16,0,0,0" AutomationProperties.HelpText="Opens Windows Settings, where you can choose BlackPearl for video files"/>
        <StackPanel VerticalAlignment="Center"><TextBlock Text="Open videos with BlackPearl" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/><TextBlock Text="Double-click a video in File Explorer, choose Open with → BlackPearl, or drop a video on this window. Videos from your library play with their artwork, progress and next episode; other videos play on their own. To use BlackPearl for every video, choose it in Windows default apps." Style="{StaticResource Hint}"/></StackPanel>
-      </DockPanel></Border>
+      </DockPanel></local:Stone>
      </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="VoicePreferences" Tag="Voice" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" IsVisibleChanged="VoicePreferencesVisibilityChanged" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
-      <Border Style="{StaticResource Card}"><StackPanel>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Devices" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
        <TextBlock Text="Talk with everyone in your room while you watch. Join voice from the player's top bar or the Participants panel." Style="{StaticResource Hint}" Margin="0,0,0,14"/>
        <TextBlock Text="Microphone" Style="{StaticResource FieldLabel}"/>
@@ -975,7 +967,7 @@
        <!-- A live level meter while this page is open: speak and watch it move. -->
        <Grid Margin="0,0,0,4" MaxWidth="460" HorizontalAlignment="Left" MinWidth="320"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
         <TextBlock Text="&#xE720;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-        <Border Grid.Column="1" x:Name="VoiceTestTrack" Height="6" CornerRadius="3" Background="{DynamicResource Line}" VerticalAlignment="Center" AutomationProperties.Name="Microphone level"><Border x:Name="VoiceTestFill" CornerRadius="3" Background="#3FB97A" HorizontalAlignment="Left" Width="0"/></Border>
+        <Border Grid.Column="1" x:Name="VoiceTestTrack" Height="6" CornerRadius="3" Background="{DynamicResource Well}" VerticalAlignment="Center" AutomationProperties.Name="Microphone level"><Border x:Name="VoiceTestFill" CornerRadius="3" Background="#3FB97A" HorizontalAlignment="Left" Width="0"/></Border>
        </Grid>
        <TextBlock x:Name="VoiceTestStatus" Style="{StaticResource Hint}" AutomationProperties.LiveSetting="Polite" Margin="0,0,0,8"/>
        <!-- Records what the room would receive with the settings on this page, then plays it back. -->
@@ -984,8 +976,8 @@
        <TextBlock Text="Speakers or headphones" Style="{StaticResource FieldLabel}"/>
        <WrapPanel><ComboBox x:Name="VoiceOutputPicker" DisplayMemberPath="Name" SelectedValuePath="Id" AutomationProperties.Name="Speakers or headphones for voice chat" Margin="0,6,8,8" MinWidth="320" MaxWidth="460"/><Button x:Name="VoiceTestSoundButton" Content="Play test sound" Click="PlayVoiceTestSound" Style="{StaticResource SettingsButton}" Margin="0,6,0,8"/></WrapPanel>
        <TextBlock Text="Windows default follows the device you choose in Windows sound settings, including when you plug in a headset. A Bluetooth headset's own microphone makes Windows switch the headset to call-quality sound, movie included; a separate or built-in microphone keeps full quality." Style="{StaticResource Hint}"/>
-      </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
+      </StackPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Talking" Style="{StaticResource CardTitle}"/>
        <TextBlock Text="Microphone processing" Style="{StaticResource FieldLabel}"/>
        <ComboBox x:Name="VoiceProcessingPicker" DisplayMemberPath="Name" SelectedValuePath="Id" AutomationProperties.Name="Microphone processing" Margin="0,6,0,6" MaxWidth="460" HorizontalAlignment="Left" MinWidth="320"/>
@@ -995,8 +987,8 @@
        <CheckBox x:Name="VoiceAlwaysOn" Content="Send my microphone continuously"/>
        <TextBlock Text="Nothing is ever held back waiting for speech to be detected. Uses a little more bandwidth, and people on older versions of BlackPearl see you as always talking." Style="{StaticResource Hint}" Margin="28,0,0,10"/>
        <CheckBox x:Name="VoiceAutoJoin" Content="Join voice automatically when I enter a room"/>
-      </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
+      </StackPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Listening" Style="{StaticResource CardTitle}"/>
        <TextBlock Text="Voice volume" Style="{StaticResource FieldLabel}"/>
        <Grid MaxWidth="460" HorizontalAlignment="Left" MinWidth="320" Margin="0,6,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/></Grid.ColumnDefinitions>
@@ -1005,7 +997,7 @@
        </Grid>
        <CheckBox x:Name="VoiceDucking" Content="Lower the video while people talk"/>
        <TextBlock Text="The movie fades to half volume while someone speaks, then returns." Style="{StaticResource Hint}" Margin="28,0,0,0"/>
-      </StackPanel></Border>
+      </StackPanel></local:Stone>
      </StackPanel></ScrollViewer>
      <ScrollViewer x:Name="AppearancePreferences" Tag="Appearance" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
       <StackPanel.Resources>
@@ -1013,39 +1005,39 @@
        <Style x:Key="ThemeChoice" TargetType="RadioButton">
         <Setter Property="Width" Value="156"/><Setter Property="Margin" Value="0,0,10,10"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
         <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
-         <Grid><Border x:Name="Frame" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="9"><ContentPresenter/></Border><Border x:Name="Ring" BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="10" Visibility="Collapsed" IsHitTestVisible="False"/></Grid>
+         <local:StoneHost><local:Stone x:Name="Frame" Depth="Chip" Background="{DynamicResource PebbleFill}" CornerRadius="14" Padding="9"><ContentPresenter/></local:Stone><Border x:Name="Ring" BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="14" Visibility="Collapsed" IsHitTestVisible="False"/></local:StoneHost>
          <ControlTemplate.Triggers>
-          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource Muted}"/></Trigger>
-          <Trigger Property="IsChecked" Value="True"><Setter TargetName="Ring" Property="Visibility" Value="Visible"/><Setter TargetName="Frame" Property="Background" Value="{DynamicResource AccentSoft}"/></Trigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="Background" Value="{DynamicResource Hover}"/></Trigger>
+          <Trigger Property="IsChecked" Value="True"><Setter TargetName="Frame" Property="Background" Value="{DynamicResource AccentSoft}"/></Trigger>
          </ControlTemplate.Triggers>
         </ControlTemplate></Setter.Value></Setter>
        </Style>
       </StackPanel.Resources>
-      <Border Style="{StaticResource Card}"><DockPanel>
+      <local:Stone Style="{StaticResource Card}"><DockPanel>
        <Button DockPanel.Dock="Right" Content="Switch light / dark" Click="ToggleTheme" VerticalAlignment="Center" Margin="16,0,0,0"/>
        <Border DockPanel.Dock="Left" Width="40" Height="40" CornerRadius="10" Background="{DynamicResource AccentSoft}" Margin="0,0,14,0"><TextBlock Text="&#xE790;" Style="{StaticResource Icon}" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border>
        <StackPanel VerticalAlignment="Center"><TextBlock Text="Mode" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="ThemeStatus" Style="{StaticResource Hint}"/><TextBlock Text="Saved immediately." Style="{StaticResource Hint}"/></StackPanel>
-      </DockPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
+      </DockPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Color theme" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/>
        <TextBlock Text="Every theme has a light and a dark version. The player stays dark and uses the theme's accent. Saved immediately." Style="{StaticResource Hint}"/>
        <WrapPanel x:Name="ThemeChoices" Margin="0,14,0,-10" AutomationProperties.Name="Color theme"/>
-      </StackPanel></Border>
+      </StackPanel></local:Stone>
      </StackPanel></ScrollViewer>
      <!-- Downloads: auto-download of new episodes. Built in Following.cs; changes apply at once. -->
      <ScrollViewer x:Name="DownloadsPreferences" Tag="Downloads" Visibility="Collapsed" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,16,0">
       <ContentControl x:Name="DownloadsContent" Focusable="False" MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" HorizontalAlignment="Left" Margin="0,0,0,12"/>
      </ScrollViewer>
      <ScrollViewer x:Name="UpdatePreferences" Tag="Updates" Visibility="Collapsed" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,16,0"><StackPanel MaxWidth="844" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Margin="0,0,0,12" HorizontalAlignment="Left">
-      <Border Style="{StaticResource Card}"><StackPanel>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="App updates" Style="{StaticResource CardTitle}" Margin="0,0,0,6"/><CheckBox x:Name="AutoCheckUpdates" Content="Automatically check for updates" Checked="AutoUpdatesChanged" Unchecked="AutoUpdatesChanged"/><TextBlock Text="Checks at startup and every six hours. Updates install only when you click Update. Update preferences save immediately." Style="{StaticResource Hint}" Margin="0,4,0,0"/><Button x:Name="CheckUpdatesButton" Content="Check for updates" ContentTemplate="{StaticResource RefreshContent}" Click="CheckUpdatesClick" HorizontalAlignment="Left" Margin="0,14,0,8"/><TextBlock x:Name="UpdateStatus" Style="{StaticResource MutedText}" AutomationProperties.LiveSetting="Polite"/>
-      </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
+      </StackPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="Diagnostics" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/><TextBlock Text="For connection or playback issues, share logs from both devices. Invitations, credentials and videos are excluded." Style="{StaticResource Hint}"/><Button x:Name="OpenLogsFolderButton" Content="Open logs folder" Click="OpenLogsFolder" Style="{StaticResource SettingsButton}" HorizontalAlignment="Left" Margin="0,12,0,0"/>
-      </StackPanel></Border>
-      <Border Style="{StaticResource Card}"><StackPanel>
+      </StackPanel></local:Stone>
+      <local:Stone Style="{StaticResource Card}"><StackPanel>
        <TextBlock Text="About" Style="{StaticResource CardTitle}" Margin="0,0,0,4"/><TextBlock Text="Video playback by libVLC / LibVLCSharp. Peer connections by libdatachannel / DataChannelDotnet. Voice chat by Concentus (Opus) and NAudio. Artwork by TVmaze (https://www.tvmaze.com, CC BY-SA), Wikipedia, and TMDB. Source pages appear in title details." Style="{StaticResource Hint}"/><Image Source="Assets/Tmdb.png" Width="200" Stretch="Uniform" HorizontalAlignment="Left" Margin="0,16,0,6" AutomationProperties.Name="The Movie Database logo"/><TextBlock><Hyperlink NavigateUri="https://www.themoviedb.org" RequestNavigate="OpenTmdbAttribution" Foreground="{DynamicResource Accent}">The Movie Database</Hyperlink></TextBlock><TextBlock Text="This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB." Style="{StaticResource Hint}" Margin="0,10,0,0"/><TextBlock Text="Streaming-provider data supplied by JustWatch via TMDB." Style="{StaticResource Hint}" Margin="0,10,0,0"/><TextBlock><Hyperlink NavigateUri="https://www.justwatch.com/" RequestNavigate="OpenTmdbAttribution" Foreground="{DynamicResource Accent}">JustWatch</Hyperlink></TextBlock>
-      </StackPanel></Border>
+      </StackPanel></local:Stone>
      </StackPanel></ScrollViewer>
     </Grid>
    </Grid>
@@ -1055,7 +1047,7 @@
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
     <Grid Margin="0,0,0,20"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Watch in sync with friends. Only the host needs the video." Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,16,0"/><StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="ReturnToRoomButton" Content="Return to player" ContentTemplate="{StaticResource PlayContent}" Tag="Room" Click="Navigate" Style="{StaticResource HeaderAction}" Margin="0,0,4,0"/><Button x:Name="AddSavedInvitationButton" Content="Join a room" Click="JoinClick" Style="{StaticResource HeaderAction}" Margin="0,0,4,0" ToolTip="Paste an invitation link or room code to add it to your saved rooms"/><Button x:Name="CreateSavedRoomButton" Content="Create room" ContentTemplate="{StaticResource AddContent}" Click="CreatePersistentRoom" Style="{StaticResource HeaderCreate}"/></StackPanel></Grid>
     <!-- Hero: what the connected room is playing, or what the most recent room watched last time. -->
-    <Border x:Name="RoomHero" Grid.Row="1" Height="200" CornerRadius="14" local:RoundedClip.Radius="14" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" Margin="0,0,0,20" Visibility="Collapsed">
+    <local:Stone x:Name="RoomHero" Grid.Row="1" Depth="Slab" Height="200" CornerRadius="20" local:RoundedClip.Radius="20" Background="{DynamicResource Surface}" Margin="0,0,0,24" Visibility="Collapsed">
      <Grid>
       <!-- Without a saved picture: a room badge before anything is chosen, a title card otherwise, and a shimmer while the picture downloads. -->
       <Grid HorizontalAlignment="Right" Width="460" ClipToBounds="True">
@@ -1100,13 +1092,13 @@
        </StackPanel>
       </StackPanel>
      </Grid>
-    </Border>
+    </local:Stone>
     <Grid Grid.Row="2"><StackPanel x:Name="RoomsEmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="500"><Border Width="76" Height="76" CornerRadius="38" Background="{DynamicResource AccentSoft}" Margin="0,0,0,22"><TextBlock Text="&#xE716;" Style="{StaticResource Icon}" FontSize="30" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><TextBlock Text="Watch together" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold" TextAlignment="Center"/><TextBlock Text="Create a room and invite friends, or paste an invitation to join theirs." Style="{StaticResource MutedText}" TextAlignment="Center" Margin="0,10,0,24"/><WrapPanel HorizontalAlignment="Center"><Button Content="Create room" ContentTemplate="{StaticResource AddContent}" Click="CreatePersistentRoom" Style="{StaticResource Primary}"/><Button Content="Join a room" Click="JoinClick" Margin="0,0,0,8"/></WrapPanel></StackPanel>
      <!-- Saved rooms: a row of room names, then tiles for the selected room. -->
      <DockPanel x:Name="SavedRoomsContent" Visibility="Collapsed">
       <DockPanel.Resources>
        <Style x:Key="TileLabel" TargetType="TextBlock"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="Margin" Value="0,0,0,10"/></Style>
-       <Style x:Key="Tile" TargetType="Border"><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="BorderBrush" Value="{DynamicResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="18,16"/></Style>
+       <Style x:Key="Tile" TargetType="local:Stone"><Setter Property="Depth" Value="Slab"/><Setter Property="Background" Value="{DynamicResource Surface}"/><Setter Property="CornerRadius" Value="20"/><Setter Property="Padding" Value="18,16"/></Style>
       </DockPanel.Resources>
       <!-- The saved rooms, on the app's thread selector (ThreadBar.cs) like the library's categories; a live room has a dot. -->
       <local:ThreadBar DockPanel.Dock="Top" HorizontalAlignment="Left" Margin="0,0,0,6">
@@ -1137,7 +1129,7 @@
         <Grid.ColumnDefinitions><ColumnDefinition Width="11*" MinWidth="280"/><ColumnDefinition Width="12"/><ColumnDefinition Width="10*" MinWidth="220"/><ColumnDefinition Width="12"/><ColumnDefinition Width="10*" MinWidth="220"/></Grid.ColumnDefinitions>
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <!-- The room: its state, the invitation, and what it watched last. -->
-        <Border Grid.RowSpan="3" Style="{StaticResource Tile}" Padding="0" local:RoundedClip.Radius="12">
+        <local:Stone Grid.RowSpan="3" Style="{StaticResource Tile}" Padding="0" local:RoundedClip.Radius="20">
          <Grid>
           <Rectangle IsHitTestVisible="False"><Rectangle.Fill><RadialGradientBrush Center="0.9,0" GradientOrigin="0.9,0" RadiusX="0.75" RadiusY="0.6" Opacity="0.20"><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="{DynamicResource AccentClear}" Offset="1"/></RadialGradientBrush></Rectangle.Fill></Rectangle>
           <StackPanel Margin="20,18,20,18">
@@ -1173,9 +1165,9 @@
            </Border>
           </StackPanel>
          </Grid>
-        </Border>
+        </local:Stone>
         <!-- People: the host admits and removes guests here; guests see who is in the room. -->
-        <Border x:Name="SavedRoomGuestManagement" Grid.Column="2" Grid.RowSpan="3" Style="{StaticResource Tile}">
+        <local:Stone x:Name="SavedRoomGuestManagement" Grid.Column="2" Grid.RowSpan="3" Style="{StaticResource Tile}">
          <DockPanel>
           <DockPanel DockPanel.Dock="Top"><TextBlock x:Name="SavedRoomGuestCount" DockPanel.Dock="Right" Style="{StaticResource MutedText}" FontSize="11.5"/><TextBlock x:Name="SavedRoomGuestHeading" Text="Guests" Style="{StaticResource TileLabel}"/></DockPanel>
           <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
@@ -1193,21 +1185,21 @@
           </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
           </Grid>
          </DockPanel>
-        </Border>
+        </local:Stone>
         <!-- What guests may do; only the host sees this tile. -->
-        <Border x:Name="SavedRoomHostControls" Grid.Column="4" Style="{StaticResource Tile}">
+        <local:Stone x:Name="SavedRoomHostControls" Grid.Column="4" Style="{StaticResource Tile}">
          <StackPanel>
           <TextBlock Text="Guests can" Style="{StaticResource TileLabel}" Margin="0,0,0,4"/>
           <ToggleButton x:Name="SavedRoomSharedControls" Content="Play, pause and seek" ToolTip="Guests can play, pause and seek. Changes save immediately." Click="SavedRoomControlsChanged" AutomationProperties.Name="Saved room shared controls" Style="{StaticResource Switch}"/>
           <CheckBox x:Name="SavedRoomLibraryBrowsing" Content="Browse my library" ToolTip="One admitted guest can browse at a time. Turning this off ends the active session." Checked="SavedRoomLibraryChanged" Unchecked="SavedRoomLibraryChanged" AutomationProperties.Name="Allow guests to browse my library" Style="{StaticResource Switch}"/>
          </StackPanel>
-        </Border>
-        <Border x:Name="SavedRoomActions" Grid.Column="4" Grid.Row="2" Style="{StaticResource Tile}">
+        </local:Stone>
+        <local:Stone x:Name="SavedRoomActions" Grid.Column="4" Grid.Row="2" Style="{StaticResource Tile}">
          <StackPanel>
           <TextBlock Text="Room" Style="{StaticResource TileLabel}"/>
           <WrapPanel><Button x:Name="RenameSavedRoomButton" Content="Rename" Style="{StaticResource QuietButton}" Click="RenameSavedRoom" Margin="0,0,4,8"/><Button x:Name="ForgetSavedRoomButton" Content="Forget room" Style="{StaticResource QuietButton}" Foreground="{DynamicResource Danger}" Click="ForgetSavedRoom" Margin="0,0,0,8"/></WrapPanel>
          </StackPanel>
-        </Border>
+        </local:Stone>
        </Grid>
       </ScrollViewer>
      </DockPanel>
@@ -1349,7 +1341,7 @@
              <local:PlayerMenuPopup x:Name="PlayerQueueMenu" Style="{StaticResource PlayerMenuPopup}" Opened="PlayerMenuOpened"><local:MenuSizer>
               <ContentControl Style="{StaticResource PlayerMenu}" Width="380" PreviewKeyDown="PlayerMenuKeyDown"><StackPanel Margin="6,2,6,2">
                <!-- Switching between the episode list (or no queue) and a queue never interrupts the playing video. -->
-               <Border Background="#0F1015" BorderBrush="{StaticResource PlayerLine}" BorderThickness="1" CornerRadius="9" Padding="3" Margin="0,0,0,8">
+               <Border Background="#0B0C10" CornerRadius="11" Padding="3" Margin="0,0,0,8">
                 <UniformGrid Rows="1">
                  <ToggleButton x:Name="QueueModeOff" Click="QueueModeOffClicked" Style="{StaticResource PlayerSegment}" AutomationProperties.Name="Turn the queue off"><StackPanel Orientation="Horizontal"><TextBlock x:Name="QueueModeOffIcon" Text="&#xE7F4;" Style="{StaticResource PlayerPillIcon}"/><TextBlock x:Name="QueueModeOffText" Text="Episodes"/></StackPanel></ToggleButton>
                  <ToggleButton x:Name="QueueModeOn" Click="QueueModeOnClicked" Style="{StaticResource PlayerSegment}" AutomationProperties.Name="Use a queue"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8FD;" Style="{StaticResource PlayerPillIcon}"/><TextBlock Text="Queue"/></StackPanel></ToggleButton>
@@ -1382,13 +1374,13 @@
               <ContentControl Style="{StaticResource PlayerMenu}" Width="360" PreviewKeyDown="PlayerMenuKeyDown"><StackPanel x:Name="RoomParticipants" Margin="6,2,6,6">
                <TextBlock Text="Participants" Style="{StaticResource PlayerMenuCaption}" Margin="4,4,4,8"/>
                <!-- Voice chat: who is talking, your microphone, and joining or leaving. -->
-               <Border x:Name="VoiceCard" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="12,10" Margin="0,0,0,10">
+               <local:Stone x:Name="VoiceCard" Depth="Chip" Background="{DynamicResource Surface}" CornerRadius="14" Padding="12,10" Margin="0,0,0,12">
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                  <Border x:Name="VoiceCardBadge" Width="32" Height="32" CornerRadius="16" Background="{DynamicResource AccentSoft}" VerticalAlignment="Top" Margin="0,2,10,0"><TextBlock x:Name="VoiceCardIcon" Text="&#xE95B;" FontFamily="{StaticResource IconFont}" FontSize="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,8,0">
                   <TextBlock Text="Voice chat" FontWeight="SemiBold"/>
                   <TextBlock x:Name="VoiceCardStatus" Foreground="{DynamicResource Muted}" FontSize="11.5" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
-                  <Border x:Name="VoiceLevelTrack" Height="3" CornerRadius="1.5" Background="{DynamicResource Line}" Margin="0,6,0,2" Visibility="Collapsed" ToolTip="Your microphone level"><Border x:Name="VoiceLevelFill" CornerRadius="1.5" Background="#3FB97A" HorizontalAlignment="Left" Width="0"/></Border>
+                  <Border x:Name="VoiceLevelTrack" Height="3" CornerRadius="1.5" Background="{DynamicResource Well}" Margin="0,6,0,2" Visibility="Collapsed" ToolTip="Your microphone level"><Border x:Name="VoiceLevelFill" CornerRadius="1.5" Background="#3FB97A" HorizontalAlignment="Left" Width="0"/></Border>
                   <!-- Everyone's voice volume, applied as it moves; each person's row has their own level. -->
                   <StackPanel x:Name="VoiceCardVolumeRow" Orientation="Horizontal" Visibility="Collapsed" Margin="0,6,0,0">
                    <TextBlock Text="&#xE767;" FontFamily="{StaticResource IconFont}" FontSize="12" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" Margin="0,0,8,0" ToolTip="Voice volume"/>
@@ -1402,7 +1394,7 @@
                   <Button x:Name="VoiceCardJoin" Click="ToggleVoice" Style="{StaticResource Primary}" Content="Join" Padding="14,0" Height="34" MinHeight="34" Margin="0" AutomationProperties.Name="Join voice chat"/>
                  </StackPanel>
                 </Grid>
-               </Border>
+               </local:Stone>
                <ListBox x:Name="PeopleList" MaxHeight="280" AutomationProperties.Name="Room participants" Background="Transparent" BorderThickness="0" Padding="0" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate>
                 <Grid Margin="0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                  <!-- The avatar ring lights up while the person is talking. -->
@@ -1431,9 +1423,9 @@
               <Button x:Name="MuteButton" Content="&#xE995;" Click="MutePlayback" Style="{StaticResource PlayerSegmentIcon}" ToolTip="Mute (M)" AutomationProperties.Name="Mute"/>
               <TextBlock x:Name="VolumeText" Text="80%" Foreground="#B4B6C2" FontSize="10.5" MinWidth="28" VerticalAlignment="Center" Margin="0,0,6,0" IsHitTestVisible="False" Typography.NumeralAlignment="Tabular"/>
               <Popup x:Name="VolumeFlyout" Placement="Top" HorizontalOffset="-5" VerticalOffset="-8" StaysOpen="True" AllowsTransparency="True" PopupAnimation="Fade" Opened="VolumeFlyoutOpened">
-               <Border Background="#F717181F" BorderBrush="{StaticResource PlayerLine}" BorderThickness="1" CornerRadius="10" Width="40" Height="136" Padding="0,10">
+               <local:Stone Depth="Chip" AlwaysDark="True" Background="#F717181F" CornerRadius="14" Width="40" Height="136" Padding="0,10">
                 <Slider x:Name="Volume" Orientation="Vertical" IsMoveToPointEnabled="True" Style="{StaticResource PlayerVerticalSlider}" Minimum="0" Maximum="100" Value="80" SmallChange="5" LargeChange="10" ValueChanged="VolumeChanged" AutomationProperties.Name="Volume"/>
-               </Border>
+               </local:Stone>
               </Popup>
              </StackPanel>
              <Button x:Name="PictureInPictureButton" Content="&#xE8A7;" Click="EnterPictureInPicture" Style="{StaticResource PlayerSegmentIcon}" ToolTip="Picture in picture (I)" AutomationProperties.Name="Picture in picture"/><Button x:Name="FullscreenButton" Content="&#xE740;" Click="Fullscreen" Style="{StaticResource PlayerSegmentIcon}" Margin="0" ToolTip="Fullscreen (F or double-click video)" AutomationProperties.Name="Fullscreen"/></StackPanel></Border>
@@ -1481,5 +1473,5 @@
    </StackPanel>
   </Grid>
   <Border x:Name="AppStatusBar" Grid.Row="2" Grid.ColumnSpan="2" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"><DockPanel><ProgressBar x:Name="ScanProgress" DockPanel.Dock="Right" Width="96" Height="3" Margin="18,0" IsIndeterminate="True" Visibility="Collapsed"/><TextBlock x:Name="StatusText" Text="Welcome to BlackPearl" Foreground="{DynamicResource Muted}" Margin="16,0" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"/></DockPanel></Border>
-  <Border x:Name="UpdateCard" Grid.Column="1" Grid.Row="1" Panel.ZIndex="100" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Width="420" Margin="24" Padding="22" CornerRadius="14" BorderThickness="1" BorderBrush="{DynamicResource Line}" Background="{DynamicResource Surface}" TextElement.Foreground="{DynamicResource Ink}" Effect="{StaticResource CardShadow}"><StackPanel><StackPanel Orientation="Horizontal" Margin="0,0,0,10"><Border Width="32" Height="32" CornerRadius="8" Background="{DynamicResource AccentSoft}" Margin="0,0,12,0"><TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><TextBlock x:Name="UpdateCardTitle" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" MaxWidth="320"/></StackPanel><TextBlock x:Name="UpdateCardStatus" Style="{StaticResource MutedText}" Margin="0,0,0,16" AutomationProperties.LiveSetting="Polite"/><ProgressBar x:Name="UpdateDownloadProgress" Visibility="Collapsed" Minimum="0" Maximum="100" Height="6" Margin="0,0,0,14"/><WrapPanel HorizontalAlignment="Right"><Button x:Name="DismissUpdateButton" Content="Later" Style="{StaticResource QuietButton}" Click="DismissUpdate" Margin="0,0,8,0"/><Button x:Name="InstallUpdateButton" Content="Update" Click="InstallUpdate" Style="{StaticResource Primary}" Margin="0"/></WrapPanel></StackPanel></Border></Grid>
+  <local:Stone x:Name="UpdateCard" Grid.Column="1" Grid.Row="1" Panel.ZIndex="100" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom" Width="420" Margin="24" Padding="22" CornerRadius="20" Depth="Dialog" Background="{DynamicResource Raised}" TextElement.Foreground="{DynamicResource Ink}"><StackPanel><StackPanel Orientation="Horizontal" Margin="0,0,0,10"><Border Width="32" Height="32" CornerRadius="8" Background="{DynamicResource AccentSoft}" Margin="0,0,12,0"><TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/></Border><TextBlock x:Name="UpdateCardTitle" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center" MaxWidth="320"/></StackPanel><TextBlock x:Name="UpdateCardStatus" Style="{StaticResource MutedText}" Margin="0,0,0,16" AutomationProperties.LiveSetting="Polite"/><ProgressBar x:Name="UpdateDownloadProgress" Visibility="Collapsed" Minimum="0" Maximum="100" Height="6" Margin="0,0,0,14"/><WrapPanel HorizontalAlignment="Right"><Button x:Name="DismissUpdateButton" Content="Later" Style="{StaticResource QuietButton}" Click="DismissUpdate" Margin="0,0,8,0"/><Button x:Name="InstallUpdateButton" Content="Update" Click="InstallUpdate" Style="{StaticResource Primary}" Margin="0"/></WrapPanel></StackPanel></local:Stone></Grid>
 </Window>

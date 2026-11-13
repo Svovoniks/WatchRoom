@@ -2341,6 +2341,8 @@ public partial class MainWindow : Window
         hero.Freeze(); resources["HeroFade"] = hero;
         var fadeLeft = new LinearGradientBrush(canvas, Alpha(canvas, 0), 0); fadeLeft.Freeze(); resources["EdgeFadeLeft"] = fadeLeft;
         var fadeRight = new LinearGradientBrush(Alpha(canvas, 0), canvas, 0); fadeRight.Freeze(); resources["EdgeFadeRight"] = fadeRight;
+        ApplyStoneTheme(resources, colors, light);
+        Stone.SetLight(this, light);
         // The player stays dark in both modes and uses the theme's dark accent.
         var player = palette.Colors(light: false); var playerAccent = player[6];
         resources["PlayerAccent"] = Solid(playerAccent); resources["PlayerAccentInk"] = Solid(player[7]); resources["PlayerAccentSoft"] = Solid(player[9]);
@@ -2348,6 +2350,43 @@ public partial class MainWindow : Window
         RoomPage.Resources["Accent"] = resources["PlayerAccent"]; RoomPage.Resources["AccentInk"] = resources["PlayerAccentInk"]; RoomPage.Resources["AccentSoft"] = resources["PlayerAccentSoft"];
         UpdateThemeChoices();
         ApplyTitleBarTheme();
+    }
+    // The pebble material in the theme's colours (see Stone and the pebble in App.xaml): a stone's fill and dome, the
+    // sunk well that holds values, and the accent light that marks focus and state. In light mode stones are chalk,
+    // lighter than the page, so they stand up from it instead of reading as dents.
+    internal static void ApplyStoneTheme(ResourceDictionary resources, Color[] colors, bool light)
+    {
+        SolidColorBrush Solid(Color color) { var brush = new SolidColorBrush(color); brush.Freeze(); return brush; }
+        static Color Alpha(Color color, byte alpha) => Color.FromArgb(alpha, color.R, color.G, color.B);
+        static Color Mix(Color from, Color to, double amount) => Color.FromRgb((byte)Math.Round(from.R + (to.R - from.R) * amount),
+            (byte)Math.Round(from.G + (to.G - from.G) * amount), (byte)Math.Round(from.B + (to.B - from.B) * amount));
+        LinearGradientBrush Vertical(params (uint Argb, double Offset)[] stops)
+        {
+            var brush = new LinearGradientBrush(new GradientStopCollection(stops.Select(stop => new GradientStop(Color.FromArgb((byte)(stop.Argb >> 24),
+                (byte)(stop.Argb >> 16), (byte)(stop.Argb >> 8), (byte)stop.Argb), stop.Offset))), 90);
+            brush.Freeze(); return brush;
+        }
+        var canvas = colors[0]; var surface = colors[1]; var elevated = colors[2]; var ink = colors[3]; var accent = colors[6];
+        var pebble = light ? Mix(surface, Colors.White, 0.55) : elevated;
+        resources["PebbleFill"] = Solid(pebble); resources["PebbleColor"] = pebble;
+        // Menus, popups and dialogs float highest, on the lightest stone.
+        resources["Raised"] = Solid(light ? Mix(surface, Colors.White, 0.7) : elevated);
+        // The dome: lighter at the top, a touch darker at the bottom; a pressed pebble's turns over.
+        resources["PebbleDome"] = light ? Vertical((0xB3FFFFFF, 0), (0x00FFFFFF, 0.55), (0x0F1E281E, 1)) : Vertical((0x14FFFFFF, 0), (0x00FFFFFF, 0.55), (0x1F000000, 1));
+        resources["PebbleDomePressed"] = light ? Vertical((0x141E281E, 0), (0x001E281E, 0.5), (0x80FFFFFF, 1)) : Vertical((0x24000000, 0), (0x00000000, 0.5), (0x0AFFFFFF, 1));
+        // The well, sunk into the page: darker than the page, shaded just inside its top edge, with a faint lip below.
+        resources["Well"] = Solid(light ? Mix(canvas, Colors.Black, 0.06) : Mix(canvas, Colors.Black, 0.32));
+        // A tray is pressed only a little way into a slab, so the wells inside it still read as deeper.
+        resources["TrayFill"] = Solid(Mix(surface, canvas, light ? 0.6 : 0.55));
+        var shade = new LinearGradientBrush(light ? Color.FromArgb(0x33, 0x1E, 0x28, 0x1E) : Color.FromArgb(0x73, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), new Point(0, 0), new Point(0, 7))
+            { MappingMode = BrushMappingMode.Absolute };
+        shade.Freeze(); resources["WellShade"] = shade;
+        resources["WellLip"] = Solid(light ? Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x0D, 0xFF, 0xFF, 0xFF));
+        resources["WellHover"] = Solid(Alpha(ink, 0x1F));
+        var lit = new LinearGradientBrush(Alpha(accent, light ? (byte)0x14 : (byte)0x1F), Alpha(accent, 0), 90); lit.Freeze(); resources["WellLit"] = lit;
+        // Focus: a crisp accent ring with a soft halo of the same light around it.
+        resources["AccentRing"] = Solid(Alpha(accent, 0xA6)); resources["AccentHalo"] = Solid(Alpha(accent, 0x29));
+        Stone.LightTheme = light;
     }
     protected override void OnSourceInitialized(EventArgs e)
     {

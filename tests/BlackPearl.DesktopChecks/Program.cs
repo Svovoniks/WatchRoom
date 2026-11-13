@@ -572,14 +572,14 @@ static class Program
         var missing = used.Where(key => !keys.Contains(key)).ToList();
         check(used.Count > 10 && missing.Count == 0, $"every resource the code looks up by name exists ({used.Count} looked up{(missing.Count > 0 ? "; missing: " + string.Join(", ", missing) : "")})");
     }
-    // Each button style draws a focus ring the shape of its button: the round ring on the soft and pebble templates, the square
+    // Each button style draws a focus ring the shape of its button: the round ring on pebbles (a tighter one on chips), the square
     // one on every template of its own. A style inherits both from its base style, so one with its own template and no ring
     // of its own once took the round ring. The app also takes off any focus visual that isn't one of its rings, which once hid
     // the round ring altogether.
     private static void CheckButtonFocusRings(Action<bool, string> check)
     {
         var resources = Application.Current.Resources;
-        var soft = (Style)resources["SoftFocusRing"]; var square = (Style)resources["FocusRing"];
+        var soft = (Style)resources["SoftFocusRing"]; var chip = (Style)resources["ChipFocusRing"]; var square = (Style)resources["FocusRing"];
         var softTemplates = new object?[] { Effective((Style)resources[typeof(System.Windows.Controls.Button)], System.Windows.Controls.Control.TemplateProperty), resources["PebbleTemplate"] };
         static object? Effective(Style? style, DependencyProperty property)
         {
@@ -594,7 +594,9 @@ static class Program
             var ring = Effective(style, FrameworkElement.FocusVisualStyleProperty) as Style;
             if (ring is null) continue; // a style that sets no ring (the caption buttons) shows none
             count++;
-            var expected = softTemplates.Contains(Effective(style, System.Windows.Controls.Control.TemplateProperty)) ? soft : square;
+            // A pebble smaller than a button (a chip) is rounder, and its ring follows its tighter corners.
+            var pebble = softTemplates.Contains(Effective(style, System.Windows.Controls.Control.TemplateProperty));
+            var expected = !pebble ? square : Effective(style, BlackPearl.Desktop.Pebble.RadiusProperty) is double radius && radius < 16 ? chip : soft;
             if (!ReferenceEquals(ring, expected) || !BlackPearl.Desktop.App.IsAppFocusRing(ring)) wrong.Add(key is Type t ? t.Name : key.ToString()!);
         }
         check(count > 10 && wrong.Count == 0, $"every button style has the focus ring of its shape, which the app keeps ({count} styles{(wrong.Count > 0 ? "; wrong: " + string.Join(", ", wrong) : "")})");
@@ -760,6 +762,32 @@ static class Program
         Call("ShowPage", "Queues"); await Task.Delay(450); window.UpdateLayout();
     }
 
+    // A pebble's shadow reaches outside the button. At 175% layout rounding left the pebble's template a fraction of a pixel
+    // wider than the button, and WPF clipped it to the button: a hard edge cut its shadow along the right and bottom. Draws
+    // pebbles with a few labels on white at the given scaling, in the window's type, and reads the page just outside each
+    // one's bottom and right edges.
+    internal static bool PebbleShadowWhole(double scale, System.Windows.Controls.ControlTemplate? template = null) =>
+        new[] { "Details", "Play", "Watch together", "Add to queue", "Resume", "Copy code" }.All(label => PebbleShadowWhole(scale, label, template));
+    private static bool PebbleShadowWhole(double scale, string label, System.Windows.Controls.ControlTemplate? template)
+    {
+        var button = new System.Windows.Controls.Button { Content = label, Height = 44, Padding = new Thickness(18, 0, 18, 0), Margin = new Thickness(0),
+            Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE8, 0xE8, 0xE8)) };
+        if (template is not null) button.Template = template;
+        var row = new System.Windows.Controls.StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal };
+        row.Children.Add(button);
+        var host = new System.Windows.Controls.Border { Background = System.Windows.Media.Brushes.White, Padding = new Thickness(40), UseLayoutRounding = true, Child = row };
+        System.Windows.Documents.TextElement.SetFontFamily(host, new System.Windows.Media.FontFamily("Segoe UI")); System.Windows.Documents.TextElement.SetFontSize(host, 14);
+        System.Windows.Media.VisualTreeHelper.SetRootDpi(host, new DpiScale(scale, scale));
+        var size = new Size(400, 200);
+        host.Measure(size); host.Arrange(new Rect(size)); host.UpdateLayout();
+        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(size.Width * scale), (int)Math.Ceiling(size.Height * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+        bitmap.Render(host);
+        var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4]; bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
+        byte Green(double x, double y) => pixels[((int)(y * scale) * bitmap.PixelWidth + (int)(x * scale)) * 4 + 1];
+        var box = button.TransformToAncestor(host).TransformBounds(new Rect(button.RenderSize));
+        // The shadow darkens the white page just below the pebble and just past its right end; cut off, the page stays white.
+        return Green(box.X + box.Width / 2, box.Bottom + 3) < 245 && Green(box.Right + 1.5, box.Y + box.Height * 0.75) < 250;
+    }
     // The sidebar folds into a strip of icons, with each icon named in a tooltip, and unfolds again.
     private static async Task CheckCollapsedRail(MainWindow window, Action<bool, string> check)
     {
@@ -1016,6 +1044,7 @@ static class Program
                 await CheckToolbarBaseline(window, Scaled);
                 await CheckPageTitleBaseline(window, Scaled);
                 await CheckCollapsedRail(window, Scaled);
+                Scaled(PebbleShadowWhole(scale), "a pebble's shadow is drawn whole, not cut off at the button's edges");
             }
         }
         finally { Rescale(window, native.DpiScaleX); arrange.Invoke(window, null); await Task.Delay(300); }
