@@ -26,11 +26,17 @@ public static class LibraryIdentity
     public static string TitleKey(MediaItem item)
     {
         if (item.Series is not null) return ShowKey(item);
-        if (item.IsVirtual || item.IsMusic || item.IsExtra || item.IsBonus || item.ExtraOf is not null) return item.Id;
-        var identity = ProviderId(item, "tmdb") is { } tmdb ? $"tmdb:{item.MetadataType ?? "movie"}:{tmdb}"
-            : ProviderId(item, "imdb") is { } imdb ? "imdb:" + imdb : null;
-        return identity is null ? item.Id : "film-" + Hash($"{identity}:{FilmPart(item) ?? 0}");
+        if (FilmIdentity(item) is not { } identity) return item.Id;
+        // Records never change, so a film's key, which hashes and reads its file name, is worked out once per record.
+        return filmKeys.GetValue(item, film => new("film-" + Hash($"{identity}:{FilmPart(film) ?? 0}"))).Value;
     }
+    private sealed record FilmKey(string Value);
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MediaItem, FilmKey> filmKeys = new();
+    // The provider identity a film's copies share, before parts are told apart; null for anything else.
+    internal static string? FilmIdentity(MediaItem item) =>
+        item.Series is not null || item.IsVirtual || item.IsMusic || item.IsExtra || item.IsBonus || item.ExtraOf is not null ? null
+        : ProviderId(item, "tmdb") is { } tmdb ? $"tmdb:{item.MetadataType ?? "movie"}:{tmdb}"
+        : ProviderId(item, "imdb") is { } imdb ? "imdb:" + imdb : null;
     public static bool SameFilm(MediaItem left, MediaItem right) => left.Series is null && right.Series is null && TitleKey(left) == TitleKey(right);
     // The part a film's file name numbers, as "Part 2", "CD1" or a trailing "-2". A number its provider title ends with
     // too, as in Apollo 13, names the film rather than a part.

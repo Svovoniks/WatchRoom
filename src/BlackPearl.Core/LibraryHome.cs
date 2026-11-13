@@ -39,7 +39,7 @@ public static class LibraryHome
                     files.Select(item => item.RuntimeMinutes).FirstOrDefault(minutes => minutes > 0)));
                 continue;
             }
-            // A film continues with the copy left part-way, the one played last; once any copy is watched, it's done.
+            // A film continues with a copy left part-way, the one played last; with none, a watched copy means it's done.
             if (title.Level == "movie")
             {
                 if (members.Where(item => item.Available && !Watched(item.Id) && Position(item.Id) >= 10000).MaxBy(item => Played(item.Id)) is { } resume)

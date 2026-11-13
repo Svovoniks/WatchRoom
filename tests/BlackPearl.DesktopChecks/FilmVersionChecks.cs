@@ -59,6 +59,10 @@ static class FilmVersionChecks
         check(Field<string>("currentPage") == "Details" && Field<MediaItem>("selected").Id == uhd.Id && forward.Count == 0,
             "Forward returns to the version last shown");
 
+        // Copies count as one film for watching too: clearing it clears every copy, as an episode's versions do.
+        store.Setting("watched:" + hd.Id, "true"); store.Setting("watched:" + uhd.Id, "true");
+        Call("MarkWatched", Field<MediaItem>("selected"), "video", null, false, false);
+        check(store.Setting("watched:" + hd.Id) == "false" && store.Setting("watched:" + uhd.Id) == "false", "marking a film unwatched clears every copy of it");
         Call("BrowseHistory", true);
         foreach (var item in new[] { hd, uhd }) store.Save(item with { Available = false });
         store.RemoveUnavailable([hd.Id, uhd.Id]);

@@ -233,8 +233,18 @@ static class LibraryVersionsFixture
         var played = new Dictionary<string, string> { ["played:hd"] = "200", ["played:uhd"] = "100", ["position:hd"] = "61000" };
         check(LibraryCatalog.CurrentVersion(versions, played).Id == "hd" && LibraryCatalog.WithCurrentVersions(films, cards, played).Single(card => card.DisplayTitle == "Heat").Media.Id == "hd",
             "a film card leads with the copy played last");
-        var chosen = new Dictionary<string, string>(played) { ["version:" + key] = "REPACK 2160p UHD" };
+        var chosen = new Dictionary<string, string>(played) { ["version:" + key] = "uhd" };
         check(LibraryCatalog.WithCurrentVersions(films, cards, chosen).Single(card => card.DisplayTitle == "Heat").Media.Id == "uhd", "a chosen version leads the film's card over the copy played last");
+        // A film remembers the chosen copy itself: copies' labels change with which other copies are online.
+        var sd = Film("sd", Path.Combine(directory, "Offline", "Heat.1995.720p.x265.mkv")) with { Available = false };
+        var withOffline = new[] { hd, uhd, sd };
+        var offlineChoice = new Dictionary<string, string>(played) { ["played:uhd"] = "300", ["version:" + key] = "hd" };
+        check(LibraryCatalog.VersionLabel(hd, LibraryCatalog.Versions(withOffline, hd)) != LibraryCatalog.VersionLabel(hd, versions) &&
+            LibraryCatalog.WithCurrentVersions(withOffline.Where(x => x.Available), LibraryCatalog.Browse(withOffline.Where(x => x.Available)), offlineChoice).Single().Media.Id == "hd" &&
+            LibraryCatalog.WithCurrentVersions(withOffline, LibraryCatalog.Browse(withOffline.Where(x => x.Available)), offlineChoice).Single().Media.Id == "hd",
+            "a chosen copy leads its film's card whether or not an offline copy is counted");
+        check(LibraryCatalog.IsVersionOf(hd, uhd) && LibraryCatalog.IsVersionOf(uhd, sd) && !LibraryCatalog.IsVersionOf(hd, hd) && !LibraryCatalog.IsVersionOf(hd, other) &&
+            !LibraryCatalog.IsVersionOf(parts[0], parts[1]) && !LibraryCatalog.IsVersionOf(unknown[0], unknown[1]), "two files are versions only when they are copies of one identified film");
 
         // A clip that came with one copy belongs to the film.
         var clip = new MediaItem("clip", Path.Combine(directory, "Desktop", "Heat Extras", "Making Of.mkv"), "Making Of", "Movie", Available: true, IsBonus: true, ExtraOf: "uhd");
@@ -249,6 +259,16 @@ static class LibraryVersionsFixture
         check(!watched.Entries.Any(entry => entry.Section == "continue") && !watched.Unseen.Any(title => title.Card.DisplayTitle == "Heat") && LibraryHome.Overview(films).Unseen.Count(title => title.Card.DisplayTitle == "Heat") == 1,
             "a film watched in any copy is done, and an unstarted one is suggested once");
         check(LibrarySearch.Search(films, "heat", new(), new Dictionary<string, FileLanguages>()).Single().Versions == 2, "Search finds a film's copies as one title");
+        var watchedOther = new Dictionary<string, string> { ["watched:hd"] = "true" };
+        bool Watched(string id) => watchedOther.GetValueOrDefault("watched:" + id) == "true";
+        check(LibraryWatchProgress.IsWatched(films, heat with { Media = uhd }, Watched, _ => 0) && !LibraryWatchProgress.IsWatched(films, heat with { Media = uhd }, Watched, _ => 61000) &&
+            !LibraryWatchProgress.IsWatched(films, heat with { Media = uhd, Versions = 1 }, Watched), "a film card is watched when another copy is, unless its own copy is part-way");
+
+        // A guest lists a film's copies apart, and each copy's artwork is its own.
+        MediaItem Posted(MediaItem film, string name) { var poster = Path.Combine(directory, "posters", name); Directory.CreateDirectory(Path.GetDirectoryName(poster)!); File.WriteAllBytes(poster, Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")); return film with { Poster = poster }; }
+        var postedHd = Posted(hd, "hd.png"); var postedUhd = Posted(uhd, "uhd.png");
+        check(SharedLibrary.ArtworkPath([postedHd, postedUhd], new("hd", "movie"))?.EndsWith("hd.png") == true && SharedLibrary.ArtworkPath([postedHd, postedUhd], new("uhd", "movie"))?.EndsWith("uhd.png") == true,
+            "a guest gets the artwork of every copy of a film, not only the one its card leads with");
         var store = new LibraryStore(Path.Combine(directory, "film-copies-db"));
         store.Setting("version:" + key, "1080p BluRay x265");
         check(store.PlaybackSettings().GetValueOrDefault("version:" + key) == "1080p BluRay x265", "playback settings carry the versions chosen for titles");

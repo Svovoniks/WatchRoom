@@ -994,7 +994,10 @@ static class Program
         {
             // The toolbar check counts "218 items". Rolled to before any scaling is set, its digits are redrawn at each
             // scaling like the rest of the window; rolled to after, they would keep the display's own grid.
-            ((RollingText)window.FindName("ResultCount")).Text = "218 items"; await Task.Delay(900);
+            // A library refresh still running from an earlier check can land just after and set its own count; the count is set
+            // again until it holds, or the toolbar check's own setting would roll it after the scaling changes.
+            var count = (RollingText)window.FindName("ResultCount");
+            for (var attempt = 0; attempt < 10 && (attempt == 0 || count.Text != "218 items"); attempt++) { count.Text = "218 items"; await Task.Delay(900); }
             foreach (var scale in new[] { 1.0, 1.25, 1.5, 1.75 })
             {
                 var at = $" (at {scale * 100:0}% scaling)";

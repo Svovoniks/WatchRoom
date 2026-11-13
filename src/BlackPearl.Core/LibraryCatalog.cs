@@ -154,8 +154,12 @@ public static class LibraryCatalog
     {
         if (film.Series is not null) return [];
         var all = source as IReadOnlyCollection<MediaItem> ?? source.ToArray();
-        var copies = Versions(all, film).Select(x => x.Id).Append(film.Id).ToHashSet();
-        return all.Where(x => x.ExtraOf is { } owner && copies.Contains(owner) && !x.IsVirtual).OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
+        var clips = all.Where(x => x.ExtraOf is not null && !x.IsVirtual).ToArray();
+        if (clips.Length == 0) return [];
+        // Only the films that have clips are compared, rather than finding every copy of this one.
+        var owners = clips.Select(x => x.ExtraOf!).ToHashSet();
+        var copies = all.Where(x => owners.Contains(x.Id) && (x.Id == film.Id || IsVersionOf(film, x))).Select(x => x.Id).Append(film.Id).ToHashSet();
+        return clips.Where(x => copies.Contains(x.ExtraOf!)).OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
     // A bonus clip from a season's own extras folder also lists at the end of that season.
     public static bool SeasonExtra(MediaItem item, int? season) => season > 0 && item.IsBonus && item.Season == 0 && item.AirsAfterSeason == season;
@@ -203,22 +207,30 @@ public static class LibraryCatalog
     {
         if (item.Series is null)
         {
+            // The provider identity narrows the library cheaply before part numbers are read from file names.
+            if (LibraryIdentity.FilmIdentity(item) is not { } identity) return [item];
             var key = LibraryIdentity.TitleKey(item);
-            return key == item.Id ? [item] : OrderVersions(source.Where(x => x.Series is null && LibraryIdentity.TitleKey(x) == key));
+            return OrderVersions(source.Where(x => x.Series is null && LibraryIdentity.FilmIdentity(x) == identity && LibraryIdentity.TitleKey(x) == key));
         }
         return item.Season is null || item.Episode is null || item.NumberingConflict is not null ? [item] :
             OrderVersions(source.Where(x => !x.IsVirtual && x.NumberingConflict is null && LibraryIdentity.SameShow(x, item) && x.Season == item.Season && x.Episode == item.Episode && x.EpisodeEnd == item.EpisodeEnd));
     }
     private static MediaItem[] OrderVersions(IEnumerable<MediaItem> versions) =>
         versions.OrderBy(x => x.IsVirtual).ThenByDescending(x => x.Available).ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToArray();
-    // The copy of a film its card and page lead with: the release chosen for it, otherwise the one played last, otherwise
-    // the first available. Playback holds the library's played: and version: settings (LibraryStore.PlaybackSettings).
+    // Whether two files are versions of one episode or film: the test of one pair that Versions makes of every file.
+    public static bool IsVersionOf(MediaItem item, MediaItem other) => item.Id != other.Id && !item.IsVirtual && !other.IsVirtual && (item.Series is null
+        ? LibraryIdentity.FilmIdentity(item) is { } identity && identity == LibraryIdentity.FilmIdentity(other) && LibraryIdentity.TitleKey(item) == LibraryIdentity.TitleKey(other)
+        : item.Season is not null && item.Episode is not null && item.NumberingConflict is null && other.NumberingConflict is null &&
+            other.Season == item.Season && other.Episode == item.Episode && other.EpisodeEnd == item.EpisodeEnd && LibraryIdentity.SameShow(item, other));
+    // The copy of a film its card and page lead with: the copy chosen for it, otherwise the one played last, otherwise the
+    // first available. Playback holds the library's played: and version: settings (LibraryStore.PlaybackSettings). A film
+    // remembers the chosen copy's id: its label depends on which other copies are online, and a show's doesn't need to.
     public static MediaItem CurrentVersion(IReadOnlyCollection<MediaItem> versions, IReadOnlyDictionary<string, string>? playback)
     {
         var playable = versions.Where(x => x.Available && !x.IsVirtual).ToArray();
         if (playable.Length < 2) return playable.FirstOrDefault() ?? versions.First();
         if (playback?.GetValueOrDefault("version:" + LibraryIdentity.TitleKey(playable[0])) is { Length: > 0 } preferred &&
-            playable.FirstOrDefault(x => VersionLabel(x, versions).Equals(preferred, StringComparison.OrdinalIgnoreCase)) is { } chosen)
+            playable.FirstOrDefault(x => x.Id == preferred) is { } chosen)
             return chosen;
         long Played(MediaItem x) => playback is not null && playback.TryGetValue("played:" + x.Id, out var value) && long.TryParse(value, out var time) ? time : 0;
         return playable.MaxBy(Played) is { } latest && Played(latest) > 0 ? latest : playable[0];
