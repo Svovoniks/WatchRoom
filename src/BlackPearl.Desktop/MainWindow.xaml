@@ -9,9 +9,10 @@
     <!-- The sidebar toggle stays in one spot, open or folded: the top-left corner, as far from the top as from the side, over
          the column of icons and the size of one, in the caption area (so it takes clicks from the window frame). The logo sits
          beside it with the name while the sidebar is open, and slides under it as the sidebar folds (SideRail.cs). The header
-         sits outside the scrolling part so scrolling never moves it. -->
+         sits outside the scrolling part so scrolling never moves it. Folded, the header is a little narrower than the toggle,
+         so the toggle may reach into the sidebar's margin rather than have its hover frame cut off. -->
     <Grid x:Name="RailHeader" DockPanel.Dock="Top" Margin="0,0,0,20">
-     <Button x:Name="RailToggle" Style="{StaticResource QuietIcon}" Content="&#xE90C;" Click="ToggleRailClick" Width="40" Height="40" Margin="0" HorizontalAlignment="Left" VerticalAlignment="Top" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Collapse sidebar (Ctrl+B)" AutomationProperties.Name="Collapse sidebar"/>
+     <Button x:Name="RailToggle" Style="{StaticResource QuietIcon}" Content="&#xE90C;" Click="ToggleRailClick" Width="40" Height="40" Margin="0,0,-12,0" HorizontalAlignment="Left" VerticalAlignment="Top" WindowChrome.IsHitTestVisibleInChrome="True" ToolTip="Collapse sidebar (Ctrl+B)" AutomationProperties.Name="Collapse sidebar"/>
      <StackPanel x:Name="RailBrand" Orientation="Horizontal" Height="40" Margin="42,0,0,0" HorizontalAlignment="Left" VerticalAlignment="Top">
       <Image x:Name="RailLogo" Source="Assets/BlackPearl.png" Width="28" Height="28" VerticalAlignment="Center" AutomationProperties.Name="BlackPearl"/>
       <!-- The name is set in a serif, like a jeweller's mark, apart from the interface type around it. -->
@@ -21,7 +22,7 @@
     <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
      <Button x:Name="NowPlayingButton" Tag="Room" Click="Navigate" Visibility="Collapsed" Background="{DynamicResource AccentSoft}" HorizontalContentAlignment="Stretch" Padding="12,10" Margin="0,0,0,8" ToolTip="Return to the current video" AutomationProperties.Name="Return to player">
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-       <Border Width="30" Height="30" CornerRadius="15" Background="{DynamicResource Accent}" VerticalAlignment="Center"><TextBlock Text="&#xF5B0;" Style="{StaticResource Icon}" FontSize="11" Foreground="{DynamicResource AccentInk}" HorizontalAlignment="Center" Margin="2,0,0,0"/></Border>
+       <Border x:Name="NowPlayingDisc" Width="30" Height="30" CornerRadius="15" Background="{DynamicResource Accent}" VerticalAlignment="Center"><TextBlock Text="&#xF5B0;" Style="{StaticResource Icon}" FontSize="11" Foreground="{DynamicResource AccentInk}" HorizontalAlignment="Center" Margin="2,0,0,0"/></Border>
        <StackPanel x:Name="NowPlayingText" Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center"><TextBlock Text="Return to player" FontWeight="SemiBold" FontSize="13"/><TextBlock x:Name="NowPlayingLabel" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource Muted}" Margin="0,2,0,0"/></StackPanel>
       </Grid>
      </Button>
@@ -544,7 +545,6 @@
          <StackPanel>
           <local:Stone Style="{StaticResource ArtworkFrame}" Height="150" Background="{DynamicResource Surface}">
            <Grid>
-            <Rectangle Visibility="{Binding CreateVisibility}" Stroke="{DynamicResource Muted}" StrokeThickness="1" StrokeDashArray="4 3" RadiusX="10" RadiusY="10" Margin="-1" Opacity="0.6"/>
             <TextBlock Visibility="{Binding PlaceholderVisibility}" Text="{Binding PlaceholderIcon}" Style="{StaticResource Icon}" FontSize="28" HorizontalAlignment="Center" Foreground="{DynamicResource Muted}"/>
             <local:Stone Style="{StaticResource QueueCover}" DataContext="{Binding Cover2}" Visibility="{Binding Visibility}" Margin="0,22,0,0" VerticalAlignment="Top"><Border.RenderTransform><TransformGroup><RotateTransform Angle="-9"/><TranslateTransform X="-46" Y="6"/></TransformGroup></Border.RenderTransform><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></local:Stone>
             <local:Stone Style="{StaticResource QueueCover}" DataContext="{Binding Cover3}" Visibility="{Binding Visibility}" Margin="0,22,0,0" VerticalAlignment="Top"><Border.RenderTransform><TransformGroup><RotateTransform Angle="9"/><TranslateTransform X="46" Y="6"/></TransformGroup></Border.RenderTransform><Image Source="{Binding View.Poster}" Stretch="UniformToFill"/></local:Stone>

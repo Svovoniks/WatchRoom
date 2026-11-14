@@ -9,16 +9,15 @@ using BlackPearl.Core;
 
 namespace BlackPearl.Desktop;
 
-// Supplies the queue menu's row details (position, playing mark, runtime, faded when played) from the window's playback state.
+// Supplies the queue menu's row details (position, playing mark, watched check, runtime) from the window's playback state.
 public sealed class QueueRowConverter : IValueConverter
 {
     internal static Func<object?, string, object?>? Resolve;
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
         Resolve?.Invoke(value, (string)parameter) ?? Fallback((string)parameter);
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => throw new NotSupportedException();
-    internal static readonly SolidColorBrush RowInk = Frozen(0xF4, 0xF4, 0xF7), RowDone = Frozen(0x7D, 0x7F, 0x8C);
     internal static SolidColorBrush Frozen(byte r, byte g, byte b) { var brush = new SolidColorBrush(Color.FromRgb(r, g, b)); brush.Freeze(); return brush; }
-    private static object Fallback(string part) => part switch { "foreground" => RowInk, "playing" => Visibility.Collapsed, _ => "" };
+    private static object Fallback(string part) => part switch { "playing" or "done" => Visibility.Collapsed, _ => "" };
 }
 
 public partial class MainWindow
@@ -129,13 +128,13 @@ public partial class MainWindow
         // Episode rows mirror listedEpisodes and queue rows mirror the queue, so a row's list position is its index.
         var index = QueueRowPosition(row!);
         var playing = playingItem?.Id == media.Id && (episode is not null || queuePosition < 0 || index == queuePosition);
+        // Watched episodes, and queue items already played, show a check in place of their number.
+        var done = !playing && (episode is not null ? WasWatched(media.Id) : queuePosition >= 0 && index >= 0 && index < queuePosition);
         return part switch
         {
-            // Played rows dim their title colour rather than their opacity, which would give every row its own render layer.
-            "foreground" => (episode is not null ? !playing && WasWatched(media.Id) : queuePosition >= 0 && index >= 0 && index < queuePosition)
-                ? QueueRowConverter.RowDone : QueueRowConverter.RowInk,
             "playing" => playing ? Visibility.Visible : Visibility.Collapsed,
-            "number" => playing ? "" : episode is not null ? media.Episode?.ToString() ?? "" : index >= 0 ? (index + 1).ToString() : "",
+            "done" => done ? Visibility.Visible : Visibility.Collapsed,
+            "number" => playing || done ? "" : episode is not null ? media.Episode?.ToString() ?? "" : index >= 0 ? (index + 1).ToString() : "",
             "runtime" => media.RuntimeMinutes is > 0 and var minutes ? minutes >= 60 ? $"{minutes / 60} h {minutes % 60:00}" : $"{minutes} min" : "",
             _ => null
         };

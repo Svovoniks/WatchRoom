@@ -58,6 +58,9 @@ public partial class MainWindow
     {
         railCollapsed = library.Setting(RailCollapsedKey) == "true";
         ApplySideRail(animate: false);
+        // The folded player button's padding is in the display's pixels, which are known once the window is shown.
+        Loaded += (_, _) => LayOutPlayerButton();
+        DpiChanged += (_, _) => LayOutPlayerButton();
         // The pearl stays beside its entry while the sidebar scrolls, resizes, folds, gains the Music entry or comes back from the player.
         // Only vertical changes move the entries; a bold label that widens the content does not.
         RailScroll.ScrollChanged += (_, e) => { if (e.VerticalChange != 0 || e.ViewportHeightChange != 0 || e.ExtentHeightChange != 0) PlaceRailPearl(animate: false); };
@@ -222,9 +225,29 @@ public partial class MainWindow
         // The words are gone within the first third of the fold, before the narrowing sidebar would cut them off.
         var opacity = Math.Clamp(1 - fold * 3, 0, 1);
         foreach (var text in RailText) text.Opacity = opacity;
-        // The player button's disc moves to the middle of the strip.
-        var inset = Lerp(12, 5, fold);
-        NowPlayingButton.Padding = new Thickness(inset, 10, inset, 10);
+        LayOutPlayerButton();
+    }
+
+    /// <summary>Moves the player button's disc to the middle of the strip as the sidebar folds.</summary>
+    private void LayOutPlayerButton()
+    {
+        var (left, right) = FoldedPlayerInsets();
+        NowPlayingButton.Padding = new Thickness(Lerp(12, left, RailFold), 10, Lerp(12, right, RailFold), 10);
+    }
+
+    /// <summary>The player button's side padding in the folded sidebar: what is left either side of its disc, in whole device
+    /// pixels. Layout rounds each margin and border to the display's pixels, so at 150% the folded button is 38.67 DIP wide,
+    /// not 39, and padding worked out in DIP cut off the disc's edge. An odd pixel goes on the left, where the sidebar's
+    /// icons lean, so the disc lines up with them.</summary>
+    private (double Left, double Right) FoldedPlayerInsets()
+    {
+        var scale = VisualTreeHelper.GetDpi(Rail).DpiScaleX;
+        double Pixels(double dip) => Math.Round(dip * scale);
+        double Across(Thickness thickness) => Pixels(thickness.Left) + Pixels(thickness.Right);
+        var button = Pixels(RailCollapsedWidth) - Across(Rail.BorderThickness) - Across(((FrameworkElement)Rail.Child).Margin) - Across(NowPlayingButton.Margin);
+        // A disc a fraction of a pixel wide past a whole pixel can be drawn a pixel wider, so it gets that pixel.
+        var spare = Math.Max(0, button - Math.Ceiling(NowPlayingDisc.Width * scale));
+        return (Math.Ceiling(spare / 2) / scale, Math.Floor(spare / 2) / scale);
     }
 
     /// <summary>Rolls the pearl to the newly selected entry once the sidebar has updated.</summary>

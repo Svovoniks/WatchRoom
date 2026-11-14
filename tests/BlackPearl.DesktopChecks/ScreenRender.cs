@@ -250,7 +250,15 @@ static class ScreenRender
             if (theme == "dark") { await CaptureCountRoll(); await CaptureCategoryGlide(); }
             // The sidebar folded into its strip of icons.
             Call("SetRailCollapsed", true); await Capture($"{theme}-library-collapsed");
-            Call("ShowPage", "Home"); await Capture($"{theme}-home-collapsed"); Call("SetRailCollapsed", false);
+            Call("ShowPage", "Home"); await Capture($"{theme}-home-collapsed");
+            // The Return to player button, which shows while a video plays, folded and open. The app hides it whenever it
+            // refreshes with nothing playing, so it is shown again each time until the pictures are taken.
+            var nowPlaying = (FrameworkElement)window.FindName("NowPlayingButton");
+            DependencyPropertyChangedEventHandler keepShown = (_, _) => window.Dispatcher.BeginInvoke(() => nowPlaying.Visibility = Visibility.Visible);
+            nowPlaying.IsVisibleChanged += keepShown; nowPlaying.Visibility = Visibility.Visible;
+            await Capture($"{theme}-home-collapsed-playing");
+            Call("SetRailCollapsed", false); await Capture($"{theme}-home-playing");
+            nowPlaying.IsVisibleChanged -= keepShown; nowPlaying.Visibility = Visibility.Collapsed;
             if (theme == "light") continue;
             Call("NavigateLibrary", 1, null, null, null); await Capture($"{theme}-movies");
             var episode = items.FirstOrDefault(item => item.Series is not null && item.Season > 0);

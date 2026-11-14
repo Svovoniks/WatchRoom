@@ -77,7 +77,8 @@ if ($newestSource -and $newestSource.LastWriteTime -gt $built.AddSeconds(2)) {
 
 if ($Scratch) {
     if ($Data) { throw 'Use either -Scratch or -Data.' }
-    $Data = Join-Path ([IO.Path]::GetTempPath()) ('blackpearl-scratch-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    # Where scratch-library.ps1 puts copies by default, outside %TEMP% (see there).
+    $Data = Join-Path $env:LOCALAPPDATA ('BlackPearl-scratch\' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
     & (Join-Path $PSScriptRoot 'scratch-library.ps1') -Destination $Data
 }
 $usual = Get-UsualData
