@@ -873,6 +873,7 @@ public partial class MainWindow : Window
         _ = UpdateDetailPosterAsync(item);
         if (item.ExtraOf is not null && !ArtworkCache.IsUsable(item.GeneratedEpisodePoster)) _ = ImproveClipArtwork(item);
         DetailFile.Text = item.IsVirtual ? "" : item.Path;
+        ShowDetailFileInfo();
         ShowWantedPanels();
         ShowAcquireDetail(item);
         ShowDetailTracks(item);

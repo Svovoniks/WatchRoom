@@ -60,7 +60,7 @@ public static partial class SubtitleText
         var utf16 = length >= 2 && sample[2] == 0xfe && sample[3] == 0xff;
         return Clean(utf16 ? Encoding.BigEndianUnicode.GetString(sample, 4, length - 2) : Encoding.UTF8.GetString(sample, 2, length));
     }
-    private static IEnumerable<(string Type, int Start, int End)> Mp4Boxes(byte[] data, int from, int end)
+    internal static IEnumerable<(string Type, int Start, int End)> Mp4Boxes(byte[] data, int from, int end)
     {
         for (var position = from; position + 8 <= end;)
         {
@@ -117,10 +117,10 @@ public static partial class SubtitleText
 
     // ISO 639-2/T packed as three 5-bit letters. Values below 0x400 are QuickTime's Macintosh codes, where 0 (English) is
     // also what tools write for "unknown", so they don't count as a language.
-    private static string? Mp4Language(ushort code) => code < 0x400 || code == 0x7fff ? null :
+    internal static string? Mp4Language(ushort code) => code < 0x400 || code == 0x7fff ? null :
         new string(new[] { (char)((code >> 10 & 31) + 0x60), (char)((code >> 5 & 31) + 0x60), (char)((code & 31) + 0x60) });
 
-    private static (long[] Offsets, int[] Sizes) Mp4SampleTable(FileStream file, List<(string Type, long Start, long End)> stbl)
+    internal static (long[] Offsets, int[] Sizes) Mp4SampleTable(FileStream file, List<(string Type, long Start, long End)> stbl)
     {
         if (Find(stbl, "stsz") is not { } stsz || Find(stbl, "stsc") is not { } stsc || (Find(stbl, "stco") ?? Find(stbl, "co64")) is not { } chunkBox) return ([], []);
 
@@ -157,10 +157,10 @@ public static partial class SubtitleText
         return (offsets[..sample], sizes[..sample]);
     }
 
-    private static (string Type, long Start, long End)? Find(List<(string Type, long Start, long End)> boxes, string type) =>
+    internal static (string Type, long Start, long End)? Find(List<(string Type, long Start, long End)> boxes, string type) =>
         boxes.FindIndex(box => box.Type == type) is var index and >= 0 ? boxes[index] : null;
     // The boxes inside [from, end), as their type and the extent of their contents.
-    private static List<(string Type, long Start, long End)> Mp4Children(Stream file, long from, long end, CancellationToken ct)
+    internal static List<(string Type, long Start, long End)> Mp4Children(Stream file, long from, long end, CancellationToken ct)
     {
         var boxes = new List<(string, long, long)>();
         var header = new byte[16];
@@ -183,7 +183,7 @@ public static partial class SubtitleText
         }
         return boxes;
     }
-    private static byte[] Read(Stream file, long position, int length)
+    internal static byte[] Read(Stream file, long position, int length)
     {
         if (length < 0 || length > 16 << 20) throw new InvalidDataException("MP4 table too large.");
         var bytes = new byte[length];

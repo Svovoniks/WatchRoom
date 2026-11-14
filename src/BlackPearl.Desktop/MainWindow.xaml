@@ -511,7 +511,15 @@
         <TextBlock Text="Extras" Foreground="{DynamicResource Muted}" FontWeight="SemiBold" Margin="0,0,0,10"/>
         <WrapPanel x:Name="DetailExtras"/>
        </StackPanel>
-       <Expander Header="File location" Foreground="{DynamicResource Muted}"><Expander.Style><Style TargetType="Expander" BasedOn="{StaticResource {x:Type Expander}}"><Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=DetailFile}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Expander.Style><TextBox x:Name="DetailFile" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" Padding="0,4" AutomationProperties.Name="Video file location" ToolTip="Select and copy the file location"/></Expander>
+       <!-- The file's location, then everything its headers say: the container, each track, chapters and attachments. -->
+       <Expander x:Name="DetailFileExpander" Header="File details" Foreground="{DynamicResource Muted}" Expanded="DetailFileExpanded"><Expander.Style><Style TargetType="Expander" BasedOn="{StaticResource {x:Type Expander}}"><Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=DetailFile}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Expander.Style>
+        <StackPanel>
+         <TextBox x:Name="DetailFile" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" Padding="0,4" AutomationProperties.Name="Video file location" ToolTip="Select and copy the file location"/>
+         <TextBlock x:Name="DetailFileInfoStatus" Style="{StaticResource MutedText}" Margin="0,10,0,0" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite"/>
+         <WrapPanel x:Name="DetailFileInfo" Margin="0,14,0,0" AutomationProperties.Name="File details"/>
+         <Button x:Name="DetailFileInfoCopy" Content="Copy details" HorizontalAlignment="Left" Margin="0,0,0,8" Click="CopyDetailFileInfo" Visibility="Collapsed" ToolTip="Copy these details as text"/>
+        </StackPanel>
+       </Expander>
        <Expander Header="Artwork and matching" Foreground="{DynamicResource Muted}" Margin="0,4,0,0"><WrapPanel Margin="0,10,0,0"><Button Content="Correct title" Click="EditTitle"/><Button Content="Find artwork / fix match" Click="MatchClick"/><Button Content="Use local poster" Click="LocalPoster"/></WrapPanel></Expander>
       </StackPanel>
      </Border>

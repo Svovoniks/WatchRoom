@@ -88,6 +88,11 @@ if (args.FirstOrDefault() == "--metadata-diagnostics")
     Console.WriteLine($"{checks} metadata diagnostic checks passed."); return;
 }
 
+if (args.FirstOrDefault() == "--file-details")
+{
+    VideoFileDetailsFixture.Run((condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); }); return;
+}
+
 if (args.FirstOrDefault() == "--track-languages")
 {
     TrackLanguageFixture.Run((condition, name) => { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); }); return;
@@ -413,6 +418,7 @@ if (part != 2)
     await MetadataFixesFixture.Run(Path.Combine(root, "metadata-fixes"), Check);
     await MetadataLanguageFixture.Run(Path.Combine(root, "metadata-language"), Check);
     TrackLanguageFixture.Run(Check);
+    VideoFileDetailsFixture.Run(Check);
     EpisodePlaybackFixture.Run(Check);
     OpenedFileFixture.Run(Check);
     await DiagnosticLogFixture.Run(Path.Combine(root, "diagnostic-log"), Check);
