@@ -285,7 +285,7 @@
        </Grid>
       </Border>
       <!-- The type of title is one choice among several, on the app's thread selector like the library's categories; green is
-           kept for filters that are on. The count is set like the library's, level with the words above the thread. -->
+           kept for filters that are on. The count is set like the library's, level with the words. -->
       <DockPanel Margin="0,14,0,0">
        <!-- Search's count follows the library's, rolling and dimming with it (RollingText.cs). -->
        <local:RollingText x:Name="SearchResultCount" DockPanel.Dock="Right" Text="{Binding Text, ElementName=ResultCount}" Pending="{Binding Pending, ElementName=ResultCount}" TextElement.Foreground="{DynamicResource Muted}" TextElement.FontFamily="{StaticResource DisplayFont}" TextElement.FontSize="15" Typography.NumeralStyle="OldStyle" VerticalAlignment="Center" Margin="12,0,8,12" AutomationProperties.LiveSetting="Polite"/>
@@ -402,7 +402,7 @@
       <ItemsControl x:Name="LibraryBreadcrumbs" Margin="-8,0,0,0" VerticalAlignment="Center" Button.Click="BreadcrumbClick" Style="{StaticResource LibraryBreadcrumbs}" AutomationProperties.Name="Library location"/>
       <!-- Search says here what it is still reading, or what a guest can search. -->
       <TextBlock x:Name="SearchNote" Visibility="Collapsed" Style="{StaticResource MutedText}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"/>
-      <!-- The count and actions sit level with the category words, above the thread; they stay quiet so the pearl leads. -->
+      <!-- The count and actions sit level with the category words; they stay quiet so the pearl leads. -->
       <!-- The count rolls to each new number, digit by digit (RollingText.cs). It is set like the category counts, in the categories' serif with old-style figures, so every number on the row speaks with one voice. -->
       <local:RollingText Grid.Column="1" x:Name="ResultCount" MinWidth="100" TextElement.Foreground="{DynamicResource Muted}" TextElement.FontFamily="{StaticResource DisplayFont}" TextElement.FontSize="15" Typography.NumeralStyle="OldStyle" VerticalAlignment="Center" Margin="12,0,8,0" AutomationProperties.LiveSetting="Polite"/>
       <Button x:Name="RescanButton" Grid.Column="2" Style="{StaticResource HeaderAction}" Content="Rescan" Click="ScanClick" Margin="0" ToolTip="Check your folders for new videos"/>
@@ -686,7 +686,7 @@
     </Grid.Resources>
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
     <StackPanel>
-     <!-- The sections, on the app's thread selector (ThreadBar.cs); a narrow window wraps them onto a second thread. -->
+     <!-- The sections, on the app's thread selector (ThreadBar.cs); a narrow window wraps them onto a second row. -->
      <local:ThreadBar HorizontalAlignment="Left" Margin="0,0,0,8">
       <WrapPanel x:Name="PreferenceSections">
        <Button Content="Folders" Tag="Folders" Click="PreferenceSectionClicked" Style="{StaticResource ThreadWord}"/>
@@ -1112,7 +1112,7 @@
         <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
         <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem">
          <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/><Setter Property="FontSize" Value="19"/>
-         <Setter Property="Height" Value="34"/><Setter Property="Padding" Value="0,0,26,0"/><Setter Property="Margin" Value="0,0,0,12"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+         <Setter Property="Height" Value="34"/><Setter Property="Padding" Value="0,0,26,0"/><Setter Property="Margin" Value="0,0,0,12"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource ThreadFocusRing}"/>
          <Setter Property="ToolTip" Value="{Binding Caption}"/><Setter Property="AutomationProperties.Name" Value="{Binding Name}"/>
          <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
           <Border Background="Transparent" Padding="{TemplateBinding Padding}">

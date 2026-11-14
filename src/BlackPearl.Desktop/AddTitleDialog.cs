@@ -109,7 +109,7 @@ public static class AddTitleDialog
         footer.Children.Add(new TextBlock { Text = "Can't find it? Try its original title or the year.", VerticalAlignment = VerticalAlignment.Center, FontSize = 12, Foreground = (Brush)owner.FindResource("Muted"), TextWrapping = TextWrapping.Wrap });
         var row = new DockPanel();
         var kinds = Segment("Kind", ["Any", "Movie", "Show", "Anime"], 0, index => { kind = index; Render(); });
-        kinds.VerticalAlignment = VerticalAlignment.Center; kinds.Margin = new Thickness(16, 8, 0, 0); kinds.Tail = 8; // Against the dialog's edge, the thread stops short of it.
+        kinds.VerticalAlignment = VerticalAlignment.Center; kinds.Margin = new Thickness(16, 8, 0, 0);
         DockPanel.SetDock(kinds, Dock.Right); row.Children.Add(kinds); row.Children.Add(input);
         DockPanel.SetDock(row, Dock.Top); DockPanel.SetDock(status, Dock.Top); DockPanel.SetDock(footer, Dock.Bottom);
         search.Children.Add(row); search.Children.Add(status); search.Children.Add(footer); search.Children.Add(list);

@@ -15,6 +15,17 @@ using BlackPearl.Desktop;
 // (dialogs, a rolling count) can still draw at the display's own scaling. CheckScalings in Program.cs checks exact pixels.
 static class ScreenRender
 {
+    // A focus visual as WPF draws one: a control in the focus style, sized to the element, in the adorner layer over it.
+    private sealed class FocusRingAdorner : System.Windows.Documents.Adorner
+    {
+        private readonly Control ring;
+        public FocusRingAdorner(FrameworkElement element) : base(element) { ring = new Control { Style = element.FocusVisualStyle }; AddVisualChild(ring); IsHitTestVisible = false; }
+        protected override int VisualChildrenCount => 1;
+        protected override Visual GetVisualChild(int index) => ring;
+        protected override Size MeasureOverride(Size constraint) { ring.Measure(AdornedElement.RenderSize); return AdornedElement.RenderSize; }
+        protected override Size ArrangeOverride(Size finalSize) { ring.Arrange(new Rect(AdornedElement.RenderSize)); return finalSize; }
+    }
+
     public static async Task Run(MainWindow window, string output, int width, int height)
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -172,7 +183,7 @@ static class ScreenRender
             {
                 if (window.FindName(target) is not Button { IsVisible: true } button) continue;
                 Call("LibraryCategoryClick", button, new RoutedEventArgs());
-                for (var at = DateTime.UtcNow; DateTime.UtcNow - at < TimeSpan.FromMilliseconds(360);)
+                for (var at = DateTime.UtcNow; DateTime.UtcNow - at < TimeSpan.FromMilliseconds(450);)
                 {
                     await Dispatcher.Yield(DispatcherPriority.Render); window.UpdateLayout();
                     var full = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32); full.Render(root);
@@ -256,13 +267,39 @@ static class ScreenRender
             details.ScrollToEnd(); await Capture($"{theme}-file-details-end");
             expander.IsExpanded = false; details.ScrollToHome();
         }
+        // Keyboard focus on an element: its focus style laid over it in the adorner layer, as WPF does.
+        async Task CaptureFocused(string name, FrameworkElement focused)
+        {
+            var adorners = System.Windows.Documents.AdornerLayer.GetAdornerLayer(focused)!; var ring = new FocusRingAdorner(focused);
+            adorners.Add(ring);
+            // A ring in the window's own adorner layer, outside its content, is drawn with the whole window.
+            if (adorners.IsDescendantOf((Visual)window.Content)) await Capture(name);
+            else
+            {
+                await Settle();
+                var bitmap = Picture(window); bitmap.Render(window);
+                var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                await using (var file = File.Create(Path.Combine(output, name + ".png"))) encoder.Save(file);
+                Console.WriteLine("Saved " + name);
+            }
+            adorners.Remove(ring);
+        }
         foreach (var theme in new[] { "dark", "light" })
         {
             Set("light", theme == "light"); Call("ApplyTheme");
             await CaptureFileDetails(theme);
             Call("ShowPage", "Home"); await Capture($"{theme}-home"); await CaptureHeroButtons(theme);
+            // Home scrolled to the mystery deck, with its filters as they open, then with the last choice on each thread.
+            var home = (ScrollViewer)window.FindName("HomePage"); var deck = (FrameworkElement)window.FindName("HomeMysteryPanel");
+            home.ScrollToVerticalOffset(deck.TranslatePoint(new Point(0, 0), (UIElement)home.Content).Y - 24); await Capture($"{theme}-home-mystery");
+            var filters = Descendants((DependencyObject)window.FindName("HomeMysteryFilters")).OfType<WrapPanel>().Select(row => row.Children.OfType<RadioButton>().ToList()).ToList();
+            foreach (var row in filters) row[^1].IsChecked = true;
+            await Capture($"{theme}-home-mystery-chosen");
+            await CaptureFocused($"{theme}-home-mystery-focus", filters[1][^1]);
+            foreach (var row in filters) row[0].IsChecked = true;
+            home.ScrollToHome();
             Call("NavigateLibrary", 0, null, null, null); await Capture($"{theme}-library");
-            if (theme == "dark") { await CaptureCountRoll(); await CaptureCategoryGlide(); }
+            if (theme == "dark") { await CaptureFocused($"{theme}-library-focus", (FrameworkElement)window.FindName("AllLibraryNav")); await CaptureCountRoll(); await CaptureCategoryGlide(); }
             // The sidebar folded into its strip of icons.
             Call("SetRailCollapsed", true); await Capture($"{theme}-library-collapsed");
             Call("ShowPage", "Home"); await Capture($"{theme}-home-collapsed");

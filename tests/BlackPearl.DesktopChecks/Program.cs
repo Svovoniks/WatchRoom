@@ -519,8 +519,9 @@ static class Program
         var padding = ((System.Windows.Controls.Control)chosen).Padding;
         var word = chosen.TranslatePoint(new Point(padding.Left, 0), bar).X; var wordWidth = chosen.ActualWidth - padding.Left - padding.Right;
         var at = light.TranslatePoint(new Point(0, light.ActualHeight / 2), bar);
-        var below = chosen.TranslatePoint(new Point(0, chosen.ActualHeight), bar).Y;
-        var thread = bar.Threads.Select(line => line.TranslatePoint(new Point(0, 0.5), bar).Y).Where(y => y >= below).DefaultIfEmpty(double.NaN).Min();
+        // The row's line hangs under its words, within the choices' own height: the first line below the chosen word's top.
+        var top = chosen.TranslatePoint(new Point(0, 0), bar).Y;
+        var thread = bar.Lines.Select(line => line + 0.5).Where(y => y > top).DefaultIfEmpty(double.NaN).Min();
         var fine = light.IsVisible && Math.Abs(at.X + light.ActualWidth / 2 - (word + wordWidth / 2)) < 1 && at.X <= word && at.X + light.ActualWidth >= word + wordWidth && Math.Abs(at.Y - thread) < 0.5;
         return (chosen, fine ? "" : $" (light {(light.IsVisible ? "at" : "hidden at")} {at.X:0.#},{at.Y:0.#}, {light.ActualWidth:0.#} wide; word at {word:0.#}, {wordWidth:0.#} wide; its thread at {thread:0.#})");
     }
@@ -629,7 +630,7 @@ static class Program
         // A narrow window wraps the sections: each row has its own thread, and the light sits on the chosen one's row.
         var wide = window.Width; window.Width = window.MinWidth; Call("ShowPreferenceSection", "Updates"); await Settle();
         var rows = ((System.Windows.Controls.Panel)sections.Content).Children.OfType<FrameworkElement>().Select(tab => Math.Round(tab.TranslatePoint(new Point(0, 0), sections).Y)).Distinct().Count();
-        check(rows > 1 && sections.Threads.Count == rows, $"wrapped sections have a thread for each row ({rows} rows, {sections.Threads.Count} threads)");
+        check(rows > 1 && sections.Lines.Count == rows, $"wrapped sections have a line for each row ({rows} rows, {sections.Lines.Count} lines)");
         Lit(sections, "Wrapped Settings", "Updates");
         window.Width = wide; await Settle();
         Call("ShowPage", "Library"); Call("OpenSearch", false); await Settle();
@@ -687,20 +688,31 @@ static class Program
                 $"{name} is part of its label, in the word's size and ink ({number.FontSize} against {label.FontSize})");
         }
         var under = Under("AllLibraryNav");
-        check(under == "", "the thread is lit under All" + under);
-        // The light glides along the thread, always forward, rather than jumping, and stays on the thread as it goes.
-        var rolled = new List<double>(); var onThread = true;
+        check(under == "", "the light is under All" + under);
+        // The light travels, always forward, rather than jumping, and stays on its line as it goes, narrowing into a bead as it
+        // speeds up and opening out under the word it reaches.
+        var rolled = new List<double>(); var widths = new List<double>(); var onThread = true;
         Call("LibraryCategoryClick", window.FindName("MoviesLibraryNav"), new RoutedEventArgs());
         for (var until = DateTime.UtcNow.AddMilliseconds(500); DateTime.UtcNow < until;)
         {
             await Task.Delay(12); window.UpdateLayout();
             var at = glow.TranslatePoint(new Point(glow.ActualWidth / 2, glow.ActualHeight / 2), categories);
-            rolled.Add(at.X); onThread &= Math.Abs(at.Y - categories.Threads[0].TranslatePoint(new Point(0, 0.5), categories).Y) < 0.5;
+            rolled.Add(at.X); widths.Add(glow.ActualWidth); onThread &= Math.Abs(at.Y - (categories.Lines[0] + 0.5)) < 0.5;
         }
         var end = rolled[^1];
         if (SystemParameters.ClientAreaAnimation)
-            check(rolled.Any(x => x > 30 && x < end - 10) && rolled.Zip(rolled.Skip(1)).All(pair => pair.Second >= pair.First - 0.01) && onThread,
-                $"the light glides along the thread to the category chosen ({string.Join(", ", rolled.Distinct().Take(10).Select(x => x.ToString("0")))})");
+        {
+            // Its width is laid out in whole device pixels, so while it squishes in place its centre can sway by half of one.
+            var sway = 0.5 / System.Windows.Media.VisualTreeHelper.GetDpi(categories).PixelsPerDip + 0.01;
+            check(rolled.Any(x => x > 30 && x < end - 10) && rolled.Zip(rolled.Skip(1)).All(pair => pair.Second >= pair.First - sway) && onThread,
+                $"the light travels to the category chosen ({string.Join(", ", rolled.Distinct().Take(10).Select(x => x.ToString("0")))})");
+            // It narrows as it moves, never standing still to do it: to a bead between the words, and full width under each. It is
+            // a bead only at the instant it is halfway, which the samples rarely catch, so the check asks for half either width.
+            var narrowest = widths.IndexOf(widths.Min());
+            var still = widths.Where((width, i) => width < widths[0] - 2 && rolled[i] <= rolled[0] + sway).Count();
+            check(widths[narrowest] <= Math.Min(widths[0], widths[^1]) / 2 && rolled[narrowest] > rolled[0] + 10 && rolled[narrowest] < end - 10 && still == 0 && widths[^1] > 40 && widths[0] > 20,
+                $"the light narrows as it travels and opens out under the word (from {widths[0]:0} wide, {widths[narrowest]:0} at {rolled[narrowest]:0} on the way, {widths[^1]:0} at the end; {still} narrowed standing still)");
+        }
         await Settle();
         under = Under("MoviesLibraryNav");
         check(under == "", "the light settles under the category chosen" + under);
@@ -1059,6 +1071,7 @@ static class Program
                 check(Math.Abs(System.Windows.Media.VisualTreeHelper.GetDpi((FrameworkElement)window.FindName("LibraryToolbar")).DpiScaleY - scale) < 0.001,
                     "the window lays out and draws at the scaling set" + at);
                 await CheckToolbarBaseline(window, Scaled);
+                await CheckThreadHang(window, Scaled);
                 await CheckPageTitleBaseline(window, Scaled);
                 await CheckCollapsedRail(window, Scaled);
                 Scaled(PebbleShadowWhole(scale), "a pebble's shadow is drawn whole, not cut off at the button's edges");
@@ -1105,10 +1118,52 @@ static class Program
             }
             return last;
         }
-        // "items" is the right part of the count; "218" has no descending figures either.
-        int lineWord = InkBottom((FrameworkElement)window.FindName("AnimeLibraryNav"), 0), lineCount = InkBottom(count, 0.55), lineScan = InkBottom(scan, 0);
+        // "items" is the right part of the count; "218" has no descending figures either. The word is read from its text, as
+        // the thread hangs at the foot of its button.
+        int lineWord = InkBottom(TextOf((FrameworkElement)window.FindName("AnimeLibraryNav")), 0), lineCount = InkBottom(count, 0.55), lineScan = InkBottom(scan, 0);
         check(Math.Abs(lineCount - lineWord) <= 1 && Math.Abs(lineScan - lineWord) <= 1,
             $"the categories, the count and the buttons share one baseline (words {lineWord}, count {lineCount}, Rescan {lineScan} at {scale:0.##}x)");
+    }
+
+    private static FrameworkElement TextOf(FrameworkElement element)
+    {
+        for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(element); i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(element, i);
+            if (child is System.Windows.Controls.TextBlock text) return text;
+            if (child is FrameworkElement nested && TextOf(nested) is System.Windows.Controls.TextBlock found) return found;
+        }
+        return element;
+    }
+
+    // A thread selector's light hangs just under its words, clear of their descenders: its bright line is drawn between 0.45 and
+    // 0.7 of the words' size under their baseline. It once ran on a thread halfway through the room under the words' boxes,
+    // about 0.9 of their size down, and looked detached from them.
+    private static async Task CheckThreadHang(MainWindow window, Action<bool, string> check)
+    {
+        var bar = (ThreadBar)window.FindName("LibraryCategoryBar");
+        var word = (FrameworkElement)window.FindName("AnimeLibraryNav"); var text = (System.Windows.Controls.TextBlock)TextOf(word);
+        var chosen = ((System.Windows.Controls.Panel)bar.Content).Children.OfType<FrameworkElement>().FirstOrDefault(ThreadBar.IsChosen);
+        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle); window.UpdateLayout();
+        var scale = System.Windows.Media.VisualTreeHelper.GetDpi(word).PixelsPerDip; var root = (FrameworkElement)window.Content;
+        var full = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth * scale), (int)Math.Ceiling(root.ActualHeight * scale), 96 * scale, 96 * scale, System.Windows.Media.PixelFormats.Pbgra32);
+        full.Render(root);
+        var stride = full.PixelWidth * 4; var pixels = new byte[stride * full.PixelHeight]; full.CopyPixels(pixels, stride, 0);
+        var at = text.TranslatePoint(new Point(0, 0), root); var below = bar.TranslatePoint(new Point(0, bar.ActualHeight), root).Y;
+        int x0 = (int)(at.X * scale), x1 = (int)((at.X + text.ActualWidth) * scale) - 1, y0 = (int)(at.Y * scale), y1 = (int)(below * scale) - 1;
+        var ground = pixels.AsSpan(y0 * stride + x0 * 4, 4).ToArray();
+        int Contrast(int x, int y) { var i = y * stride + x * 4; return Math.Abs(pixels[i] - ground[0]) + Math.Abs(pixels[i + 1] - ground[1]) + Math.Abs(pixels[i + 2] - ground[2]); }
+        // "Anime" is not chosen and has no descenders, so its ink ends at the row's baseline, which the chosen word shares.
+        var baseline = -1;
+        for (var y = y0; y <= y1 && baseline < 0; y++) if (Enumerable.Range(x0, x1 - x0 + 1).Any(x => Contrast(x, y) > 60)) baseline = y;
+        for (var y = baseline; baseline >= 0 && y <= y1; y++) if (Enumerable.Range(x0, x1 - x0 + 1).Any(x => Contrast(x, y) > 60)) baseline = y; else break;
+        // The light's bright line is the row that stands out most under the middle of the chosen word.
+        var middle = chosen is null ? -1 : (int)((chosen.TranslatePoint(new Point(0, 0), root).X + (chosen.ActualWidth - ((System.Windows.Controls.Control)chosen).Padding.Right) / 2) * scale);
+        var line = -1; var strongest = 15;
+        for (var y = baseline + 1; baseline >= 0 && middle >= 0 && y <= y1; y++) { var contrast = Enumerable.Range(middle - 2, 4).Sum(x => Contrast(x, y)) / 4; if (contrast > strongest) (line, strongest) = (y, contrast); }
+        var hang = (line - baseline - 1) / scale / text.FontSize;
+        check(baseline >= 0 && line >= 0 && hang >= 0.45 && hang <= 0.7,
+            $"a thread selector's light hangs just under its words (gap {hang:0.##} of the words' size: baseline at row {baseline}, light at {line}, contrast {strongest})");
     }
 
     // Every page but the player and the welcome page is named in the caption row, as its sidebar entry is, and starts under it.
