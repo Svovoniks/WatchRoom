@@ -163,9 +163,9 @@ public static partial class SubtitleText
     /// <summary>Whether Tracks can list this file's tracks: Matroska and MP4 only.</summary>
     public static bool ListsTracks(string path) => IsMatroska(path) || IsMp4(path);
     private static bool IsMatroska(string path) => Path.GetExtension(path).ToLowerInvariant() is ".mkv" or ".mka" or ".mks" or ".webm";
-    private static FileStream Open(string path) => new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.RandomAccess);
+    internal static FileStream Open(string path) => new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.RandomAccess);
 
-    private static ulong Vint(Stream file, bool id)
+    internal static ulong Vint(Stream file, bool id)
     {
         var first = file.ReadByte(); if (first <= 0) throw new InvalidDataException("Invalid EBML header.");
         var mask = 0x80; var length = 1; while ((first & mask) == 0) { mask >>= 1; length++; }
@@ -174,19 +174,19 @@ public static partial class SubtitleText
         for (var i = 1; i < length; i++) { var next = file.ReadByte(); if (next < 0) throw new EndOfStreamException(); value = value << 8 | (byte)next; }
         return !id && value == (1UL << (7 * length)) - 1 ? ulong.MaxValue : value;
     }
-    private static ulong UInt(Stream file, ulong length)
+    internal static ulong UInt(Stream file, ulong length)
     {
         if (length > 8) throw new InvalidDataException("Invalid EBML integer.");
         ulong value = 0;
         for (var i = 0UL; i < length; i++) { var next = file.ReadByte(); if (next < 0) throw new EndOfStreamException(); value = value << 8 | (byte)next; }
         return value;
     }
-    private static byte[] Bytes(Stream file, ulong length)
+    internal static byte[] Bytes(Stream file, ulong length)
     {
         if (length > 1 << 20) throw new InvalidDataException("EBML element too large.");
         var bytes = new byte[length]; file.ReadExactly(bytes); return bytes;
     }
-    private static string Ascii(Stream file, ulong length) => Encoding.UTF8.GetString(Bytes(file, length)).TrimEnd('\0');
+    internal static string Ascii(Stream file, ulong length) => Encoding.UTF8.GetString(Bytes(file, length)).TrimEnd('\0');
 
     // EBML header, then the Segment's children until the first Cluster: Tracks is always among them in practice.
     private static Header? ReadTracks(FileStream file, CancellationToken ct)
