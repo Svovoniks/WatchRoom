@@ -250,7 +250,7 @@ public static partial class VideoFileDetails
                             case 0x63ca: levelName = Ascii(file, size); break;
                             case 0x63c4 or 0x63c9 or 0x63c6: if (UInt(file, size) > 0) other = true; break;
                         }
-                else if (field == 0x67c8) ReadSimpleTag(file, next, "", values, ct);
+                else if (field == 0x67c8) ReadSimpleTag(file, next, "", values, 0, ct);
             if (other && uids.Count == 0) continue; // tags of a chapter, edition or attachment
             if (uids.Count > 0)
             {
@@ -261,8 +261,9 @@ public static partial class VideoFileDetails
             foreach (var (name, value) in values) details.Container.Add(TagName(name) + suffix, value);
         }
     }
-    private static void ReadSimpleTag(Stream file, long end, string parent, List<(string Name, string Value)> values, CancellationToken ct)
+    private static void ReadSimpleTag(Stream file, long end, string parent, List<(string Name, string Value)> values, int depth, CancellationToken ct)
     {
+        if (depth > 8 || values.Count > 1000) return; // real files nest one or two deep; a crafted one must not overflow the stack
         string? name = null, value = null; var nested = new List<(long Start, long End)>();
         foreach (var (id, length, next) in Children(file, end, ct))
             switch (id)
@@ -278,7 +279,7 @@ public static partial class VideoFileDetails
         foreach (var (start, stop) in nested)
         {
             file.Position = start;
-            ReadSimpleTag(file, stop, full, values, ct);
+            ReadSimpleTag(file, stop, full, values, depth + 1, ct);
         }
     }
 
@@ -318,7 +319,10 @@ public static partial class VideoFileDetails
             // Matroska's defaults: one channel at 8 kHz.
             // HE-AAC's core runs at half the rate it plays at: the rate heard is the output's.
             var core = t.SampleRate ?? 8000;
-            AddAudio(track, (long)(t.Channels ?? 1), t.OutputSampleRate is > 0 ? t.OutputSampleRate.Value : core, (long?)t.BitDepth);
+            // ffmpeg stores its 32-bit float decoding depth for lossy codecs, which have no bit depth of their own.
+            var lossy = t.Codec.StartsWith("A_AAC", StringComparison.Ordinal) || t.Codec is "A_AC3" or "A_EAC3" or "A_OPUS" or "A_VORBIS" ||
+                t.Codec.StartsWith("A_MPEG/", StringComparison.Ordinal) || t.Codec.StartsWith("A_REAL/", StringComparison.Ordinal);
+            AddAudio(track, (long)(t.Channels ?? 1), t.OutputSampleRate is > 0 ? t.OutputSampleRate.Value : core, lossy ? null : (long?)t.BitDepth);
             if (t.OutputSampleRate is > 0 && t.OutputSampleRate != core) track.Add("Core sample rate", SampleRate(core));
         }
         if (long.TryParse(Tag("BPS"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var bps)) track.Add("Bitrate", Bitrate(bps));

@@ -126,6 +126,10 @@ static class UiExperienceChecks
             Check(Control<TextBox>("DetailFile").Text == media[1].Path && fileInfo.Children.Count == 0, "another page clears the previous file's details at once");
             PumpUntil(() => fileInfo.Children.Count > 0);
             Check(fileDetails.IsExpanded, "an open File details section stays open and reads the next page's file");
+            var shown = fileInfo.Children[0];
+            Call("Select", media[1]);
+            Check(fileInfo.Children.Count > 0 && ReferenceEquals(fileInfo.Children[0], shown),
+                "the page refreshing on the same file (a scan or a rename) keeps the details it read instead of reading them again");
             fileDetails.IsExpanded = false;
             Call("Select", media[0]);
             var queues = (List<SavedQueue>)Field("savedQueues"); queues.Clear(); queues.Add(new("ux-queue", "Movie night", [media[0].Id, media[1].Id, episode.Id]));

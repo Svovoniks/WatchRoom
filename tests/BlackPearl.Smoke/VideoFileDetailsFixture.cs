@@ -49,6 +49,18 @@ static class VideoFileDetailsFixture
                 details.All(g => !g.Title.StartsWith("Subtitles") || g.Title.Contains("German")),
                 "a QuickTime chapter track is listed as chapters, not as subtitles");
 
+            // ffmpeg and HandBrake also write the chapter track's chapters as Nero chapters (udta/chpl).
+            var both = Path.Combine(directory, "both.mp4");
+            File.WriteAllBytes(both, WithNeroChapters(File.ReadAllBytes(mp4), ["Chapter 1", "Chapter 2"]));
+            details = VideoFileDetails.Read(both);
+            check(details.Count(g => g.Title.StartsWith("Chapters")) == 1 && details.Single(g => g.Title == "Chapters").Details.First().Value == "Chapter 1",
+                "chapters an MP4 carries both as a chapter track and as Nero chapters are listed once");
+            var nero = Path.Combine(directory, "nero.mp4");
+            Mp4Fixture.Write(nero, [new(new short[8000 * 4], 8000)], []);
+            File.WriteAllBytes(nero, WithNeroChapters(File.ReadAllBytes(nero), ["Opening", "Ending"]));
+            check(VideoFileDetails.Read(nero).FirstOrDefault(g => g.Title == "Chapters")?.Details.Select(d => d.Label + " " + d.Value).SequenceEqual(["0:00 Opening", "0:01 Ending"]) == true,
+                "an MP4 with only Nero chapters lists them");
+
             var avi = Path.Combine(directory, "old.avi");
             File.WriteAllBytes(avi, Avi());
             details = VideoFileDetails.Read(avi);
@@ -64,6 +76,16 @@ static class VideoFileDetailsFixture
             check(details.Count >= 1 && Value(details, "File", "Format") == "Matroska" && Value(details, "File", "Note") is not null,
                 "a damaged file still lists what could be read, and says that some details are missing");
             check(VideoFileDetails.Read(Path.Combine(directory, "missing.mkv")).Count == 0, "a file that isn't there has no details");
+            // An unfinished download: the name says Matroska, the bytes are zeros, and TagLib throws plain exceptions on them.
+            var unreadable = true;
+            foreach (var (name, length) in new[] { ("zeros.mkv", 100), ("empty.mkv", 0), ("zeros.webm", 3) })
+            {
+                var path = Path.Combine(directory, name);
+                File.WriteAllBytes(path, new byte[length]);
+                try { details = VideoFileDetails.Read(path); unreadable &= Value(details, "File", "Size") is not null; }
+                catch (Exception) { unreadable = false; }
+            }
+            check(unreadable, "a zero-filled or empty Matroska file lists its size instead of throwing");
             var unknown = Path.Combine(directory, "clip.ts");
             File.WriteAllBytes(unknown, new byte[188 * 4]);
             details = VideoFileDetails.Read(unknown);
@@ -71,6 +93,25 @@ static class VideoFileDetailsFixture
                 "a format nothing reads still lists the file's format and size");
         }
         finally { try { Directory.Delete(directory, true); } catch (IOException) { } }
+    }
+
+    // Appends udta/chpl (version 1: flags, reserved, count, then 100 ns start, title length and title) to the file's last box, its moov.
+    private static byte[] WithNeroChapters(byte[] file, string[] titles)
+    {
+        var moov = 0;
+        for (var position = 0; position + 8 <= file.Length; position += (int)BinaryPrimitives.ReadUInt32BigEndian(file.AsSpan(position)))
+            if (Encoding.ASCII.GetString(file, position + 4, 4) == "moov") moov = position;
+        var entries = titles.SelectMany((title, i) =>
+        {
+            var start = new byte[8]; BinaryPrimitives.WriteInt64BigEndian(start, i * TimeSpan.TicksPerSecond);
+            var text = Encoding.UTF8.GetBytes(title);
+            return (byte[])[.. start, (byte)text.Length, .. text];
+        }).ToArray();
+        static byte[] Box(string type, byte[] body) { var size = new byte[4]; BinaryPrimitives.WriteUInt32BigEndian(size, (uint)(8 + body.Length)); return [.. size, .. Encoding.ASCII.GetBytes(type), .. body]; }
+        var udta = Box("udta", Box("chpl", [1, 0, 0, 0, 0, 0, 0, 0, (byte)titles.Length, .. entries]));
+        var result = (byte[])[.. file, .. udta];
+        BinaryPrimitives.WriteUInt32BigEndian(result.AsSpan(moov), BinaryPrimitives.ReadUInt32BigEndian(file.AsSpan(moov)) + (uint)udta.Length);
+        return result;
     }
 
     // RIFF 'AVI ': hdrl (avih, a video strl with Xvid, an audio strl with MP3), INFO with ISFT, and an empty movi.

@@ -40,8 +40,9 @@ public static partial class VideoFileDetails
             else { file.Dispose(); ReadOther(path, details); }
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or OverflowException or ArgumentException or
-            IndexOutOfRangeException or FormatException or TagLib.CorruptFileException or TagLib.UnsupportedFormatException) { complete = false; }
+        // A damaged file keeps what was read before the damage. TagLib throws plain exceptions, KeyNotFoundException and
+        // NullReferenceException on damaged Matroska, Ogg and Windows Media files, so any failure counts as a partial read.
+        catch (Exception ex) when (ex is not OutOfMemoryException) { complete = false; }
 
         var general = new Section("File");
         general.Add("Format", details.Format ?? FormatByExtension(path));

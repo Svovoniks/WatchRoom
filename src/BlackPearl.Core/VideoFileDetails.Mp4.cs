@@ -56,12 +56,15 @@ public static partial class VideoFileDetails
         }
 
         var tracks = movie.Where(box => box.Type == "trak").Select(box => ReadMp4Track(file, box, ct)).ToList();
-        foreach (var box in movie)
-            if (box.Type == "udta") ReadMp4UserData(file, box, details, ct);
-            else if (box.Type == "meta") ReadMp4Meta(file, box, details.Container, ct);
         var chapters = tracks.SelectMany(track => track.Chapters).ToHashSet();
+        bool IsChapterTrack(Mp4Track track) => chapters.Contains(track.Id) && track.Handler is "text" or "sbtl" or "subt";
+        // ffmpeg and HandBrake write the same chapters twice, as Nero chapters and as a QuickTime chapter track: list them once.
+        var hasChapterTrack = tracks.Any(track => IsChapterTrack(track) && track.Timescale > 0);
+        foreach (var box in movie)
+            if (box.Type == "udta") ReadMp4UserData(file, box, details, !hasChapterTrack, ct);
+            else if (box.Type == "meta") ReadMp4Meta(file, box, details.Container, ct);
         foreach (var track in tracks)
-            if (chapters.Contains(track.Id) && track.Handler is "text" or "sbtl" or "subt") ReadMp4ChapterTrack(file, track, details, ct);
+            if (IsChapterTrack(track)) ReadMp4ChapterTrack(file, track, details, ct);
             else AddMp4Track(file, track, details, ct);
     }
 
@@ -440,13 +443,13 @@ public static partial class VideoFileDetails
     }
 
     // udta: iTunes-style meta → ilst, Nero chapters (chpl), and QuickTime's own ©-named text boxes.
-    private static void ReadMp4UserData(FileStream file, (string Type, long Start, long End) udta, Details details, CancellationToken ct)
+    private static void ReadMp4UserData(FileStream file, (string Type, long Start, long End) udta, Details details, bool neroChapters, CancellationToken ct)
     {
         foreach (var box in Mp4Children(file, udta.Start, udta.End, ct))
         {
             var raw = Encoding.Latin1.GetString(SubtitleText.Read(file, box.Start - 4, 4));
             if (box.Type == "meta") ReadMp4Meta(file, box, details.Container, ct);
-            else if (box.Type == "chpl") ReadNeroChapters(file, box, details, ct);
+            else if (box.Type == "chpl" && neroChapters) ReadNeroChapters(file, box, details, ct);
             else if (raw[0] == '©' && box.End - box.Start >= 4)
             {
                 var data = SubtitleText.Read(file, box.Start, (int)Math.Min(box.End - box.Start, 64 << 10));

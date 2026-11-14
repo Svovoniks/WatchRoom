@@ -18,6 +18,8 @@ public partial class MainWindow
     /// <summary>Clears the details of the previous page, and reads this page's file when the section is open.</summary>
     private void ShowDetailFileInfo()
     {
+        // The same file again (the page refreshed after a scan or a rename): keep what was read, or is being read.
+        if (fileInfoPath is not null && fileInfoPath == DetailFile.Text) return;
         fileInfoVersion++; fileInfoPath = null; fileInfoGroups = [];
         DetailFileInfo.Children.Clear();
         DetailFileInfoStatus.Visibility = DetailFileInfoCopy.Visibility = Visibility.Collapsed;
@@ -39,6 +41,7 @@ public partial class MainWindow
         IReadOnlyList<FileDetailGroup> groups;
         try { groups = await Task.Run(() => VideoFileDetails.Read(path, lifetime.Token), lifetime.Token); }
         catch (OperationCanceledException) { return; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { groups = []; } // shown as unreadable, and read again next time
         if (closing || version != fileInfoVersion) return;
         fileInfoGroups = groups;
         if (groups.Count == 0)
