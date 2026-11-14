@@ -109,6 +109,25 @@ static class UiExperienceChecks
                 "available details clear stale unavailable guidance and offer resume");
             Check(Control<TextBox>("DetailFile").IsReadOnly && Control<TextBox>("DetailFile").Text == media[0].Path,
                 "file location can be selected and copied without being edited");
+            // File details: read once the section is opened with its toggle, kept while it stays on the same file, and read again
+            // for the next page's file. The Copy button isn't pressed: it would replace the clipboard of whoever runs the checks.
+            Layout(1280, 810);
+            var fileDetails = Control<Expander>("DetailFileExpander"); var fileInfo = Control<WrapPanel>("DetailFileInfo");
+            Check(!fileDetails.IsExpanded && fileInfo.Children.Count == 0, "file details are not read while their section is closed");
+            var fileToggle = Descendants<System.Windows.Controls.Primitives.ToggleButton>(fileDetails).First();
+            ((System.Windows.Automation.Provider.IToggleProvider)new System.Windows.Automation.Peers.ToggleButtonAutomationPeer(fileToggle)
+                .GetPattern(System.Windows.Automation.Peers.PatternInterface.Toggle)).Toggle();
+            PumpUntil(() => fileInfo.Children.Count > 0);
+            var firstGroup = (StackPanel)fileInfo.Children[0];
+            Check(fileDetails.IsExpanded && ((TextBlock)firstGroup.Children[0]).Text == "File" && Control<Button>("DetailFileInfoCopy").Visibility == Visibility.Visible &&
+                Control<TextBlock>("DetailFileInfoStatus").Visibility == Visibility.Collapsed,
+                "opening File details lists the file's details and offers to copy them");
+            Call("Select", media[1]);
+            Check(Control<TextBox>("DetailFile").Text == media[1].Path && fileInfo.Children.Count == 0, "another page clears the previous file's details at once");
+            PumpUntil(() => fileInfo.Children.Count > 0);
+            Check(fileDetails.IsExpanded, "an open File details section stays open and reads the next page's file");
+            fileDetails.IsExpanded = false;
+            Call("Select", media[0]);
             var queues = (List<SavedQueue>)Field("savedQueues"); queues.Clear(); queues.Add(new("ux-queue", "Movie night", [media[0].Id, media[1].Id, episode.Id]));
             Call("OpenQueue", "ux-queue");
             Check(Control<Button>("PlaySavedQueueButton").Visibility == Visibility.Visible, "filled queue exposes playback actions");

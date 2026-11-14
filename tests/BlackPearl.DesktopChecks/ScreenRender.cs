@@ -242,9 +242,24 @@ static class ScreenRender
         while (Field("libraryLoaded") is not true && DateTime.UtcNow < deadline) await Settle(200);
         var items = ((List<MediaItem>)Field("items")!).Where(item => item.Available && !item.IsExtra).ToList();
         Call("SetRailCollapsed", false);
+        // A video page's File details, open: the file with the most tracks among the first few hundred, so the columns wrap.
+        var detailed = await Task.Run(() => items.Where(item => !item.IsMusic).Take(300).Select(item => (Item: item, Groups: VideoFileDetails.Read(item.Path).Count))
+            .OrderByDescending(entry => entry.Groups).Select(entry => entry.Item).FirstOrDefault());
+        async Task CaptureFileDetails(string theme)
+        {
+            if (detailed is null) return;
+            Call("Select", detailed);
+            var expander = (Expander)window.FindName("DetailFileExpander"); var details = (ScrollViewer)window.FindName("Details");
+            expander.IsExpanded = true; await Settle(2500);
+            details.ScrollToVerticalOffset(expander.TranslatePoint(new Point(0, 0), (UIElement)details.Content).Y - 24);
+            await Capture($"{theme}-file-details");
+            details.ScrollToEnd(); await Capture($"{theme}-file-details-end");
+            expander.IsExpanded = false; details.ScrollToHome();
+        }
         foreach (var theme in new[] { "dark", "light" })
         {
             Set("light", theme == "light"); Call("ApplyTheme");
+            await CaptureFileDetails(theme);
             Call("ShowPage", "Home"); await Capture($"{theme}-home"); await CaptureHeroButtons(theme);
             Call("NavigateLibrary", 0, null, null, null); await Capture($"{theme}-library");
             if (theme == "dark") { await CaptureCountRoll(); await CaptureCategoryGlide(); }
