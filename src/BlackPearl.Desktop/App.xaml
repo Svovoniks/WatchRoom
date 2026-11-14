@@ -45,7 +45,13 @@
   <DropShadowEffect x:Key="CardShadow" BlurRadius="24" ShadowDepth="6" Direction="270" Opacity="0.35" Color="#000000"/>
   <DropShadowEffect x:Key="PopupShadow" BlurRadius="18" ShadowDepth="4" Direction="270" Opacity="0.4" Color="#000000"/>
 
-  <Style x:Key="FocusRing"><Setter Property="Control.Template"><Setter.Value><ControlTemplate><Border BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="8" SnapsToDevicePixels="True"/></ControlTemplate></Setter.Value></Setter></Style>  <Style TargetType="Window"><Setter Property="local:WindowTheme.Enabled" Value="True"/><Setter Property="Icon" Value="/BlackPearl;component/Assets/BlackPearl.ico"/><Setter Property="Background" Value="{DynamicResource Canvas}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontFamily" Value="Segoe UI"/><Setter Property="FontSize" Value="14"/></Style>
+  <Style x:Key="FocusRing"><Setter Property="Control.Template"><Setter.Value><ControlTemplate><Border BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="8" SnapsToDevicePixels="True"/></ControlTemplate></Setter.Value></Setter></Style>
+  <!-- The focus rings of the thread selector's choices (ThreadBar.cs): around the word, as far out on its left as on its right,
+       leaving the space after it, and a little below the box to take in the light, which hangs at the box's foot. The space after a
+       word is 26 for a word at the head of a page and 18 for an option within one. -->
+  <Style x:Key="ThreadFocusRing"><Setter Property="Control.Template"><Setter.Value><ControlTemplate><Border Margin="-7,0,19,-7" BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="8" SnapsToDevicePixels="True"/></ControlTemplate></Setter.Value></Setter></Style>
+  <Style x:Key="ThreadOptionFocusRing"><Setter Property="Control.Template"><Setter.Value><ControlTemplate><Border Margin="-6,0,12,-5" BorderBrush="{DynamicResource Accent}" BorderThickness="2" CornerRadius="8" SnapsToDevicePixels="True"/></ControlTemplate></Setter.Value></Setter></Style>
+  <Style TargetType="Window"><Setter Property="local:WindowTheme.Enabled" Value="True"/><Setter Property="Icon" Value="/BlackPearl;component/Assets/BlackPearl.ico"/><Setter Property="Background" Value="{DynamicResource Canvas}"/><Setter Property="Foreground" Value="{DynamicResource Ink}"/><Setter Property="FontFamily" Value="Segoe UI"/><Setter Property="FontSize" Value="14"/></Style>
   <!-- Links are in the accent everywhere, rather than the system's blue. -->
   <Style TargetType="Hyperlink"><Setter Property="Foreground" Value="{DynamicResource Accent}"/></Style>
   <Style x:Key="MutedText" TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="21"/></Style>
@@ -260,13 +266,21 @@
     </Grid></Viewbox>
    </ControlTemplate></Setter.Value></Setter>
   </Style>
-  <!-- The app's pick-one selector (ThreadBar.cs): words strung on a thread, the stretch under the chosen one lit in the pearl's
-       colours, the accent fading into its violet, and gliding to the next choice. The threads are drawn in code; the light is
-       here so its colours follow the theme. -->
+  <!-- The app's pick-one selector (ThreadBar.cs): a line of light under the chosen word in the pearl's colours, the accent
+       fading into its violet, with a glow rising from it behind the word. Both are here so their colours follow the theme;
+       ThreadBar.cs places and moves them. -->
   <Style TargetType="local:ThreadBar">
    <Setter Property="Focusable" Value="False"/><Setter Property="IsTabStop" Value="False"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="local:ThreadBar">
     <Grid>
+     <!-- The glow: light rising from the line behind the word, the accent at the line fading through violet, strongest under the
+          word's middle. Behind the words, so it lights the page around them rather than washing over the letters. -->
+     <Canvas IsHitTestVisible="False">
+      <Border x:Name="PART_Glow" Opacity="0.55" Visibility="Hidden">
+       <Border.Background><LinearGradientBrush StartPoint="0,1" EndPoint="0,0"><GradientStop Color="{DynamicResource AccentColor}" Offset="0"/><GradientStop Color="#669A7AE6" Offset="0.5"/><GradientStop Color="#009A7AE6" Offset="1"/></LinearGradientBrush></Border.Background>
+       <Border.OpacityMask><RadialGradientBrush Center="0.5,1" GradientOrigin="0.5,1" RadiusX="0.55" RadiusY="1"><GradientStop Color="#FF000000" Offset="0.45"/><GradientStop Color="#00000000" Offset="1"/></RadialGradientBrush></Border.OpacityMask>
+      </Border>
+     </Canvas>
      <ContentPresenter/>
      <Canvas x:Name="PART_Layer" IsHitTestVisible="False">
 <!-- The light: a bright line with a soft halo around it. The halo is drawn as gradients, not a blur effect, which looked the
@@ -284,12 +298,13 @@
     </Grid>
    </ControlTemplate></Setter.Value></Setter>
   </Style>
-  <!-- A choice on a thread at the head of a page, such as a library category or a settings section: a word in the wordmark's
-       serif. The chosen one is in full ink with the thread lit under it; the rest are muted until pointed at. All share one
+  <!-- A choice on the thread selector at the head of a page, such as a library category or a settings section: a word in the
+       wordmark's serif. The chosen one is in full ink with the light under it; the rest are muted until pointed at. All share one
        weight, so choosing one never moves the others. The space after each word is its right padding, so the first word lines
-       up with the page and the light centres on the word; the bottom margin is the room for the thread. -->
+       up with the page and the light centres on the word. The light hangs just under the words, at the foot of the box; the
+       bottom margin keeps it clear of what follows. -->
   <Style x:Key="ThreadWord" TargetType="ButtonBase">
-   <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/><Setter Property="FontSize" Value="19"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource FocusRing}"/>
+   <Setter Property="Foreground" Value="{DynamicResource Muted}"/><Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/><Setter Property="FontSize" Value="19"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{StaticResource ThreadFocusRing}"/>
    <Setter Property="Height" Value="34"/><Setter Property="Padding" Value="0,0,26,0"/><Setter Property="Margin" Value="0,0,0,12"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Background" Value="Transparent"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ButtonBase">
     <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter VerticalAlignment="Center" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" RecognizesAccessKey="True"/></Border>
@@ -304,9 +319,9 @@
   <Style x:Key="ThreadWordChoice" TargetType="RadioButton" BasedOn="{StaticResource ThreadWord}">
    <Style.Triggers><Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger></Style.Triggers>
   </Style>
-  <!-- A choice on a thread within a page, such as a folder's category: the interface's own type, smaller, closer together. -->
+  <!-- A choice on the thread selector within a page, such as a folder's category: the interface's own type, smaller, closer together. -->
   <Style x:Key="ThreadOption" TargetType="ButtonBase" BasedOn="{StaticResource ThreadWord}">
-   <Setter Property="FontFamily" Value="Segoe UI"/><Setter Property="FontSize" Value="13"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0,0,18,0"/><Setter Property="Margin" Value="0,0,0,8"/>
+   <Setter Property="FontFamily" Value="Segoe UI"/><Setter Property="FontSize" Value="13"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0,0,18,0"/><Setter Property="Margin" Value="0,0,0,8"/><Setter Property="FocusVisualStyle" Value="{StaticResource ThreadOptionFocusRing}"/>
   </Style>
   <Style x:Key="ThreadOptionChoice" TargetType="RadioButton" BasedOn="{StaticResource ThreadOption}">
    <Style.Triggers><Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="{DynamicResource Ink}"/></Trigger></Style.Triggers>

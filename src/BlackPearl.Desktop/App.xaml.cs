@@ -67,7 +67,7 @@ public partial class App : Application
     }
     // The focus rings App.xaml defines, which keyboard focus keeps; any other focus visual is taken off.
     public static bool IsAppFocusRing(Style style) => Current?.Resources is { } resources &&
-        (ReferenceEquals(style, resources["FocusRing"]) || ReferenceEquals(style, resources["SoftFocusRing"]) || ReferenceEquals(style, resources["ChipFocusRing"]) || ReferenceEquals(style, resources["WellFocusRing"]));
+        (ReferenceEquals(style, resources["FocusRing"]) || ReferenceEquals(style, resources["SoftFocusRing"]) || ReferenceEquals(style, resources["ChipFocusRing"]) || ReferenceEquals(style, resources["WellFocusRing"]) || ReferenceEquals(style, resources["ThreadFocusRing"]) || ReferenceEquals(style, resources["ThreadOptionFocusRing"]));
     public static bool SoftwareRendering { get; } = AppEnvironment.Get("RENDER") is { } mode
         ? !mode.Equals("hardware", StringComparison.OrdinalIgnoreCase)
         : SystemParameters.IsRemoteSession || System.Windows.Media.RenderCapability.Tier >> 16 == 0;

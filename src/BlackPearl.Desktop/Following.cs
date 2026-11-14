@@ -274,7 +274,7 @@ public partial class MainWindow
         var choices = new WrapPanel(); choices.Children.Add(ask); choices.Children.Add(countdown);
         AutomationProperties.SetName(choices, "Before downloading");
         var frame = new ThreadBar { Content = choices, Reach = 5, VerticalAlignment = VerticalAlignment.Center };
-        // The choices leave room under themselves for their thread; the same room under the list keeps it level with the words.
+        // The choices leave room under themselves for their light; the same room under the list keeps it level with the words.
         var minutes = new ComboBox { ItemsSource = FollowSettings.CountdownChoices.Select(x => $"{x} minutes").ToArray(), SelectedIndex = Array.IndexOf(FollowSettings.CountdownChoices, settings.Minutes),
             IsEnabled = settings.Enabled, Margin = new Thickness(12, 0, 0, 8), MinWidth = 130, VerticalAlignment = VerticalAlignment.Center,
             Visibility = settings.Countdown ? Visibility.Visible : Visibility.Collapsed };
