@@ -65,7 +65,6 @@ public partial class MainWindow
         public bool Playing { get; init; }
         public int Count { get; init; }
         public int Watched { get; init; }
-        public Visibility CreateVisibility => Queue is null ? Visibility.Visible : Visibility.Collapsed;
         public Visibility PlaceholderVisibility => Cover1.View is null ? Visibility.Visible : Visibility.Collapsed;
         public string PlaceholderIcon => Queue is null ? "" : "";
         public Visibility PlayingVisibility => Playing ? Visibility.Visible : Visibility.Collapsed;

@@ -116,6 +116,15 @@ static class EpisodeEndChecks
                 ((System.Windows.Controls.Primitives.ToggleButton)window.FindName("QueueModeOff")).IsChecked == true && ((TextBlock)window.FindName("QueueModeOffText")).Text == "Episodes" &&
                 ((Button)window.FindName("PlayPlayerQueueButton")).Visibility == Visibility.Collapsed,
                 "without a queue, the queue menu lists the show's episodes with the playing one selected");
+            Call("SetWatched", second, true);
+            var rows = queueList.Items.Cast<object>().ToArray();
+            object? Row(int index, string part) => Call("QueueRowValue", rows[index], part);
+            check(Equals(Row(firstIndex + 1, "done"), Visibility.Visible) && (string?)Row(firstIndex + 1, "number") == "" &&
+                Equals(Row(firstIndex, "done"), Visibility.Collapsed) && Equals(Row(firstIndex, "playing"), Visibility.Visible),
+                "a watched episode shows a check in place of its number, and the playing one shows the play mark");
+            Call("SetWatched", second, false);
+            check(Equals(Row(firstIndex + 1, "done"), Visibility.Collapsed) && (string?)Row(firstIndex + 1, "number") == second.Episode?.ToString(),
+                "an unwatched episode shows its number");
             var listSource = queueList.ItemsSource;
             Set("items", Field<List<MediaItem>>("items").ToList()); Call("UpdateSessionControls");
             check(ReferenceEquals(listSource, queueList.ItemsSource), "a library refresh with the same episodes keeps the list instead of rebuilding it");

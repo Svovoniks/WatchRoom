@@ -105,6 +105,21 @@ static class PlayerLayoutChecks
             playQueue.Visibility == Visibility.Visible && queueList.ActualHeight <= queueList.MaxHeight,
             "populating the player queue restores its list and controls within a bounded menu");
         Save(queueMenuContent, "player-queue-menu.png");
+        // A show's episode list: the playing episode has the play mark, watched ones a check in place of their number.
+        void Field(string name, object? value) => typeof(MainWindow).GetField(name, flags)!.SetValue(window, value);
+        void ShowRows() { Invoke(window, "RefreshQueueList", true); LayoutMenu(); window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background); LayoutMenu(); }
+        string[] names = ["Opening Night", "A Call for 'Q'", "Low Tide", "Kept in Brine", "The Long Way Round", "Last Light"];
+        var season = names.Select((name, i) => episode with { Id = "list-" + (i + 3), Path = Path.Combine(App.DataDirectory, $"list-{i + 3}.mp4"), Season = 1, Episode = i + 3, EpisodeTitle = name, RuntimeMinutes = i == 5 ? 7 : 6 }).ToArray();
+        var watched = (Dictionary<string, bool>)typeof(MainWindow).GetField("watchedState", flags)!.GetValue(window)!;
+        foreach (var item in season) watched[item.Id] = item.Episode is 4 or 6;
+        Field("items", season.ToList()); Field("playingItem", season[2]); ShowRows();
+        Check(queueList.Items.Count == season.Length && queueList.SelectedIndex == 2, "the episode list shows the playing show's episodes");
+        Save(queueMenuContent, "player-episode-list.png", 2);
+        // A queue part-way through: the item already played has the check.
+        queue.AddRange(season[..3]); Field("queuePosition", 1); Field("playingItem", season[1]); ShowRows();
+        Save(queueMenuContent, "player-queue-played.png", 2);
+        queue.Clear(); Field("queuePosition", -1); Field("playingItem", null); Field("items", new List<BlackPearl.Core.MediaItem> { episode }); watched.Clear();
+        queueList.ItemsSource = populatedQueue; Invoke(window, "UpdateSessionControls"); LayoutMenu();
         // Long-running shows list hundreds of episodes; only the rows in view may be built.
         var longSeason = Enumerable.Range(1, 1500).Select(i => new { QueueTitle = $"S01 · E{i:0000} · Episode {i}" }).ToArray();
         int Realized(ItemsControl list, int count) => Enumerable.Range(0, count).Count(i => list.ItemContainerGenerator.ContainerFromIndex(i) is not null);
@@ -374,9 +389,9 @@ static class PlayerLayoutChecks
     }
     static void Invoke(object target, string name, params object[] args) => target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(target, args);
     static void Check(bool condition, string message) { if (!condition) throw new Exception("FAIL: " + message); Console.WriteLine("PASS: " + message); }
-    static void Save(FrameworkElement root, string name)
+    static void Save(FrameworkElement root, string name, double zoom = 1)
     {
-        var bitmap = new RenderTargetBitmap((int)root.ActualWidth, (int)root.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(root);
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth * zoom), (int)Math.Ceiling(root.ActualHeight * zoom), 96 * zoom, 96 * zoom, PixelFormats.Pbgra32); bitmap.Render(root);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         Directory.CreateDirectory("artifacts/library-ui"); using var output = File.Create(Path.Combine("artifacts/library-ui", name)); encoder.Save(output);
     }

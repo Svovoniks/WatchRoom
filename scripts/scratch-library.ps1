@@ -3,7 +3,7 @@
 # The copy gets its own artwork, plugins and metadata cache, and every stored path into the library folder is rewritten
 # to the copy, so nothing that runs on it can change the user's library, posters or settings. The videos stay where they
 # are and are only read.
-#   scratch-library.ps1                         copy the usual library to a new folder under %TEMP%
+#   scratch-library.ps1                         copy the usual library to a new folder under %LOCALAPPDATA%\BlackPearl-scratch
 #   scratch-library.ps1 -Destination <folder>   copy it to <folder>, which must be new or empty
 #   scratch-library.ps1 -Source <folder>        copy another library folder
 # Then point the app or a check at the copy: dev-launch.ps1 -Data <copy>, or $env:BLACKPEARL_DATA = '<copy>'.
@@ -17,7 +17,9 @@ if (!$Source) {
     $current = Join-Path $env:LOCALAPPDATA 'BlackPearl'; $former = Join-Path $env:LOCALAPPDATA 'Watchroom'
     $Source = if (!(Test-Path (Join-Path $current 'library.db')) -and (Test-Path (Join-Path $former 'library.db'))) { $former } else { $current }
 }
-if (!$Destination) { $Destination = Join-Path ([IO.Path]::GetTempPath()) ('blackpearl-scratch-' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }
+# Not under %TEMP%: copies keep the artwork's own dates, so Windows' temporary-file cleanup (Storage Sense) takes artwork
+# more than a week old out of a copy there, and the copy's posters go blank.
+if (!$Destination) { $Destination = Join-Path $env:LOCALAPPDATA ('BlackPearl-scratch\' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }
 $sdk = Join-Path $root '.tools/dotnet/dotnet.exe'
 if (!(Test-Path $sdk)) { $sdk = 'dotnet' }
 

@@ -850,7 +850,20 @@ static class Program
             var room = presenter.TranslatePoint(new Point(presenter.ActualWidth, 0), rail).X;
             var end = glyph.TranslatePoint(new Point(glyph.FontSize, 0), rail).X;
             return end > room + 0.01 ? $"{entry.Name} at {rail.ActualWidth:0.#} wide: glyph ends {end:0.#}, room ends {room:0.#}" : null;
-        }).OfType<string>();
+        }).Append(PlayerCut()).OfType<string>();
+        // The Return to player button's disc is cut off when it is wider than the room the button leaves its content.
+        var player = (System.Windows.Controls.Button)window.FindName("NowPlayingButton"); var disc = (FrameworkElement)window.FindName("NowPlayingDisc");
+        var playerShown = player.Visibility; player.Visibility = Visibility.Visible; window.UpdateLayout();
+        // The app hides the button again whenever it refreshes with nothing playing, so each look shows it first.
+        string? PlayerCut()
+        {
+            if (player.Visibility != Visibility.Visible) { player.Visibility = Visibility.Visible; window.UpdateLayout(); }
+            if (!disc.IsVisible) return "NowPlayingDisc hidden";
+            var presenter = (FrameworkElement)System.Windows.Media.VisualTreeHelper.GetParent((DependencyObject)player.Content);
+            double left = presenter.TranslatePoint(new Point(0, 0), rail).X, room = presenter.TranslatePoint(new Point(presenter.ActualWidth, 0), rail).X;
+            double start = disc.TranslatePoint(new Point(0, 0), rail).X, end = disc.TranslatePoint(new Point(disc.ActualWidth, 0), rail).X;
+            return start < left - 0.01 || end > room + 0.01 ? $"NowPlayingDisc at {rail.ActualWidth:0.##} wide: disc {start:0.##} to {end:0.##}, room {left:0.##} to {room:0.##}" : null;
+        }
         async Task<(List<double> Widths, List<double> Tops, bool Still)> Fold(bool collapsed)
         {
             var widths = new List<double>(); var tops = new List<double>(); var still = true;
@@ -880,6 +893,9 @@ static class Program
             $"a collapsed sidebar is a strip of icons ({rail.ActualWidth:0.#} wide)");
         check(logo.IsVisible && Math.Abs(logoMiddle - glyphMiddle) < 1,
             $"a collapsed sidebar keeps the logo, centred over its icons (logo middle {logoMiddle:0.#}, icon middle {glyphMiddle:0.#})");
+        var discCut = PlayerCut(); var discMiddle = disc.TranslatePoint(new Point(disc.ActualWidth / 2, 0), rail).X;
+        check(discCut is null && Math.Abs(discMiddle - glyphMiddle) < 1,
+            $"a collapsed sidebar shows the whole Return to player disc, centred over its icons ({discCut ?? "whole"}; disc middle {discMiddle:0.##}, icon middle {glyphMiddle:0.##})");
         var foldedLogo = logo.TranslatePoint(new Point(0, 0), rail);
         check(toggle.IsVisible && toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && foldedLogo.Y >= toggleAt.Y + toggle.ActualHeight,
             $"folding leaves the toggle in its spot and drops the logo under it (toggle {toggle.TranslatePoint(new Point(0, 0), rail)}, was {toggleAt}; logo {foldedLogo})");
@@ -919,6 +935,7 @@ static class Program
         check(cut.Count == 0, "no sidebar icon is cut off, folded, open or in between" + (cut.Count > 0 ? $" ({string.Join("; ", cut.Distinct().Take(4))})" : ""));
         check(rail.ActualWidth == 212 && label.IsVisible && label.Opacity == 1 && home.ToolTip is null && content.ActualWidth == expanded, "the sidebar expands back to its labels");
         check(toggle.TranslatePoint(new Point(0, 0), rail) == toggleAt && logo.TranslatePoint(new Point(0, 0), rail) == logoAt, "unfolding leaves the toggle in its spot and puts the logo back beside it");
+        player.Visibility = playerShown;
         Call("ShowPage", page); await Dispatcher.Yield(DispatcherPriority.Render);
     }
 

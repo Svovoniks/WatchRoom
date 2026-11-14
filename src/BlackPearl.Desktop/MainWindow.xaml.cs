@@ -1518,6 +1518,10 @@ public partial class MainWindow : Window
     private async Task PrepareVideoSurface(bool openPlayer = true)
     {
         PlayerEmpty.Visibility = Visibility.Collapsed;
+        // The video view creates the window VLC draws into when its template is applied, which layout does only once the
+        // player has been shown. A room joined from another page plays before that, and VLC would then open its own
+        // "VLC (Direct3D11 output)" window and keep the video there even after the player opens.
+        Video.ApplyTemplate();
         // A video started while picture in picture is open plays there; the app stays on its page.
         if (!openPlayer || pictureInPicture) return;
         ShowPage("Room");

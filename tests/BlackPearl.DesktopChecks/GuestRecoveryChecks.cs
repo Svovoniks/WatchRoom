@@ -12,6 +12,26 @@ using BlackPearl.Desktop;
 
 static class GuestRecoveryChecks
 {
+    private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int length);
+    // VLC's own output windows ("VLC (Direct3D11 output)"), which it opens when it has no window to draw into.
+    private static int VlcOutputWindows()
+    {
+        var count = 0; var self = (uint)Environment.ProcessId;
+        EnumWindows((handle, _) =>
+        {
+            GetWindowThreadProcessId(handle, out var process);
+            var title = new System.Text.StringBuilder(256);
+            if (process == self && IsWindowVisible(handle) && GetWindowText(handle, title, title.Capacity) > 0 && title.ToString().StartsWith("VLC (", StringComparison.Ordinal)) count++;
+            return true;
+        }, IntPtr.Zero);
+        return count;
+    }
+
     public static async Task Run(MainWindow window, string directory, Action<bool, string>? check = null)
     {
         PlaybackDiagnostics.Initialize(Path.Combine(directory, "logs"));
@@ -62,6 +82,11 @@ static class GuestRecoveryChecks
             host.Send(new("ready", Data: Wire.Serialize(new PlaybackReadiness(host.HostedMedia!.Media.Id, host.Snapshot!.Playback!.Generation))));
             host.Send(new("playback", Data: Wire.Serialize(new PlaybackState(0, host.HostedMedia.Media.Id, true, 0, 0))));
             await Wait(() => player.IsPlaying && player.Time > 500);
+            // Run on its own (--guest-recovery), the window has never shown the player, as when a room is joined from Watch rooms.
+            var playerHidden = ((FrameworkElement)window.FindName("RoomPage")).Visibility != Visibility.Visible;
+            var strays = VlcOutputWindows();
+            Check(player.Hwnd != IntPtr.Zero && strays == 0,
+                $"a room video started {(playerHidden ? "with the player hidden" : "in the player")} draws into the player, not a separate VLC window ({strays} found)");
             var priorPosition = player.Time;
             var bridge = Field("bridge"); var loadedMedia = Field("loadedMedia"); var loadGeneration = Field("loadGeneration");
             var restored = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

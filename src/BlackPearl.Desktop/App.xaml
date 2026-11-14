@@ -613,11 +613,12 @@
   </Style>
   <!-- Track rows show the language, then muted details such as the channel layout or format. -->
   <DataTemplate x:Key="PlayerTrackRow"><StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Label}"/><TextBlock Text="{Binding Detail, FallbackValue={x:Null}}" Foreground="{StaticResource PlayerMuted}" FontWeight="Normal" FontSize="11.5" Margin="8,0,0,0" VerticalAlignment="Center"/></StackPanel></DataTemplate>
-  <!-- Queue and episode rows: position or a playing mark, title, runtime. Watched episodes and played queue items are dimmed. -->
+  <!-- Queue and episode rows: position, a playing mark or a watched check, then title and runtime. -->
   <DataTemplate x:Key="PlayerQueueRow"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
    <TextBlock Text="{Binding Converter={StaticResource QueueRow}, ConverterParameter=number}" Foreground="#7D7F8C" FontSize="11.5" FontWeight="Normal" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular"/>
    <TextBlock Text="&#xE768;" FontFamily="{StaticResource IconFont}" FontSize="11" Foreground="{DynamicResource PlayerAccent}" VerticalAlignment="Center" Visibility="{Binding Converter={StaticResource QueueRow}, ConverterParameter=playing}"/>
-   <TextBlock Grid.Column="1" Text="{Binding QueueTitle}" Foreground="{Binding Converter={StaticResource QueueRow}, ConverterParameter=foreground}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+   <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="11" Foreground="#7D7F8C" VerticalAlignment="Center" Visibility="{Binding Converter={StaticResource QueueRow}, ConverterParameter=done}"/>
+   <TextBlock Grid.Column="1" Text="{Binding QueueTitle}" Foreground="#F4F4F7" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
    <TextBlock Grid.Column="2" Text="{Binding Converter={StaticResource QueueRow}, ConverterParameter=runtime}" Foreground="#7D7F8C" FontSize="11" FontWeight="Normal" Margin="10,0,0,0" VerticalAlignment="Center"/>
   </Grid></DataTemplate>
   <Style x:Key="PlayerSlider" TargetType="Slider">
