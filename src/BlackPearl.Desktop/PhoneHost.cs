@@ -222,6 +222,7 @@ internal sealed class PhoneHostProcess(LibraryStore library)
         if (PhoneHost.AppOpenOrOpening) { fail("opening", "BlackPearl is opening on the PC. Try again in a moment."); return Task.FromResult(false); }
         if (phoneLibrary!.Playable(message, fail) is not { } item) return Task.FromResult(false);
         phoneLibrary.SaveHandOver(item, PhoneLibrary.Position(message));
+        if (phoneLibrary.QueuePlace(message, item.Id) is ({ } fromQueue, var place)) phoneLibrary.SaveQueueHandOver(fromQueue, place);
         dispatcher.BeginInvoke(() => PhoneHost.OpenApp(item.Id), DispatcherPriority.Background);
         return Task.FromResult(true);
     }

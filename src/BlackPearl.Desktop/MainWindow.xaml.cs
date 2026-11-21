@@ -225,7 +225,8 @@ public partial class MainWindow : Window
             if (!openedFile && Program.PlayMediaId is { } handedOver && items.FirstOrDefault(x => x.Id == handedOver && x.Available && !x.IsVirtual) is { } fromPhone)
             {
                 Select(fromPhone);
-                queuePosition = -1;
+                // Played from a queue on the phone: the phone host saved the queue at its place, and Next goes on through it.
+                if (!(queuePosition >= 0 && queuePosition < queue.Count && queue[queuePosition].Id == fromPhone.Id)) queuePosition = -1;
                 _ = Guard(async () => { await PlayLocalItem(fromPhone); PublishQueue(); });
             }
             // Background work reads files and the whole catalog; while a video opened at launch starts, it waits.

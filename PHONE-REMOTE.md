@@ -113,7 +113,7 @@ UTF-8 JSON text messages, at most 64 KiB, each with a `type`.
 ### Opening
 
 1. Phone → PC: `{"type":"hello","protocol":1,"app":"<app version>","device":"<phone model or name>"}`
-2. PC → phone: `{"type":"welcome","protocol":1,"app":"<desktop version>","pc":"<PC name>","pcId":"<PC id>","canStart":true,"features":["library","watch"]}`.
+2. PC → phone: `{"type":"welcome","protocol":1,"app":"<desktop version>","pc":"<PC name>","pcId":"<PC id>","canStart":true,"features":["library","watch","queues"]}`.
    `features` lists what the PC offers beyond the remote (see "The library and watching on the phone"); a PC from
    before them sends none.
    If the PC can't speak the phone's protocol it sends `{"type":"error","code":"protocol","message":"…"}` saying which
@@ -249,6 +249,31 @@ Phone → PC: `{"type":"play","request":<n>,"id":"…","positionMs":1180000}` pl
 position, and answers `{"type":"done","request":<n>}` once it has started. It needs `canStart`; a refusal is an
 `error` with code `not-allowed`, `in-room` (the PC is in a room), `gone`, or `opening` (BlackPearl is starting on the PC: ask again once the phone has reconnected to it). The PC ends the phone's stream before it
 answers: the phone is no longer watching, and an answer queued behind video it still reads can take seconds to arrive.
+
+### Queues
+
+The PC's saved queues, the ones on its Queues page, are shared with the phone when its `welcome` lists the `queues` feature. A video's place is its position in the
+saved queue (from 0), so a video queued twice has two places; videos the library no longer has keep their places but
+are never listed.
+
+Phone → PC: `{"type":"queues","request":<n>}`. PC → phone:
+`{"type":"queues","request":<n>,"queues":[{"id":"…","name":"Evening","count":12,"upNext":3,"active":true,"artwork":"<token>"}]}`.
+`count` is the videos the library has; `upNext` is the place Play continues from, as on the PC's Queues page (the
+queue's place when it is the PC's active one, otherwise its first unwatched video), or null; `active` marks the queue
+the PC's player uses.
+
+`browse` with `"queue":"<id>"` answers a `page` of that queue's videos in order, and with `"episodesOf":"<entry id>"`
+the show's episodes, in the order its Previous and Next follow. Their entries are the usual ones plus `"index"`, the
+place (for `episodesOf`, the position in the list). A queue that is gone is an `error` with code `browse`.
+
+`watch` and `play` take `"queue":"<id>","queueIndex":<place>`. The video plays as part of that queue: for `watch`, the
+answer's `previous`, `next` and `first` are the queue's playable videos around the place (each with a `queueIndex`),
+and `"queue":{"id":"…","name":"…","index":<place>}` echoes it. A place that no longer holds the video falls back to the
+video's first place, and a queue that doesn't have it to the show's episodes. On the PC, `play` makes the queue its
+player's, as playing it there does; with BlackPearl closed, the phone host saves it so BlackPearl opens on it.
+
+The `state` carries `"queue":{"id":"…","name":"…","index":<place>}` while the PC plays a video from a saved queue (not
+in a room), or null.
 
 ### The media channel, `media-v1`
 

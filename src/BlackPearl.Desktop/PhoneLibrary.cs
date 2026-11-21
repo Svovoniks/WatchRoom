@@ -18,7 +18,7 @@ namespace BlackPearl.Desktop;
 internal sealed class PhoneLibrary(LibraryStore library, Func<PhoneRemoteHost?> current, Action<Action> post, CancellationToken lifetime)
 {
     public const int PageSize = 40;
-    public static readonly string[] Features = ["library", "watch"];
+    public static readonly string[] Features = ["library", "watch", "queues"];
     public static string StreamCacheDirectory => Path.Combine(Path.GetTempPath(), "BlackPearl", "stream-cache");
 
     // The library's videos, read on the dispatcher thread.
@@ -112,7 +112,9 @@ internal sealed class PhoneLibrary(LibraryStore library, Func<PhoneRemoteHost?> 
         {
             switch (type)
             {
+                case "browse" when Text(message, "queue") is not null || Text(message, "episodesOf") is not null: await BrowseList(remote, session, request, message); break;
                 case "browse": await Browse(remote, session, request, message); break;
+                case "queues": await Queues(remote, session, request); break;
                 case "watch": await Watch(remote, session, request, message, Fail); break;
                 case "progress": SaveProgress(message); break;
                 case "play":
@@ -182,7 +184,7 @@ internal sealed class PhoneLibrary(LibraryStore library, Func<PhoneRemoteHost?> 
     }
 
     private record Entry(string Id, string Title, string Caption, string Level, int? Season, int? Episode, string Overview, string Kind,
-        int? RuntimeMinutes, int? Year, int Episodes, string? HomeSection, long PositionMs, bool Watched, string? Artwork, bool Playable);
+        int? RuntimeMinutes, int? Year, int Episodes, string? HomeSection, long PositionMs, bool Watched, string? Artwork, bool Playable, int? Index = null);
 
     // The library page names each picture by a token rather than its path.
     private string? ArtworkToken(string? path)
@@ -269,6 +271,11 @@ internal sealed class PhoneLibrary(LibraryStore library, Func<PhoneRemoteHost?> 
         }
         else if (ffmpeg is not null && await Probe(ffmpeg, item, TimeSpan.FromSeconds(2)) is { } probe)
             qualities.AddRange(StreamQuality.For(probe.ClassHeight).Select(q => q.Id));
+        // Where the phone goes from here, worked out before the stream is registered, so the answer follows at once.
+        var (source, version) = (Items().ToArray(), LibraryIdentity.TitleKey(item) is { } show ? library.Setting("version:" + show) : null);
+        var (inQueue, place) = QueuePlace(Text(message, "queue"), Number(message, "queueIndex"), item.Id);
+        var (back, forward, start) = await Task.Run(() => inQueue is null ? EpisodeSteps(source, item, version) : QueueSteps(source, inQueue, place));
+        var tracks = TrackPreferences();
         if (current() != remote) { stream.Dispose(); return; }
         if (streams.TryRemove(session.PhoneId, out var raced)) raced.Dispose();
         streams[session.PhoneId] = stream;
@@ -276,23 +283,130 @@ internal sealed class PhoneLibrary(LibraryStore library, Func<PhoneRemoteHost?> 
         if (remote.Connected.All(s => s.PhoneId != session.PhoneId)) ExpireStream(session.PhoneId);
         var title = item.QueueTitle;
         var detail = StreamDetail(item);
-        var (source, version) = (Items().ToArray(), LibraryIdentity.TitleKey(item) is { } show ? library.Setting("version:" + show) : null);
-        var (back, forward, start) = await Task.Run(() => EpisodeSteps(source, item, version));
-        var tracks = TrackPreferences();
+        var queue = inQueue is null ? null : new { id = inQueue.Id, name = inQueue.Name, index = place };
         remote.SendMessage(session, stream.Converter is { } converter
             ? new { type = "stream", request, id = item.Id, title, detail, positionMs = resume, durationMs, kind = "hls", streamId = converter.Stream.Id,
                 segments = converter.Stream.Segments, segmentMs = converter.Stream.SegmentMs, quality = converter.Stream.Quality, qualities, note,
-                previous = back, next = forward, first = start, tracks }
+                previous = back, next = forward, first = start, tracks, queue }
             : (object)new { type = "stream", request, id = item.Id, title, detail, positionMs = resume, durationMs, kind = "file", resource = "file/" + item.Id,
                 length = file.Media.Length, extension = file.Media.Extension, quality = StreamQuality.OriginalId, qualities, note,
-                previous = back, next = forward, first = start, tracks });
+                previous = back, next = forward, first = start, tracks, queue });
+    }
+
+    // The saved queue a phone plays a video from, and the video's place in it: the place it named while that still holds
+    // the video, otherwise the video's first place. None when the queue is gone or no longer has the video.
+    public (SavedQueue? Queue, int Place) QueuePlace(JsonElement message, string mediaId) => QueuePlace(Text(message, "queue"), Number(message, "queueIndex"), mediaId);
+    public (SavedQueue? Queue, int Place) QueuePlace(string? queueId, long? named, string mediaId)
+    {
+        if (queueId is null || PhoneQueues.Read(library.Setting("queues")).FirstOrDefault(q => q.Id == queueId) is not { } saved) return (null, -1);
+        if (named is { } at && at is >= 0 and < int.MaxValue && PhoneQueues.Holds(saved, (int)at, mediaId)) return (saved, (int)at);
+        var first = Array.IndexOf(saved.MediaIds, mediaId);
+        return first < 0 ? (null, -1) : (saved, first);
+    }
+
+    // Previous, Next and Loop all's start within a queue, as the PC's player steps through it.
+    private static (EpisodeStep? Previous, EpisodeStep? Next, EpisodeStep? First) QueueSteps(MediaItem[] source, SavedQueue saved, int place)
+    {
+        var byId = ById(source);
+        var (previous, next, first) = PhoneQueues.Steps(saved, byId, place, item => File.Exists(item.Path));
+        EpisodeStep? Step(int? index) => index is { } at && byId.GetValueOrDefault(saved.MediaIds[at]) is { } item
+            ? new(item.Id, item.QueueTitle, StreamDetail(item), at) : null;
+        return (Step(previous), Step(next), Step(first));
+    }
+
+    private static Dictionary<string, MediaItem> ById(IEnumerable<MediaItem> source)
+    {
+        var result = new Dictionary<string, MediaItem>();
+        foreach (var item in source) result.TryAdd(item.Id, item);
+        return result;
+    }
+
+    // A video's picture in a list: an episode's still, or its season's or show's poster; a film's poster.
+    private static string? Picture(MediaItem item) => item.Series is null ? item.Poster
+        : LibraryCatalog.EpisodeArtwork(item) ?? item.SeasonPoster ?? item.SeriesPoster ?? item.Poster;
+
+    // The PC's saved queues, for the phone's Library: each with its count, a picture, and where Play continues, as on the
+    // PC's Queues page. Active is the one the PC's player uses.
+    private async Task Queues(PhoneRemoteHost remote, PhoneRemoteSession session, long request)
+    {
+        var source = Items().ToArray();
+        var saved = PhoneQueues.Read(library.Setting("queues"));
+        var activeId = library.Setting("activeQueue");
+        var position = int.TryParse(library.Setting("queuePosition"), out var at) ? at : -1;
+        var queues = await Task.Run(() =>
+        {
+            var playback = library.PlaybackSettings();
+            var byId = ById(source);
+            bool Watched(string id) => playback.GetValueOrDefault("watched:" + id) == "true";
+            return saved.Select(queue =>
+            {
+                var active = queue.Id == activeId ? PhoneQueues.SavedIndex(queue, byId, position) : -1;
+                var upNext = PhoneQueues.UpNext(queue, byId, active, Watched);
+                var entries = PhoneQueues.Entries(queue, byId);
+                var cover = upNext >= 0 ? byId[queue.MediaIds[upNext]] : entries.Select(e => e.Item).FirstOrDefault();
+                return new QueueCard(queue.Id, queue.Name.Length > 120 ? queue.Name[..120] : queue.Name, entries.Length, upNext >= 0 ? upNext : null,
+                    queue.Id == activeId, cover is null ? null : ArtworkToken(Picture(cover)));
+            }).ToArray();
+        });
+        if (current() != remote) return;
+        // Each message is at most 64 KiB; past that, the last queues are left out.
+        while (queues.Length > 0 && Encoding.UTF8.GetByteCount(Wire.Serialize(new { type = "queues", request, queues })) >= 60000) queues = queues[..^1];
+        remote.SendMessage(session, new { type = "queues", request, queues });
+    }
+
+    private sealed record QueueCard(string Id, string Name, int Count, int? UpNext, bool Active, string? Artwork);
+
+    // A queue's videos in its order (queue), or the show of a video's episodes (episodesOf), as Library entries that also
+    // carry their place, for watch and play to take back.
+    private async Task BrowseList(PhoneRemoteHost remote, PhoneRemoteSession session, long request, JsonElement message)
+    {
+        var source = Items().ToArray();
+        var queueId = Text(message, "queue");
+        var saved = queueId is null ? null : PhoneQueues.Read(library.Setting("queues")).FirstOrDefault(q => q.Id == queueId);
+        var anchor = Text(message, "episodesOf") is { } of ? source.FirstOrDefault(x => x.Id == of) : null;
+        if (saved is null && anchor is null)
+        {
+            remote.SendMessage(session, new { type = "error", code = "browse", request,
+                message = queueId is not null ? "This queue is no longer on the PC." : "This video is no longer in the PC's library." });
+            return;
+        }
+        var version = anchor is not null && LibraryIdentity.TitleKey(anchor) is { } show ? library.Setting("version:" + show) : null;
+        var requested = (int)Math.Clamp(Number(message, "page") ?? 0, 0, 100000);
+        var (entries, total, page) = await Task.Run(() =>
+        {
+            var playback = library.PlaybackSettings();
+            var listed = saved is not null ? PhoneQueues.Entries(saved, ById(source))
+                : EpisodePlayback.Episodes(source, anchor!, version).Select((item, index) => (index, item)).ToArray();
+            var page = Math.Min(requested, Math.Max(0, (listed.Length - 1) / PageSize));
+            var entries = listed.Skip(page * PageSize).Take(PageSize).Select(e => ListEntry(e.Item2, e.Item1, playback)).ToArray();
+            return (entries, listed.Length, page);
+        });
+        if (current() != remote) return;
+        var location = saved?.Name ?? anchor!.Series ?? anchor.DisplayTitle;
+        for (var limit = 300; ; limit /= 2)
+        {
+            var reply = new { type = "page", request, entries, total, page, pageSize = PageSize, location };
+            if (Encoding.UTF8.GetByteCount(Wire.Serialize(reply)) < 60000) { remote.SendMessage(session, reply); return; }
+            entries = limit > 0 ? entries.Select(entry => entry with { Overview = entry.Overview[..Math.Min(entry.Overview.Length, limit)] }).ToArray() : entries[..^1];
+        }
+    }
+
+    private Entry ListEntry(MediaItem item, int index, IReadOnlyDictionary<string, string> playback)
+    {
+        var watched = playback.GetValueOrDefault("watched:" + item.Id) == "true";
+        var position = !watched && long.TryParse(playback.GetValueOrDefault("position:" + item.Id), out var at) ? Math.Max(0, at) : 0;
+        var overview = item.DetailOverview ?? "";
+        return new Entry(item.Id, item.QueueTitle, StreamDetail(item) ?? "", item.Series is null ? "movie" : "episode", item.Season, item.Episode,
+            overview[..Math.Min(overview.Length, 300)], item.Kind, item.RuntimeMinutes, item.Year, 0, null, position, watched,
+            ArtworkToken(Picture(item)), item.Available && !item.IsVirtual && File.Exists(item.Path), index);
     }
 
     private static string? StreamDetail(MediaItem item) => item.Series is not null
         ? string.Join(" · ", new[] { item.Season is { } season ? $"Season {season}" : null, item.EpisodeDisplayTitle }.OfType<string>())
         : item.Year?.ToString(CultureInfo.InvariantCulture);
 
-    private sealed record EpisodeStep(string Id, string Title, string? Detail);
+    // QueueIndex: the step's place in the queue the phone plays from.
+    private sealed record EpisodeStep(string Id, string Title, string? Detail, int? QueueIndex = null);
 
     // The episodes the phone's Previous and Next play, chosen as the PC's own buttons and up-next countdown choose them,
     // and the show's first regular episode, where Loop all starts again after the last one. Null for a film, or at either
@@ -408,4 +522,16 @@ internal sealed class PhoneLibrary(LibraryStore library, Func<PhoneRemoteHost?> 
         return item;
     }
     public static long? Position(JsonElement message) => Number(message, "positionMs");
+
+    // Play on the PC from a queue while BlackPearl is closed: the queue is saved as the player's, at the video's place,
+    // which BlackPearl takes up as it opens, so Next goes on through the queue.
+    public void SaveQueueHandOver(SavedQueue saved, int place)
+    {
+        var byId = ById(Items());
+        var resolved = PhoneQueues.Entries(saved, byId).Select(e => e.Item.Id).ToArray();
+        library.Setting("activeQueue", saved.Id);
+        library.Setting("lastQueue", saved.Id);
+        library.Setting("queue", Wire.Serialize(resolved));
+        library.Setting("queuePosition", PhoneQueues.PlaybackIndex(saved, byId, place).ToString(CultureInfo.InvariantCulture));
+    }
 }

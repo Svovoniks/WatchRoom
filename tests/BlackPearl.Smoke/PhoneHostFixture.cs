@@ -60,8 +60,8 @@ static class PhoneHostFixture
             if (link is null) return;
             link.Send(new { type = "hello", protocol = 1, app = "smoke", device = "Smoke phone" });
             var welcome = await link.Next("welcome", 10000);
-            check(welcome is { } w && w.GetProperty("features").EnumerateArray().Select(x => x.GetString()).SequenceEqual(["library", "watch"]) && !w.GetProperty("canStart").GetBoolean(),
-                "the phone host welcomes the phone with the library and watching, and the PC's settings");
+            check(welcome is { } w && w.GetProperty("features").EnumerateArray().Select(x => x.GetString()).SequenceEqual(["library", "watch", "queues"]) && !w.GetProperty("canStart").GetBoolean(),
+                "the phone host welcomes the phone with the library, watching and queues, and the PC's settings");
             check(await link.Next("state", 5000) is { } state && !state.GetProperty("media").GetBoolean(), "the phone host says nothing is playing");
             link.Send(new { type = "command", action = "toggle" });
             check(await link.Next("error", 5000) is { } nothing && nothing.GetProperty("code").GetString() == "nothing-playing" &&

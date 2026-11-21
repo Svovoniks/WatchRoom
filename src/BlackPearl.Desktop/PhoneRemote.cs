@@ -111,7 +111,22 @@ public partial class MainWindow
             (int)Math.Round(Volume.Value), player.Mute, loopMode switch { LoopMode.All => "all", LoopMode.One => "one", _ => "off" }, fullscreen,
             PreviousButton.IsEnabled, NextButton.IsEnabled, CanControlMediaPlayback, inRoom,
             // Only a video this PC plays on its own can move to the phone; a room's belongs to the room.
-            room is null && item is { IsMusic: false } && InLibrary(item) ? item.Id : null);
+            room is null && item is { IsMusic: false } && InLibrary(item) ? item.Id : null,
+            room is null ? PhoneRemoteQueue(item) : null);
+    }
+
+    // The saved queue playing here and the video's place in it. The player's queue is the saved one's videos that the
+    // library has, in order, so one pass finds the place without a lookup on every state.
+    private RemoteQueue? PhoneRemoteQueue(MediaItem? item)
+    {
+        if (!PlayingFromQueue(item) || activeQueueId is null || savedQueues.FirstOrDefault(q => q.Id == activeQueueId) is not { } saved) return null;
+        for (int index = 0, at = 0; index < saved.MediaIds.Length && at < queue.Count; index++)
+        {
+            if (saved.MediaIds[index] != queue[at].Id) continue;
+            if (at == queuePosition) return new(saved.Id, saved.Name, index);
+            at++;
+        }
+        return null;
     }
 
     // Sends the state when something other than the advancing position changed, after a seek, and every five seconds
